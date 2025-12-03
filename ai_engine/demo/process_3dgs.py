@@ -16,6 +16,87 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # Linux 下的临时高速工作区 (训练时的临时文件放这里，速度快 10 倍)
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 
+# ================= 新增：智能场景分析算法 =================
+def analyze_scene_type(json_path):
+    """
+    分析 transforms.json 中的相机姿态，判断是“向内拍摄(物体)”还是“向外拍摄(场景)”。
+    返回建议的 ns-train 参数列表。
+    """
+    print(f"\n🤖 [AI 分析] 正在读取相机轨迹以判断场景类型...")
+    
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        
+        frames = data["frames"]
+        if not frames:
+            return [], "unknown"
+
+        # 1. 提取所有相机位置
+        positions = []
+        forward_vectors = []
+        
+        for frame in frames:
+            c2w = np.array(frame["transform_matrix"])
+            # 位置是第4列前3行
+            pos = c2w[:3, 3]
+            positions.append(pos)
+            
+            # 计算前向向量 (Nerfstudio/OpenGL 中，Z轴指向相机后方，所以前向是 -Z)
+            # 旋转矩阵是前3x3
+            rot = c2w[:3, :3]
+            # Forward = R * [0, 0, -1]
+            forward = rot @ np.array([0, 0, -1]) 
+            forward_vectors.append(forward)
+            
+        positions = np.array(positions)
+        forward_vectors = np.array(forward_vectors)
+        
+        # 2. 计算场景几何中心 (所有相机的中心点)
+        center_of_mass = np.mean(positions, axis=0)
+        
+        # 3. 判断每个相机是否看向中心
+        # 向量：相机 -> 中心
+        vec_to_center = center_of_mass - positions
+        # 归一化
+        norms = np.linalg.norm(vec_to_center, axis=1, keepdims=True)
+        # 防止除以0
+        norms[norms < 1e-6] = 1.0 
+        vec_to_center_norm = vec_to_center / norms
+        
+        # 点积：Forward · ToCenter
+        # 如果 > 0，说明视线和指向中心的向量夹角 < 90度（看向中心）
+        dot_products = np.sum(forward_vectors * vec_to_center_norm, axis=1)
+        
+        # 4. 统计“看向中心”的相机比例
+        looking_inward_ratio = np.sum(dot_products > 0) / len(frames)
+        
+        print(f"    -> 相机聚合度: {looking_inward_ratio:.2f} (1.0代表完全向内，0.0代表完全向外)")
+
+        # 5. 决策逻辑 (阈值 0.6)
+        if looking_inward_ratio > 0.6:
+            print("💡 判定结果：【物体扫描模式 (Inward)】")
+            print("    -> 策略：相机围着物体转。启用紧凑裁剪(2.0~6.0)，聚焦中心物体，去除背景。")
+            
+            # 物体模式参数
+            return ["--pipeline.model.enable-collider", "True", 
+                    "--pipeline.model.collider-params", "near_plane", "2.0", "far_plane", "6.0"], "object"
+        else:
+            print("💡 判定结果：【全景/室内模式 (Outward)】")
+            print("    -> 策略：相机在内部向外看，或直线扫描。放宽裁剪(0.05~100.0)，保留墙壁和远景。")
+            
+            # 室内/全景模式参数
+            return ["--pipeline.model.enable-collider", "True", 
+                    "--pipeline.model.collider-params", "near_plane", "0.05", "far_plane", "100.0"], "scene"
+
+    except Exception as e:
+        print(f"⚠️ 分析失败 ({e})，将使用默认保守参数。")
+        # 默认保守：不乱切，设大范围
+        return ["--pipeline.model.enable-collider", "True", 
+                "--pipeline.model.collider-params", "near_plane", "0.1", "far_plane", "50.0"], "unknown"
+
+# ================= 主流程 =================
+
 def run_pipeline(video_path, project_name):
     print(f"\n🚀 [BrainDance Engine] 启动任务: {project_name}")
     
@@ -52,7 +133,7 @@ def run_pipeline(video_path, project_name):
         # ================= [Step 1] 数据预处理 (Manual Split) =================
         print(f"\n🎥 [1/3] 视频抽帧与位姿解算 (COLMAP)")
         
-        # 1.1 手动调用 FFmpeg (回到低清晰度/低帧率鲁棒性配置)
+        # 1.1 手动调用 FFmpeg (保持原代码配置：1920宽, 4FPS)
         print("    -> 1.1 FFmpeg: 抽帧到 1080P 宽分辨率 (4 FPS) 写入原生目录")
         
         extracted_images_dir = data_dir / "images"
@@ -61,7 +142,7 @@ def run_pipeline(video_path, project_name):
         # FFmpeg 命令: 缩放至 1920px 宽 (1080P)，抽取 4 帧/秒
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", str(video_dst), 
-            "-vf", "scale=1920:-1,fps=4", # 关键修改：回到 1920 宽 和 4.0 FPS
+            "-vf", "scale=1920:-1,fps=4", 
             "-q:v", "2", 
             str(extracted_images_dir / "frame_%05d.jpg")
         ]
@@ -120,6 +201,9 @@ def run_pipeline(video_path, project_name):
         # 如果找到至少一个运行目录，我们认为训练已完成，跳过
         print(f"\n⏩ [训练跳过] 检测到已完成的训练结果：{run_dirs[-1].name}")
     else:
+        # === 核心修改：调用智能场景分析，获取裁剪参数 ===
+        collider_args, scene_type = analyze_scene_type(transforms_file)
+        
         # 如果没有找到运行目录，则开始训练
         print(f"\n🧠 [2/3] 开始训练 (RTX 5070 加速中)")
         
@@ -133,11 +217,8 @@ def run_pipeline(video_path, project_name):
             "--pipeline.model.random-init", "False", 
             "--pipeline.model.cull-alpha-thresh", "0.005",
 
-            # === 新增：模型裁剪 (Collider) ===
-            # 这里的参数将限制高斯球只在近平面2.0到远平面6.0之间生成，
-            # 修复：必须拆分为独立的列表元素，不能写成字典字符串
-            "--pipeline.model.enable-collider", "True",
-            "--pipeline.model.collider-params", "near_plane", "2.0", "far_plane", "6.0",
+            # === 插入：智能分析得出的裁剪参数 ===
+            *collider_args,
             
             # --- 训练参数 ---
             "--max-num-iterations", "15000",
