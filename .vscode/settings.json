@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "tuple": "cpp",
+        "utility": "cpp",
+        "xutility": "cpp"
+    }
+}
