@@ -1,0 +1,132 @@
+# =========================
+# 1. Global / OS / IDE (全局设置)
+# =========================
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# =========================
+# 2. Security & Secrets (安全与密钥 - 极其重要!)
+# =========================
+.env
+.env.*
+*.pem
+*.key
+config.yaml
+secrets.yaml
+# 如果你有存放 Key 的特定 json
+key.json
+service_account.json
+
+# =========================
+# 3. Server: Go (后端)
+# =========================
+# 编译生成的二进制文件
+/server/main
+/server/*.exe
+/server/*.dll
+/server/*.so
+/server/*.dylib
+/server/bin/
+
+# 测试输出
+/server/*.test
+/server/*.out
+
+# 依赖 vendor (如果你不使用 Go Modules 的 vendor模式，通常忽略)
+/server/vendor/
+
+# =========================
+# 4. App: Flutter (移动端)
+# =========================
+/app/build/
+/app/.dart_tool/
+/app/.flutter-plugins
+/app/.flutter-plugins-dependencies
+/app/.pub-cache/
+/app/.pub/
+
+# Android 相关
+/app/android/.gradle
+/app/android/local.properties
+/app/android/**/*.jks
+/app/android/**/*.keystore
+/app/android/app/build
+/app/android/key.properties
+
+# iOS 相关
+/app/ios/.generated/
+/app/ios/Flutter/Generated.xcconfig
+/app/ios/Flutter/flutter_export_environment.sh
+/app/ios/Pods/
+/app/ios/Podfile.lock
+
+# =========================
+# 5. AI Engine: Python (算法端)
+# =========================
+# 字节码与缓存
+ai_engine/**/__pycache__/
+ai_engine/**/*.pyc
+
+# 虚拟环境 (兼容常见的命名)
+ai_engine/venv/
+ai_engine/.venv/
+ai_engine/env/
+
+# Jupyter Notebook 缓存
+ai_engine/.ipynb_checkpoints
+
+# =========================
+# 6. BrainDance Specific: Media & 3DGS Data (项目特有)
+# =========================
+# 忽略 ai_engine 下的所有大型媒体文件 (无论在哪个子目录)
+ai_engine/**/*.mp4
+ai_engine/**/*.mov
+ai_engine/**/*.avi
+ai_engine/**/*.mkv
+ai_engine/**/*.jpg
+ai_engine/**/*.jpeg
+ai_engine/**/*.png
+ai_engine/**/*.gif
+
+# 忽略 3DGS 训练过程中的大型模型文件
+ai_engine/**/*.ply
+ai_engine/**/*.splat
+ai_engine/**/*.obj
+ai_engine/**/*.glb
+ai_engine/**/*.gltf
+
+# 忽略 Nerfstudio/COLMAP 的输出目录
+ai_engine/outputs/
+ai_engine/exports/
+ai_engine/data_cache/
+ai_engine/datasets/
+ai_engine/checkpoints/
+
+# 忽略 Colmap 数据库
+ai_engine/**/*.db
+ai_engine/**/*.bin
+
+# 忽略 Tensorboard 日志
+ai_engine/runs/
