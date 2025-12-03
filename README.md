@@ -6,7 +6,7 @@
 
 [English](https://www.google.com/search?q=README_EN.md) | [简体中文](README.md)
 
-
+</div>
 
 ## 📖 序言：从“记录画面”到“收藏空间”
 
@@ -142,4 +142,4 @@ License: MIT
 
 
 
- "To live is to express, and to express is to create."
+ "To live is to express, and to express is to create."</sub> </div>
