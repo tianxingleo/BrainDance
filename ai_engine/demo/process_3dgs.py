@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 import torch # 引入 torch 用于加载模型
 import logging # 引入 logging 用于控制 Nerfstudio 输出
+import json # 引入 json 用于读写 transforms 文件
+import numpy as np # 引入 numpy 进行矩阵运算
 
 # 设置 Nerfstudio 内部日志级别，避免大量杂项输出干扰
 logging.getLogger('nerfstudio').setLevel(logging.ERROR) 
@@ -51,15 +53,15 @@ def run_pipeline(video_path, project_name):
         print(f"\n🎥 [1/3] 视频抽帧与位姿解算 (COLMAP)")
         
         # 1.1 手动调用 FFmpeg (回到低清晰度/低帧率鲁棒性配置)
-        print("    -> 1.1 FFmpeg: 抽帧到 1080P 宽分辨率 (1.5 FPS) 写入原生目录")
+        print("    -> 1.1 FFmpeg: 抽帧到 1080P 宽分辨率 (4 FPS) 写入原生目录")
         
         extracted_images_dir = data_dir / "images"
         extracted_images_dir.mkdir(parents=True, exist_ok=True)
         
-        # FFmpeg 命令: 缩放至 1920px 宽 (1080P)，抽取 1.5 帧/秒
+        # FFmpeg 命令: 缩放至 1920px 宽 (1080P)，抽取 4 帧/秒
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", str(video_dst), 
-            "-vf", "scale=1920:-1,fps=4", # 关键修改：回到 1920 宽 和 1.5 FPS
+            "-vf", "scale=1920:-1,fps=4", # 关键修改：回到 1920 宽 和 4.0 FPS
             "-q:v", "2", 
             str(extracted_images_dir / "frame_%05d.jpg")
         ]
@@ -130,6 +132,12 @@ def run_pipeline(video_path, project_name):
             # --- 强制 COLMAP 初始化参数 ---
             "--pipeline.model.random-init", "False", 
             "--pipeline.model.cull-alpha-thresh", "0.005",
+
+            # === 新增：模型裁剪 (Collider) ===
+            # 这里的参数将限制高斯球只在近平面2.0到远平面6.0之间生成，
+            # 修复：必须拆分为独立的列表元素，不能写成字典字符串
+            "--pipeline.model.enable-collider", "True",
+            "--pipeline.model.collider-params", "near_plane", "2.0", "far_plane", "6.0",
             
             # --- 训练参数 ---
             "--max-num-iterations", "15000",
@@ -172,9 +180,14 @@ def run_pipeline(video_path, project_name):
 
     print(f"✅ 导出成功！文件应已生成于 {work_dir / 'point_cloud.ply'}")
 
-    # ================= [Step 4] 结果回传 (查找默认文件名并重命名) =================
+    # ================= [Step 4] 结果回传 (查找默认文件名并存储姿态) =================
     print(f"\n📦 [IO 同步] 正在将结果回传至 Windows 项目目录...")
     
+    # === 修复：必须在引用 target_dir 之前先定义它 ===
+    # 目标路径：脚本所在的目录 (即你的 Windows 项目目录)
+    target_dir = Path(__file__).parent / "results"
+    target_dir.mkdir(exist_ok=True)
+
     # 查找默认的 PLY 文件名 (Nerfstudio 在某些版本中输出 splat.ply)
     temp_ply_default = work_dir / "point_cloud.ply"
     temp_ply_alt = work_dir / "splat.ply" # 查找另一个可能的默认名 (您的日志显示为 splat.ply)
@@ -186,20 +199,79 @@ def run_pipeline(video_path, project_name):
         temp_ply = temp_ply_alt
     else:
         temp_ply = None
-
-    # 目标路径：脚本所在的目录 (即你的 Windows 项目目录)
-    target_dir = Path(__file__).parent / "results"
-    target_dir.mkdir(exist_ok=True)
-    final_ply = target_dir / f"{project_name}.ply"
+        
+    # 查找 transforms.json (姿态数据源)
+    transforms_src = data_dir / "transforms.json"
     
+    # 定义 WebGL 友好的姿态输出文件路径
+    # (此时 target_dir 已经定义，不会再报错)
+    final_webgl_poses = target_dir / "webgl_poses.json"
+    final_ply = target_dir / f"{project_name}.ply"
+    final_transforms = target_dir / "transforms.json" # 目标姿态文件
+    
+    
+    # --- 关键修改：姿态预处理逻辑 ---
+    if transforms_src.exists():
+        print("🔄 正在生成 WebGL 友好姿态文件 (webgl_poses.json)...")
+        
+        try:
+            with open(transforms_src, 'r') as f:
+                data = json.load(f)
+            
+            # --- WebGL 姿态转换核心 ---
+            webgl_frames = []
+            
+            # 定义 WebGL 转换矩阵 (Y-up to Z-up, R-hand to L-hand) 
+            GL_TO_WEBGL = np.array([
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float32)
+
+            for frame in data["frames"]:
+                # 1. C2W 矩阵 (Nerfstudio 格式)
+                c2w_matrix = np.array(frame["transform_matrix"], dtype=np.float32)
+                
+                # 2. 计算 W2C 矩阵 (WeblGL 相机需要)
+                w2c_matrix = np.linalg.inv(c2w_matrix)
+                
+                webgl_frames.append({
+                    "file_path": frame["file_path"],
+                    # 直接提供 C2W，但在命名上暗示 WebGL 可以直接用
+                    "pose_matrix_c2w": c2w_matrix.tolist() 
+                })
+                
+            # 写入 WebGL 友好的 JSON 文件
+            webgl_data = {
+                "camera_model": data["camera_model"],
+                "w": data["w"],
+                "h": data["h"],
+                "fl_x": data["fl_x"],
+                "fl_y": data["fl_y"],
+                "frames": webgl_frames
+            }
+            
+            with open(final_webgl_poses, 'w') as f:
+                json.dump(webgl_data, f, indent=4)
+            print(f"✅ WebGL 姿态文件已保存至: {final_webgl_poses.resolve()}")
+            
+        except Exception as e:
+            print(f"❌ 姿态预处理失败: {e}")
+    # --- 姿态预处理逻辑结束 ---
+
+
     if temp_ply and temp_ply.exists():
-        # 修复权限问题：使用 Bash 字符串执行 cp 命令，确保路径解析正确
-        copy_command_str = f"cp {str(temp_ply)} {str(final_ply)}"
+        # 1. 复制 PLY 文件
+        copy_ply_command_str = f"cp {str(temp_ply)} {str(final_ply)}"
+        subprocess.run(copy_ply_command_str, check=True, shell=True)
         
-        # 使用 shell=True 来执行 cp 命令
-        subprocess.run(copy_command_str, check=True, shell=True)
+        # 2. 复制 transforms.json 文件
+        if transforms_src.exists():
+            copy_transforms_cmd_str = f"cp {str(transforms_src)} {str(final_transforms)}"
+            subprocess.run(copy_transforms_cmd_str, check=True, shell=True)
         
-        print(f"✅ 成功！最终文件已保存至: {final_ply}")
+        print(f"✅ 成功！最终模型已保存至: {final_ply}")
         print(f"📁 您可以在 Windows 资源管理器中打开: {final_ply.resolve()}")
         
         # 清理 Linux 临时文件
@@ -209,12 +281,6 @@ def run_pipeline(video_path, project_name):
     else:
         # 如果 CLI 运行成功但文件没找到，可能是命名问题
         print("❌ 导出失败，未找到 PLY 文件 (point_cloud.ply 或 splat.ply)。")
-        # 尝试打印目录内容，以供调试
-        print(f"🔍 调试信息：{work_dir} 目录内容如下:")
-        try:
-             print(os.listdir(work_dir))
-        except:
-             pass
         return None
 
 if __name__ == "__main__":
