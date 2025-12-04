@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="https://www.google.com/search?q=https://via.placeholder.com/1200x400%3Ftext%3DBrainDance%2B%257C%2B%E6%B5%81%E5%85%89·记" alt="BrainDance Banner" width="100%" />
-
 # 🕯️ BrainDance | 流光 · 记
 
 ### (Project: Anti-Entropy)
@@ -37,7 +35,7 @@ BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文
 - **个人见证 (Spatial Journal)**：
   - **空间折叠**：当你毕业离开住了4年的宿舍，或搬离充满回忆的出租屋时，一键扫描，即可将整个物理空间打包带走。带不走房子，但能带走“家”。
 - **医疗辅助 (The Cure)**：
-  - **怀旧疗法**：对于**认知障碍(阿尔茨海默症)**患者，BrainDance 是尊严的防线。通过 VR/MR 设备，让老人重返几十年前的“老家”。墙上的照片会说话，桌上的饭菜冒着热气。这种沉浸式的熟悉感，是药物无法替代的慰藉。
+  - **怀旧疗法**：对于**阿尔茨海默症**患者，BrainDance 是尊严的防线。通过 VR/MR 设备，让老人重返几十年前的“老家”。墙上的照片会说话，桌上的饭菜冒着热气。这种沉浸式的熟悉感，是药物无法替代的慰藉。
 
 ### 2. 宏观尺度 (The Macro Scale)：传承
 
