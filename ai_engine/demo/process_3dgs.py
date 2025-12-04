@@ -3,11 +3,13 @@ import sys
 import shutil
 import os
 import time
+import datetime # 引入时间处理库
 from pathlib import Path
-import torch # 引入 torch 用于加载模型
-import logging # 引入 logging 用于控制 Nerfstudio 输出
-import json # 引入 json 用于读写 transforms 文件
-import numpy as np # 引入 numpy 进行矩阵运算
+import torch 
+import logging 
+import json 
+import numpy as np 
+import math
 
 # 设置 Nerfstudio 内部日志级别，避免大量杂项输出干扰
 logging.getLogger('nerfstudio').setLevel(logging.ERROR) 
@@ -16,7 +18,12 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # Linux 下的临时高速工作区 (训练时的临时文件放这里，速度快 10 倍)
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 
-# ================= 新增：智能场景分析算法 =================
+# ================= 辅助工具：时间格式化 =================
+def format_duration(seconds):
+    """将秒数转换为 HH:MM:SS 格式"""
+    return str(datetime.timedelta(seconds=int(seconds)))
+
+# ================= 智能场景分析算法 =================
 def analyze_scene_type(json_path):
     """
     分析 transforms.json 中的相机姿态，判断是“向内拍摄(物体)”还是“向外拍摄(场景)”。
@@ -43,9 +50,7 @@ def analyze_scene_type(json_path):
             positions.append(pos)
             
             # 计算前向向量 (Nerfstudio/OpenGL 中，Z轴指向相机后方，所以前向是 -Z)
-            # 旋转矩阵是前3x3
             rot = c2w[:3, :3]
-            # Forward = R * [0, 0, -1]
             forward = rot @ np.array([0, 0, -1]) 
             forward_vectors.append(forward)
             
@@ -56,16 +61,12 @@ def analyze_scene_type(json_path):
         center_of_mass = np.mean(positions, axis=0)
         
         # 3. 判断每个相机是否看向中心
-        # 向量：相机 -> 中心
         vec_to_center = center_of_mass - positions
-        # 归一化
         norms = np.linalg.norm(vec_to_center, axis=1, keepdims=True)
-        # 防止除以0
         norms[norms < 1e-6] = 1.0 
         vec_to_center_norm = vec_to_center / norms
         
         # 点积：Forward · ToCenter
-        # 如果 > 0，说明视线和指向中心的向量夹角 < 90度（看向中心）
         dot_products = np.sum(forward_vectors * vec_to_center_norm, axis=1)
         
         # 4. 统计“看向中心”的相机比例
@@ -77,15 +78,11 @@ def analyze_scene_type(json_path):
         if looking_inward_ratio > 0.6:
             print("💡 判定结果：【物体扫描模式 (Inward)】")
             print("    -> 策略：相机围着物体转。启用紧凑裁剪(2.0~6.0)，聚焦中心物体，去除背景。")
-            
-            # 物体模式参数
             return ["--pipeline.model.enable-collider", "True", 
                     "--pipeline.model.collider-params", "near_plane", "2.0", "far_plane", "6.0"], "object"
         else:
             print("💡 判定结果：【全景/室内模式 (Outward)】")
             print("    -> 策略：相机在内部向外看，或直线扫描。放宽裁剪(0.05~100.0)，保留墙壁和远景。")
-            
-            # 室内/全景模式参数
             return ["--pipeline.model.enable-collider", "True", 
                     "--pipeline.model.collider-params", "near_plane", "0.05", "far_plane", "100.0"], "scene"
 
@@ -98,7 +95,10 @@ def analyze_scene_type(json_path):
 # ================= 主流程 =================
 
 def run_pipeline(video_path, project_name):
+    # --- 全局计时开始 ---
+    global_start_time = time.time()
     print(f"\n🚀 [BrainDance Engine] 启动任务: {project_name}")
+    print(f"🕒 开始时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # 1. 路径解析
     video_src = Path(video_path).resolve()
@@ -113,98 +113,119 @@ def run_pipeline(video_path, project_name):
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen" # 防止无头模式崩溃
 
+    # ================= [Step 1] 数据预处理 (Manual Split) =================
+    step1_start = time.time()
+    
     if transforms_file.exists():
-        print(f"\n⏩ [断点续传] 检测到已存在的 COLMAP 数据: {transforms_file}")
+        print(f"\n⏩ [Step 1] 检测到已存在的 COLMAP 数据: {transforms_file}，跳过预处理。")
     else:
-        # 如果没找到数据，说明是新任务或上次没跑完，重新开始
-        print(f"🆕 [新任务] 未找到历史数据，开始初始化工作区...")
-        
-        # 清理旧的临时文件 (只在需要重新跑 Step 1 时清理)
+        print(f"\n🆕 [新任务] 未找到历史数据，开始初始化工作区...")
         if work_dir.exists():
             shutil.rmtree(work_dir)
         work_dir.mkdir(parents=True)
         data_dir.mkdir(parents=True)
         
         print(f"📂 [IO 优化] 正在将数据迁移至 Linux 原生目录加速...")
-        # 复制视频到 Linux 高速区
         video_dst = work_dir / video_src.name
         shutil.copy(str(video_src), str(video_dst))
 
-        # ================= [Step 1] 数据预处理 (Manual Split) =================
         print(f"\n🎥 [1/3] 视频抽帧与位姿解算 (COLMAP)")
-        
-        # 1.1 手动调用 FFmpeg (保持原代码配置：1920宽, 4FPS)
+
+        # 1.1 手动调用 FFmpeg
         print("    -> 1.1 FFmpeg: 抽帧到 1080P 宽分辨率 (4 FPS) 写入原生目录")
-        
+
         extracted_images_dir = data_dir / "images"
         extracted_images_dir.mkdir(parents=True, exist_ok=True)
-        
-        # FFmpeg 命令: 缩放至 1920px 宽 (1080P)，抽取 4 帧/秒
+
+        # FFmpeg 命令
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", str(video_dst), 
-            "-vf", "scale=1920:-1,fps=4", 
+            "-vf", "fps=5",  # <--- 保持原始分辨率，4 FPS
             "-q:v", "2", 
             str(extracted_images_dir / "frame_%05d.jpg")
         ]
-        subprocess.run(ffmpeg_cmd, check=True) 
+        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) 
+
+        # --- 图片数量检查 (Limit to 20000 - 实际上不删除，仅作为保险) ---
+        all_images = sorted(list(extracted_images_dir.glob("*.jpg")))
+        num_images = len(all_images)
+        MAX_IMAGES = 20000
+
+        if num_images > MAX_IMAGES:
+            print(f"    ⚠️ 图片数量 ({num_images}) 超过上限 {MAX_IMAGES}，正在进行均匀采样...")
+            indices_to_keep = set([int(i * (num_images - 1) / (MAX_IMAGES - 1)) for i in range(MAX_IMAGES)])
+            deleted_count = 0
+            for idx, img_path in enumerate(all_images):
+                if idx not in indices_to_keep:
+                    os.remove(img_path) 
+                    deleted_count += 1
+            print(f"    ✅ 已删除 {deleted_count} 张多余图片，剩余 {MAX_IMAGES} 张用于序列匹配。")
+        else:
+            print(f"    ✅ 图片数量 ({num_images}) 未超标，无需处理。")
         
         # 1.2 调用 ns-process-data images (COLMAP 解算)
-        print("    -> 1.2 Nerfstudio: 调用 COLMAP 进行位姿解算")
-        
+        print("    -> 1.2 Nerfstudio: 调用 COLMAP 进行位姿解算 (模式: Sequential, 实时日志)")
+
         colmap_data_dir = data_dir 
-        
+
         cmd_colmap = [
             "ns-process-data", "images",
             "--data", str(extracted_images_dir),
             "--output-dir", str(colmap_data_dir),
             "--verbose",
+            # "--matching-method", "sequential"  <--- 已确认使用默认/自动模式
         ]
         
-        # --- 核心修改：捕获输出，并检查 COLMAP 质量 ---
-        process_result = subprocess.run(
-            cmd_colmap, 
-            check=True, 
-            env=env,
-            capture_output=True, # 捕获 stdout 和 stderr
-            text=True
-        )
-
-        # 打印 COLMAP 的完整输出
-        print(process_result.stdout)
-        print(process_result.stderr)
+        # --- 使用 Popen 实现“实时直播”日志 ---
+        full_log_content = [] 
         
-        # 质量检查：如果 COLMAP 仅找到极少数的位姿，则停止
-        if "COLMAP only found poses" in process_result.stdout:
+        try:
+            with subprocess.Popen(
+                cmd_colmap, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                env=env,
+                bufsize=1 
+            ) as process:
+                for line in process.stdout:
+                    print(line, end='') 
+                    full_log_content.append(line) 
+                process.wait()
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(process.returncode, cmd_colmap)
+        except Exception as e:
+            print(f"\n❌ COLMAP 运行出错: {e}")
+            raise e
+
+        log_str = "".join(full_log_content)
+        
+        # 质量检查
+        if "COLMAP only found poses" in log_str:
             print("\n🚨🚨🚨 检测到 COLMAP 数据质量极差！自动停止训练。")
             print("❌ 错误原因：视频质量太差或场景反光，只有极少数图片找到了位姿。")
-            print("➡️ 建议：请重拍视频（降低反光，增加纹理点），然后删除 transforms.json 重新运行。")
-            
-            # 清理损坏的数据，但保留 workspace 以供调试
             shutil.rmtree(data_dir)
             raise RuntimeError("COLMAP 数据质量不合格，流程停止。")
-        # --- 质量检查结束 ---
 
-
-        # 检查 COLMAP 产物是否存在
         if not transforms_file.exists():
             raise FileNotFoundError("COLMAP 失败，未找到 transforms.json 文件。")
-
+            
+    step1_duration = time.time() - step1_start
+    print(f"⏱️ [Step 1 完成] 耗时: {format_duration(step1_duration)}")
 
     # ================= [Step 2] 模型训练 =================
+    step2_start = time.time()
     
-    # 查找是否有已完成的训练结果 (以避免重复训练)
+    # 查找是否有已完成的训练结果
     search_path = output_dir / project_name / "splatfacto"
-    # 获取所有时间戳文件夹
     run_dirs = sorted(list(search_path.glob("*"))) if search_path.exists() else []
 
     if run_dirs:
-        # 如果找到至少一个运行目录，我们认为训练已完成，跳过
-        print(f"\n⏩ [训练跳过] 检测到已完成的训练结果：{run_dirs[-1].name}")
+        print(f"\n⏩ [Step 2] 检测到已完成的训练结果：{run_dirs[-1].name}，跳过训练。")
     else:
-        # === 核心修改：调用智能场景分析，获取裁剪参数 ===
+        # === 调用智能场景分析，获取裁剪参数 ===
         collider_args, scene_type = analyze_scene_type(transforms_file)
         
-        # 如果没有找到运行目录，则开始训练
         print(f"\n🧠 [2/3] 开始训练 (RTX 5070 加速中)")
         
         cmd_train = [
@@ -227,15 +248,18 @@ def run_pipeline(video_path, project_name):
             # --- 关键修复：训练完成后自动退出，无需 Ctrl+C ---
             "--viewer.quit-on-train-completion", "True",
             
-            # --- Dataparser 子命令 (指定使用 colmap 来解析数据) ---
+            # --- Dataparser 子命令 ---
             "colmap",
         ]
         subprocess.run(cmd_train, check=True, env=env)
 
-    # ================= [Step 3] 导出结果 (使用 CLI，最可靠) =================
+    step2_duration = time.time() - step2_start
+    print(f"⏱️ [Step 2 完成] 耗时: {format_duration(step2_duration)}")
+
+    # ================= [Step 3] 导出结果 =================
+    step3_start = time.time()
     print(f"\n💾 [3/3] 导出结果")
     
-    # 确保 run_dirs 包含了最新结果（如果 Step 2 刚跑完）
     if not run_dirs:
         run_dirs = sorted(list(search_path.glob("*")))
 
@@ -246,34 +270,30 @@ def run_pipeline(video_path, project_name):
     latest_run = run_dirs[-1]
     config_path = latest_run / "config.yml"
     
-    # 导出命令 (这次用最可靠的 CLI，避免 Python 模块导入错误)
     cmd_export = [
         "ns-export", "gaussian-splat",
         "--load-config", str(config_path),
         "--output-dir", str(work_dir)
     ]
     
-    # 只需要运行 CLI 命令，避免 Python 内部复杂调用
     subprocess.run(cmd_export, check=True, env=env)
     
     print("⏳ 等待文件写入磁盘...")
-    time.sleep(5) # 强制等待 5 秒，确保大文件写入完成
+    time.sleep(5) 
 
     print(f"✅ 导出成功！文件应已生成于 {work_dir / 'point_cloud.ply'}")
+    step3_duration = time.time() - step3_start
+    print(f"⏱️ [Step 3 完成] 耗时: {format_duration(step3_duration)}")
 
-    # ================= [Step 4] 结果回传 (查找默认文件名并存储姿态) =================
+    # ================= [Step 4] 结果回传 =================
     print(f"\n📦 [IO 同步] 正在将结果回传至 Windows 项目目录...")
     
-    # === 修复：必须在引用 target_dir 之前先定义它 ===
-    # 目标路径：脚本所在的目录 (即你的 Windows 项目目录)
     target_dir = Path(__file__).parent / "results"
     target_dir.mkdir(exist_ok=True)
 
-    # 查找默认的 PLY 文件名 (Nerfstudio 在某些版本中输出 splat.ply)
     temp_ply_default = work_dir / "point_cloud.ply"
-    temp_ply_alt = work_dir / "splat.ply" # 查找另一个可能的默认名 (您的日志显示为 splat.ply)
+    temp_ply_alt = work_dir / "splat.ply"
     
-    # 确定哪个文件存在
     if temp_ply_default.exists():
         temp_ply = temp_ply_default
     elif temp_ply_alt.exists():
@@ -281,49 +301,27 @@ def run_pipeline(video_path, project_name):
     else:
         temp_ply = None
         
-    # 查找 transforms.json (姿态数据源)
     transforms_src = data_dir / "transforms.json"
-    
-    # 定义 WebGL 友好的姿态输出文件路径
-    # (此时 target_dir 已经定义，不会再报错)
     final_webgl_poses = target_dir / "webgl_poses.json"
     final_ply = target_dir / f"{project_name}.ply"
-    final_transforms = target_dir / "transforms.json" # 目标姿态文件
+    final_transforms = target_dir / "transforms.json"
     
-    
-    # --- 关键修改：姿态预处理逻辑 ---
+    # --- 姿态预处理逻辑 ---
     if transforms_src.exists():
         print("🔄 正在生成 WebGL 友好姿态文件 (webgl_poses.json)...")
-        
         try:
             with open(transforms_src, 'r') as f:
                 data = json.load(f)
             
-            # --- WebGL 姿态转换核心 ---
             webgl_frames = []
-            
-            # 定义 WebGL 转换矩阵 (Y-up to Z-up, R-hand to L-hand) 
-            GL_TO_WEBGL = np.array([
-                [1, 0, 0, 0],
-                [0, 1, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1]
-            ], dtype=np.float32)
-
             for frame in data["frames"]:
-                # 1. C2W 矩阵 (Nerfstudio 格式)
                 c2w_matrix = np.array(frame["transform_matrix"], dtype=np.float32)
-                
-                # 2. 计算 W2C 矩阵 (WeblGL 相机需要)
-                w2c_matrix = np.linalg.inv(c2w_matrix)
-                
+                # 计算 W2C (虽然这里只存了 C2W，但可以预留逻辑)
                 webgl_frames.append({
                     "file_path": frame["file_path"],
-                    # 直接提供 C2W，但在命名上暗示 WebGL 可以直接用
                     "pose_matrix_c2w": c2w_matrix.tolist() 
                 })
                 
-            # 写入 WebGL 友好的 JSON 文件
             webgl_data = {
                 "camera_model": data["camera_model"],
                 "w": data["w"],
@@ -336,31 +334,33 @@ def run_pipeline(video_path, project_name):
             with open(final_webgl_poses, 'w') as f:
                 json.dump(webgl_data, f, indent=4)
             print(f"✅ WebGL 姿态文件已保存至: {final_webgl_poses.resolve()}")
-            
         except Exception as e:
             print(f"❌ 姿态预处理失败: {e}")
-    # --- 姿态预处理逻辑结束 ---
-
 
     if temp_ply and temp_ply.exists():
-        # 1. 复制 PLY 文件
+        # 复制 PLY 文件
         copy_ply_command_str = f"cp {str(temp_ply)} {str(final_ply)}"
         subprocess.run(copy_ply_command_str, check=True, shell=True)
         
-        # 2. 复制 transforms.json 文件
+        # 复制 transforms.json 文件
         if transforms_src.exists():
             copy_transforms_cmd_str = f"cp {str(transforms_src)} {str(final_transforms)}"
             subprocess.run(copy_transforms_cmd_str, check=True, shell=True)
         
-        print(f"✅ 成功！最终模型已保存至: {final_ply}")
-        print(f"📁 您可以在 Windows 资源管理器中打开: {final_ply.resolve()}")
-        
         # 清理 Linux 临时文件
         shutil.rmtree(work_dir)
         print(f"🧹 清理完成: 已删除工作区 {work_dir}")
+        
+        # --- 最终时间汇总 ---
+        total_time = time.time() - global_start_time
+        print(f"\n✅ =============================================")
+        print(f"🎉 任务全部完成！安心睡觉吧。")
+        print(f"📂 最终模型: {final_ply}")
+        print(f"⏱️ 总共耗时: {format_duration(total_time)}")
+        print(f"✅ =============================================")
+        
         return str(final_ply)
     else:
-        # 如果 CLI 运行成功但文件没找到，可能是命名问题
         print("❌ 导出失败，未找到 PLY 文件 (point_cloud.ply 或 splat.ply)。")
         return None
 
