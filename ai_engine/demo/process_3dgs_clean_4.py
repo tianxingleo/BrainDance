@@ -33,7 +33,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
+MAX_IMAGES = 100 # 🔥 全局最大图片数量限制
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -145,7 +145,7 @@ FORCE_SPHERICAL_CULLING = True
 # 0.5 表示只保留离中心最近的 50% 的点 (非常狠)
 # 0.65 表示保留 65% (推荐，比较平衡)
 # 0.9 表示保留 90% (只去极远处的背景)
-KEEP_PERCENTILE = 0.6
+KEEP_PERCENTILE = 0.9
 
 # 检查依赖
 try:
@@ -412,14 +412,12 @@ def run_pipeline(video_path, project_name):
         "--ImageReader.single_camera", "1"
     ], "[1/4] GPU 特征提取")
 
-    # 4. 手动运行 Matcher (改为穷举模式，以保证成功率)
-    # Sequential 模式在抽帧或运动过快时极易失败，Exhaustive 虽然慢一点点但最稳
-    # 既然有 GPU 加速，200 张图跑 Exhaustive 也很快 (约1-3分钟)
+    # 4. 手动运行 Sequential Matcher (顺序匹配)
     run_colmap_step([
-        system_colmap_exe, "exhaustive_matcher",
+        system_colmap_exe, "sequential_matcher",
         "--database_path", str(database_path),
-        "--SiftMatching.use_gpu", "1"  # 🔥 强制开启 GPU
-    ], "[2/4] GPU 穷举匹配 (Exhaustive)")
+        "--SequentialMatching.overlap", "25" 
+    ], "[2/4] GPU 顺序匹配")
 
     # 4.5 手动运行 Mapper (稀疏重建) - 必须运行此步才能生成点云和质量报告
     # 我们需要创建 sparse/0 目录，以符合 Nerfstudio 的标准结构
@@ -693,8 +691,14 @@ def run_pipeline(video_path, project_name):
 
     if final_ply_to_use and final_ply_to_use.exists():
         try:
-            # 复制 PLY 文件
+            # 1. 复制最终 PLY (可能是裁剪过的)
             shutil.copy2(str(final_ply_to_use), str(final_ply_dst))
+            
+            # 2. 额外回传原始未裁剪模型 (用于对比或备份)
+            final_raw_ply_dst = target_dir / f"{project_name}_raw.ply"
+            if raw_ply.exists():
+                shutil.copy2(str(raw_ply), str(final_raw_ply_dst))
+                print(f"    -> 原始模型已备份: {final_raw_ply_dst.name}")
             
             # 复制 transforms.json 文件
             if transforms_src.exists():
