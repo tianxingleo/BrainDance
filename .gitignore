@@ -117,6 +117,7 @@ ai_engine/**/*.obj
 ai_engine/**/*.glb
 ai_engine/**/*.gltf
 
+
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
 ai_engine/exports/
