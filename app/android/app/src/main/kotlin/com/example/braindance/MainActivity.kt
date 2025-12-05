@@ -1,4 +1,4 @@
-package com.example.flutter_application_2
+package com.example.braindance
 
 import io.flutter.embedding.android.FlutterActivity
 
