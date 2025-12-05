@@ -1,0 +1,671 @@
+import subprocess
+import sys
+import shutil
+import os
+import time
+import datetime
+from pathlib import Path
+import json
+import numpy as np
+import logging
+import cv2
+import re
+
+# ================= 🧠 AI 依赖引入 =================
+try:
+    import dashscope
+    from dashscope import MultiModalConversation
+    from ultralytics import SAM, YOLOWorld
+    HAS_AI = True
+except ImportError:
+    HAS_AI = False
+    print("⚠️ [环境警告] 未检测到 dashscope 或 ultralytics 库。")
+    print("    -> 智能分割功能将被禁用。请运行: pip install dashscope ultralytics")
+
+# 🔥 请在此处填入你的 API KEY (或者确保环境变量 DASHSCOPE_API_KEY 已存在)
+# os.environ["DASHSCOPE_API_KEY"] = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# ================= 🔧 基础配置 =================
+# 🔥【绝杀】强制将编译好的系统级 colmap 路径提到最前面
+sys_path = "/usr/local/bin"
+current_path = os.environ.get("PATH", "")
+if sys_path not in current_path.split(os.pathsep)[0]:
+    print(f"⚡ [环境修正] 强制设置 PATH 优先级: {sys_path} -> Priority High")
+    os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
+
+# 设置日志级别
+logging.getLogger('nerfstudio').setLevel(logging.ERROR) 
+
+# 工作区配置
+LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
+# 🔥 新增：词汇树文件路径 (请确保你下载了它！)
+VOCAB_TREE_PATH = LINUX_WORK_ROOT / "vocab_tree_flickr100k_words.bin" 
+SCENE_RADIUS_SCALE = 1.8 
+MAX_IMAGES = 130 
+
+# 切割配置
+FORCE_SPHERICAL_CULLING = True
+KEEP_PERCENTILE = 0.9
+
+# 检查 plyfile
+try:
+    from plyfile import PlyData, PlyElement
+    HAS_PLYFILE = True
+except ImportError:
+    HAS_PLYFILE = False
+
+# ================= 🧠 AI 核心逻辑函数 =================
+
+def get_central_object_prompt(images_dir: Path, sample_count=3):
+    """
+    [Step 1.1] 使用 Qwen-VL-Plus 多图分析，提取中心物体的文本描述
+    """
+    api_key = os.environ.get("DASHSCOPE_API_KEY")
+    if not api_key:
+        print("❌ 未设置 DASHSCOPE_API_KEY，无法调用大模型。")
+        return None
+
+    print(f"\n🧠 [AI 分析] 正在调用 Qwen-VL-Plus 分析场景...")
+    
+    # 随机采样 3 张图片
+    image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
+    if not image_files: return None
+    
+    indices = np.linspace(0, len(image_files) - 1, sample_count, dtype=int)
+    sampled_imgs = [image_files[i] for i in indices]
+    
+    # 构建多模态消息
+    content = [{"image": str(img_path)} for img_path in sampled_imgs]
+    content.append({
+        "text": (
+            "这些是一个视频的抽帧图片。请分析画面中心始终存在的、最主要的一个物体是什么。"
+            "请输出一个适合用于物体检测模型的英文名词短语（Prompt）。"
+            "注意：如果物体是白色的、缺乏纹理的（如白色充电宝），请使用更具几何特征的描述，如 'white box' 或 'rectangular object'，而不要只说 'portable charger'。"
+            "例如：'red fire extinguisher', 'white box', 'wooden chair'。"
+            "要求：严格只输出这个英文短语，不要包含任何标点符号、解释或 'The object is...' 这种废话。"
+        )
+    })
+
+    messages = [{"role": "user", "content": content}]
+
+    try:
+        response = dashscope.MultiModalConversation.call(
+            model='qwen-vl-plus', 
+            messages=messages
+        )
+        
+        if response.status_code == 200:
+            prompt_text = response.output.choices[0].message.content[0]["text"].strip()
+            # 简单的清洗，去掉可能的标点
+            prompt_text = prompt_text.replace(".", "").replace('"', "").replace("'", "")
+            print(f"    🤖 Qwen 认为中心物体是: [ \033[92m{prompt_text}\033[0m ]")
+            return prompt_text
+        else:
+            print(f"❌ Qwen 调用失败: {response.code} - {response.message}")
+            return None
+    except Exception as e:
+        print(f"❌ API 连接异常: {e}")
+        return None
+
+def run_ai_segmentation_pipeline(data_dir: Path):
+    """
+    [Step 1.2] 执行完整的 AI 分割流程：Qwen -> YOLO-World -> SAM 2 -> transforms.json
+    """
+    if not HAS_AI: return False
+    
+    images_dir = data_dir / "images"
+    masks_dir = data_dir / "masks"
+    transforms_file = data_dir / "transforms.json"
+
+    if not transforms_file.exists():
+        print("⚠️ 未找到 transforms.json，无法进行 Mask 注入。")
+        return False
+
+    # 1. 获取提示词
+    text_prompt = get_central_object_prompt(images_dir)
+    if not text_prompt:
+        print("⚠️ 无法获取提示词，跳过 AI 分割。")
+        return False
+
+    print(f"\n✂️ [AI 分割] 启动 Ultralytics 流水线: Prompt='{text_prompt}'")
+    masks_dir.mkdir(parents=True, exist_ok=True)
+
+    # 2. 加载模型
+    print("    -> 正在加载模型 (YOLO-World + SAM 2)...")
+    try:
+        # YOLO-World: 听懂文字，找框
+        det_model = YOLOWorld("yolov8s-worldv2.pt") 
+        det_model.set_classes([text_prompt])
+        
+        # SAM 2: 根据框，抠图
+        # 注意：使用 sam2.1_b.pt (Base版本) 平衡速度与精度
+        sam_model = SAM("sam2.1_b.pt") 
+    except Exception as e:
+        print(f"❌ 模型加载失败: {e}")
+        return False
+
+    # 3. 批量处理
+    image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
+    total_imgs = len(image_files)
+    
+    print(f"    -> 开始处理 {total_imgs} 张图片...")
+    
+    processed_count = 0
+    
+    for i, img_path in enumerate(image_files):
+        mask_output_path = masks_dir / f"{img_path.stem}.png"
+        
+        # 断点续传：如果 mask 已经存在且不为空，跳过
+        if mask_output_path.exists():
+            continue
+
+        # --- A. 检测阶段 (Text -> Box) ---
+        # conf=0.05 极低阈值确保召回
+        try:
+            det_results = det_model.predict(img_path, conf=0.05, verbose=False)
+            bboxes = det_results[0].boxes.xyxy.cpu() 
+            
+            # 🔥 修改：中心保底策略 🔥
+            if len(bboxes) == 0:
+                # 如果检测不到，假设物体在画面中心 (取中间 50% 区域)
+                h, w = det_results[0].orig_shape[:2]
+                margin_h = h * 0.25
+                margin_w = w * 0.25
+                # 手动构造一个中心框 [x1, y1, x2, y2]
+                import torch
+                bboxes = torch.tensor([[margin_w, margin_h, w - margin_w, h - margin_h]])
+                print(f"       ⚠️ {img_path.name}: AI未检测到物体，强制使用【中心保底框】...")
+
+            # --- B. 分割阶段 (Box -> Mask) ---
+            sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
+            
+            # --- C. 合成 ---
+            if sam_results[0].masks is not None:
+                # 合并所有实例
+                all_masks = sam_results[0].masks.data.cpu().numpy()
+                combined = np.any(all_masks, axis=0).astype(np.uint8) * 255
+                final_mask = combined
+            else:
+                # 如果 SAM 也失败了（极少见），才给全黑
+                h, w = det_results[0].orig_shape[:2]
+                final_mask = np.zeros((h, w), dtype=np.uint8)
+            
+            cv2.imwrite(str(mask_output_path), final_mask)
+
+            # 🔥 新增步骤：模仿该项目的思路，生成“背景涂黑”的训练图 🔥
+            # 读取原图
+            original_img = cv2.imread(str(img_path))
+            
+            # 将 Mask 转为 0/1 (三通道)
+            mask_bool = (final_mask > 127).astype(np.uint8)
+            mask_3c = cv2.merge([mask_bool, mask_bool, mask_bool])
+            
+            # 背景涂黑：原图 * Mask
+            masked_img = original_img * mask_3c
+            
+            # 覆盖原图 (或者存到新目录)
+            # 建议直接覆盖 data/images 里的图，因为 COLMAP 已经跑完了，不需要原图了
+            cv2.imwrite(str(img_path), masked_img)
+
+            processed_count += 1
+            if processed_count % 10 == 0:
+                print(f"       进度: {processed_count}/{total_imgs} ...", end="\r")
+
+        except Exception as e:
+            print(f"       ❌ 处理 {img_path.name} 失败: {e}")
+            continue
+
+    print(f"\n    ✅ Mask 生成完毕: {masks_dir}")
+
+    # 4. 注入 transforms.json
+    print("🔄 [Pipeline] 正在注入 Mask 信息到 transforms.json...")
+    with open(transforms_file, 'r') as f:
+        meta = json.load(f)
+    
+    modified_count = 0
+    for frame in meta["frames"]:
+        fname = Path(frame["file_path"]).stem
+        mask_rel_path = f"masks/{fname}.png"
+        
+        # 只有当 Mask 文件真的存在时才添加
+        if (masks_dir / f"{fname}.png").exists():
+            frame["mask_path"] = mask_rel_path
+            modified_count += 1
+    
+    with open(transforms_file, 'w') as f:
+        json.dump(meta, f, indent=4)
+        
+    print(f"    ✅ 已更新 {modified_count} 帧的 Mask 路径。训练将自动去除背景！")
+    return True
+
+# ================= 辅助工具 =================
+def format_duration(seconds):
+    return str(datetime.timedelta(seconds=int(seconds)))
+
+def smart_filter_blurry_images(image_folder, keep_ratio=0.85, max_images=MAX_IMAGES):
+    # (保持原有的清洗逻辑不变)
+    print(f"\n🧠 [智能清洗] 正在分析图片质量 (混合策略版)...")
+    image_dir = Path(image_folder)
+    images = sorted([p for p in image_dir.iterdir() if p.suffix.lower() in ['.jpg', '.jpeg', '.png']])
+    if not images: return
+    trash_dir = image_dir.parent / "trash_smart"
+    trash_dir.mkdir(exist_ok=True)
+    img_scores = []
+    for i, img_path in enumerate(images):
+        img = cv2.imread(str(img_path))
+        if img is None: continue
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+        grid_h, grid_w = h // 3, w // 3
+        max_grid_score = 0
+        for r in range(3):
+            for c in range(3):
+                roi = gray[r*grid_h:(r+1)*grid_h, c*grid_w:(c+1)*grid_w]
+                score = cv2.Laplacian(roi, cv2.CV_64F).var()
+                if score > max_grid_score: max_grid_score = score
+        img_scores.append((img_path, max_grid_score))
+        if i % 50 == 0: print(f"  -> 分析中... {i}/{len(images)}", end="\r")
+    
+    scores = [s[1] for s in img_scores]
+    if not scores: return
+    quality_threshold = np.percentile(scores, (1 - keep_ratio) * 100)
+    good_images = []
+    for img_path, score in img_scores:
+        if score < quality_threshold:
+            shutil.move(str(img_path), str(trash_dir / img_path.name))
+        else:
+            good_images.append(img_path)
+    
+    if len(good_images) > max_images:
+        indices_to_keep = set(np.linspace(0, len(good_images) - 1, max_images, dtype=int))
+        for idx, img_path in enumerate(good_images):
+            if idx not in indices_to_keep:
+                shutil.move(str(img_path), str(trash_dir / img_path.name))
+    print(f"✨ 清洗结束，剩余 {len(list(image_dir.glob('*')))} 张。")
+
+def analyze_and_calculate_adaptive_collider(json_path):
+    # (保持原有逻辑，但如果检测到 Mask，可以更加激进)
+    print(f"\n🤖 [AI 分析] 解析相机轨迹...")
+    try:
+        with open(json_path, 'r') as f: data = json.load(f)
+        frames = data["frames"]
+        if not frames: return [], "unknown"
+        
+        # 简单判定：是否有 mask_path
+        has_mask = "mask_path" in frames[0]
+        if has_mask:
+            print("    -> 检测到 Mask 数据！将启用物体聚焦模式。")
+        
+        # (原有的轨迹分析逻辑...)
+        positions = [np.array(f["transform_matrix"])[:3, 3] for f in frames]
+        forward_vectors = [np.array(f["transform_matrix"])[:3, :3] @ np.array([0, 0, -1]) for f in frames]
+        center = np.mean(positions, axis=0)
+        vec_to_center = center - positions
+        vec_to_center /= (np.linalg.norm(vec_to_center, axis=1, keepdims=True) + 1e-6)
+        ratio = np.sum(np.sum(forward_vectors * vec_to_center, axis=1) > 0) / len(frames)
+        
+        # 如果有 Mask，或者相机向内看，都认为是物体模式
+        is_object_mode = ratio > 0.6 or FORCE_SPHERICAL_CULLING or has_mask
+
+        if is_object_mode:
+            dists = [np.linalg.norm(p) for p in positions]
+            avg_dist = np.mean(dists)
+            scene_radius = 1.0 * SCENE_RADIUS_SCALE
+            calc_near = max(0.05, min(dists) - scene_radius)
+            calc_far = avg_dist + scene_radius
+            return ["--pipeline.model.enable-collider", "True", 
+                    "--pipeline.model.collider-params", "near_plane", str(round(calc_near, 2)), 
+                    "far_plane", str(round(calc_far, 2))], "object"
+        else:
+            return ["--pipeline.model.enable-collider", "True", 
+                    "--pipeline.model.collider-params", "near_plane", "0.05", "far_plane", "100.0"], "scene"
+    except:
+        return [], "unknown"
+
+def perform_percentile_culling(ply_path, json_path, output_path):
+    # (保持原有逻辑不变)
+    if not HAS_PLYFILE: return False
+    print(f"\n✂️ [后处理] 正在执行【分位数暴力切割】...")
+    try:
+        with open(json_path, 'r') as f: frames = json.load(f)["frames"]
+        cam_pos = np.array([np.array(f["transform_matrix"])[:3, 3] for f in frames])
+        center = np.mean(cam_pos, axis=0)
+        
+        plydata = PlyData.read(str(ply_path))
+        vertex = plydata['vertex']
+        points = np.stack([vertex['x'], vertex['y'], vertex['z']], axis=1)
+        
+        dists_pts = np.linalg.norm(points - center, axis=1)
+        threshold_radius = np.percentile(dists_pts, KEEP_PERCENTILE * 100)
+        
+        opacities = 1 / (1 + np.exp(-vertex['opacity']))
+        mask = (dists_pts < threshold_radius) & (opacities > 0.05)
+        filtered_vertex = vertex[mask]
+        
+        PlyData([PlyElement.describe(filtered_vertex, 'vertex')]).write(str(output_path))
+        return True
+    except Exception as e:
+        print(f"❌ 切割失败: {e}")
+        return False
+
+# ================= 主流程 =================
+
+def run_pipeline(video_path, project_name):
+    global_start_time = time.time()
+    print(f"\n🚀 [BrainDance Engine AI-Enhanced] 启动任务: {project_name}")
+    print(f"🕒 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    video_src = Path(video_path).resolve()
+    work_dir = LINUX_WORK_ROOT / project_name
+    data_dir = work_dir / "data"
+    output_dir = work_dir / "outputs"
+    transforms_file = data_dir / "transforms.json"
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen" 
+
+    # [Step 1] 数据处理
+    step1_start = time.time()
+    
+    # ... (目录初始化逻辑保持不变)
+    if work_dir.exists(): shutil.rmtree(work_dir, ignore_errors=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(video_src), str(work_dir / video_src.name))
+
+    print(f"\n🎥 [1/4] 数据准备与清洗")
+    temp_dir = work_dir / "temp_extract"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    extracted_images_dir = work_dir / "raw_images"
+    extracted_images_dir.mkdir(parents=True, exist_ok=True)
+    
+    # FFmpeg 抽帧
+    try:
+        subprocess.run(["ffmpeg", "-y", "-i", str(work_dir / video_src.name), 
+                        "-vf", "fps=10", "-q:v", "2", 
+                        str(temp_dir / "frame_%05d.jpg")], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) 
+    except: pass
+    
+    # 清洗
+    smart_filter_blurry_images(temp_dir, keep_ratio=0.85)
+    
+    # 迁移
+    all_candidates = sorted(list(temp_dir.glob("*.jpg")) + list(temp_dir.glob("*.png")))
+    final_images_list = []
+    if len(all_candidates) > MAX_IMAGES:
+        indices = np.linspace(0, len(all_candidates) - 1, MAX_IMAGES, dtype=int)
+        indices = sorted(list(set(indices)))
+        for idx in indices: final_images_list.append(all_candidates[idx])
+    else:
+        final_images_list = all_candidates
+
+    for img_path in final_images_list:
+        shutil.copy2(str(img_path), str(extracted_images_dir / img_path.name))
+    shutil.rmtree(temp_dir)
+
+    # COLMAP 流程 (增强版 - 包含自动修正)
+    print(f"\n📐 [2/4] COLMAP 位姿解算 (增强版)")
+    colmap_output_dir = data_dir / "colmap"
+    colmap_output_dir.mkdir(parents=True, exist_ok=True)
+    database_path = colmap_output_dir / "database.db"
+    
+    # 查找 colmap
+    system_colmap_exe = shutil.which("colmap") or "/usr/local/bin/colmap"
+
+    full_log_content = []
+
+    def run_colmap_step(cmd, description):
+        print(f"\n🚀 {description}...")
+        try:
+            # 使用 Popen 实时打印输出
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                env=env
+            )
+            
+            # 实时读取输出
+            for line in process.stdout:
+                full_log_content.append(line)
+                # 过滤掉过于频繁的进度输出，保留关键信息
+                # 扩充关键词，确保 Mapper 阶段能看到 Registering 和 Bundle adjustment 等信息
+                if any(k in line for k in ["Iteration", "Error", "Loading", "Elapsed", "Registering", "Image #", "Bundle adjustment", "Retriangulation", "Filtering"]):
+                    print(f"    [COLMAP] {line.strip()}")
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, cmd)
+                
+        except Exception as e:
+            print(f"❌ {description} 失败: {e}")
+            raise e
+
+    try:
+        # 1. Feature Extractor
+        run_colmap_step([
+            system_colmap_exe, "feature_extractor", 
+            "--database_path", str(database_path), 
+            "--image_path", str(extracted_images_dir), 
+            "--ImageReader.camera_model", "OPENCV", 
+            "--ImageReader.single_camera", "1"
+        ], "Step 1: 特征提取 (Feature Extractor)")
+
+        # ---------------------------------------------------------
+        # 选项 A: 暴力匹配 (Exhaustive) - 小场景(<500张)最推荐，最稳
+        # ---------------------------------------------------------
+        # print("    -> 暴力匹配 (Exhaustive Matcher)...")
+        # run_colmap_step([
+        #     system_colmap_exe, "exhaustive_matcher", 
+        #     "--database_path", str(database_path)
+        # ], "Step 2: 暴力匹配")
+
+        # ---------------------------------------------------------
+        # 选项 B: 词汇树匹配 (Vocab Tree) - 也就是你要找的“树模式”
+        # ---------------------------------------------------------
+        print("    -> 🌳 词汇树匹配 (Vocab Tree Matcher)...")
+        
+        # 自动迁移词汇树文件
+        local_vocab_path = Path(__file__).parent / "vocab_tree_flickr100k_words.bin"
+        if not VOCAB_TREE_PATH.exists():
+            if local_vocab_path.exists():
+                print(f"    📦 检测到本地词汇树文件，正在迁移至工作区...")
+                shutil.copy2(str(local_vocab_path), str(VOCAB_TREE_PATH))
+            else:
+                print(f"❌ 错误：未找到词汇树文件: {VOCAB_TREE_PATH}")
+                print(f"    也未在脚本同级目录找到: {local_vocab_path}")
+                print("请运行: wget https://demuc.de/colmap/vocab_tree_flickr100k_words.bin -P ~/braindance_workspace/")
+                raise FileNotFoundError("Vocab tree file missing")
+
+        run_colmap_step([
+            system_colmap_exe, "vocab_tree_matcher", 
+            "--database_path", str(database_path),
+            "--VocabTreeMatching.vocab_tree_path", str(VOCAB_TREE_PATH),
+            "--VocabTreeMatching.match_list_path", "" # 留空自动生成
+        ], "Step 2: 词汇树匹配")
+
+        # 3. Mapper
+        sparse_dir = colmap_output_dir / "sparse"
+        sparse_dir.mkdir(parents=True, exist_ok=True)
+        run_colmap_step([
+            system_colmap_exe, "mapper", 
+            "--database_path", str(database_path), 
+            "--image_path", str(extracted_images_dir), 
+            "--output_path", str(sparse_dir)
+        ], "Step 3: 稀疏重建 (Mapper)")
+
+    except subprocess.CalledProcessError:
+        print("❌ COLMAP 流程中断。")
+        return None
+
+    # 3. 🔧 目录结构“强力修正” (Auto-Fixer)
+    print("\n🔧 [Auto-Fix] 正在检查并修正 COLMAP 输出目录结构...")
+    sparse_root = colmap_output_dir / "sparse"
+    target_dir_0 = sparse_root / "0"
+    target_dir_0.mkdir(parents=True, exist_ok=True)
+
+    required_files_bin = ["cameras.bin", "images.bin", "points3D.bin"]
+    required_files_txt = ["cameras.txt", "images.txt", "points3D.txt"]
+
+    # 策略：先找 bin，再找 txt
+    found_files = []
+    source_dir = None
+
+    # 1. 检查 sparse/0 (标准位置)
+    if all((target_dir_0 / f).exists() for f in required_files_bin):
+        print("    ✅ COLMAP 输出正常 (sparse/0/*.bin)")
+    else:
+        # 2. 递归搜索
+        print("    ⚠️ 标准路径未找到模型，开始全盘扫描...")
+        for root, dirs, files in os.walk(sparse_root):
+            root_path = Path(root)
+            # 检查 bin
+            if all(f in files for f in required_files_bin):
+                source_dir = root_path
+                found_files = required_files_bin
+                break
+            # 检查 txt
+            if all(f in files for f in required_files_txt):
+                source_dir = root_path
+                found_files = required_files_txt
+                break
+        
+        if source_dir:
+            print(f"    🔍 在 {source_dir} 找到模型文件，正在归位到 {target_dir_0}...")
+            if source_dir != target_dir_0:
+                for f in found_files:
+                    if (target_dir_0 / f).exists():
+                        (target_dir_0 / f).unlink()
+                    shutil.move(str(source_dir / f), str(target_dir_0 / f))
+                print("    ✅ 归位完成！")
+        else:
+            print("    ❌ 致命错误：在 sparse 目录下找不到完整的 COLMAP 模型文件！")
+
+    # 同步图片到 data/images
+    dest_images_dir = data_dir / "images"
+    dest_images_dir.mkdir(parents=True, exist_ok=True)
+    for img in extracted_images_dir.glob("*"): shutil.copy2(str(img), str(dest_images_dir / img.name))
+
+    # 生成 transforms.json
+    print("    -> 生成 transforms.json...")
+    run_colmap_step([
+        "ns-process-data", "images", 
+        "--data", str(dest_images_dir), 
+        "--output-dir", str(data_dir), 
+        "--skip-colmap", 
+        "--skip-image-processing", 
+        "--num-downscales", "0"
+    ], "生成 transforms.json")
+
+    # --- 质量检测逻辑 ---
+    full_log = "".join(full_log_content)
+    
+    # 1. 检测 "No convergence"
+    if "Termination : No convergence" in full_log:
+        print("\n❌ [严重错误] COLMAP 无法收敛 (No convergence)！")
+        print("🛑 任务已终止，因为生成的稀疏点云质量无法满足训练要求。")
+        return None
+
+    # 2. 检测匹配率过低
+    # 示例日志: COLMAP only found poses for 10.00% of the images. This is low.
+    match = re.search(r"COLMAP only found poses for (\d+\.?\d*)% of the images", full_log)
+    if match:
+        matched_percentage = float(match.group(1))
+        print(f"\n📊 COLMAP 匹配率检测: {matched_percentage:.2f}%")
+        
+        if matched_percentage < 35.0:
+            print(f"❌ [质量警告] 匹配率过低 (< 35%)！")
+            print("    -> 这意味着大部分图片无法被定位，生成的 3D 场景将严重残缺。")
+            print("🛑 任务已终止。建议：增加图片数量、保证图片清晰度或增加重叠率。")
+            return None
+
+    # ================= 🔥 AI 介入点 (新增) =================
+    if HAS_AI:
+        print(f"\n🧠 [3/4] AI 智能分割介入 (Qwen + YOLO + SAM)")
+        ai_success = run_ai_segmentation_pipeline(data_dir)
+        if ai_success:
+            print("✨ AI 分割流程完成，Mask 已注入！")
+        else:
+            print("⚠️ AI 分割流程遇到问题，将使用原始图像训练。")
+    else:
+        print("\n⏩ 跳过 AI 分割 (未满足依赖)")
+    # ======================================================
+
+    step1_duration = time.time() - step1_start
+    print(f"⏱️ [预处理完成] 耗时: {format_duration(step1_duration)}")
+
+    # [Step 2] 训练
+    step2_start = time.time()
+    print(f"\n🔥 [4/4] 开始训练 (Splatfacto)")
+    
+    collider_args, scene_type = analyze_and_calculate_adaptive_collider(transforms_file)
+    
+    # 构建训练命令
+    train_cmd = [
+        "ns-train", "splatfacto", 
+        "--data", str(data_dir), 
+        "--output-dir", str(output_dir), 
+        "--experiment-name", project_name, 
+        "--pipeline.model.random-init", "False", 
+        "--pipeline.model.cull-alpha-thresh", "0.005", 
+        *collider_args,
+        "--max-num-iterations", "15000", 
+        "--vis", "viewer+tensorboard", 
+        "--viewer.quit-on-train-completion", "True", 
+        "colmap", 
+        "--downscale-factor", "1"
+    ]
+    
+    subprocess.run(train_cmd, check=True, env=env)
+    step2_duration = time.time() - step2_start
+
+    # [Step 3] 导出
+    step3_start = time.time()
+    print(f"\n💾 正在导出...")
+    search_path = output_dir / project_name / "splatfacto"
+    run_dirs = sorted(list(search_path.glob("*")))
+    latest_run = run_dirs[-1]
+    
+    subprocess.run([
+        "ns-export", "gaussian-splat", 
+        "--load-config", str(latest_run/"config.yml"), 
+        "--output-dir", str(work_dir)
+    ], check=True, env=env)
+    
+    # 暴力切割
+    raw_ply = work_dir / "point_cloud.ply"
+    if not raw_ply.exists(): raw_ply = work_dir / "splat.ply"
+    cleaned_ply = work_dir / "point_cloud_cleaned.ply"
+    final_ply = raw_ply
+    
+    if (scene_type == "object" or FORCE_SPHERICAL_CULLING) and raw_ply.exists():
+        if perform_percentile_culling(raw_ply, transforms_file, cleaned_ply):
+            final_ply = cleaned_ply
+    
+    step3_duration = time.time() - step3_start
+
+    # [Step 4] 回传
+    target_dir = Path(__file__).parent / "results"
+    target_dir.mkdir(exist_ok=True)
+    shutil.copy2(str(final_ply), str(target_dir / f"{project_name}.ply"))
+    
+    total_duration = time.time() - global_start_time
+    print(f"\n🎉 全部完成！模型已保存至: {target_dir / f'{project_name}.ply'}")
+    print(f"📊 耗时统计:")
+    print(f"   - 预处理 (COLMAP + AI): {format_duration(step1_duration)}")
+    print(f"   - 训练 (Splatfacto):    {format_duration(step2_duration)}")
+    print(f"   - 导出与后处理:         {format_duration(step3_duration)}")
+    print(f"   - 总耗时:               {format_duration(total_duration)}")
+    
+    return str(target_dir / f"{project_name}.ply")
+
+if __name__ == "__main__":
+    script_dir = Path(__file__).resolve().parent
+    video_file = script_dir / "test.mp4" 
+    if len(sys.argv) > 1: video_file = Path(sys.argv[1])
+
+    if video_file.exists():
+        run_pipeline(video_file, "scene_ai_test")
+    else:
+        print(f"❌ 找不到视频: {video_file}")

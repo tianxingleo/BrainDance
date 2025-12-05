@@ -10,6 +10,19 @@ import numpy as np
 import cv2
 from pathlib import Path
 
+# 🔥【绝杀】强制将编译好的系统级 colmap 路径提到最前面
+# 这样系统找 colmap 时，第一个看到的就是 /usr/local/bin 里的那个好版本
+sys_path = "/usr/local/bin"
+current_path = os.environ.get("PATH", "")
+
+if sys_path not in current_path.split(os.pathsep)[0]: # 如果不在第一位
+    print(f"⚡ [环境修正] 强制设置 PATH 优先级: {sys_path} -> Priority High")
+    os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
+
+# 验证一下
+colmap_loc = shutil.which("colmap")
+print(f"🧐 [自检] 当前脚本使用的 COLMAP 路径: {colmap_loc}")
+
 # ================= 🔧 用户配置区域 =================
 # 1. OpenAI API Key (用于 GPT-4o 语义分析)
 # 如果留空，将自动降级为使用“几何算法”进行分析，无需联网
@@ -23,6 +36,7 @@ LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 # SAM 模型: sam_l.pt (Large版，精度最高)
 MODEL_YOLO = 'yolov8x-worldv2.pt'
 MODEL_SAM = 'sam_l.pt'
+MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
 
 # ================= 📦 库导入与初始化 =================
 logging.getLogger('nerfstudio').setLevel(logging.ERROR)
@@ -193,25 +207,184 @@ def run_pipeline(video_path, project_name):
         shutil.copy(str(video_src), str(work_dir / video_src.name))
 
         print(f"\n🎥 [1/3] 视频处理 (COLMAP)")
+        
+        # 1. 定义两个隔离区域
+        # temp_dir: 存放 ffmpeg 原始产物
+        temp_dir = work_dir / "temp_extract"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
         img_dir = data_dir / "images"
         img_dir.mkdir(parents=True, exist_ok=True)
         
-        # 保持原有 1920 / 4fps 设置
+        # 2. FFmpeg 抽帧 (输出到临时目录)
+        print(f"    -> 正在抽帧到临时目录...")
         subprocess.run([
             "ffmpeg", "-y", "-i", str(work_dir / video_src.name), 
             "-vf", "scale=1920:-1,fps=4", "-q:v", "2", 
-            str(img_dir / "frame_%05d.jpg")
+            str(temp_dir / "frame_%05d.jpg")
         ], check=True) 
         
-        # COLMAP
+        # 3. 【关键步骤】数量限制与迁移 (从 temp -> images)
+        print("    -> 正在执行【数量限制与迁移】...")
+        
+        # 读取所有图片
+        all_candidates = sorted(list(temp_dir.glob("*.jpg")) + list(temp_dir.glob("*.png")))
+        total_candidates = len(all_candidates)
+        
+        final_images_list = []
+        
+        if total_candidates > MAX_IMAGES:
+            print(f"    ⚠️ 图片过多 ({total_candidates}), 正在均匀选取 {MAX_IMAGES} 张...")
+            # 均匀采样索引
+            indices = np.linspace(0, total_candidates - 1, MAX_IMAGES, dtype=int)
+            # 使用集合去重
+            indices = sorted(list(set(indices)))
+            
+            for idx in indices:
+                final_images_list.append(all_candidates[idx])
+        else:
+            print(f"    ✅ 图片数量 ({total_candidates}) 未超标，全部保留。")
+            final_images_list = all_candidates
+
+        # 执行复制
+        for img_path in final_images_list:
+            shutil.copy2(str(img_path), str(img_dir / img_path.name))
+            
+        print(f"    ✅ 已将 {len(final_images_list)} 张干净图片移入 COLMAP 专用目录。")
+        print(f"    🧹 正在清理临时文件...")
+        shutil.rmtree(temp_dir) 
+        
+        # =========================================================
+        # 🚀 COLMAP 启动 (手动挡 + 强制修正)
+        # =========================================================
+        print(f"    ✅ 准备启动 COLMAP (Linux GPU 模式)...")
+        
+        colmap_output_dir = data_dir / "colmap"
+        colmap_output_dir.mkdir(parents=True, exist_ok=True)
+        database_path = colmap_output_dir / "database.db"
+        
+        # 绝对路径调用
+        system_colmap_exe = "/usr/local/bin/colmap" 
+        if not os.path.exists(system_colmap_exe):
+            found_path = shutil.which("colmap")
+            if found_path and "conda" not in found_path:
+                system_colmap_exe = found_path
+                print(f"    ⚠️ 警告: /usr/local/bin/colmap 不存在，尝试使用: {system_colmap_exe}")
+
+        def run_colmap_step(cmd, step_desc):
+            print(f"\n⚡ {step_desc}...")
+            try:
+                with subprocess.Popen(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.STDOUT,
+                    text=True, 
+                    env=env,
+                    bufsize=1 
+                ) as process:
+                    for line in process.stdout:
+                        print(line, end='') 
+                    process.wait()
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(process.returncode, cmd)
+            except Exception as e:
+                print(f"\n❌ {step_desc} 执行异常: {e}")
+                raise e
+
+        # 1. Feature Extractor
+        run_colmap_step([
+            system_colmap_exe, "feature_extractor",
+            "--database_path", str(database_path),
+            "--image_path", str(img_dir),
+            "--ImageReader.camera_model", "OPENCV",
+            "--ImageReader.single_camera", "1"
+        ], "[1/4] GPU 特征提取")
+
+        # 2. Sequential Matcher
+        run_colmap_step([
+            system_colmap_exe, "sequential_matcher",
+            "--database_path", str(database_path),
+            "--SequentialMatching.overlap", "25" 
+        ], "[2/4] GPU 顺序匹配")
+
+        # 3. Mapper
+        sparse_output_dir = colmap_output_dir / "sparse" / "0"
+        sparse_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        run_colmap_step([
+            system_colmap_exe, "mapper",
+            "--database_path", str(database_path),
+            "--image_path", str(img_dir),
+            "--output_path", str(sparse_output_dir)
+        ], "[3/4] 稀疏重建 (Mapper)")
+
+        print(f"✅ COLMAP 计算完成！正在检查并修正目录结构...")
+
+        # =========================================================
+        # 🔧 [3.5] 目录结构强力修正 (Auto-Fixer)
+        # =========================================================
+        colmap_root = colmap_output_dir
+        sparse_root = colmap_root / "sparse"
+        target_dir_0 = sparse_root / "0"
+        target_dir_0.mkdir(parents=True, exist_ok=True)
+
+        required_files_bin = ["cameras.bin", "images.bin", "points3D.bin"]
+        required_files_txt = ["cameras.txt", "images.txt", "points3D.txt"]
+        
+        model_found = False
+
+        # 1. 检查是不是已经在 sparse/0
+        if all((target_dir_0 / f).exists() for f in required_files_bin):
+            model_found = True
+        elif all((target_dir_0 / f).exists() for f in required_files_txt):
+            model_found = True
+            
+        # 2. 检查是不是在 sparse 根目录 -> 搬运
+        if not model_found:
+            if all((sparse_root / f).exists() for f in required_files_bin):
+                print("    🔧 检测到 BIN 模型在 sparse 根目录，正在归位...")
+                for f in required_files_bin:
+                    shutil.move(str(sparse_root / f), str(target_dir_0 / f))
+                model_found = True
+            elif all((sparse_root / f).exists() for f in required_files_txt):
+                print("    🔧 检测到 TXT 模型在 sparse 根目录，正在归位...")
+                for f in required_files_txt:
+                    shutil.move(str(sparse_root / f), str(target_dir_0 / f))
+                model_found = True
+
+        # 3. 检查是不是在子目录 -> 搬运
+        if not model_found:
+            for root, dirs, files in os.walk(sparse_root):
+                if all(f in files for f in required_files_bin):
+                    src_path = Path(root)
+                    if src_path == target_dir_0: continue
+                    print(f"    🔧 在子目录 {src_path} 找到 BIN 模型，正在归位...")
+                    for f in required_files_bin:
+                        shutil.move(str(src_path / f), str(target_dir_0 / f))
+                    model_found = True
+                    break
+                if all(f in files for f in required_files_txt):
+                    src_path = Path(root)
+                    if src_path == target_dir_0: continue
+                    print(f"    🔧 在子目录 {src_path} 找到 TXT 模型，正在归位...")
+                    for f in required_files_txt:
+                        shutil.move(str(src_path / f), str(target_dir_0 / f))
+                    model_found = True
+                    break
+
+        if not model_found:
+            raise FileNotFoundError("COLMAP Mapper failed to generate valid model files.")
+
+        # 4. 生成 transforms.json (跳过 COLMAP)
+        print(f"\n🔄 [4/4] 生成 transforms.json (Nerfstudio)...")
         res = subprocess.run([
             "ns-process-data", "images",
             "--data", str(img_dir),
             "--output-dir", str(data_dir),
+            "--skip-colmap", 
             "--verbose"
         ], check=True, env=env, capture_output=True, text=True)
         print(res.stdout)
-        if "COLMAP only found poses" in res.stdout: raise RuntimeError("COLMAP 失败")
 
     # ================= [Step 2] 智能分析与训练 =================
     search_path = output_dir / project_name / "splatfacto"
