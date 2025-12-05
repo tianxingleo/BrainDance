@@ -190,26 +190,56 @@ def run_ai_segmentation_pipeline(data_dir: Path):
                 h, w = det_results[0].orig_shape[:2]
                 final_mask = np.zeros((h, w), dtype=np.uint8)
             
-            cv2.imwrite(str(mask_output_path), final_mask)
+            # -------------------------------------------------
+            # 🔥【新增步骤】蒙版质量质检 (Quality Gate) 🔥
+            # -------------------------------------------------
+            h, w = final_mask.shape[:2]
+            total_pixels = h * w
+            # 计算白色像素（前景）的数量 (阈值大于127判定为白)
+            foreground_pixels = np.sum(final_mask > 127)
+            # 计算占比
+            mask_ratio = foreground_pixels / total_pixels
+            
+            # 设定合理区间阈值 (可根据实际情况调整)
+            # 白色充电宝通常不会小于画面的 2%，也不会超过 90%
+            MIN_RATIO = 0.02  # 2%
+            MAX_RATIO = 0.90  # 90%
+            
+            is_mask_good = MIN_RATIO <= mask_ratio <= MAX_RATIO
 
-            # 🔥 新增步骤：模仿该项目的思路，生成“背景涂黑”的训练图 🔥
-            # 1. 读取原图
-            original_img = cv2.imread(str(img_path))
-            
-            # 2. 【新增】对 Mask 进行高斯模糊 (羽化边缘)
-            # kernel size (5, 5) 可以根据图片分辨率调整，越大越糊
-            mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
-            
-            # 3. 归一化并转为 3 通道 (0.0 ~ 1.0)
-            mask_norm = mask_blurred / 255.0
-            mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
-            
-            # 4. 柔和涂黑 (Soft Paint Black)
-            # 使用浮点数运算，保留边缘的半透明过渡
-            masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
-            
-            # 5. 覆盖原图
-            cv2.imwrite(str(img_path), masked_img)
+            if is_mask_good:
+                # === A. 质检通过：正常使用蒙版并涂黑背景 ===
+                print(f"       ✅ 蒙版质量合格 (占比: {mask_ratio:.1%})，正在应用...")
+
+                # 1. 保存 Mask 文件 (Nerfstudio 需要)
+                cv2.imwrite(str(mask_output_path), final_mask)
+                
+                # 2. 执行“涂黑策略” (保留羽化边缘逻辑)
+                original_img = cv2.imread(str(img_path))
+                if original_img is not None:
+                    # 【保留】对 Mask 进行高斯模糊 (羽化边缘)
+                    mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
+                    
+                    # 归一化并转为 3 通道 (0.0 ~ 1.0)
+                    mask_norm = mask_blurred / 255.0
+                    mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
+                    
+                    # 柔和涂黑 (Soft Paint Black)
+                    masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
+                    
+                    # 覆盖原图
+                    cv2.imwrite(str(img_path), masked_img)
+                    
+            else:
+                # === B. 质检失败：弃用蒙版，保留原图 ===
+                reason = "太小/没检测到" if mask_ratio < MIN_RATIO else "太大/包含背景"
+                print(f"       ⚠️ 蒙版质量异常 (占比 {mask_ratio:.1%}, 原因: {reason}) -> 🗑️ 已弃用此蒙版，使用原始图片。")
+                # 关键操作：
+                # 1. 不保存 mask 文件 (Nerfstudio 找不到 mask 就会用默认模式)
+                # 2. 不修改原图 (不执行涂黑)
+                # 如果之前已经生成过错误的 mask 文件，这里最好把它删掉以防万一
+                if mask_output_path.exists():
+                    mask_output_path.unlink()
 
             processed_count += 1
             if processed_count % 10 == 0:
