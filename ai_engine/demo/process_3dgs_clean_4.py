@@ -33,7 +33,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 100 # 🔥 全局最大图片数量限制
+MAX_IMAGES = 600 # 🔥 全局最大图片数量限制
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -598,7 +598,7 @@ def run_pipeline(video_path, project_name):
             "--pipeline.model.random-init", "False", 
             "--pipeline.model.cull-alpha-thresh", "0.005", 
             *collider_args,
-            "--max-num-iterations", "15000", 
+            "--max-num-iterations", "25000", 
             "--vis", "viewer+tensorboard", 
             "--viewer.quit-on-train-completion", "True", 
             
