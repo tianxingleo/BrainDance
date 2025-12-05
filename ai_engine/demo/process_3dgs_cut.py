@@ -193,18 +193,22 @@ def run_ai_segmentation_pipeline(data_dir: Path):
             cv2.imwrite(str(mask_output_path), final_mask)
 
             # 🔥 新增步骤：模仿该项目的思路，生成“背景涂黑”的训练图 🔥
-            # 读取原图
+            # 1. 读取原图
             original_img = cv2.imread(str(img_path))
             
-            # 将 Mask 转为 0/1 (三通道)
-            mask_bool = (final_mask > 127).astype(np.uint8)
-            mask_3c = cv2.merge([mask_bool, mask_bool, mask_bool])
+            # 2. 【新增】对 Mask 进行高斯模糊 (羽化边缘)
+            # kernel size (5, 5) 可以根据图片分辨率调整，越大越糊
+            mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
             
-            # 背景涂黑：原图 * Mask
-            masked_img = original_img * mask_3c
+            # 3. 归一化并转为 3 通道 (0.0 ~ 1.0)
+            mask_norm = mask_blurred / 255.0
+            mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
             
-            # 覆盖原图 (或者存到新目录)
-            # 建议直接覆盖 data/images 里的图，因为 COLMAP 已经跑完了，不需要原图了
+            # 4. 柔和涂黑 (Soft Paint Black)
+            # 使用浮点数运算，保留边缘的半透明过渡
+            masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
+            
+            # 5. 覆盖原图
             cv2.imwrite(str(img_path), masked_img)
 
             processed_count += 1
