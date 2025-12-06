@@ -8,34 +8,48 @@ import logging
 import torch
 import torch.nn.functional as F
 from types import ModuleType
+import numpy as np
 
-# ================= 🔥 [RTX 5070 兼容性补丁 V27] 终极伪造 (补全 Is Checks) 🔥 =================
+# ================= 🔥 [RTX 5070 兼容性补丁 V32] 修复 Mask 溢出 + 终极 Mock 🔥 =================
 def inject_mocks():
-    print("⚠️ [系统检测] 正在注入 Kaolin 和 PyTorch3D 的 V27 Mock 模块...")
+    print("⚠️ [系统检测] 正在注入 Kaolin 和 PyTorch3D 的 V32 Mock 模块...")
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    # --- 1. 定义通用 Mock 类 ---
+    # --- 1. 定义智能 Mock 类 (处理链式调用) ---
     class MockClass:
         def __init__(self, *args, **kwargs): 
             self.device = device
+        
+        # 场景 A: 直接调用 t(points) -> 返回 Tensor
         def __call__(self, *args, **kwargs): 
-            return torch.zeros(1, device=device, requires_grad=True)
+            return torch.zeros(1, 3, device=device, requires_grad=True)
+        
+        # 场景 B: 显式转换方法 -> 返回 self (支持链式调用)
+        def compose(self, *args, **kwargs): return self
+        def inverse(self): return self
         def to(self, *args, **kwargs): return self
         def cpu(self): return self
         def cuda(self): return self
-        def compose(self, *args, **kwargs): return self
-        def inverse(self): return self
-        def get_matrix(self): return torch.eye(4, device=device).unsqueeze(0)
         def clone(self): return self
         def detach(self): return self
-        def __getattr__(self, name): return self 
+        
+        # 场景 C: 显式计算方法 -> 返回 Tensor 或原值
+        def get_matrix(self): return torch.eye(4, device=device).unsqueeze(0)
+        def transform_points(self, x): return x # 直接返回输入，保证数据流不断
+        def transform_normals(self, x): return x
+        
+        # 场景 D: 未知属性/方法
+        def __getattr__(self, name):
+            def method_mock(*args, **kwargs):
+                return self
+            return method_mock
 
     def mock_func(*args, **kwargs): 
         return torch.tensor(0.0, device=device)
-        
+    
     def mock_check_func(*args, **kwargs):
-        return False # 默认返回 False，假装不是这个类型
+        return False 
 
     # --- 2. 伪造 Kaolin ---
     if "kaolin" not in sys.modules:
@@ -81,26 +95,40 @@ def inject_mocks():
         mock_p3d.renderer = ModuleType("pytorch3d.renderer")
         mock_p3d.renderer.cameras = ModuleType("pytorch3d.renderer.cameras")
         mock_p3d.renderer.camera_utils = ModuleType("pytorch3d.renderer.camera_utils")
-        mock_p3d.vis = ModuleType("pytorch3d.vis")
+        mock_p3d.renderer.mesh = ModuleType("pytorch3d.renderer.mesh")
+        mock_p3d.renderer.mesh.textures = ModuleType("pytorch3d.renderer.mesh.textures")
+        mock_p3d.renderer.mesh.rasterizer = ModuleType("pytorch3d.renderer.mesh.rasterizer")
+        mock_p3d.renderer.mesh.shader = ModuleType("pytorch3d.renderer.mesh.shader")
         
-        # 🔥 [重点修复] 预先构建完整的 plotly_vis 模块 🔥
+        sys.modules["pytorch3d.renderer.cameras"] = mock_p3d.renderer.cameras
+        sys.modules["pytorch3d.renderer.camera_utils"] = mock_p3d.renderer.camera_utils
+        sys.modules["pytorch3d.renderer.mesh"] = mock_p3d.renderer.mesh
+        sys.modules["pytorch3d.renderer.mesh.textures"] = mock_p3d.renderer.mesh.textures
+        sys.modules["pytorch3d.renderer.mesh.rasterizer"] = mock_p3d.renderer.mesh.rasterizer
+        sys.modules["pytorch3d.renderer.mesh.shader"] = mock_p3d.renderer.mesh.shader
+
+        mock_p3d.vis = ModuleType("pytorch3d.vis")
         mock_plotly_vis = ModuleType("pytorch3d.vis.plotly_vis")
+        
+        # 填充 vis 模块
         mock_plotly_vis.AxisArgs = MockClass
         mock_plotly_vis.Lighting = MockClass
         mock_plotly_vis.plot_scene = mock_func
         mock_plotly_vis.get_camera_wireframe = mock_func
-        # 绘图函数
         mock_plotly_vis._add_camera_trace = mock_func
         mock_plotly_vis._add_ray_bundle_trace = mock_func
         mock_plotly_vis._add_pointcloud_trace = mock_func
         mock_plotly_vis._add_mesh_trace = mock_func
-        # 类型检查函数 (新增)
+        mock_plotly_vis._scale_camera_to_bounds = mock_func
+        mock_plotly_vis._update_axes_bounds = mock_func
         mock_plotly_vis._is_ray_bundle = mock_check_func
         mock_plotly_vis._is_pointclouds = mock_check_func
         mock_plotly_vis._is_meshes = mock_check_func
         mock_plotly_vis._is_cameras = mock_check_func
         
         mock_p3d.vis.plotly_vis = mock_plotly_vis
+        sys.modules["pytorch3d.vis"] = mock_p3d.vis
+        sys.modules["pytorch3d.vis.plotly_vis"] = mock_plotly_vis
 
         # [A] Transforms
         mock_p3d.transforms.Transform3d = MockClass
@@ -115,12 +143,18 @@ def inject_mocks():
         mock_p3d.transforms.quaternion_to_axis_angle = lambda q: torch.zeros((q.shape[0], 3), device=q.device)
         mock_p3d.transforms.axis_angle_to_matrix = lambda a: torch.eye(3, device=a.device).unsqueeze(0).repeat(a.shape[0], 1, 1)
         
-        # [B] Renderer & Cameras
-        mock_p3d.renderer.look_at_view_transform = lambda **kwargs: (torch.eye(3, device=device).unsqueeze(0), torch.zeros(1, 3, device=device))
+        # [B] Renderer
+        def look_at_view_transform(dist=1.0, elev=0.0, azim=0.0, **kwargs):
+            R = torch.eye(3, device=device).unsqueeze(0)
+            T = torch.zeros(1, 3, device=device)
+            return R, T
+        
+        mock_p3d.renderer.look_at_view_transform = look_at_view_transform
         mock_p3d.renderer.look_at_rotation = lambda **kwargs: torch.eye(3, device=device).unsqueeze(0)
         mock_p3d.renderer.camera_position_from_spherical_angles = lambda **kwargs: torch.zeros(1, 3, device=device)
         mock_p3d.renderer.ray_bundle_to_ray_points = lambda **kwargs: torch.zeros(1, 3, device=device)
         mock_p3d.renderer.ray_points_to_depth = lambda **kwargs: torch.zeros(1, device=device)
+        
         mock_p3d.renderer.camera_utils.camera_to_eye_at_up = lambda **kwargs: (torch.zeros(1, 3, device=device), torch.zeros(1, 3, device=device), torch.zeros(1, 3, device=device))
         mock_p3d.renderer.camera_utils.join_cameras_as_batch = mock_func
 
@@ -141,8 +175,14 @@ def inject_mocks():
             setattr(mock_p3d.renderer, cls_name, mock_cls)
             if "Cameras" in cls_name:
                 setattr(mock_p3d.renderer.cameras, cls_name, mock_cls)
+            if "Textures" in cls_name:
+                setattr(mock_p3d.renderer.mesh.textures, cls_name, mock_cls)
+            if "Shader" in cls_name:
+                setattr(mock_p3d.renderer.mesh.shader, cls_name, mock_cls)
+            if "Rasterizer" in cls_name and "Mesh" in cls_name:
+                setattr(mock_p3d.renderer.mesh.rasterizer, cls_name, mock_cls)
         
-        # [C] Structures
+        # [D] Structures
         mock_p3d.structures.Meshes = MockClass
         mock_p3d.structures.Pointclouds = MockClass
         mock_p3d.structures.join_meshes_as_scene = mock_func
@@ -150,17 +190,12 @@ def inject_mocks():
         mock_p3d.structures.list_to_padded = mock_func
         mock_p3d.structures.padded_to_list = mock_func
         
-        # 注册到系统
         sys.modules["pytorch3d"] = mock_p3d
         sys.modules["pytorch3d.transforms"] = mock_p3d.transforms
         sys.modules["pytorch3d.structures"] = mock_p3d.structures
         sys.modules["pytorch3d.renderer"] = mock_p3d.renderer
-        sys.modules["pytorch3d.renderer.cameras"] = mock_p3d.renderer.cameras
-        sys.modules["pytorch3d.renderer.camera_utils"] = mock_p3d.renderer.camera_utils
-        sys.modules["pytorch3d.vis"] = mock_p3d.vis
-        sys.modules["pytorch3d.vis.plotly_vis"] = mock_plotly_vis 
         
-    print("✅ [Mock V27] PyTorch3D Is Checks 深度注入完成")
+    print("✅ [Mock V32] 修复 Mask 溢出 + 终极注入完成")
 
 # 注入 Mocks
 inject_mocks()
@@ -214,14 +249,43 @@ def run_pipeline():
     
     try:
         from inference import Inference, load_image
+        from PIL import Image
         
         inference = Inference(str(CONFIG_PATH))
         
-        print(f"    -> 读取图片: {target_img_path}")
-        image = load_image(str(target_img_path))
+        print(f"    -> 读取并处理图片: {target_img_path}")
+        
+        # [1] 处理图片
+        pil_image = Image.open(str(target_img_path)).convert("RGB")
+        orig_w, orig_h = pil_image.size
+
+        # [2] 降采样 (低显存模式)
+        target_size = 256
+        if max(orig_w, orig_h) > target_size:
+            scale = target_size / max(orig_w, orig_h)
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            pil_image = pil_image.resize((new_w, new_h), Image.LANCZOS)
+            print(f"       📉 降采样至: {new_w} x {new_h}")
+        
+        # [3] 关键修复：保持 uint8 格式！不要除以 255.0！
+        # 结果形状: (H, W, 3), 类型: uint8, 范围: [0, 255]
+        image = np.array(pil_image)
+        
+        # [4] 处理 Mask：保持 uint8 格式
+        # 结果形状: (H, W), 类型: uint8
+        # 值设为 1，因为 inference 内部会执行 mask * 255。
+        # 如果传 255，会变成 255*255 (溢出)。如果传 1，会变成 255 (完美)。
+        h, w = image.shape[:2]
+        mask = np.ones((h, w), dtype=np.uint8)
+        
+        print(f"    -> 输入状态确认: Image {image.shape} ({image.dtype}), Mask {mask.shape} ({mask.dtype})")
         
         print("    -> 生成 3D Gaussian Splats...")
-        output = inference(image, mask=None, seed=42) 
+        # 此时 Image 是 (H, W, 3) uint8
+        # 此时 Mask 是 (H, W) uint8
+        # inference 内部会拼接它们 -> RGBA (H, W, 4) uint8
+        output = inference(image, mask=mask, seed=42) 
         
         gaussian_splats = output["gs"]
         
@@ -234,6 +298,7 @@ def run_pipeline():
         print(f"❌ 运行出错: {e}")
         import traceback
         traceback.print_exc()
+        torch.cuda.empty_cache()
         return
 
     print(f"\n💾 [3/3] 结果回传")
