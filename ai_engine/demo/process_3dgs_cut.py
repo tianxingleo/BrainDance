@@ -107,9 +107,60 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
         print(f"❌ API 连接异常: {e}")
         return None
 
+def check_mask_quality_advanced(mask, img_name=""):
+    """
+    高级蒙版质检：判断占比、边界溢出、破碎程度
+    返回: (bool 是否合格, str 原因)
+    """
+    h, w = mask.shape
+    total_pixels = h * w
+    white_pixels = cv2.countNonZero(mask)
+    
+    # 1. 基础占比检查 (2% ~ 90%)
+    if white_pixels == 0: return False, "空蒙版"
+    ratio = white_pixels / total_pixels
+    if ratio < 0.02: return False, f"占比过小 ({ratio:.1%})"
+    if ratio > 0.90: return False, f"占比过大 ({ratio:.1%})"
+
+    # 2. 边界检查 (判断是否“中间白四周黑”)
+    # 检查上下左右边缘 5px 的区域，如果白色太多，说明物体可能被截断或者背景没去干净
+    margin = 5
+    border_top = np.mean(mask[:margin, :] > 127)
+    border_bottom = np.mean(mask[-margin:, :] > 127)
+    border_left = np.mean(mask[:, :margin] > 127)
+    border_right = np.mean(mask[:, -margin:] > 127)
+    
+    # 容忍度：边缘最多允许 10% 的像素是白的
+    if max(border_top, border_bottom, border_left, border_right) > 0.10:
+        return False, "边缘溢出 (物体未居中或背景残留)"
+
+    # 3. 散点/破碎度检查 (判断是否“白色呈散点状态”)
+    # 使用连通域分析
+    # connectivity=8 表示 8 邻域连通
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    
+    # stats 里的 index 0 通常是背景(黑色)，我们需要找最大的白色块
+    if num_labels < 2: return False, "无有效前景"
+    
+    # 找出最大的前景连通块面积
+    max_foreground_area = 0
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area > max_foreground_area:
+            max_foreground_area = area
+            
+    # 计算“凝聚度”：最大块面积 / 总白色面积
+    # 如果是散点，这个值会很低；如果是完整的物体，这个值接近 1.0
+    cohesion = max_foreground_area / white_pixels
+    
+    if cohesion < 0.75: # 阈值可调，0.75 表示必须有 75% 的白色像素是连在一起的
+        return False, f"过于破碎 (主连通块仅占 {cohesion:.1%}，疑似噪点)"
+
+    return True, "合格"
+
 def run_ai_segmentation_pipeline(data_dir: Path):
     """
-    [Step 1.2] 执行完整的 AI 分割流程：Qwen -> YOLO-World -> SAM 2 -> transforms.json
+    [Step 1.2] 执行 AI 分割，并根据质量【严格剔除】废片
     """
     if not HAS_AI: return False
     
@@ -118,158 +169,181 @@ def run_ai_segmentation_pipeline(data_dir: Path):
     transforms_file = data_dir / "transforms.json"
 
     if not transforms_file.exists():
-        print("⚠️ 未找到 transforms.json，无法进行 Mask 注入。")
+        print("⚠️ 未找到 transforms.json，无法进行 Mask 处理。")
         return False
 
-    # 1. 获取提示词
-    text_prompt = get_central_object_prompt(images_dir)
-    if not text_prompt:
-        print("⚠️ 无法获取提示词，跳过 AI 分割。")
-        return False
-
-    print(f"\n✂️ [AI 分割] 启动 Ultralytics 流水线: Prompt='{text_prompt}'")
+    # 1. 准备工作
+    text_prompt = "white portable charger; white box; rectangular object"
+    print(f"\n✂️ [AI 分割] 启动严格筛选模式 (Prompt: '{text_prompt}')")
+    
     masks_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. 加载模型
-    print("    -> 正在加载模型 (YOLO-World + SAM 2)...")
+    # 2. 加载模型 (推荐用 Large)
+    print("    -> 正在加载 SAM 2 Large 模型...")
+    
+    # 🔥 自动迁移 AI 模型文件
+    model_files = ["yolov8s-worldv2.pt", "sam2.1_l.pt"]
+    for model_name in model_files:
+        target_model_path = LINUX_WORK_ROOT / model_name
+        local_model_path = Path(__file__).parent / model_name
+        
+        if not target_model_path.exists():
+            if local_model_path.exists():
+                print(f"    📦 检测到本地模型 {model_name}，正在迁移至工作区...")
+                shutil.copy2(str(local_model_path), str(target_model_path))
+            else:
+                print(f"    ⚠️ 未在脚本目录找到 {model_name}，将尝试自动下载...")
+
     try:
+        # 使用绝对路径加载（如果存在），否则使用默认名称（触发下载）
+        yolo_path = LINUX_WORK_ROOT / "yolov8s-worldv2.pt"
+        sam_path = LINUX_WORK_ROOT / "sam2.1_l.pt"
+        
         # YOLO-World: 听懂文字，找框
-        det_model = YOLOWorld("yolov8s-worldv2.pt") 
+        det_model = YOLOWorld(str(yolo_path) if yolo_path.exists() else "yolov8s-worldv2.pt") 
         det_model.set_classes([text_prompt])
         
         # SAM 2: 根据框，抠图
-        # 注意：使用 sam2.1_b.pt (Base版本) 平衡速度与精度
-        sam_model = SAM("sam2.1_b.pt") 
+        # 注意：使用 sam2.1_l.pt (Large版本) 精度更高，速度较慢
+        sam_model = SAM(str(sam_path) if sam_path.exists() else "sam2.1_l.pt") 
     except Exception as e:
         print(f"❌ 模型加载失败: {e}")
         return False
 
-    # 3. 批量处理
-    image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
-    total_imgs = len(image_files)
-    
-    print(f"    -> 开始处理 {total_imgs} 张图片...")
-    
-    processed_count = 0
-    
-    for i, img_path in enumerate(image_files):
-        mask_output_path = masks_dir / f"{img_path.stem}.png"
-        
-        # 断点续传：如果 mask 已经存在且不为空，跳过
-        if mask_output_path.exists():
-            continue
-
-        # --- A. 检测阶段 (Text -> Box) ---
-        # conf=0.05 极低阈值确保召回
-        try:
-            det_results = det_model.predict(img_path, conf=0.05, verbose=False)
-            bboxes = det_results[0].boxes.xyxy.cpu() 
-            
-            # 🔥 修改：中心保底策略 🔥
-            if len(bboxes) == 0:
-                # 如果检测不到，假设物体在画面中心 (取中间 50% 区域)
-                h, w = det_results[0].orig_shape[:2]
-                margin_h = h * 0.25
-                margin_w = w * 0.25
-                # 手动构造一个中心框 [x1, y1, x2, y2]
-                import torch
-                bboxes = torch.tensor([[margin_w, margin_h, w - margin_w, h - margin_h]])
-                print(f"       ⚠️ {img_path.name}: AI未检测到物体，强制使用【中心保底框】...")
-
-            # --- B. 分割阶段 (Box -> Mask) ---
-            sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
-            
-            # --- C. 合成 ---
-            if sam_results[0].masks is not None:
-                # 合并所有实例
-                all_masks = sam_results[0].masks.data.cpu().numpy()
-                combined = np.any(all_masks, axis=0).astype(np.uint8) * 255
-                final_mask = combined
-            else:
-                # 如果 SAM 也失败了（极少见），才给全黑
-                h, w = det_results[0].orig_shape[:2]
-                final_mask = np.zeros((h, w), dtype=np.uint8)
-            
-            # -------------------------------------------------
-            # 🔥【新增步骤】蒙版质量质检 (Quality Gate) 🔥
-            # -------------------------------------------------
-            h, w = final_mask.shape[:2]
-            total_pixels = h * w
-            # 计算白色像素（前景）的数量 (阈值大于127判定为白)
-            foreground_pixels = np.sum(final_mask > 127)
-            # 计算占比
-            mask_ratio = foreground_pixels / total_pixels
-            
-            # 设定合理区间阈值 (可根据实际情况调整)
-            # 白色充电宝通常不会小于画面的 2%，也不会超过 90%
-            MIN_RATIO = 0.02  # 2%
-            MAX_RATIO = 0.90  # 90%
-            
-            is_mask_good = MIN_RATIO <= mask_ratio <= MAX_RATIO
-
-            if is_mask_good:
-                # === A. 质检通过：正常使用蒙版并涂黑背景 ===
-                print(f"       ✅ 蒙版质量合格 (占比: {mask_ratio:.1%})，正在应用...")
-
-                # 1. 保存 Mask 文件 (Nerfstudio 需要)
-                cv2.imwrite(str(mask_output_path), final_mask)
-                
-                # 2. 执行“涂黑策略” (保留羽化边缘逻辑)
-                original_img = cv2.imread(str(img_path))
-                if original_img is not None:
-                    # 【保留】对 Mask 进行高斯模糊 (羽化边缘)
-                    mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
-                    
-                    # 归一化并转为 3 通道 (0.0 ~ 1.0)
-                    mask_norm = mask_blurred / 255.0
-                    mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
-                    
-                    # 柔和涂黑 (Soft Paint Black)
-                    masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
-                    
-                    # 覆盖原图
-                    cv2.imwrite(str(img_path), masked_img)
-                    
-            else:
-                # === B. 质检失败：弃用蒙版，保留原图 ===
-                reason = "太小/没检测到" if mask_ratio < MIN_RATIO else "太大/包含背景"
-                print(f"       ⚠️ 蒙版质量异常 (占比 {mask_ratio:.1%}, 原因: {reason}) -> 🗑️ 已弃用此蒙版，使用原始图片。")
-                # 关键操作：
-                # 1. 不保存 mask 文件 (Nerfstudio 找不到 mask 就会用默认模式)
-                # 2. 不修改原图 (不执行涂黑)
-                # 如果之前已经生成过错误的 mask 文件，这里最好把它删掉以防万一
-                if mask_output_path.exists():
-                    mask_output_path.unlink()
-
-            processed_count += 1
-            if processed_count % 10 == 0:
-                print(f"       进度: {processed_count}/{total_imgs} ...", end="\r")
-
-        except Exception as e:
-            print(f"       ❌ 处理 {img_path.name} 失败: {e}")
-            continue
-
-    print(f"\n    ✅ Mask 生成完毕: {masks_dir}")
-
-    # 4. 注入 transforms.json
-    print("🔄 [Pipeline] 正在注入 Mask 信息到 transforms.json...")
+    # 3. 读取 transforms.json (用于最后过滤)
     with open(transforms_file, 'r') as f:
         meta = json.load(f)
     
-    modified_count = 0
-    for frame in meta["frames"]:
-        fname = Path(frame["file_path"]).stem
-        mask_rel_path = f"masks/{fname}.png"
-        
-        # 只有当 Mask 文件真的存在时才添加
-        if (masks_dir / f"{fname}.png").exists():
-            frame["mask_path"] = mask_rel_path
-            modified_count += 1
+    # 建立文件名到帧数据的映射，方便后续删除
+    # 注意：file_path 可能是 "images/frame_001.jpg"，我们只取文件名匹配
+    frames_map = {Path(f["file_path"]).name: f for f in meta["frames"]}
     
+    image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
+    total_imgs = len(image_files)
+    
+    valid_frames_list = [] # 存放合格的帧数据
+    deleted_count = 0
+    
+    print(f"    -> 开始处理 {total_imgs} 张图片...")
+
+    for i, img_path in enumerate(image_files):
+        # --- A. 检测与分割 (同前) ---
+        try:
+            # 1. YOLO 检测
+            det_results = det_model.predict(img_path, conf=0.05, verbose=False)
+            
+            # ============================================================
+            # 🕵️‍♂️ [DEBUG 模式] 看看 YOLO 到底看到了什么？
+            # ============================================================
+            
+            # 1. 准备调试目录 (只会创建一次)
+            debug_dir = data_dir / "debug_yolo_visuals"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 2. 检查检测结果
+            num_boxes = len(det_results[0].boxes)
+            
+            if num_boxes > 0:
+                # 获取画了框的图片 (numpy 数组)
+                plotted_img = det_results[0].plot()
+                
+                # 保存到 debug 目录，文件名加个前缀方便找
+                debug_path = debug_dir / f"debug_{img_path.name}"
+                cv2.imwrite(str(debug_path), plotted_img)
+                
+                # 在控制台打印坐标信息 (只打印前 3 张图，避免刷屏)
+                if i < 3: 
+                    print(f"\n    👀 [DEBUG] {img_path.name}: 找到了 {num_boxes} 个目标")
+                    box_coords = det_results[0].boxes.xyxy.cpu().numpy()[0] # 取第一个框
+                    conf_score = det_results[0].boxes.conf.cpu().numpy()[0]
+                    print(f"       -> 位置: {box_coords} (置信度: {conf_score:.2f})")
+                    print(f"       -> 调试图已保存: {debug_path}")
+            else:
+                if i < 3:
+                    print(f"\n    🙈 [DEBUG] {img_path.name}: YOLO 没找到任何东西 (0 boxes)")
+            
+            # ============================================================
+
+            bboxes = det_results[0].boxes.xyxy.cpu() 
+            
+            # 中心保底策略
+            if len(bboxes) == 0:
+                h, w = det_results[0].orig_shape[:2]
+                import torch
+                bboxes = torch.tensor([[w*0.25, h*0.25, w*0.75, h*0.75]], device=det_model.device)
+
+            # 2. SAM 分割
+            sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
+            
+            if sam_results[0].masks is not None:
+                all_masks = sam_results[0].masks.data.cpu().numpy()
+                final_mask = np.any(all_masks, axis=0).astype(np.uint8) * 255
+            else:
+                final_mask = np.zeros(det_results[0].orig_shape[:2], dtype=np.uint8)
+
+            # -------------------------------------------------
+            # 🔥 核心修改：质量裁决与剔除 🔥
+            # -------------------------------------------------
+            is_good, reason = check_mask_quality_advanced(final_mask, img_path.name)
+
+            if is_good:
+                # ✅ 合格：保留图片，执行涂黑
+                
+                # 1. 涂黑操作 (Paint Black)
+                original_img = cv2.imread(str(img_path))
+                if original_img is not None:
+                    # 羽化边缘
+                    mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
+                    mask_norm = mask_blurred / 255.0
+                    mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
+                    
+                    # 生成黑背景图
+                    masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
+                    cv2.imwrite(str(img_path), masked_img) # 覆盖原图
+                
+                # 2. 保存 Mask (可选，Nerfstudio 其实不需要了因为背景已经黑了，但留着也好)
+                cv2.imwrite(str(masks_dir / f"{img_path.stem}.png"), final_mask)
+
+                # 3. 加入合格列表
+                if img_path.name in frames_map:
+                    # 确保这一帧在 transforms.json 里也有记录
+                    # 同时注入 mask_path (虽然涂黑了，加个 mask 双重保险也没错)
+                    frame_data = frames_map[img_path.name]
+                    frame_data["mask_path"] = f"masks/{img_path.stem}.png"
+                    valid_frames_list.append(frame_data)
+
+            else:
+                # ❌ 不合格：物理删除
+                print(f"       🗑️ [剔除] {img_path.name}: {reason}")
+                img_path.unlink() # 删除图片文件
+                deleted_count += 1
+                # 注意：这里不把它加入 valid_frames_list，它自然就从 transforms.json 里消失了
+
+        except Exception as e:
+            print(f"       ❌ 处理出错 {img_path.name}: {e}")
+            # 出错也视为不合格，不加入列表
+            continue
+
+        if i % 10 == 0:
+            print(f"       进度: {i}/{total_imgs} (已剔除 {deleted_count} 张)...", end="\r")
+
+    # 4. 结算与更新
+    print(f"\n\n📊 筛选报告:")
+    print(f"   - 原始总数: {total_imgs}")
+    print(f"   - 剔除数量: {deleted_count} ({deleted_count/total_imgs:.1%})")
+    print(f"   - 剩余可用: {len(valid_frames_list)}")
+
+    if len(valid_frames_list) == 0:
+        print("❌ 错误：所有图片都被剔除了！请检查提示词或拍摄质量。")
+        return False
+
+    # 5. 重写 transforms.json
+    # 只保留合格的帧，这样 Nerfstudio 就只会训练这些“纯净”的黑背景图
+    meta["frames"] = valid_frames_list
     with open(transforms_file, 'w') as f:
         json.dump(meta, f, indent=4)
         
-    print(f"    ✅ 已更新 {modified_count} 帧的 Mask 路径。训练将自动去除背景！")
+    print(f"    ✅ transforms.json 已更新，数据集已清洗完毕。")
     return True
 
 # ================= 辅助工具 =================
@@ -476,143 +550,148 @@ def run_pipeline(video_path, project_name):
             print(f"❌ {description} 失败: {e}")
             raise e
 
-    try:
-        # 1. Feature Extractor
-        run_colmap_step([
-            system_colmap_exe, "feature_extractor", 
-            "--database_path", str(database_path), 
-            "--image_path", str(extracted_images_dir), 
-            "--ImageReader.camera_model", "OPENCV", 
-            "--ImageReader.single_camera", "1"
-        ], "Step 1: 特征提取 (Feature Extractor)")
+    # ==========================================
+    # 🔥 核心修改：闭环重试机制 (包含质量检测) 🔥
+    # ==========================================
+    MAX_RETRIES = 3
+    colmap_success = False
 
-        # ---------------------------------------------------------
-        # 选项 A: 暴力匹配 (Exhaustive) - 小场景(<500张)最推荐，最稳
-        # ---------------------------------------------------------
-        # print("    -> 暴力匹配 (Exhaustive Matcher)...")
-        # run_colmap_step([
-        #     system_colmap_exe, "exhaustive_matcher", 
-        #     "--database_path", str(database_path)
-        # ], "Step 2: 暴力匹配")
-
-        # ---------------------------------------------------------
-        # 选项 B: 词汇树匹配 (Vocab Tree) - 也就是你要找的“树模式”
-        # ---------------------------------------------------------
-        print("    -> 🌳 词汇树匹配 (Vocab Tree Matcher)...")
-        
-        # 自动迁移词汇树文件
-        local_vocab_path = Path(__file__).parent / "vocab_tree_flickr100k_words.bin"
-        if not VOCAB_TREE_PATH.exists():
-            if local_vocab_path.exists():
-                print(f"    📦 检测到本地词汇树文件，正在迁移至工作区...")
-                shutil.copy2(str(local_vocab_path), str(VOCAB_TREE_PATH))
-            else:
-                print(f"❌ 错误：未找到词汇树文件: {VOCAB_TREE_PATH}")
-                print(f"    也未在脚本同级目录找到: {local_vocab_path}")
-                print("请运行: wget https://demuc.de/colmap/vocab_tree_flickr100k_words.bin -P ~/braindance_workspace/")
-                raise FileNotFoundError("Vocab tree file missing")
-
-        run_colmap_step([
-            system_colmap_exe, "vocab_tree_matcher", 
-            "--database_path", str(database_path),
-            "--VocabTreeMatching.vocab_tree_path", str(VOCAB_TREE_PATH),
-            "--VocabTreeMatching.match_list_path", "" # 留空自动生成
-        ], "Step 2: 词汇树匹配")
-
-        # 3. Mapper
-        sparse_dir = colmap_output_dir / "sparse"
-        sparse_dir.mkdir(parents=True, exist_ok=True)
-        run_colmap_step([
-            system_colmap_exe, "mapper", 
-            "--database_path", str(database_path), 
-            "--image_path", str(extracted_images_dir), 
-            "--output_path", str(sparse_dir)
-        ], "Step 3: 稀疏重建 (Mapper)")
-
-    except subprocess.CalledProcessError:
-        print("❌ COLMAP 流程中断。")
-        return None
-
-    # 3. 🔧 目录结构“强力修正” (Auto-Fixer)
-    print("\n🔧 [Auto-Fix] 正在检查并修正 COLMAP 输出目录结构...")
-    sparse_root = colmap_output_dir / "sparse"
-    target_dir_0 = sparse_root / "0"
-    target_dir_0.mkdir(parents=True, exist_ok=True)
-
-    required_files_bin = ["cameras.bin", "images.bin", "points3D.bin"]
-    required_files_txt = ["cameras.txt", "images.txt", "points3D.txt"]
-
-    # 策略：先找 bin，再找 txt
-    found_files = []
-    source_dir = None
-
-    # 1. 检查 sparse/0 (标准位置)
-    if all((target_dir_0 / f).exists() for f in required_files_bin):
-        print("    ✅ COLMAP 输出正常 (sparse/0/*.bin)")
-    else:
-        # 2. 递归搜索
-        print("    ⚠️ 标准路径未找到模型，开始全盘扫描...")
-        for root, dirs, files in os.walk(sparse_root):
-            root_path = Path(root)
-            # 检查 bin
-            if all(f in files for f in required_files_bin):
-                source_dir = root_path
-                found_files = required_files_bin
-                break
-            # 检查 txt
-            if all(f in files for f in required_files_txt):
-                source_dir = root_path
-                found_files = required_files_txt
-                break
-        
-        if source_dir:
-            print(f"    🔍 在 {source_dir} 找到模型文件，正在归位到 {target_dir_0}...")
-            if source_dir != target_dir_0:
-                for f in found_files:
-                    if (target_dir_0 / f).exists():
-                        (target_dir_0 / f).unlink()
-                    shutil.move(str(source_dir / f), str(target_dir_0 / f))
-                print("    ✅ 归位完成！")
-        else:
-            print("    ❌ 致命错误：在 sparse 目录下找不到完整的 COLMAP 模型文件！")
-
-    # 同步图片到 data/images
+    # 提前同步图片 (只需要做一次)
     dest_images_dir = data_dir / "images"
     dest_images_dir.mkdir(parents=True, exist_ok=True)
-    for img in extracted_images_dir.glob("*"): shutil.copy2(str(img), str(dest_images_dir / img.name))
+    for img in extracted_images_dir.glob("*"): 
+        shutil.copy2(str(img), str(dest_images_dir / img.name))
 
-    # 生成 transforms.json
-    print("    -> 生成 transforms.json...")
-    run_colmap_step([
-        "ns-process-data", "images", 
-        "--data", str(dest_images_dir), 
-        "--output-dir", str(data_dir), 
-        "--skip-colmap", 
-        "--skip-image-processing", 
-        "--num-downscales", "0"
-    ], "生成 transforms.json")
-
-    # --- 质量检测逻辑 ---
-    full_log = "".join(full_log_content)
-    
-    # 1. 检测 "No convergence"
-    if "Termination : No convergence" in full_log:
-        print("\n❌ [严重错误] COLMAP 无法收敛 (No convergence)！")
-        print("🛑 任务已终止，因为生成的稀疏点云质量无法满足训练要求。")
-        return None
-
-    # 2. 检测匹配率过低
-    # 示例日志: COLMAP only found poses for 10.00% of the images. This is low.
-    match = re.search(r"COLMAP only found poses for (\d+\.?\d*)% of the images", full_log)
-    if match:
-        matched_percentage = float(match.group(1))
-        print(f"\n📊 COLMAP 匹配率检测: {matched_percentage:.2f}%")
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"\n🔄 [COLMAP] 正在执行第 {attempt} / {MAX_RETRIES} 次尝试...")
         
-        if matched_percentage < 35.0:
-            print(f"❌ [质量警告] 匹配率过低 (< 35%)！")
-            print("    -> 这意味着大部分图片无法被定位，生成的 3D 场景将严重残缺。")
-            print("🛑 任务已终止。建议：增加图片数量、保证图片清晰度或增加重叠率。")
-            return None
+        # --- 1. 每次重试前，强制清理环境 ---
+        if attempt > 1:
+            print("    🧹 [重试准备] 正在清理旧数据...")
+            if database_path.exists(): 
+                try: database_path.unlink()
+                except: pass
+            
+            sparse_dir = colmap_output_dir / "sparse"
+            if sparse_dir.exists(): 
+                try: shutil.rmtree(sparse_dir)
+                except: pass
+            sparse_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 删除可能存在的旧 transforms.json，防止误读
+            if transforms_file.exists():
+                transforms_file.unlink()
+
+        try:
+            # --- 2. 运行 COLMAP 核心流程 ---
+            
+            # Step 1: 特征提取
+            run_colmap_step([
+                system_colmap_exe, "feature_extractor", 
+                "--database_path", str(database_path), 
+                "--image_path", str(extracted_images_dir), 
+                "--ImageReader.camera_model", "OPENCV", 
+                "--ImageReader.single_camera", "1"
+            ], "Step 1: 特征提取")
+
+            # Step 2: 词汇树匹配 (Vocab Tree)
+            print("    -> 🌳 词汇树匹配 (Vocab Tree Matcher)...")
+            local_vocab_path = Path(__file__).parent / "vocab_tree_flickr100k_words.bin"
+            if not VOCAB_TREE_PATH.exists():
+                if local_vocab_path.exists():
+                    shutil.copy2(str(local_vocab_path), str(VOCAB_TREE_PATH))
+                else:
+                    raise FileNotFoundError(f"Missing vocab tree: {VOCAB_TREE_PATH}")
+
+            run_colmap_step([
+                system_colmap_exe, "vocab_tree_matcher", 
+                "--database_path", str(database_path),
+                "--VocabTreeMatching.vocab_tree_path", str(VOCAB_TREE_PATH),
+                "--VocabTreeMatching.match_list_path", "" 
+            ], "Step 2: 词汇树匹配")
+
+            # Step 3: 稀疏重建
+            sparse_dir = colmap_output_dir / "sparse"
+            sparse_dir.mkdir(parents=True, exist_ok=True)
+            run_colmap_step([
+                system_colmap_exe, "mapper", 
+                "--database_path", str(database_path), 
+                "--image_path", str(extracted_images_dir), 
+                "--output_path", str(sparse_dir)
+            ], "Step 3: 稀疏重建")
+
+            # --- 3. 立即执行 Auto-Fix (目录修正) ---
+            # (必须在循环内做，因为每次 mapper 可能会乱生成目录)
+            print("    🔧 正在检查模型结构...")
+            sparse_root = colmap_output_dir / "sparse"
+            target_dir_0 = sparse_root / "0"
+            target_dir_0.mkdir(parents=True, exist_ok=True)
+            
+            required_files = ["cameras.bin", "images.bin", "points3D.bin"]
+            model_found = False
+            
+            # 扫描并归位
+            if all((target_dir_0 / f).exists() for f in required_files):
+                model_found = True
+            else:
+                for root, dirs, files in os.walk(sparse_root):
+                    if all(f in files for f in required_files):
+                        source_dir = Path(root)
+                        if source_dir != target_dir_0:
+                            for f in required_files:
+                                if (target_dir_0/f).exists(): (target_dir_0/f).unlink()
+                                shutil.move(str(source_dir/f), str(target_dir_0/f))
+                        model_found = True
+                        break
+            
+            if not model_found:
+                raise RuntimeError("COLMAP 未生成有效的稀疏模型文件！")
+
+            # --- 4. 立即生成 transforms.json 以检测质量 ---
+            print("    -> 正在生成数据以进行质量检测...")
+            run_colmap_step([
+                "ns-process-data", "images", 
+                "--data", str(dest_images_dir), 
+                "--output-dir", str(data_dir), 
+                "--skip-colmap", 
+                "--skip-image-processing", 
+                "--num-downscales", "0"
+            ], "生成 transforms.json")
+
+            # --- 5. 🔥 关键：质量判决 (Quality Gate) 🔥 ---
+            if not transforms_file.exists():
+                raise RuntimeError("transforms.json 生成失败")
+
+            with open(transforms_file, 'r') as f:
+                meta = json.load(f)
+            
+            registered_count = len(meta["frames"])
+            total_count = len(list(extracted_images_dir.glob("*.jpg")) + list(extracted_images_dir.glob("*.png")))
+            
+            match_ratio = registered_count / total_count if total_count > 0 else 0
+            print(f"    📊 本次匹配率: {match_ratio:.2%} ({registered_count}/{total_count})")
+
+            if match_ratio < 0.35: # 阈值 35%
+                print(f"    ⚠️ 匹配率过低，判定为失败！准备重试...")
+                # 主动抛出异常，触发 except 块，进入下一次循环
+                raise RuntimeError(f"Low match ratio: {match_ratio:.2%}")
+            
+            # 如果走到这里，说明一切正常
+            print(f"    ✨ 质量达标！COLMAP 在第 {attempt} 次尝试中成功！")
+            colmap_success = True
+            break # 跳出重试循环
+
+        except Exception as e:
+            print(f"    ❌ 第 {attempt} 次尝试失败: {e}")
+            if attempt < MAX_RETRIES:
+                print("    ⏳ 3秒后进行下一次重试...")
+                time.sleep(3)
+            else:
+                print("    🛑 已耗尽所有重试机会。")
+
+    if not colmap_success:
+        print("❌ COLMAP 最终失败 (质量不达标)，任务终止。")
+        return None
 
     # ================= 🔥 AI 介入点 (新增) =================
     if HAS_AI:
@@ -643,12 +722,21 @@ def run_pipeline(video_path, project_name):
         "--experiment-name", project_name, 
         "--pipeline.model.random-init", "False", 
         "--pipeline.model.cull-alpha-thresh", "0.005", 
+        # 🔥 新增：提高分裂门槛 (默认 0.0002 -> 0.0008)
+        "--pipeline.model.densify-grad-thresh", "0.0008",
+        # 🔥 新增：提前停止分裂 (默认 15000 -> 10000)
+        "--pipeline.model.stop-split-at", "10000",
+        # 🔥 新增：缩短热身期 (默认 500 -> 500)
+        "--pipeline.model.warmup-length", "500",
         *collider_args,
         "--max-num-iterations", "15000", 
         "--vis", "viewer+tensorboard", 
         "--viewer.quit-on-train-completion", "True", 
-        "colmap", 
-        "--downscale-factor", "1"
+        "nerfstudio-data", 
+        "--downscale-factor", "1",
+        "--orientation-method", "none", 
+        "--center-method", "none",
+        "--auto-scale-poses", "False"
     ]
     
     subprocess.run(train_cmd, check=True, env=env)
