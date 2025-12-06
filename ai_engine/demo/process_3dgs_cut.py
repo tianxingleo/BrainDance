@@ -470,6 +470,8 @@ def run_pipeline(video_path, project_name):
     transforms_file = data_dir / "transforms.json"
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen" 
+    # 【新增】修复 distutils 报错的关键环境变量
+    env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib" 
 
     # [Step 1] 数据处理
     step1_start = time.time()
