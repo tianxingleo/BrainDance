@@ -41,7 +41,7 @@ LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 # 🔥 新增：词汇树文件路径 (请确保你下载了它！)
 VOCAB_TREE_PATH = LINUX_WORK_ROOT / "vocab_tree_flickr100k_words.bin" 
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 130 
+MAX_IMAGES = 180 
 
 # 切割配置
 FORCE_SPHERICAL_CULLING = True
