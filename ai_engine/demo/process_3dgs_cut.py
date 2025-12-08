@@ -110,56 +110,75 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
         print(f"❌ API 连接异常: {e}")
         return None
 
-def check_mask_quality_advanced(mask, img_name=""):
+def clean_and_verify_mask(mask, img_name=""):
     """
-    高级蒙版质检：判断占比、边界溢出、破碎程度
-    返回: (bool 是否合格, str 原因)
+    [净化版] 
+    1. 强制清洗：只保留画面中最大的连通块 (去除孤立噪点)。
+    2. 严格质检：清洗后如果形状依然毛糙(粘连阴影)，则剔除。
+    3. 返回：(是否合格, 清洗后的干净Mask, 原因)
     """
     h, w = mask.shape
-    total_pixels = h * w
-    white_pixels = cv2.countNonZero(mask)
     
-    # 1. 基础占比检查 (2% ~ 90%)
-    if white_pixels == 0: return False, "空蒙版"
-    ratio = white_pixels / total_pixels
-    if ratio < 0.02: return False, f"占比过小 ({ratio:.1%})"
-    if ratio > 0.90: return False, f"占比过大 ({ratio:.1%})"
-
-    # 2. 边界检查 (判断是否“中间白四周黑”)
-    # 检查上下左右边缘 5px 的区域，如果白色太多，说明物体可能被截断或者背景没去干净
-    margin = 5
-    border_top = np.mean(mask[:margin, :] > 127)
-    border_bottom = np.mean(mask[-margin:, :] > 127)
-    border_left = np.mean(mask[:, :margin] > 127)
-    border_right = np.mean(mask[:, -margin:] > 127)
-    
-    # 容忍度：边缘最多允许 10% 的像素是白的
-    if max(border_top, border_bottom, border_left, border_right) > 0.10:
-        return False, "边缘溢出 (物体未居中或背景残留)"
-
-    # 3. 散点/破碎度检查 (判断是否“白色呈散点状态”)
-    # 使用连通域分析
-    # connectivity=8 表示 8 邻域连通
+    # --- 1. 连通域分析 & 强制清洗 (Cleaning) ---
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     
-    # stats 里的 index 0 通常是背景(黑色)，我们需要找最大的白色块
-    if num_labels < 2: return False, "无有效前景"
-    
-    # 找出最大的前景连通块面积
-    max_foreground_area = 0
-    for i in range(1, num_labels):
-        area = stats[i, cv2.CC_STAT_AREA]
-        if area > max_foreground_area:
-            max_foreground_area = area
-            
-    # 计算“凝聚度”：最大块面积 / 总白色面积
-    # 如果是散点，这个值会很低；如果是完整的物体，这个值接近 1.0
-    cohesion = max_foreground_area / white_pixels
-    
-    if cohesion < 0.75: # 阈值可调，0.75 表示必须有 75% 的白色像素是连在一起的
-        return False, f"过于破碎 (主连通块仅占 {cohesion:.1%}，疑似噪点)"
+    # 如果全黑，直接扔
+    if num_labels < 2: 
+        return False, None, "空蒙版"
 
-    return True, "合格"
+    # 找出最大的前景块 (忽略 index 0 的背景)
+    max_area = 0
+    max_label = -1
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] > max_area:
+            max_area = stats[i, cv2.CC_STAT_AREA]
+            max_label = i
+            
+    # 如果最大的块也太小 (比如只占屏幕 0.5%)，那是垃圾
+    if max_area < (h * w * 0.005):
+        return False, None, "主体过小，疑似噪点"
+
+    # 🔥 核心操作：重构 Mask，只保留最大的那一块
+    # Frame 103 的顶部噪点和 Frame 13 的左下角碎点在这里会被直接抹除
+    cleaned_mask = (labels == max_label).astype(np.uint8) * 255
+
+    # --- 2. 对清洗后的 Mask 进行“体检” (Verification) ---
+    
+    # 提取轮廓
+    contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours: return False, None, "清洗后无轮廓"
+    
+    main_cnt = max(contours, key=cv2.contourArea)
+    
+    # [检查 A] 实心度 (Solidity)
+    # 针对 Frame 21 底部那种粘连的锯齿状阴影。
+    # 正常的剃须刀是圆润的，Solidity 应该接近 0.95 以上。
+    # 如果底部粘了一滩烂泥一样的阴影，Solidity 会掉到 0.85 以下。
+    hull = cv2.convexHull(main_cnt)
+    hull_area = cv2.contourArea(hull)
+    if hull_area == 0: return False, None, "凸包面积为0"
+    
+    solidity = max_area / hull_area
+    
+    # 阈值设定：0.88 (非常严格，只允许极其轻微的边缘不平整)
+    if solidity < 0.88:
+        return False, None, f"边缘严重毛糙/粘连阴影 (实心度 {solidity:.2f})"
+
+    # [检查 B] 极其夸张的长宽比 (防止把桌子缝隙当成物体)
+    x, y, w_rect, h_rect = cv2.boundingRect(main_cnt)
+    aspect_ratio = w_rect / h_rect
+    if aspect_ratio > 4.5: # 放宽了之前的标准，但太离谱的长条还是要杀
+        return False, None, f"形状异常 (长宽比 {aspect_ratio:.1f})"
+
+    # 注意：这里完全移除了“边界溢出”检查，碰到边界也能过。
+
+    # 🔥 新增：边缘腐蚀 (Erosion)
+    # 这一步是为了切掉物体边缘沾染的桌面反光和那一圈淡淡的阴影
+    kernel_size = 3  # 腐蚀力度，3x3 约等于缩减 1-2 个像素
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    cleaned_mask = cv2.erode(cleaned_mask, kernel, iterations=1)
+    
+    return True, cleaned_mask, "合格"
 
 def get_salient_box(img_path, margin_ratio=0.1):
     """
@@ -382,33 +401,61 @@ def run_ai_segmentation_pipeline(data_dir: Path):
                 final_mask = np.zeros(det_results[0].orig_shape[:2], dtype=np.uint8)
 
             # -------------------------------------------------
-            # 🔥 核心修改：质量裁决与剔除 🔥
+            # 🔥 核心修改：使用净化函数 🔥
             # -------------------------------------------------
-            is_good, reason = check_mask_quality_advanced(final_mask, img_path.name)
+            # 注意：这里接收 3 个返回值 (是否合格, 新Mask, 原因)
+            is_good, cleaned_mask, reason = clean_and_verify_mask(final_mask, img_path.name)
 
             if is_good:
-                # ✅ 合格：保留图片，执行涂黑
+                # ✅ 合格：使用清洗后的 Mask (cleaned_mask) 进行处理
                 
-                # 1. 涂黑操作 (Paint Black)
+                # 1. 涂黑操作 -> 改为生成 RGBA 图片
                 original_img = cv2.imread(str(img_path))
                 if original_img is not None:
-                    # 羽化边缘
-                    mask_blurred = cv2.GaussianBlur(final_mask, (15, 15), 0)
-                    mask_norm = mask_blurred / 255.0
-                    mask_3c = cv2.merge([mask_norm, mask_norm, mask_norm])
+                    # 羽化边缘 (关键！减少边缘反光带来的硬切伪影)
+                    # 稍微加大一点羽化半径，比如 5 或 7
+                    mask_blurred = cv2.GaussianBlur(cleaned_mask, (5, 5), 0)
                     
-                    # 生成黑背景图
-                    masked_img = (original_img.astype(np.float32) * mask_3c).astype(np.uint8)
-                    cv2.imwrite(str(img_path), masked_img) # 覆盖原图
-                
-                # 2. 保存 Mask (可选，Nerfstudio 其实不需要了因为背景已经黑了，但留着也好)
-                cv2.imwrite(str(masks_dir / f"{img_path.stem}.png"), final_mask)
+                    # 归一化 mask (0.0 - 1.0)
+                    alpha_channel = mask_blurred / 255.0
+                    
+                    # 转换原图为 float 以便计算
+                    img_float = original_img.astype(np.float32)
+                    
+                    # 预乘 Alpha (Premultiplied Alpha) - 这一步对 3DGS 边缘质量很重要
+                    # 它可以让边缘的反光平滑过渡到透明，而不是产生硬边
+                    b, g, r = cv2.split(img_float)
+                    b = b * alpha_channel
+                    g = g * alpha_channel
+                    r = r * alpha_channel
+                    
+                    # 合并为 4 通道 (BGRA)
+                    # 注意：最后一个通道是 alpha_channel * 255
+                    alpha_uint8 = mask_blurred
+                    img_bgra = cv2.merge([b, g, r, alpha_uint8.astype(np.float32)]).astype(np.uint8)
+                    
+                    # 保存为 PNG (因为 JPG 不支持透明通道)
+                    # 我们删掉原来的 .jpg，保存为 .png
+                    new_img_path = img_path.with_suffix('.png')
+                    cv2.imwrite(str(new_img_path), img_bgra)
+                    
+                    # 如果原图是 jpg，删掉它，避免重复
+                    if img_path.suffix.lower() == '.jpg':
+                        img_path.unlink()
+                        
+                    # 更新路径变量，方便后面写入 json
+                    final_img_path_name = new_img_path.name
+                else:
+                    final_img_path_name = img_path.name
+
+                # 2. 保存 Mask (保持不变)
+                cv2.imwrite(str(masks_dir / f"{img_path.stem}.png"), cleaned_mask)
 
                 # 3. 加入合格列表
+                # 这里必须更新 file_path 为新的 .png 文件
                 if img_path.name in frames_map:
-                    # 确保这一帧在 transforms.json 里也有记录
-                    # 同时注入 mask_path (虽然涂黑了，加个 mask 双重保险也没错)
                     frame_data = frames_map[img_path.name]
+                    frame_data["file_path"] = f"images/{final_img_path_name}" # 更新文件名
                     frame_data["mask_path"] = f"masks/{img_path.stem}.png"
                     valid_frames_list.append(frame_data)
 
@@ -823,7 +870,13 @@ def run_pipeline(video_path, project_name):
         "--output-dir", str(output_dir), 
         "--experiment-name", project_name, 
         "--pipeline.model.random-init", "False", 
-        "--pipeline.model.cull-alpha-thresh", "0.005", 
+        
+        # 🔥 新增参数 1: 告诉 Nerfstudio 背景是透明的，不要把黑色渲染出来
+        "--pipeline.model.background-color", "random", 
+        
+        # 🔥 新增参数 2: 提高不透明度阈值，让那层薄薄的黑色烟雾直接消失
+        "--pipeline.model.cull-alpha-thresh", "0.05", # 默认是 0.005，改大到 0.05
+
         # 🔥 新增：提高分裂门槛 (默认 0.0002 -> 0.0008)
         "--pipeline.model.densify-grad-thresh", "0.0008",
         # 🔥 新增：提前停止分裂 (默认 15000 -> 10000)
