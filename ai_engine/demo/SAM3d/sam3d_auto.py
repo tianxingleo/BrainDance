@@ -9,10 +9,32 @@ import torch
 from types import ModuleType
 import numpy as np
 from PIL import Image
+import cv2
+import dashscope
+from http import HTTPStatus
+import gc
+import json
 
-# ================= 🔥 [RTX 5070 兼容性补丁 V32] 终极 Mock 🔥 =================
+# ================= 🔧 配置区域 (请修改这里) =================
+INPUT_IMAGE_NAME = "input.jpg" 
+LINUX_WORK_ROOT = Path.home() / "sam3d_workspace"
+SAM3D_REPO_PATH = Path.home() / "workspace/ai/sam-3d-objects"
+CONFIG_PATH = SAM3D_REPO_PATH / "checkpoints/hf/pipeline.yaml"
+CPU_CONFIG_PATH = CONFIG_PATH.parent / "cpu_pipeline.yaml"
+
+# 🔥 [新增] 阿里云 DashScope API Key
+DASHSCOPE_API_KEY = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+os.environ["DASHSCOPE_API_KEY"] = DASHSCOPE_API_KEY
+
+# 🔥 [新增] SAM 2 模型路径
+SAM2_CHECKPOINT = "./checkpoints/sam2_hiera_large.pt" 
+SAM2_CONFIG = "sam2_hiera_l.yaml"
+
+os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0"
+
+# ================= 🔥 Mock 系统 (保持不变) =================
 def inject_mocks():
-    print("⚠️ [系统检测] 正在注入 Kaolin 和 PyTorch3D 的 V32 Mock 模块...")
+    print("⚠️ [System] Injecting Virtual Kaolin & PyTorch3D Modules...")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     class MockClass:
@@ -35,7 +57,6 @@ def inject_mocks():
     def mock_func(*args, **kwargs): return torch.tensor(0.0, device=device)
     def mock_check_func(*args, **kwargs): return False 
 
-    # --- Kaolin Mock ---
     if "kaolin" not in sys.modules:
         mock_kaolin = ModuleType("kaolin")
         submodules = ["ops", "ops.mesh", "ops.spc", "metrics", "metrics.pointcloud", "render", "render.camera", "render.mesh", "visualize", "io", "io.obj", "io.usd", "utils", "utils.testing"]
@@ -62,7 +83,6 @@ def inject_mocks():
         mock_kaolin.__path__ = []
         sys.modules["kaolin"] = mock_kaolin
 
-    # --- PyTorch3D Mock ---
     if "pytorch3d" not in sys.modules:
         mock_p3d = ModuleType("pytorch3d")
         mock_p3d.__path__ = []
@@ -136,262 +156,285 @@ def inject_mocks():
         sys.modules["pytorch3d.transforms"] = mock_p3d.transforms
         sys.modules["pytorch3d.structures"] = mock_p3d.structures
         sys.modules["pytorch3d.renderer"] = mock_p3d.renderer
-    print("✅ [Mock V32] 注入完成")
+    print("✅ [System] Mock Environment Ready")
 
-# 注入 Mocks
 inject_mocks()
 
-# ================= 🔧 配置区域 =================
-INPUT_IMAGE_NAME = "input.jpg"  # 脚本会自动优先查找 input.png
-LINUX_WORK_ROOT = Path.home() / "sam3d_workspace"
-SAM3D_REPO_PATH = Path.home() / "workspace/ai/sam-3d-objects"
-CONFIG_PATH = SAM3D_REPO_PATH / "checkpoints/hf/pipeline.yaml"
+# ================= 🔥 新增：Qwen + SAM 2 智能分割类 =================
 
-# 🔥🔥 [修复点] CPU 配置保存路径改为与 CONFIG_PATH 同级目录 🔥🔥
-CPU_CONFIG_PATH = CONFIG_PATH.parent / "cpu_pipeline.yaml"
+class VLMProcessor:
+    """负责调用 Qwen-VL API 获取物体坐标"""
+    def __init__(self):
+        pass
 
-os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0"
+    def get_main_object_box(self, image_path):
+        """调用 Qwen-VL-Max 识别图片主体"""
+        print("🤖 [Qwen] Uploading image to API...")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"image": image_path},
+                    {"text": "Detect the main subject in this image. Return the bounding box in [ymin, xmin, ymax, xmax] format within the range [0, 1000]."}
+                ]
+            }
+        ]
+
+        try:
+            response = dashscope.MultiModalConversation.call(
+                model='qwen-vl-max', 
+                messages=messages,
+            )
+
+            if response.status_code == HTTPStatus.OK:
+                content = response.output.choices[0].message.content
+                print(f"🤖 [Qwen] Thinking: {content}")
+                return self._parse_coordinates(content, image_path)
+            else:
+                print(f"❌ [Qwen] API Error: {response.code} - {response.message}")
+                return None
+        except Exception as e:
+            print(f"❌ [Qwen] Exception: {e}")
+            return None
+
+    def _parse_coordinates(self, content, image_path):
+        import re
+        nums = re.findall(r'\d+', content)
+        if len(nums) >= 4:
+            y1, x1, y2, x2 = map(int, nums[:4])
+            with Image.open(image_path) as img:
+                w, h = img.size
+            x_min = int(x1 / 1000 * w)
+            y_min = int(y1 / 1000 * h)
+            x_max = int(x2 / 1000 * w)
+            y_max = int(y2 / 1000 * h)
+            # Padding
+            padding = 10
+            x_min = max(0, x_min - padding)
+            y_min = max(0, y_min - padding)
+            x_max = min(w, x_max + padding)
+            y_max = min(h, y_max + padding)
+            return np.array([x_min, y_min, x_max, y_max])
+        return None
+
+class SAM2Processor:
+    """负责加载 SAM 2 并执行分割"""
+    def __init__(self):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.predictor = None
+
+    def load_model(self):
+        if self.predictor is not None: return
+        try:
+            from sam2.build_sam import build_sam2
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
+            print("🔄 [SAM 2] Loading model to GPU...")
+            sam2_model = build_sam2(SAM2_CONFIG, SAM2_CHECKPOINT, device=self.device)
+            self.predictor = SAM2ImagePredictor(sam2_model)
+            print("✅ [SAM 2] Model loaded.")
+        except Exception as e:
+            print(f"❌ [SAM 2] Load failed: {e}")
+
+    def segment(self, image_path, box):
+        image = Image.open(image_path).convert("RGB")
+        image_np = np.array(image)
+        self.predictor.set_image(image_np)
+        masks, scores, _ = self.predictor.predict(
+            point_coords=None, point_labels=None,
+            box=box[None, :], multimask_output=False,
+        )
+        return masks[0].astype(np.uint8) * 255
+
+    def unload_model(self):
+        """显存清理：非常重要！"""
+        if self.predictor:
+            print("🧹 [SAM 2] Unloading model to free VRAM...")
+            del self.predictor
+            self.predictor = None
+            torch.cuda.empty_cache()
+            gc.collect()
+
+# ================= 🔧 辅助函数 =================
 
 def format_duration(seconds):
     return str(datetime.timedelta(seconds=int(seconds)))
 
 def setup_environment():
     if not SAM3D_REPO_PATH.exists():
-        print(f"❌ 错误: 找不到 SAM 3D 仓库路径: {SAM3D_REPO_PATH}")
+        print(f"❌ Error: Repo not found at {SAM3D_REPO_PATH}")
         sys.exit(1)
-    
     sys.path.append(str(SAM3D_REPO_PATH))
     sys.path.append(str(SAM3D_REPO_PATH / "notebook"))
     os.chdir(SAM3D_REPO_PATH)
 
 def prepare_cpu_config():
-    """创建一个强制使用 CPU 的临时配置文件"""
-    print(f"📝 [Config Hack] 正在创建 CPU 初始化配置: {CPU_CONFIG_PATH}")
-    if not CONFIG_PATH.exists():
-        print(f"❌ 找不到原始配置: {CONFIG_PATH}")
-        return False
-    
+    """Config Hack to prevent OOM at init"""
+    print(f"📝 [Config Hack] Creating CPU config: {CPU_CONFIG_PATH}")
+    if not CONFIG_PATH.exists(): return False
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # 强制替换 device: cuda 为 device: cpu
-        new_content = content.replace("device: cuda", "device: cpu")
-        new_content = new_content.replace('device: "cuda"', 'device: "cpu"')
-        
-        # 写入到 checkpoints/hf/cpu_pipeline.yaml
-        with open(CPU_CONFIG_PATH, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-            
-        print(f"    ✅ 已生成 CPU 配置")
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f: content = f.read()
+        new_content = content.replace("device: cuda", "device: cpu").replace('device: "cuda"', 'device: "cpu"')
+        with open(CPU_CONFIG_PATH, 'w', encoding='utf-8') as f: f.write(new_content)
         return True
-    except Exception as e:
-        print(f"❌ 创建 CPU 配置失败: {e}")
-        return False
+    except: return False
 
-def auto_generate_mask(image_np):
-    """自动生成 Mask (简单的去白/黑背景)"""
-    # image_np 是 (H, W, 3) 的 uint8
-    
-    # 策略1: 亮度阈值 (去除接近白色的背景)
-    # 计算每个像素的亮度
-    intensity = image_np.mean(axis=2)
-    
-    # 假设背景是白色的 (亮度 > 240)
-    is_white_bg = intensity > 240
-    
-    # 假设背景是黑色的 (亮度 < 15)
-    is_black_bg = intensity < 15
-    
-    # 生成 mask: 背景部分为 0，物体部分为 255
-    # 如果大部分是白色背景，就去除白色；如果是黑色，就去除黑色
-    white_pixel_count = np.sum(is_white_bg)
-    black_pixel_count = np.sum(is_black_bg)
-    total_pixels = image_np.shape[0] * image_np.shape[1]
-    
-    if white_pixel_count > total_pixels * 0.1: # 如果有超过10%的白色，假设是白背景
-        print("    🎨 检测到浅色背景，正在自动抠图...")
-        mask = np.where(is_white_bg, 0, 255).astype(np.uint8)
-    elif black_pixel_count > total_pixels * 0.1: # 否则假设黑背景
-        print("    🎨 检测到深色背景，正在自动抠图...")
-        mask = np.where(is_black_bg, 0, 255).astype(np.uint8)
-    else:
-        print("    ⚠️ 背景颜色不明确，使用全图 Mask (可能会生成方块)")
-        mask = np.ones((image_np.shape[0], image_np.shape[1]), dtype=np.uint8) * 255
-        
-    return mask
+# ================= 🚀 主流水线 (整合版) =================
 
 def run_pipeline():
     global_start_time = time.time()
     
     windows_dir = Path(__file__).resolve().parent
     source_img_path = windows_dir / INPUT_IMAGE_NAME
-    # 尝试寻找 png 文件 (带透明通道)
-    source_png_path = windows_dir / "input.png"
-    
-    if source_png_path.exists():
-        print(f"✨ 发现 input.png，将使用 Alpha 通道作为 Mask (推荐)")
-        source_img_path = source_png_path
-        INPUT_EXT = ".png"
-    else:
-        INPUT_EXT = ".jpg"
-    
     project_name = source_img_path.stem 
     work_dir = LINUX_WORK_ROOT / project_name
     
-    print(f"\n🚀 [RTX 5070 Pipeline V44] 启动任务: {source_img_path.name}")
+    print(f"\n🚀 [SAM 3D + Qwen + SAM2] Start: {source_img_path.name}")
     
     if not source_img_path.exists():
-        print(f"❌ 错误: 找不到图片 {source_img_path}")
+        print(f"❌ Error: Image not found {source_img_path}")
         return
 
     if work_dir.exists(): shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-
     target_img_path = work_dir / source_img_path.name
     shutil.copy2(str(source_img_path), str(target_img_path))
 
-    print(f"\n🧠 [2/3] 加载模型推理 (强制 CPU 初始化)...")
-    setup_environment()
+    # ================= 🌟 Phase 1: AI 智能抠图 (Qwen + SAM 2) =================
+    print(f"\n🧠 [Phase 1] Auto-Segmentation (VLM + SAM 2)...")
     
-    if not prepare_cpu_config():
+    vlm = VLMProcessor()
+    sam = SAM2Processor()
+    clean_image_path = work_dir / "input_clean.png"
+    
+    # 1. 识别坐标 (API)
+    box = vlm.get_main_object_box(str(target_img_path))
+    
+    if box is not None:
+        print(f"📍 Box found: {box}")
+        # 2. 分割 (Local GPU)
+        sam.load_model()
+        try:
+            mask = sam.segment(str(target_img_path), box)
+            
+            # 3. 应用 Mask 并保存 PNG
+            pil_image = Image.open(str(target_img_path)).convert("RGBA")
+            image_np = np.array(pil_image)
+            
+            if mask.shape != image_np.shape[:2]:
+                mask = cv2.resize(mask, (image_np.shape[1], image_np.shape[0]), interpolation=cv2.INTER_NEAREST)
+            
+            image_np[:, :, 3] = mask
+            clean_img = Image.fromarray(image_np)
+            
+            # 自动裁剪透明边缘
+            bbox = clean_img.getbbox()
+            if bbox: clean_img = clean_img.crop(bbox)
+            
+            clean_img.save(clean_image_path)
+            print(f"    ✅ Clean image saved: {clean_image_path}")
+            
+        except Exception as e:
+            print(f"❌ Segmentation failed: {e}")
+            return
+        finally:
+            # 4. 关键：清理 SAM 2 显存！
+            sam.unload_model()
+    else:
+        print("❌ Qwen failed to detect object. Aborting.")
         return
 
+    # ================= 🌟 Phase 2: SAM 3D 生成 (Process 3DGS) =================
+    print(f"\n🧠 [Phase 2] Loading SAM 3D Pipeline...")
+    setup_environment()
+    if not prepare_cpu_config(): return
+
     try:
-        from inference import Inference, load_image
-        import numpy as np
-        from PIL import Image
+        from inference import Inference
         
-        # 🔥🔥🔥 终极拦截器：强制 torch.load 使用 CPU 🔥🔥🔥
+        # 显存拦截器
         original_torch_load = torch.load
         def cpu_load_hook(*args, **kwargs):
-            if 'map_location' not in kwargs:
-                kwargs['map_location'] = 'cpu'
+            if 'map_location' not in kwargs: kwargs['map_location'] = 'cpu'
             return original_torch_load(*args, **kwargs)
         
-        print("    🛡️ 已激活显存拦截器：强制所有权重加载至 RAM...")
         torch.load = cpu_load_hook
+        print("    🛡️ Memory Interceptor: Active.")
         
         try:
-            # 初始化 (所有模型进 RAM)
             inference = Inference(str(CPU_CONFIG_PATH))
             pipeline = inference._pipeline
-            pipeline.device = torch.device('cuda') # 欺骗 Pipeline
-            print("    ✅ 模型初始化完成，显存占用 0GB")
+            pipeline.device = torch.device('cuda')
+            print("    ✅ SAM 3D Init Done (RAM only).")
         finally:
-            # 恢复 torch.load
             torch.load = original_torch_load
-            print("    🛡️ 显存拦截器已解除")
 
-        # 读取并处理图片
-        pil_image = Image.open(str(target_img_path)).convert("RGBA") # 读取 RGBA 以防万一
-        orig_w, orig_h = pil_image.size
+        # 读取我们刚刚生成的“干净”图片
+        pil_image = Image.open(str(clean_image_path)).convert("RGBA")
         
-        target_size = 512
+        # 降采样到 256px 防止 OOM
+        target_size = 256
+        orig_w, orig_h = pil_image.size
         if max(orig_w, orig_h) > target_size:
             scale = target_size / max(orig_w, orig_h)
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
             pil_image = pil_image.resize((new_w, new_h), Image.LANCZOS)
-            print(f"    📉 [显存保护] 图片降采样至: {new_w} x {new_h}")
+            print(f"    📉 Resized input for 3D: {new_w} x {new_h}")
         
         image_rgba = np.array(pil_image)
-        image = image_rgba[:, :, :3] # 取 RGB
-        h, w = image.shape[:2]
-        
-        # 🔥🔥🔥 智能 Mask 生成 🔥🔥🔥
-        if INPUT_EXT == ".png" and image_rgba.shape[2] == 4:
-            # 如果是 PNG 且有 Alpha 通道，直接用 Alpha 作为 Mask
-            print("    🎭 使用 PNG Alpha 通道作为 Mask")
-            mask = image_rgba[:, :, 3]
-        else:
-            # 如果是 JPG，尝试自动去除背景
-            mask = auto_generate_mask(image)
-        
-        # =========================================================
-        # 🔥 第一阶段：搬运 Stage 1 模型到 GPU
-        # =========================================================
-        print("\n🚚 [Stage 1] 正在将 Stage 1 模型搬运到 GPU...")
+        image = image_rgba[:, :, :3]
+        mask = image_rgba[:, :, 3] # 直接使用刚才扣好的 Alpha 通道
+
+        # --- Stage 1 ---
+        print("\n🚚 [Stage 1] Loading Sparse Structure Models...")
         torch.cuda.empty_cache()
-        
         pipeline.models["ss_generator"].to('cuda')
         pipeline.models["ss_decoder"].to('cuda')
-        if "ss_encoder" in pipeline.models and pipeline.models["ss_encoder"] is not None:
-            pipeline.models["ss_encoder"].to('cuda')
-        
-        if "ss_condition_embedder" in pipeline.condition_embedders:
-            pipeline.condition_embedders["ss_condition_embedder"].to('cuda')
+        if "ss_encoder" in pipeline.models and pipeline.models["ss_encoder"]: pipeline.models["ss_encoder"].to('cuda')
+        if "ss_condition_embedder" in pipeline.condition_embedders: pipeline.condition_embedders["ss_condition_embedder"].to('cuda')
             
-        print("🚀 [Step 1/2] 正在运行 Stage 1 (生成结构)...")
-        stage1_output = pipeline.run(
-            image=image, 
-            mask=mask, 
-            stage1_only=True, 
-            seed=42
-        )
-        print("    ✅ Stage 1 完成！")
+        print("🚀 [Stage 1] Inference Start...")
+        stage1_output = pipeline.run(image=image, mask=mask, stage1_only=True, seed=42)
+        print("    ✅ Stage 1 Complete.")
 
-        # =========================================================
-        # 🔥 第二阶段：撤回 Stage 1，搬运 Stage 2
-        # =========================================================
-        print("\n🔄 [显存切换] 卸载 Stage 1，加载 Stage 2...")
+        # --- Stage 2 ---
+        print("\n🔄 [Swap] Offloading Stage 1 -> Loading Stage 2...")
         pipeline.models["ss_generator"].cpu()
         pipeline.models["ss_decoder"].cpu()
-        if "ss_encoder" in pipeline.models and pipeline.models["ss_encoder"] is not None:
-             pipeline.models["ss_encoder"].cpu()
-        if "ss_condition_embedder" in pipeline.condition_embedders:
-             pipeline.condition_embedders["ss_condition_embedder"].cpu()
+        if "ss_encoder" in pipeline.models and pipeline.models["ss_encoder"]: pipeline.models["ss_encoder"].cpu()
+        if "ss_condition_embedder" in pipeline.condition_embedders: pipeline.condition_embedders["ss_condition_embedder"].cpu()
         torch.cuda.empty_cache()
         
         pipeline.models["slat_generator"].to('cuda')
         pipeline.models["slat_decoder_gs"].to('cuda')
-        if "slat_condition_embedder" in pipeline.condition_embedders:
-            pipeline.condition_embedders["slat_condition_embedder"].to('cuda')
+        if "slat_condition_embedder" in pipeline.condition_embedders: pipeline.condition_embedders["slat_condition_embedder"].to('cuda')
         
-        print("    ✅ 模型切换完毕！")
         pipeline.decode_formats = ["gaussian"]
-        
-        print("🚀 [Step 2/2] 正在运行 Stage 2 (生成 Gaussian)...")
         original_sample_ss = pipeline.sample_sparse_structure
         pipeline.sample_sparse_structure = lambda *args, **kwargs: stage1_output
         
+        print("🚀 [Stage 2] Inference Start...")
         try:
-            output = pipeline.run(
-                image=image,
-                mask=mask,
-                stage1_only=False, 
-                seed=42,
-                with_mesh_postprocess=False, 
-                with_texture_baking=False 
-            )
+            output = pipeline.run(image=image, mask=mask, stage1_only=False, seed=42, with_mesh_postprocess=False, with_texture_baking=False)
         finally:
             pipeline.sample_sparse_structure = original_sample_ss
 
-        # 保存结果
+        # --- Save ---
         if "gs" in output:
             gaussian_splats = output["gs"]
             ply_output_path = work_dir / f"{project_name}_3d.ply"
             gaussian_splats.save_ply(str(ply_output_path))
-            print(f"    ✅ 生成成功: {ply_output_path.name}")
-        else:
-            print("    ❌ 错误: 输出中没有 Gaussian Splats 数据")
-            return
+            final_windows_path = windows_dir / f"{project_name}_3dgs.ply"
+            shutil.copy2(str(ply_output_path), str(final_windows_path))
+            print(f"\n🎉 Success! Saved to: {final_windows_path}")
         
     except Exception as e:
-        print(f"❌ 运行出错: {e}")
+        print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
         torch.cuda.empty_cache()
-        return
 
-    final_windows_path = windows_dir / f"{project_name}_3dgs.ply"
-    if ply_output_path.exists():
-        shutil.copy2(str(ply_output_path), str(final_windows_path))
-        print(f"\n🎉 成功！模型已保存: {final_windows_path}")
-    else:
-        print("    ❌ 失败: 未生成 PLY 文件")
-
-    print(f"\n📊 总耗时: {format_duration(time.time() - global_start_time)}")
+    print(f"\n📊 Total Time: {format_duration(time.time() - global_start_time)}")
 
 if __name__ == "__main__":
     run_pipeline()
