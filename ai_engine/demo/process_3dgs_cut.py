@@ -409,53 +409,54 @@ def run_ai_segmentation_pipeline(data_dir: Path):
             if is_good:
                 # ✅ 合格：使用清洗后的 Mask (cleaned_mask) 进行处理
                 
-                # 1. 涂黑操作 -> 改为生成 RGBA 图片
+                # 1. 涂黑操作 -> 改为生成 RGBA (PNG) 图片
                 original_img = cv2.imread(str(img_path))
                 if original_img is not None:
-                    # 羽化边缘 (关键！减少边缘反光带来的硬切伪影)
-                    # 稍微加大一点羽化半径，比如 5 或 7
+                    # 羽化边缘 (减少硬切伪影)
                     mask_blurred = cv2.GaussianBlur(cleaned_mask, (5, 5), 0)
                     
-                    # 归一化 mask (0.0 - 1.0)
-                    alpha_channel = mask_blurred / 255.0
+                    # 确保 alpha_channel 是 float32
+                    alpha_channel = mask_blurred.astype(np.float32) / 255.0
                     
-                    # 转换原图为 float 以便计算
+                    # 转换原图为 float32 以便计算
                     img_float = original_img.astype(np.float32)
                     
-                    # 预乘 Alpha (Premultiplied Alpha) - 这一步对 3DGS 边缘质量很重要
-                    # 它可以让边缘的反光平滑过渡到透明，而不是产生硬边
+                    # 预乘 Alpha (Premultiplied Alpha)
                     b, g, r = cv2.split(img_float)
                     b = b * alpha_channel
                     g = g * alpha_channel
                     r = r * alpha_channel
                     
-                    # 合并为 4 通道 (BGRA)
-                    # 注意：最后一个通道是 alpha_channel * 255
-                    alpha_uint8 = mask_blurred
-                    img_bgra = cv2.merge([b, g, r, alpha_uint8.astype(np.float32)]).astype(np.uint8)
+                    # 🔥 修复点：在 merge 之前，强制所有通道转回 uint8
+                    # 这样 b, g, r, a 全部都是 uint8 类型，OpenCV 就不会报错了
+                    img_bgra = cv2.merge([
+                        b.astype(np.uint8), 
+                        g.astype(np.uint8), 
+                        r.astype(np.uint8), 
+                        mask_blurred # 已经是 uint8，直接用
+                    ])
                     
-                    # 保存为 PNG (因为 JPG 不支持透明通道)
-                    # 我们删掉原来的 .jpg，保存为 .png
+                    # 保存为 PNG (必须用 PNG 存透明通道)
                     new_img_path = img_path.with_suffix('.png')
                     cv2.imwrite(str(new_img_path), img_bgra)
                     
                     # 如果原图是 jpg，删掉它，避免重复
                     if img_path.suffix.lower() == '.jpg':
-                        img_path.unlink()
+                        try: img_path.unlink()
+                        except: pass
                         
-                    # 更新路径变量，方便后面写入 json
                     final_img_path_name = new_img_path.name
                 else:
                     final_img_path_name = img_path.name
 
-                # 2. 保存 Mask (保持不变)
+                # 2. 保存 Mask (一定要保存清洗后的！)
                 cv2.imwrite(str(masks_dir / f"{img_path.stem}.png"), cleaned_mask)
 
                 # 3. 加入合格列表
-                # 这里必须更新 file_path 为新的 .png 文件
+                # 记得在这里更新 json 里的文件名 (后缀变成了 .png)
                 if img_path.name in frames_map:
                     frame_data = frames_map[img_path.name]
-                    frame_data["file_path"] = f"images/{final_img_path_name}" # 更新文件名
+                    frame_data["file_path"] = f"images/{final_img_path_name}" 
                     frame_data["mask_path"] = f"masks/{img_path.stem}.png"
                     valid_frames_list.append(frame_data)
 
