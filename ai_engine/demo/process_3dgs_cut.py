@@ -80,9 +80,12 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
         "text": (
             "这些是一个视频的抽帧图片。请分析画面中心始终存在的、最主要的一个物体是什么。"
             "请输出一个适合用于物体检测模型的英文名词短语（Prompt）。"
-            "注意：如果物体是白色的、缺乏纹理的（如白色充电宝），请使用更具几何特征的描述，如 'white box' 或 'rectangular object'，而不要只说 'portable charger'。"
-            "例如：'red fire extinguisher', 'white box', 'wooden chair'。"
-            "要求：严格只输出这个英文短语，不要包含任何标点符号、解释或 'The object is...' 这种废话。"
+            "⚠️ 关键策略：请优先描述【视觉特征】（颜色、材质、形状），而不是【功能名称】。"
+            "越简单、越'土'的词，检测模型越容易识别。"
+            "例如："
+            " - 不要说 'electric shaver' (电动剃须刀)，请说 'gray metal object' 或 'device'。"
+            " - 不要说 'portable charger' (充电宝)，请说 'white rectangular box'。"
+            "要求：严格只输出这个英文短语，不要包含任何标点符号、解释。"
         )
     })
 
@@ -158,9 +161,58 @@ def check_mask_quality_advanced(mask, img_name=""):
 
     return True, "合格"
 
+def get_salient_box(img_path, margin_ratio=0.1):
+    """
+    [纯本地 CV 算法] 计算画面的'视觉显著区域'，以此作为 SAM 的提示框。
+    原理：利用拉普拉斯算子找边缘 -> 膨胀连接 -> 找最大外接矩形
+    """
+    try:
+        img = cv2.imread(str(img_path))
+        if img is None: return None
+        
+        # 1. 转灰度并计算边缘 (Laplacian)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 计算梯度/边缘，越是物体边缘越亮
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        laplacian = np.uint8(np.absolute(laplacian))
+        
+        # 2. 模糊与二值化 (把零散的边缘连成块)
+        # 高斯模糊让纹理聚集
+        blurred = cv2.GaussianBlur(laplacian, (25, 25), 0)
+        # 阈值处理：只保留最'强烈'的纹理区域 (取前20%亮的区域)
+        threshold_val = np.percentile(blurred, 80) 
+        _, binary = cv2.threshold(blurred, threshold_val, 255, cv2.THRESH_BINARY)
+        
+        # 3. 找最大轮廓
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours: return None
+        
+        # 找到面积最大的轮廓（通常就是主体）
+        max_cnt = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(max_cnt)
+        
+        # 4. 加上一点安全边距 (Padding)，防止框太紧
+        H, W = img.shape[:2]
+        pad_x = int(w * margin_ratio)
+        pad_y = int(h * margin_ratio)
+        
+        x1 = max(0, x - pad_x)
+        y1 = max(0, y - pad_y)
+        x2 = min(W, x + w + pad_x)
+        y2 = min(H, y + h + pad_y)
+        
+        # 返回符合 YOLO/SAM 格式的 tensor
+        import torch
+        return torch.tensor([[x1, y1, x2, y2]], dtype=torch.float32)
+        
+    except Exception as e:
+        print(f"       ⚠️ 视觉重心计算失败: {e}")
+        return None
+
 def run_ai_segmentation_pipeline(data_dir: Path):
     """
-    [Step 1.2] 执行 AI 分割，并根据质量【严格剔除】废片
+    [Step 1.2] 执行 AI 分割
+    逻辑：Qwen分析 -> 失败则用通用词 -> YOLO识别 -> 失败则强制中心框 -> SAM分割
     """
     if not HAS_AI: return False
     
@@ -172,11 +224,28 @@ def run_ai_segmentation_pipeline(data_dir: Path):
         print("⚠️ 未找到 transforms.json，无法进行 Mask 处理。")
         return False
 
-    # 1. 准备工作
-    text_prompt = "white portable charger; white box; rectangular object"
-    print(f"\n✂️ [AI 分割] 启动严格筛选模式 (Prompt: '{text_prompt}')")
-    
+    # ================= 核心修改逻辑开始 =================
+    print(f"\n✂️ [AI 分割] 正在初始化...")
+
+    # --- 第一层：尝试调用大模型获取精准 Prompt ---
+    text_prompt = None
+    try:
+        # 尝试调用你写的那个函数
+        text_prompt = get_central_object_prompt(images_dir)
+    except Exception as e:
+        print(f"    ⚠️ 大模型调用出错: {e}")
+
+    # --- 第二层：如果大模型失败，使用通用 Prompt ---
+    if not text_prompt:
+        # 使用一个非常通用的词，让 YOLO-World 去找画面里最显著的东西
+        # "salient object" (显著物体) 或 "central object" (中心物体) 效果通常不错
+        text_prompt = "central object; single object"
+        print(f"    ⚠️ 未能获取精准描述，降级使用通用 Prompt: '{text_prompt}'")
+    else:
+        print(f"    🎯 获取到精准 Prompt: '\033[92m{text_prompt}\033[0m'")
+
     masks_dir.mkdir(parents=True, exist_ok=True)
+    # ================= 核心修改逻辑结束 =================
 
     # 2. 加载模型 (推荐用 Large)
     print("    -> 正在加载 SAM 2 Large 模型...")
@@ -265,15 +334,46 @@ def run_ai_segmentation_pipeline(data_dir: Path):
             # ============================================================
 
             bboxes = det_results[0].boxes.xyxy.cpu() 
+
+            # ============================================================
+            # 🔥 核心修改：从“死框”改为“智能中心点扩散”
+            # ============================================================
             
-            # 中心保底策略
+            # 标记是否使用点提示
+            use_point_prompt = False
+            
+            # 如果 YOLO 没找到框，或者框太离谱
             if len(bboxes) == 0:
+                print(f"       ⚠️ YOLO 未识别到物体，切换为 [SAM 中心点模式]")
                 h, w = det_results[0].orig_shape[:2]
                 import torch
-                bboxes = torch.tensor([[w*0.25, h*0.25, w*0.75, h*0.75]], device=det_model.device)
-
-            # 2. SAM 分割
-            sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
+                
+                # 策略：给 SAM 一个中心点 (x, y)，让它自己去“泛洪填充”
+                # points 格式: [[x, y]]
+                input_points = [[w / 2, h / 2]]
+                # labels 格式: [1] (1表示前景点，0表示背景点)
+                input_labels = [1]
+                
+                use_point_prompt = True
+            
+            # 3. 执行 SAM 分割
+            if use_point_prompt:
+                # 方式 A: 使用点提示 (Point Prompt)
+                # 注意：Ultralytics 的 SAM 接口调用方式可能略有不同，
+                # 如果是官方 SAM，通常是 predict(points=..., labels=...)
+                # 在 Ultralytics 封装中，我们通常把点转成微小的框，或者直接传参
+                
+                # 为了兼容性最强，我们这里用一个“极小框”模拟“点”
+                # 这样 SAM 会认为这是一个非常确定的中心区域
+                cx, cy = w / 2, h / 2
+                margin = 5 # 5像素的中心区域
+                bboxes = torch.tensor([[cx-margin, cy-margin, cx+margin, cy+margin]], device=det_model.device)
+                
+                # 调用 SAM (Ultralytics 会把这个小框当做提示)
+                sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
+            else:
+                # 方式 B: 使用 YOLO 的框 (Box Prompt)
+                sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
             
             if sam_results[0].masks is not None:
                 all_masks = sam_results[0].masks.data.cpu().numpy()
