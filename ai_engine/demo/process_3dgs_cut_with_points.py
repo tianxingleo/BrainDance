@@ -486,7 +486,7 @@ def run_ai_segmentation_pipeline(data_dir: Path):
                 if img_path.name in frames_map:
                     frame_data = frames_map[img_path.name]
                     frame_data["file_path"] = f"images/{final_img_path_name}" 
-                    # frame_data["mask_path"] = f"masks/{img_path.stem}.png"
+                    frame_data["mask_path"] = f"masks/{img_path.stem}.png"
                     valid_frames_list.append(frame_data)
 
             else:
