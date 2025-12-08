@@ -355,6 +355,35 @@ def run_ai_segmentation_pipeline(data_dir: Path):
             bboxes = det_results[0].boxes.xyxy.cpu() 
 
             # ============================================================
+            # 🔥 核心修改：多目标筛选 (只取最中间的一个)
+            # ============================================================
+            if len(bboxes) > 1:
+                import torch
+                # 获取画面尺寸
+                img_h, img_w = det_results[0].orig_shape[:2]
+                screen_center = torch.tensor([img_w / 2.0, img_h / 2.0])
+                
+                min_dist = float('inf')
+                best_idx = 0
+                
+                # 遍历所有框，计算它们中心点到画面中心的距离
+                for idx, box in enumerate(bboxes):
+                    # box: [x1, y1, x2, y2]
+                    box_center_x = (box[0] + box[2]) / 2.0
+                    box_center_y = (box[1] + box[3]) / 2.0
+                    
+                    dist = torch.sqrt((box_center_x - screen_center[0])**2 + (box_center_y - screen_center[1])**2)
+                    
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = idx
+                
+                # 只保留那个“天选之子”
+                print(f"       🛡️ 发现 {len(bboxes)} 个目标，自动锁定最中心的一个 (距离中心 {min_dist:.1f}px)")
+                bboxes = bboxes[best_idx].unsqueeze(0) # 保持维度 [1, 4]
+            # ============================================================ 
+
+            # ============================================================
             # 🔥 核心修改：从“死框”改为“智能中心点扩散”
             # ============================================================
             
