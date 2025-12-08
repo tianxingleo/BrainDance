@@ -1,17 +1,49 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as path_joiner;
+import 'dart:io';// For Platform.localeName
 import 'language.dart';
+import 'dir_and_file.dart';
 
 class AppConfig {
+  static const settingsFileName = "settings.txt";
   static const appName = 'BrainDance';
   static const version = '1.0.0';
   static Color primaryColor = Colors.blue;
   static Color accentColor = Colors.orange;
-  static int langCode = 0;
+  static late Map<String, String> langMap;
+
+  static Future<void> loadFromSettings() async {
+    //加载默认数据
+    AppConfig.langMap = Localize.getLangMap(Platform.localeName);
+    //加载文件数据
+    final dir = await DirFinder.supportDir();
+    final path = path_joiner.join(dir, settingsFileName);
+    if (await FileSystem.checkFileExists(path)) {//检测设置文件是否存在
+      //从设置文件中读取语言代码
+      List<String> contents = await FileSystem.readFile(path);
+      for (int i = 0; i < contents.length; i++) {
+        switch (i) {
+        case 0:
+          //语言代码
+          AppConfig.langMap = Localize.getLangMap(contents[i]);
+          break;
+        }
+      }
+    }
+  }
+  static Future<void> saveToSettings() async {
+    final dir = await DirFinder.supportDir();
+    final path = path_joiner.join(dir, settingsFileName);
+    List<String> contents = [];
+    contents.add(AppConfig.langMap['locale'] ?? 'en_US');
+    await FileSystem.writeFile(path, contents);
+  }
 }
 String textLocalize(String id) {
-  return Localize.t(langCode : AppConfig.langCode, text : id);
+  return AppConfig.langMap[id] ?? id;
 }
-void main() {
+void main() async {
+  await AppConfig.loadFromSettings();
   runApp(const MyApp());
 }
 
@@ -21,11 +53,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: textLocalize("title"),
+      title: "title",
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: AppConfig.accentColor),
       ),
-      home: MyHomePage(title: textLocalize("home_page")),
+      home: MyHomePage(title : "home_page"),
     );
   }
 }
@@ -49,16 +81,30 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  late String _currentTitle;
+  @override
+  void initState() {
+    super.initState();  // 必须调用父类方法
+    _currentTitle = widget.title;  // 2. 用传入的标题初始化
+  }
   int _counter = 0;
 
-  void _incrementCounter() {
+  void _incrementCounter() async {
+    String c = await DirFinder.documentsDir();
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter += 10;
+      _currentTitle = "Directory:\n$c";
+      _counter += 1;
+    });
+  }
+  void _decrementCounter() {
+    if (AppConfig.langMap['locale'] == 'en_US') {
+      AppConfig.langMap = Localize.getLangMap('zh_CN');
+    } else {
+      AppConfig.langMap = Localize.getLangMap('en_US');
+    }
+    AppConfig.saveToSettings();
+    setState(() {
+      _counter -= 1;
     });
   }
 
@@ -78,7 +124,14 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Container(
+          alignment: Alignment.topLeft, // 关键：顶部对齐
+          height: 200, // AppBar 的标准高度
+          child: Text(
+            textLocalize("home_page"),
+          ),
+        ),
+        toolbarHeight: 200,
       ),
       body: Center(
         // Center is a layout widget. It takes a single child and positions it
@@ -97,7 +150,7 @@ class _MyHomePageState extends State<MyHomePage> {
           // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
           // action in the IDE, or press "p" in the console), to see the
           // wireframe for each widget.
-          mainAxisAlignment: .center,
+          mainAxisAlignment: .start,
           children: [
             Text(textLocalize("main")),
             Text(
@@ -107,10 +160,30 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+      floatingActionButton: Stack(
+        children: [
+          Positioned(
+            bottom: 16,
+            right: 160,
+            child:
+              FloatingActionButton(
+                onPressed: _incrementCounter,
+                tooltip: 'Increment',
+                child: const Icon(Icons.add),
+                
+              ),
+          ),
+          Positioned(
+            bottom: 16,
+            left: 160,
+            child:
+              FloatingActionButton(
+                onPressed: _decrementCounter,
+                tooltip: textLocalize("main_2"),
+                child: const Icon(Icons.remove),
+              ),
+          ),
+        ],
       ),
     );
   }
