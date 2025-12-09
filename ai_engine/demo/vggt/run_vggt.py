@@ -1,7 +1,26 @@
-import subprocess
 import sys
-import shutil
 import os
+
+# 🔥【关键】强制添加 vggt 库的路径
+# 你的 vggt 库所在的真实路径
+vggt_lib_path = "/home/ltx/workspace/ai/vggt"
+
+if vggt_lib_path not in sys.path:
+    print(f"⚡ [环境修正] 添加 VGGT 库路径: {vggt_lib_path}")
+    sys.path.insert(0, vggt_lib_path)
+
+# 🔥【关键】确保当前目录不在 sys.path 的首位，防止误引用
+# (可选，但推荐)
+try:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir in sys.path:
+        sys.path.remove(current_dir)
+        sys.path.append(current_dir) # 把它放到最后
+except:
+    pass
+
+import subprocess
+import shutil
 import time
 import datetime # 引入时间处理库
 from pathlib import Path
@@ -10,6 +29,18 @@ import numpy as np
 import logging
 import cv2 # 引入OpenCV库
 import re # 引入正则库用于日志分析
+
+# --- 🔥 新增 VGGT 导入 ---
+import torch
+import torch.nn.functional as F
+# 假设你已经 pip install -e . 安装了 vggt，或者将 vggt 文件夹放在了同一目录
+from vggt.models.vggt import VGGT
+from vggt.utils.load_fn import load_and_preprocess_images_square
+from vggt.utils.pose_enc import pose_encoding_to_extri_intri
+from vggt.utils.geometry import unproject_depth_map_to_point_map
+from vggt.utils.helper import create_pixel_coordinate_grid, randomly_limit_trues
+from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap_wo_track, batch_np_matrix_to_pycolmap
+# 如果需要 BA (Bundle Adjustment)，还需要引入 track 相关库，但为了速度建议先仅使用前馈
 
 import os
 
@@ -33,7 +64,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
+MAX_IMAGES =20 # 🔥 全局最大图片数量限制 (VGGT 显存优化)
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -260,6 +291,191 @@ def perform_percentile_culling(ply_path, json_path, output_path):
         print(f"❌ 切割失败详情: {e}")
         return False
 
+# ================= VGGT 核心处理函数 =================
+def run_vggt_pipeline(image_dir, output_sparse_dir, use_ba=False):
+    """
+    使用 VGGT 替代 COLMAP 进行稀疏重建
+    """
+    print(f"🚀 [VGGT] 正在启动神经网络 SfM...")
+    
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    
+    # 1. 加载模型 (会自动下载权重)
+    model = VGGT()
+    # 如果无法连接 HuggingFace，请手动下载模型并修改此处路径
+    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+    try:
+        state_dict = torch.hub.load_state_dict_from_url(_URL)
+        model.load_state_dict(state_dict)
+    except Exception as e:
+        print(f"    ⚠️ 自动下载模型失败: {e}")
+        print("    -> 请确保网络通畅或手动下载模型。")
+        raise e
+
+    model.eval()
+    model = model.to(device)
+    print("    -> VGGT 模型加载完成")
+
+    # 2. 加载图片
+    image_paths = sorted(list(Path(image_dir).glob("*")))
+    if not image_paths:
+        raise ValueError("VGGT 输入目录为空")
+        
+    # VGGT 默认推理分辨率 518，加载分辨率设为 1024 (保持细节)
+    vggt_res = 336
+    load_res = 518 
+    
+    print(f"    -> 正在预处理 {len(image_paths)} 张图片...")
+    # images_tensor: (B, 3, H, W), coords: (B, 6) [x1, y1, x2, y2, w, h]
+    images_tensor, original_coords = load_and_preprocess_images_square(image_paths, target_size=load_res)
+    images_tensor = images_tensor.to(device)
+    original_coords = original_coords.to(device)
+
+    # 3. 运行 VGGT 推理
+    print("    -> 正在执行前向推理 (这可能需要几秒钟)...")
+    images_input = F.interpolate(images_tensor, size=(vggt_res, vggt_res), mode="bilinear", align_corners=False)
+    
+    with torch.no_grad():
+        with torch.cuda.amp.autocast(dtype=dtype):
+            # 添加 batch 维度
+            aggregated_tokens_list, ps_idx = model.aggregator(images_input[None])
+            
+            # 预测相机
+            pose_enc = model.camera_head(aggregated_tokens_list)[-1]
+            extrinsic, intrinsic = pose_encoding_to_extri_intri(pose_enc, images_input.shape[-2:])
+            
+            # 预测深度
+            depth_map, depth_conf = model.depth_head(aggregated_tokens_list, images_input[None], ps_idx)
+    
+    del aggregated_tokens_list
+    torch.cuda.empty_cache()
+
+    # 移除 batch 维度并转为 numpy
+    extrinsic = extrinsic.squeeze(0).cpu().numpy()
+    intrinsic = intrinsic.squeeze(0).cpu().numpy()
+    depth_map = depth_map.squeeze(0).cpu().numpy()
+    depth_conf = depth_conf.squeeze(0).cpu().numpy()
+    
+    # 3. 反投影生成 3D 点云
+    print("    -> 生成稀疏点云...")
+    # 直接传入 numpy 数组，不需要转 tensor，也不需要再调 .numpy()
+    points_3d = unproject_depth_map_to_point_map(
+        depth_map, 
+        extrinsic, 
+        intrinsic
+    )
+
+    # 4. 转换为 COLMAP 格式
+    print("    -> 正在转换为 COLMAP 格式...")
+    
+    # 准备点云颜色和坐标网格
+    points_rgb = F.interpolate(images_tensor, size=(vggt_res, vggt_res), mode="bilinear", align_corners=False)
+    points_rgb = (points_rgb.cpu().numpy() * 255).astype(np.uint8).transpose(0, 2, 3, 1)
+    
+    num_frames, height, width, _ = points_3d.shape
+    points_xyf = create_pixel_coordinate_grid(num_frames, height, width)
+    
+    # 🔥 [修改] 动态点云过滤策略 (防止点云为空)
+    # 目标：保留置信度最高的 10万个点 (至少保留一些点)
+    TARGET_POINTS = 100000
+    
+    # 将置信度图展平
+    conf_flat = depth_conf.reshape(-1)
+    
+    # 如果总像素点少于目标数，则只过滤极低信心的点
+    if conf_flat.shape[0] <= TARGET_POINTS:
+        conf_threshold = 0.1
+    else:
+        # 找到第 K 大的置信度值作为阈值
+        # 使用 np.partition 快速找到 Top-K 的分界线
+        # 我们取倒数第 TARGET_POINTS 个位置的值
+        k_idx = conf_flat.shape[0] - TARGET_POINTS
+        conf_threshold = np.partition(conf_flat, k_idx)[k_idx]
+        
+        # 确保阈值至少是 0.1 (过滤掉纯噪声)
+        conf_threshold = max(float(conf_threshold), 0.1)
+
+    print(f"    -> 动态调整置信度阈值: {conf_threshold:.4f} (保留 Top {TARGET_POINTS} 点)")
+    
+    # 生成掩码
+    conf_mask = depth_conf >= conf_threshold
+    
+    points_3d_filtered = points_3d[conf_mask]
+    points_xyf_filtered = points_xyf[conf_mask]
+    points_rgb_filtered = points_rgb[conf_mask]
+    
+    # 生成 PyCOLMAP 重建对象
+    reconstruction = batch_np_matrix_to_pycolmap_wo_track(
+        points_3d_filtered,
+        points_xyf_filtered,
+        points_rgb_filtered,
+        extrinsic,
+        intrinsic,
+        image_size=np.array([vggt_res, vggt_res]),
+        camera_type="PINHOLE"
+    )
+    
+    # 5. 修正相机参数 (Rescale back to original resolution)
+    # 这一步非常重要，因为 VGGT 是在缩放后的方形图上推理的
+    base_image_names = [p.name for p in image_paths]
+    
+    # 引用 demo_colmap.py 中的 rename_colmap_recons_and_rescale_camera 逻辑
+    # 这里为了简洁直接嵌入逻辑
+    for pyimageid in reconstruction.images:
+        pyimage = reconstruction.images[pyimageid]
+        pycamera = reconstruction.cameras[pyimage.camera_id]
+        pyimage.name = base_image_names[pyimageid - 1]
+        
+        # 获取原始尺寸信息
+        # original_coords: [x1, y1, x2, y2, width, height]
+        real_w = original_coords[pyimageid - 1, 4].item()
+        real_h = original_coords[pyimageid - 1, 5].item()
+        max_dim = max(real_w, real_h)
+        
+        # 计算缩放比例: 从 vggt_res (518) 还原到 load_res (1024) 再还原到原始尺寸
+        # 注意：load_and_preprocess_images_square 做了两件事：padding square 和 resize
+        # VGGT 输出的是基于 vggt_res 的参数
+        
+        # 修正逻辑：
+        # VGGT output (518) -> Load Res (1024) -> Original
+        scale_vggt_to_load = load_res / vggt_res
+        
+        # load_res 是对原图做 padding 后 resize 得到的
+        # scale_original_to_load = load_res / max(original_w, original_h)
+        scale_load_to_original = max(real_w, real_h) / load_res
+        
+        total_scale = scale_vggt_to_load * scale_load_to_original
+        
+        # 缩放内参 (focal, cx, cy)
+        pycamera.params *= total_scale
+        
+        # 修正主点 (Principal Point) 偏移
+        # 原始预处理中可能有 padding (left, top)
+        # padding 在 load_res 尺度下是：
+        padding_left_load = original_coords[pyimageid - 1, 0].item()
+        padding_top_load = original_coords[pyimageid - 1, 1].item()
+        
+        # 我们需要在还原后的尺度上减去这个 padding 带来的偏移吗？
+        # demo_colmap.py 的逻辑是：
+        # pred_params[-2:] = real_image_size / 2 (强制设为中心)
+        # 这是一个简化假设，假设主点在中心。VGGT 训练时通常使用了中心裁剪。
+        pycamera.params[2] = real_w / 2.0
+        pycamera.params[3] = real_h / 2.0
+        
+        pycamera.width = int(real_w)
+        pycamera.height = int(real_h)
+        
+        # 如果有点的 2D 观测，也需要 shift，但 batch_np_matrix_to_pycolmap_wo_track 
+        # 生成的 reconstruction 点的 2D 坐标是基于 518 分辨率的
+        # Nerfstudio 训练时会重新投影，或者我们可以忽略 sparse model 里的 2D points 位置，只用相机姿态
+    
+    # 6. 保存
+    output_sparse_dir = Path(output_sparse_dir)
+    output_sparse_dir.mkdir(parents=True, exist_ok=True)
+    reconstruction.write(str(output_sparse_dir))
+    print(f"    -> 结果已保存至: {output_sparse_dir}")
+
 # ================= 主流程 =================
 
 def run_pipeline(video_path, project_name):
@@ -273,9 +489,14 @@ def run_pipeline(video_path, project_name):
     work_dir = LINUX_WORK_ROOT / project_name
     data_dir = work_dir / "data"
     output_dir = work_dir / "outputs"
+    # ...
     transforms_file = data_dir / "transforms.json"
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen" 
+    
+    # 🔥 [新增] 强制修复 setuptools/distutils 冲突
+    env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+    # ...
 
     # [Step 1] 数据处理
     step1_start = time.time()
@@ -402,102 +623,42 @@ def run_pipeline(video_path, project_name):
             raise e
 
     # 3. 手动运行 Feature Extractor (特征提取)
-    # 注意：移除 --SiftExtraction.use_gpu 和 --SiftExtraction.num_threads，因为部分 COLMAP 版本不识别这些参数
-    # 如果编译了 CUDA，COLMAP 默认会自动使用 GPU；线程数也会自动管理
-    run_colmap_step([
-        system_colmap_exe, "feature_extractor",
-        "--database_path", str(database_path),
-        "--image_path", str(extracted_images_dir),
-        "--ImageReader.camera_model", "OPENCV",
-        "--ImageReader.single_camera", "1"
-    ], "[1/4] GPU 特征提取")
+    # [已移除] VGGT 不需要 COLMAP 特征提取
+    # run_colmap_step([ ... ], "[1/4] GPU 特征提取")
 
     # 4. 手动运行 Sequential Matcher (顺序匹配)
-    run_colmap_step([
-        system_colmap_exe, "sequential_matcher",
-        "--database_path", str(database_path),
-        "--SequentialMatching.overlap", "25" 
-    ], "[2/4] GPU 顺序匹配")
+    # [已移除] VGGT 不需要 COLMAP 匹配
+    # run_colmap_step([ ... ], "[2/4] GPU 顺序匹配")
 
-    # 4.5 手动运行 Mapper (稀疏重建) - 必须运行此步才能生成点云和质量报告
-    # 我们需要创建 sparse/0 目录，以符合 Nerfstudio 的标准结构
+    # 4.5 手动运行 Mapper (稀疏重建)
+    # [已移除] VGGT 不需要 COLMAP Mapper
+    # run_colmap_step([ ... ], "[3/4] 稀疏重建 (Mapper)")
+
+    # 修正路径定义
+    colmap_output_dir = data_dir / "colmap"
     sparse_output_dir = colmap_output_dir / "sparse" / "0"
-    sparse_output_dir.mkdir(parents=True, exist_ok=True)
     
-    run_colmap_step([
-        system_colmap_exe, "mapper",
-        "--database_path", str(database_path),
-        "--image_path", str(extracted_images_dir),
-        "--output_path", str(sparse_output_dir)
-    ], "[3/4] 稀疏重建 (Mapper)")
+    # 🔥🔥🔥 替换开始: 使用 VGGT 替代 COLMAP 🔥🔥🔥
+    print(f"\n⚡ [1/4] 使用 VGGT 替代 COLMAP 进行稀疏重建...")
+    try:
+        # 这里的 extracted_images_dir 是你之前清洗好的图片目录
+        run_vggt_pipeline(
+            image_dir=extracted_images_dir,
+            output_sparse_dir=sparse_output_dir,
+            use_ba=False # 初始版本建议 False，速度最快。如果需要更高精度可改为 True (需额外代码)
+        )
+    except Exception as e:
+        print(f"❌ VGGT 运行失败: {e}")
+        return None
+    # 🔥🔥🔥 替换结束 🔥🔥🔥
 
-    print(f"✅ COLMAP 计算完成！正在检查并修正目录结构...")
+    print(f"✅ VGGT 计算完成！")
 
     # =========================================================
     # 🔧 [3.5] 目录结构强力修正 (Auto-Fixer)
-    # 目标：无论 COLMAP 把模型生成在哪里，都强行移动到 {data}/colmap/sparse/0
+    # 由于 VGGT 直接输出到了正确位置，大部分修正逻辑可以跳过
     # =========================================================
     
-    colmap_root = colmap_output_dir  # .../data/colmap
-    sparse_root = colmap_root / "sparse"
-    target_dir_0 = sparse_root / "0"
-    target_dir_0.mkdir(parents=True, exist_ok=True)
-
-    required_files_bin = ["cameras.bin", "images.bin", "points3D.bin"]
-    required_files_txt = ["cameras.txt", "images.txt", "points3D.txt"]
-    
-    model_found = False
-
-    # 1. 检查是不是已经在 sparse/0 (完美情况)
-    if all((target_dir_0 / f).exists() for f in required_files_bin):
-        print("    ✅ 模型文件 (BIN) 位置正确。")
-        model_found = True
-    elif all((target_dir_0 / f).exists() for f in required_files_txt):
-        print("    ✅ 模型文件 (TXT) 位置正确。")
-        model_found = True
-        
-    # 2. 检查是不是在 sparse 根目录 (常见情况) -> 搬运
-    if not model_found:
-        if all((sparse_root / f).exists() for f in required_files_bin):
-            print("    🔧 检测到 BIN 模型在 sparse 根目录，正在归位...")
-            for f in required_files_bin:
-                shutil.move(str(sparse_root / f), str(target_dir_0 / f))
-            model_found = True
-        elif all((sparse_root / f).exists() for f in required_files_txt):
-            print("    🔧 检测到 TXT 模型在 sparse 根目录，正在归位...")
-            for f in required_files_txt:
-                shutil.move(str(sparse_root / f), str(target_dir_0 / f))
-            model_found = True
-
-    # 3. 检查是不是在子目录 (例如 sparse/1 或 sparse/0/0) -> 搬运
-    if not model_found:
-        # 递归搜索所有子目录
-        for root, dirs, files in os.walk(sparse_root):
-            # 检查当前目录是否有 bin 模型
-            if all(f in files for f in required_files_bin):
-                src_path = Path(root)
-                if src_path == target_dir_0: continue # 跳过自己
-                print(f"    🔧 在子目录 {src_path} 找到 BIN 模型，正在归位...")
-                for f in required_files_bin:
-                    shutil.move(str(src_path / f), str(target_dir_0 / f))
-                model_found = True
-                break
-            # 检查当前目录是否有 txt 模型
-            if all(f in files for f in required_files_txt):
-                src_path = Path(root)
-                if src_path == target_dir_0: continue
-                print(f"    🔧 在子目录 {src_path} 找到 TXT 模型，正在归位...")
-                for f in required_files_txt:
-                    shutil.move(str(src_path / f), str(target_dir_0 / f))
-                model_found = True
-                break
-
-    if not model_found:
-        print("❌ [严重错误] 在 sparse 目录下找不到完整的 COLMAP 模型文件！")
-        print("    -> 可能原因：Mapper 失败，未能重建出场景。")
-        # 这里可以选择抛出异常，或者让它继续跑看看日志
-        raise FileNotFoundError("COLMAP Mapper failed to generate valid model files.")
-
     # [3.6] 提前同步图片 (为了让 ns-process-data 能找到)
     print(f"    -> 正在同步图片: raw_images -> data/images ...")
     dest_images_dir = data_dir / "images"

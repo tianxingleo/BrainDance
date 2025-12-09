@@ -372,7 +372,7 @@ def run_pipeline():
         pil_image = Image.open(str(clean_image_path)).convert("RGBA")
         
         # 降采样到 256px 防止 OOM
-        target_size = 256
+        target_size = 512
         orig_w, orig_h = pil_image.size
         if max(orig_w, orig_h) > target_size:
             scale = target_size / max(orig_w, orig_h)
