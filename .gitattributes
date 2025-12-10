@@ -56,6 +56,9 @@
 *.cpp filter=lfs diff=lfs merge=lfs -text
 *.manifest filter=lfs diff=lfs merge=lfs -text
 *.ttc filter=lfs diff=lfs merge=lfs -text
+*.ts filter=lfs diff=lfs merge=lfs -text
+*.vue filter=lfs diff=lfs merge=lfs -text
+*.svg filter=lfs diff=lfs merge=lfs -text
 *.pt !text -filter -merge -diff
 *.pth !text -filter -merge -diff
 *.ckpt !text -filter -merge -diff
@@ -87,10 +90,7 @@
 *.npz !text -filter -merge -diff
 *.parquet !text -filter -merge -diff
 vscode_cli.tar.gz !text -filter -merge -diff
-*.ts filter=lfs diff=lfs merge=lfs -text
-*.vue filter=lfs diff=lfs merge=lfs -text
 *.sh filter=lfs diff=lfs merge=lfs -text
-*.svg filter=lfs diff=lfs merge=lfs -text
 *.hpp filter=lfs diff=lfs merge=lfs -text
 *.rb filter=lfs diff=lfs merge=lfs -text
 *.php filter=lfs diff=lfs merge=lfs -text

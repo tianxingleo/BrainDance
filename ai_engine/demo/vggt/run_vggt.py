@@ -64,7 +64,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES =20 # 🔥 全局最大图片数量限制 (VGGT 显存优化)
+MAX_IMAGES =25 # 🔥 全局最大图片数量限制 (VGGT 显存优化)
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -324,7 +324,7 @@ def run_vggt_pipeline(image_dir, output_sparse_dir, use_ba=False):
         
     # VGGT 默认推理分辨率 518，加载分辨率设为 1024 (保持细节)
     vggt_res = 336
-    load_res = 518 
+    load_res = 1024 
     
     print(f"    -> 正在预处理 {len(image_paths)} 张图片...")
     # images_tensor: (B, 3, H, W), coords: (B, 6) [x1, y1, x2, y2, w, h]
