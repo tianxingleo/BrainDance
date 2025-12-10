@@ -13,8 +13,6 @@ class AppConfig {
   static late Map<String, String> langMap;
 
   static Future<void> loadFromSettings() async {
-    //加载默认数据
-    AppConfig.langMap = Localize.getLangMap(Platform.localeName);
     //加载文件数据
     final dir = await DirFinder.supportDir();
     final path = path_joiner.join(dir, settingsFileName);
@@ -34,6 +32,7 @@ class AppConfig {
   static Future<void> saveToSettings() async {
     final dir = await DirFinder.supportDir();
     final path = path_joiner.join(dir, settingsFileName);
+    await DirSystem.ensureDir(dir);
     List<String> contents = [];
     contents.add(AppConfig.langMap['locale'] ?? 'en_US');
     await FileSystem.writeFile(path, contents);
@@ -43,7 +42,8 @@ String textLocalize(String id) {
   return AppConfig.langMap[id] ?? id;
 }
 void main() async {
-  await AppConfig.loadFromSettings();
+  //加载默认数据
+  AppConfig.langMap = Localize.getLangMap(Platform.localeName);
   runApp(const MyApp());
 }
 
@@ -81,18 +81,19 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  late String _currentTitle;
   @override
   void initState() {
     super.initState();  // 必须调用父类方法
-    _currentTitle = widget.title;  // 2. 用传入的标题初始化
+    _loading();//加载AppConfig
   }
   int _counter = 0;
 
+  void _loading() async {
+    await AppConfig.loadFromSettings();
+    setState(() {});
+  }
   void _incrementCounter() async {
-    String c = await DirFinder.documentsDir();
     setState(() {
-      _currentTitle = "Directory:\n$c";
       _counter += 1;
     });
   }
