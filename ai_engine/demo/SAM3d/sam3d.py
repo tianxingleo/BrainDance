@@ -287,7 +287,7 @@ def run_pipeline():
         pil_image = Image.open(str(target_img_path)).convert("RGBA") # 读取 RGBA 以防万一
         orig_w, orig_h = pil_image.size
         
-        target_size = 512
+        target_size = 800
         if max(orig_w, orig_h) > target_size:
             scale = target_size / max(orig_w, orig_h)
             new_w = int(orig_w * scale)
