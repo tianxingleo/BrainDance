@@ -16,7 +16,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    https: false,
+    https: true,
     // 【✅ 必须添加以下 headers 才能让 3DGS 运行】
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
