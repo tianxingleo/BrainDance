@@ -1,326 +1,330 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import * as THREE from 'three';
-import { SplatMesh } from '@sparkjsdev/spark';
+import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 
 const containerRef = ref(null);
-const isVRMode = ref(false);
-const isAutoRotate = ref(false);
-const isLoading = ref(false);
+const isLoading = ref(true);
+const loadingText = ref("正在准备场景...");
 const isSecureContext = ref(false);
 
-const renderer = shallowRef(null);
-const scene = shallowRef(null);
-const camera = shallowRef(null);
-const controls = shallowRef(null);
-let splatMesh = null;
+// --- 核心变量 ---
+let viewer = null;          
+let particleSystem = null;  
+let controls = null;        
+let animationId = null;
+let clock = new THREE.Clock();
 
-// 2. 初始化核心逻辑 (只调用一次)
-// 2. 初始化核心逻辑
-const initViewer = async () => {
-  if (isLoading.value) return;
-  isLoading.value = true;
+const CONFIG = {
+  filePath: '/models/point_cloud_cleaned.ply',
+  gatherDuration: 3.5,      
+  fadeDuration: 1.5,        
+  colorDuration: 4.0,       
+  particleCount: 50000,     
+};
 
-  try {
-    // --- 清理 ---
-    if (renderer.value) {
-      renderer.value.dispose();
-      renderer.value.forceContextLoss();
-      renderer.value.domElement.remove();
-      renderer.value = null;
-    }
-    if (containerRef.value) containerRef.value.innerHTML = '';
+const state = {
+  phase: 0, 
+  startTime: 0,
+};
 
-    // --- Three.js 基础 ---
-    scene.value = new THREE.Scene();
-    scene.value.background = new THREE.Color(0x202020); // 改为深灰色背景，防止黑色模型看不见
+const modelUniforms = {
+  uColorProgress: { value: 0.0 }, 
+  uOpacity: { value: 0.0 },       
+  uCenter: { value: new THREE.Vector3(0,0,0) }
+};
 
-    const { clientWidth, clientHeight } = containerRef.value;
-    camera.value = new THREE.PerspectiveCamera(70, clientWidth / clientHeight, 0.01, 1000);
-    camera.value.position.set(0, 0, 5);
+// ==========================================
+// 1. 创建替身粒子 (修复 Shader 报错)
+// ==========================================
+const createProxyParticles = (targetCenter, targetRadius) => {
+  const count = CONFIG.particleCount;
+  const geometry = new THREE.BufferGeometry();
+  const positions = [];     
+  const startPositions = [];
+  const endPositions = [];  
+  const colors = [];
 
-    renderer.value = new THREE.WebGLRenderer({ antialias: false });
-    renderer.value.setSize(clientWidth, clientHeight);
-    renderer.value.xr.enabled = true;
-    containerRef.value.appendChild(renderer.value.domElement);
-
-    // --- 🔴 关键修改：直接加载，开启调试模式 ---
-    console.log('🚀 开始标准加载...');
+  for (let i = 0; i < count; i++) {
+    const r = targetRadius * Math.cbrt(Math.random()); 
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
     
-    // 尝试 1：不指定 format，让 Spark 根据后缀自己猜
-    // 如果失败，我们稍后修改这里强制指定 'ksplat' 或 'ply'
-    splatMesh = new SplatMesh('/models/scene.splat', {
-        alphaTest: 0.1,
-        logLevel: 'debug' // 👈 开启 Spark 内部详细日志
-    });
+    const x = targetCenter.x + r * Math.sin(phi) * Math.cos(theta);
+    const y = targetCenter.y + r * Math.sin(phi) * Math.sin(theta);
+    const z = targetCenter.z + r * Math.cos(phi);
+    
+    endPositions.push(x, y, z);
+    positions.push(x, y, z); 
 
-    scene.value.add(splatMesh);
+    const flyDist = 30 + Math.random() * 30;
+    const dir = new THREE.Vector3(x - targetCenter.x, y - targetCenter.y, z - targetCenter.z).normalize();
+    if (dir.length() === 0) dir.set(0,1,0);
+    
+    startPositions.push(
+      targetCenter.x + dir.x * flyDist, 
+      targetCenter.y + dir.y * flyDist, 
+      targetCenter.z + dir.z * flyDist
+    );
 
-    // 等待加载
-    await splatMesh.ready;
-    console.log('✅ 加载过程结束');
+    colors.push(0.6, 0.6, 0.6); 
+  }
 
-    // 🔴 诊断：打印整个对象，看看数据到底在哪
-    console.log('📦 SplatMesh 对象详情:', splatMesh);
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('aStart', new THREE.Float32BufferAttribute(startPositions, 3));
+  geometry.setAttribute('aEnd', new THREE.Float32BufferAttribute(endPositions, 3));
+  // 🔴 修复 1: 改名为 aColor，避免与内置 color 冲突
+  geometry.setAttribute('aColor', new THREE.Float32BufferAttribute(colors, 3));
 
-    // 尝试获取粒子数 (不同版本属性名可能不同)
-    const count = splatMesh.splatCount || splatMesh.count || (splatMesh.geometry ? splatMesh.geometry.getAttribute('position').count : 0);
-    console.log(`📊 粒子数检测: ${count}`);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uProgress: { value: 0.0 }, 
+      uAlpha: { value: 1.0 },    
+      uSize: { value: 3.0 * window.devicePixelRatio }
+    },
+    // 🔴 修复 2: 显式声明所有 attribute
+    vertexShader: `
+      uniform float uProgress;
+      uniform float uSize;
+      
+      attribute vec3 aStart;
+      attribute vec3 aEnd;
+      attribute vec3 aColor; // 显式声明颜色属性
+      
+      varying vec3 vColor;
+      
+      float easeOutCubic(float x) { return 1.0 - pow(1.0 - x, 3.0); }
 
-    if (count > 0) {
-        // 强制修正位置和缩放
-        splatMesh.position.set(0, 0, 0);
-        splatMesh.rotation.set(0, 0, 0);
-        splatMesh.scale.set(1, 1, 1);
-        splatMesh.frustumCulled = false;
+      void main() {
+        vColor = aColor; // 使用自定义的 aColor
         
-        // 自动对焦
-        const box = new THREE.Box3().setFromObject(splatMesh);
-        const center = box.getCenter(new THREE.Vector3());
-        console.log('📏 模型中心:', center);
-        controls.value.target.copy(center);
-        camera.value.lookAt(center);
-    } else {
-        console.warn('⚠️ 粒子数为 0，尝试缩放或检查格式...');
-    }
-
-    // --- 启动循环 ---
-    renderer.value.setAnimationLoop(() => {
-      if (controls.value) controls.value.update();
-      if (renderer.value && scene.value && camera.value) {
-        renderer.value.render(scene.value, camera.value);
+        float t = easeOutCubic(uProgress);
+        vec3 pos = mix(aStart, aEnd, t);
+        
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        
+        gl_PointSize = uSize * (8.0 / -mvPosition.z);
       }
-    });
-
-    setupDesktopControls();
-    adjustControlsToModel();
-    window.addEventListener('resize', onWindowResize);
-
-  } catch (error) {
-    console.error("❌ 错误:", error);
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-// 2.1. 桌面控制器逻辑
-const setupDesktopControls = () => {
-  if (!renderer.value || !camera.value) return;
-  if (controls.value) {
-    controls.value.dispose();
-    controls.value = null;
-  }
-
-  const _controls = new ArcballControls(camera.value, renderer.value.domElement, scene.value);
-  _controls.setGizmosVisible(false);
-  _controls.cursorZoom = true;
-  _controls.adjustNearFar = true;
-  _controls.enableDamping = true;
-  _controls.dampingFactor = 10;
-  _controls.wMax = 10;
-  _controls.radiusFactor = 1.2;
-
-  controls.value = _controls;
-};
-
-// 3. 对焦辅助函数
-const adjustControlsToModel = () => {
-  if (isVRMode.value || !splatMesh) return;
-  setTimeout(() => {
-    const box = new THREE.Box3().setFromObject(splatMesh);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-
-    if (size.length() > 0 && size.length() < Infinity) {
-      if (controls.value) {
-        controls.value.target.copy(center);
-        controls.value.update();
+    `,
+    fragmentShader: `
+      uniform float uAlpha;
+      varying vec3 vColor;
+      void main() {
+        // 圆形裁切
+        vec2 coord = gl_PointCoord - vec2(0.5);
+        if(length(coord) > 0.5) discard;
+        
+        gl_FragColor = vec4(vColor, uAlpha);
       }
+    `,
+    transparent: true,
+    depthWrite: false, 
+    blending: THREE.AdditiveBlending,
+    vertexColors: false // 关闭自动颜色处理，完全手动接管
+  });
 
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const distance = maxDim * 2.0;
-      if (camera.value) {
-        camera.value.position.set(center.x, center.y, center.z + distance);
-        camera.value.lookAt(center);
+  return new THREE.Points(geometry, material);
+};
+
+// ==========================================
+// 2. 注入模型 Shader (稳健版)
+// ==========================================
+const injectModelShader = (mesh) => {
+  const material = mesh.material;
+  material.uniforms = material.uniforms || {};
+  material.uniforms.uColorProgress = modelUniforms.uColorProgress;
+  material.uniforms.uOpacity = modelUniforms.uOpacity;
+  material.uniforms.uCenter = modelUniforms.uCenter;
+
+  const vsHead = `varying vec3 vPos;`;
+  if (!material.vertexShader.includes(vsHead)) {
+    material.vertexShader = vsHead + material.vertexShader;
+    const end = material.vertexShader.lastIndexOf('}');
+    material.vertexShader = material.vertexShader.substring(0, end) + 
+      `vPos = (modelMatrix * vec4(position, 1.0)).xyz;\n}` ;
+  }
+
+  const fsHead = `
+    uniform float uOpacity;
+    uniform float uColorProgress;
+    uniform vec3 uCenter;
+    varying vec3 vPos;
+  `;
+  if (!material.fragmentShader.includes('uniform float uOpacity;')) {
+    material.fragmentShader = fsHead + material.fragmentShader;
+    
+    const end = material.fragmentShader.lastIndexOf('}');
+    const logic = `
+      // 1. 透明度淡入
+      gl_FragColor.a *= uOpacity;
+      
+      // 2. 变色逻辑 (从中心向外变彩)
+      float dist = distance(vPos, uCenter);
+      float colorRadius = uColorProgress * 100.0; 
+      
+      if (dist > colorRadius) {
+         // 变灰
+         float gray = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+         gl_FragColor.rgb = vec3(gray);
       }
-    }
-  }, 100);
+    `;
+    material.fragmentShader = material.fragmentShader.substring(0, end) + logic + '}';
+  }
+  
+  material.needsUpdate = true;
 };
 
-// 4. VR 会话管理
-const onSessionStarted = (session) => {
-  isVRMode.value = true;
-  if (controls.value) {
-    controls.value.dispose();
-    controls.value = null;
-  }
-  session.addEventListener('end', onSessionEnded);
-};
-
-const onSessionEnded = () => {
-  isVRMode.value = false;
-  setupDesktopControls();
-};
-
-const toggleVRMode = async () => {
-  if (!isSecureContext.value) {
-    alert("VR 模式需要 HTTPS 环境或本地 localhost");
-    return;
-  }
-  if (!renderer.value) return;
-
-  if (isVRMode.value) {
-    const session = renderer.value.xr.getSession();
-    if (session) await session.end();
-    return;
-  }
-
+// ==========================================
+// 3. 初始化全流程
+// ==========================================
+const initViewer = async () => {
+  if (containerRef.value) containerRef.value.innerHTML = '';
+  
+  viewer = new GaussianSplats3D.Viewer({
+    'rootElement': containerRef.value,
+    'cameraUp': [0, 1, 0],
+    'initialCameraPosition': [0, 0, 10], 
+    'initialCameraLookAt': [0, 0, 0],
+    'useBuiltInControls': false,         
+    'gpuAcceleratedSort': true,
+    'splatAlphaRemovalThreshold': 5      
+  });
+  
   try {
-    const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor', 'bounded-floor']
+    loadingText.value = "加载模型...";
+    await viewer.addSplatScene(CONFIG.filePath, {
+      'showLoadingUI': false,
+      'progressiveLoad': false,
+      'rotation': [1, 0, 0, 0]
     });
-    renderer.value.xr.setSession(session);
-    onSessionStarted(session);
+    
+    console.log("✅ 模型加载完成");
+    loadingText.value = "";
+    isLoading.value = false;
+
+    const splatMesh = viewer.getSplatMesh();
+    splatMesh.visible = true; 
+    splatMesh.frustumCulled = false;
+    
+    // 计算中心
+    splatMesh.updateMatrixWorld();
+    const center = new THREE.Vector3(0, 0, 0);
+    const radius = 10.0;
+    modelUniforms.uCenter.value.copy(center);
+    
+    // 初始状态：模型透明
+    modelUniforms.uOpacity.value = 0.0; 
+    injectModelShader(splatMesh);
+
+    // 添加粒子
+    particleSystem = createProxyParticles(center, radius);
+    viewer.threeScene.add(particleSystem);
+
+    // 控制器
+    if (controls) controls.dispose();
+    controls = new ArcballControls(viewer.camera, viewer.renderer.domElement, viewer.threeScene);
+    controls.setGizmosVisible(false); // 🔴 关闭红绿蓝球
+    controls.enableDamping = true;
+    
+    viewer.start();
+    state.startTime = clock.getElapsedTime();
+    animate();
+
   } catch (e) {
-    console.error("无法进入 VR:", e);
-    if (e.name === 'NotSupportedError') {
-      alert("未检测到 VR 设备或浏览器不支持 WebXR");
-    } else {
-      alert("无法进入 VR: " + e.message);
-    }
+    console.error("初始化失败", e);
+    loadingText.value = "加载失败: " + e.message;
   }
 };
 
-const toggleAutoRotate = () => {
-  isAutoRotate.value = !isAutoRotate.value;
-  // ArcballControls 没有 autoRotate，这里仅做 UI 状态切换
+// ==========================================
+// 4. 动画循环
+// ==========================================
+const animate = () => {
+  animationId = requestAnimationFrame(animate);
+  
+  const now = clock.getElapsedTime();
+  const time = now - state.startTime;
+  
+  if (controls) controls.update();
+
+  // 1. 聚拢
+  if (time <= CONFIG.gatherDuration) {
+    const p = time / CONFIG.gatherDuration; 
+    if (particleSystem) {
+      particleSystem.material.uniforms.uProgress.value = p;
+      particleSystem.material.uniforms.uAlpha.value = 1.0;
+    }
+    modelUniforms.uOpacity.value = 0.0;
+  }
+  
+  // 2. 融合 (粒子淡出，模型淡入)
+  else if (time <= CONFIG.gatherDuration + CONFIG.fadeDuration) {
+    const fadeP = (time - CONFIG.gatherDuration) / CONFIG.fadeDuration;
+    
+    if (particleSystem) {
+      particleSystem.material.uniforms.uProgress.value = 1.0;
+      particleSystem.material.uniforms.uAlpha.value = 1.0 - fadeP;
+    }
+    modelUniforms.uOpacity.value = fadeP;
+  }
+  
+  // 3. 上色
+  else {
+    if (particleSystem && particleSystem.parent) {
+      particleSystem.parent.remove(particleSystem);
+      particleSystem.geometry.dispose();
+      particleSystem = null; 
+    }
+    
+    modelUniforms.uOpacity.value = 1.0;
+    
+    const colorStartTime = CONFIG.gatherDuration + CONFIG.fadeDuration;
+    const colorP = (time - colorStartTime) / CONFIG.colorDuration;
+    
+    modelUniforms.uColorProgress.value = Math.min(colorP, 1.0);
+  }
 };
 
-// 检查协议
-const checkProtocol = () => {
+const checkProtocol = () => { 
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const isHttps = window.location.protocol === 'https:';
-  isSecureContext.value = isLocal || isHttps;
+  isSecureContext.value = isLocal || window.location.protocol === 'https:';
 };
 
-// 生命周期
-onMounted(() => {
-  if (!containerRef.value) return;
-  checkProtocol();
-  initViewer();
+onMounted(() => { 
+  if (containerRef.value) { 
+    checkProtocol(); 
+    initViewer(); 
+  } 
 });
 
-const onWindowResize = () => {
-  if (camera.value && renderer.value && containerRef.value) {
-    const { clientWidth, clientHeight } = containerRef.value;
-    camera.value.aspect = clientWidth / clientHeight;
-    camera.value.updateProjectionMatrix();
-    renderer.value.setSize(clientWidth, clientHeight);
-  }
-};
-
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', onWindowResize);
-  if (renderer.value) {
-    renderer.value.dispose();
-    renderer.value.forceContextLoss();
-  }
-  if (splatMesh) {
-    splatMesh.dispose();
-    splatMesh = null;
-  }
+  if (animationId) cancelAnimationFrame(animationId);
+  if (viewer) viewer.dispose();
 });
 </script>
 
 <template>
   <div class="app-container">
     <div ref="containerRef" class="viewer-container"></div>
-
     <div v-if="isLoading" class="loading-overlay">
-      正在处理...
+      <div class="loader-text">{{ loadingText }}</div>
     </div>
-
     <div class="controls-ui">
-      <button 
-        v-if="isSecureContext" 
-        @click="toggleVRMode" 
-        :class="{ active: isVRMode }" 
-        :disabled="isLoading"
-      >
-        {{ isVRMode ? '退出 VR' : '进入 VR' }}
-      </button>
-
-      <div v-else class="https-warning">
-        VR不可用 (需HTTPS)
-      </div>
-      
-      <button @click="toggleAutoRotate" :class="{ active: isAutoRotate }" :disabled="isLoading">
-        {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
-      </button>
+      <button v-if="isSecureContext" class="btn">VR 模式</button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.app-container {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-  background-color: #333;
+.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; }
+.viewer-container { width: 100%; height: 100%; }
+.loading-overlay { 
+  position: absolute; inset: 0; background: black; 
+  display: flex; justify-content: center; align-items: center; z-index: 200; 
 }
-.viewer-container {
-  width: 100%;
-  height: 100%;
-}
-.controls-ui {
-  position: absolute;
-  top: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 15px;
-  z-index: 100;
-  align-items: center; /* 保证文字和按钮对齐 */
-}
-.loading-overlay {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.7);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-  font-size: 18px;
-}
-.https-warning {
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 12px;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 8px 12px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 100, 100, 0.3);
-}
-button {
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 10px 20px;
-  border-radius: 20px;
-  font-size: 14px;
-  backdrop-filter: blur(5px);
-  cursor: pointer;
-  transition: all 0.3s;
-}
-button:active { transform: scale(0.95); }
-button.active {
-  background: rgba(34, 197, 94, 0.8);
-  border-color: rgba(34, 197, 94, 1);
-  font-weight: bold;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.loader-text { color: #22c55e; font-family: monospace; font-size: 18px; }
+.controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); z-index: 100; }
+.btn { background: rgba(0,0,0,0.5); border: 1px solid #444; color: white; padding: 8px 16px; border-radius: 20px; }
 </style>
