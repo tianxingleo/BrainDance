@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "@sparkjsdev/spark": "^0.1.10",
     "three": "^0.181.2",
     "vue": "^3.5.25"
   },
