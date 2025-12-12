@@ -1,0 +1,15 @@
+{
+  "shooting_strategy": {
+    "mode": "Orbiting",
+    "is_enclosed": true,
+    "orbit_target": "Single Object",
+    "is_oblique_photography": false,
+    "estimated_focal_length": "Standard"
+  },
+  "quality_assessment": {
+    "noise_level": "Low",
+    "dynamic_obstacles": [],
+    "lighting_condition": "漫反射均匀，局部有键盘背光干扰"
+  },
+  "summary": "在室内桌面上围绕一支白色触控笔进行环绕拍摄，背景为木质桌面和部分电脑外设。拍摄视角多变但均保持稳定，无明显遮挡或动态干扰物。整体光照较暗，主要依赖环境光与键盘背光，存在轻微反光区域。目标物体单一且清晰，适合3D Gaussian Splatting重建。"
+}
