@@ -33,7 +33,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
+MAX_IMAGES = 300 # 🔥 全局最大图片数量限制
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
