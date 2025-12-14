@@ -1,3 +1,4 @@
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path_joiner;
 import 'dart:io';// For Platform.localeName
@@ -8,8 +9,8 @@ class AppConfig {
   static const settingsFileName = "settings.txt";
   static const appName = 'BrainDance';
   static const version = '1.0.0';
-  static Color primaryColor = Colors.blue;
-  static Color accentColor = Colors.orange;
+  static Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
+  static Color accentColor = Color.fromRGBO(232, 234, 220, 1);
   static late Map<String, String> langMap;
 
   static Future<void> loadFromSettings() async {
@@ -53,9 +54,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "title",
+      debugShowCheckedModeBanner: false,
+      title: "Brain Dance",
       theme: ThemeData(
-        colorScheme: .fromSeed(seedColor: AppConfig.accentColor),
+        colorScheme: .fromSeed(seedColor: AppConfig.primaryColor),
       ),
       home: MyHomePage(title : "home_page"),
     );
@@ -118,11 +120,12 @@ class _MyHomePageState extends State<MyHomePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
+      backgroundColor: AppConfig.accentColor,
       appBar: AppBar(
         // TRY THIS: Try changing the color here to a specific color (to
         // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
         // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: AppConfig.primaryColor,//Theme.of(context).colorScheme.inversePrimary
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
         title: Container(
@@ -167,21 +170,24 @@ class _MyHomePageState extends State<MyHomePage> {
             bottom: 16,
             right: 160,
             child:
-              FloatingActionButton(
-                onPressed: _incrementCounter,
-                tooltip: 'Increment',
-                child: const Icon(Icons.add),
-                
+              TDButton(
+                onTap: _incrementCounter,
+                text: '增加按钮',
+                size: TDButtonSize.large,
+                shape: TDButtonShape.rectangle,
+                theme: TDButtonTheme.primary,
               ),
           ),
           Positioned(
             bottom: 16,
             left: 160,
             child:
-              FloatingActionButton(
-                onPressed: _decrementCounter,
-                tooltip: textLocalize("main_2"),
-                child: const Icon(Icons.remove),
+              TDButton(
+                onTap: _decrementCounter,
+                text: '切换按钮',
+                size: TDButtonSize.large,
+                shape: TDButtonShape.rectangle,
+                theme: TDButtonTheme.primary,
               ),
           ),
         ],
