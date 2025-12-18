@@ -12,6 +12,10 @@ import cv2 # 引入OpenCV库
 import re # 引入正则库用于日志分析
 
 import os
+os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+
+import torch
+torch.set_float32_matmul_precision('high') # 开启 TF32 加速
 
 # 🔥【绝杀】强制将编译好的系统级 colmap 路径提到最前面
 # 这样系统找 colmap 时，第一个看到的就是 /usr/local/bin 里的那个好版本

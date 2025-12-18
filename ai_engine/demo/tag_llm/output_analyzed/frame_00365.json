@@ -1,7 +1,0 @@
-{
-  "filename": "frame_00365.jpg",
-  "quality_score": 7,
-  "reason_for_selection": "轻微旋转视角，补充前后方向的视觉信息。",
-  "has_artifacts": false,
-  "description": "触控笔斜放，笔尖朝右上角，桌面纹理清晰，光线分布均匀，适合用于姿态估计。"
-}

@@ -258,7 +258,7 @@ const initViewer = async () => {
     window.viewer = viewer;
 
     // 加载你的模型
-    await viewer.addSplatScene('/models/scene.splat', {
+    await viewer.addSplatScene('/models/scene_auto_sync_raw.ply', {
       'showLoadingUI': true,
       'progressiveLoad': false,
       'rotation': [1, 0, 0, 0],

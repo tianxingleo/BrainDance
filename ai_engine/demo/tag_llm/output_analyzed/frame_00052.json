@@ -1,7 +1,0 @@
-{
-  "filename": "frame_00052.jpg",
-  "quality_score": 8,
-  "reason_for_selection": "包含键盘背光的典型场景，虽有红光干扰但不影响主体识别，可用于光照一致性分析。",
-  "has_artifacts": true,
-  "description": "触控笔位于桌面中央，左侧为红色背光键盘，右侧有鼠标和耳机盒，整体环境真实，可作为光照变化参考帧。"
-}

@@ -1,7 +1,0 @@
-{
-  "filename": "frame_00602.jpg",
-  "quality_score": 10,
-  "reason_for_selection": "正上方俯拍视角，笔体垂直于画面，能提供最佳顶部纹理信息，是关键视角。",
-  "has_artifacts": false,
-  "description": "触控笔竖直放置于桌面中央，笔尖朝上，笔身完全对齐画幅中心，背景为纯木纹桌面，无其他物体干扰，适合用于顶面特征提取。"
-}

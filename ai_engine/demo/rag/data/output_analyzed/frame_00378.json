@@ -1,0 +1,7 @@
+{
+  "filename": "frame_00378.jpg",
+  "quality_score": 7,
+  "reason_for_selection": "补充视角，确保所有方向均有覆盖，避免盲区。",
+  "has_artifacts": false,
+  "description": "触控笔从右上至左下倾斜，笔尖朝左下方，背景含键盘腕托，图像稳定，适合用于SfM流程。"
+}

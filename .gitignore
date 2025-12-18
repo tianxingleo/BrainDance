@@ -130,3 +130,22 @@ ai_engine/**/*.bin
 
 # 忽略 Tensorboard 日志
 ai_engine/runs/
+
+# ChromaDB (最常用的本地向量库)
+chroma_db/
+chroma/
+db/
+*.sqlite3
+
+# FAISS (Facebook AI Similarity Search)
+*.faiss
+*.index
+faiss_index/
+
+# LanceDB
+.lancedb/
+*.lance/
+
+# Qdrant (本地存储)
+storage/
+qdrant_storage/
