@@ -767,7 +767,7 @@ def analyze_and_calculate_adaptive_collider(json_path, force_cull=False, radius_
     except:
         return [], "unknown"
 
-def perform_percentile_culling(ply_path, json_path, output_path):
+def perform_percentile_culling(ply_path, json_path, output_path, keep_percentile=0.9):
     """
     [点云后处理] 基于统计分位数的暴力切割
     功能：去除 Gaussian Splatting 训练后产生在远处的背景伪影。
@@ -790,10 +790,10 @@ def perform_percentile_culling(ply_path, json_path, output_path):
         
         # 3. 计算所有点到中心的距离
         dists_pts = np.linalg.norm(points - center, axis=1)
-        
+
         # [算法逻辑] 确定阈值半径
-        # KEEP_PERCENTILE (0.9) 意味着我们只保留距离中心最近的 90% 的点
-        threshold_radius = np.percentile(dists_pts, KEEP_PERCENTILE * 100)
+        # 2. ✅ 这里修改：使用传入的参数 keep_percentile
+        threshold_radius = np.percentile(dists_pts, keep_percentile * 100)
         
         # 4. 读取不透明度 (Opacity) 并过滤
         # Gaussian Splatting 存储的 opacity 通常经过 sigmoid 激活，需要还原
@@ -1139,7 +1139,12 @@ def run_pipeline(cfg: PipelineConfig):
     
     # 如果是物体模式，执行之前的“分位数切割”函数
     if (scene_type == "object" or cfg.force_spherical_culling) and raw_ply.exists():
-        if perform_percentile_culling(raw_ply, cfg.transforms_file, cleaned_ply):
+        if perform_percentile_culling(
+            raw_ply, 
+            cfg.transforms_file, 
+            cleaned_ply, 
+            keep_percentile=cfg.keep_percentile # <--- 新增这行
+        ):
             final_ply = cleaned_ply
     
     step3_duration = time.time() - step3_start
