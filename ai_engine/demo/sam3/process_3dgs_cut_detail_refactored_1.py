@@ -225,89 +225,63 @@ def get_central_object_prompt(images_dir: Path, sample_count=7):
 # ==============================================================================
 def clean_and_verify_mask(mask, img_name=""):
     """
-    参数:
-        mask (numpy array): 单通道二值图像 (0表示背景, 255表示物体)
-        img_name (str): 用于日志输出的文件名，方便调试
-        
-    返回:
-        tuple: (是否合格 bool, 清洗后的干净Mask, 原因 str)
+    [V4 优化版] 针对细长物体(笔)优化，增加“背景误杀”拦截
     """
-    h, w = mask.shape # 获取图像的高度和宽度
+    h, w = mask.shape
     
-    # --- 1. 连通域分析 & 强制清洗 (Connected Components Analysis) ---
-    # [算法逻辑] 连通组件分析
-    # 将 mask 中所有相连的白色像素归为一个"岛屿" (Component)。
-    # connectivity=8 表示判断像素相连时考虑周围8个方向 (上下左右+对角线)。
-    # stats 矩阵包含每个连通块的统计信息：[左上角x, 左上角y, 宽, 高, 面积]
+    # 1. 连通域分析
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    
-    # num_labels 至少为 2 (背景 label=0 + 至少一个前景块 label=1...)
-    # 如果小于 2，说明全图都是黑的，分割失败
-    if num_labels < 2: 
-        return False, None, "空蒙版"
+    if num_labels < 2: return False, None, "Empty Mask"
 
-    # [算法逻辑] 寻找最大前景块 (Largest Component)
-    # 我们假设画面中最大的那个物体就是我们要的主体，其他的细小碎块都是噪点。
+    # 寻找最大前景块
     max_area = 0
     max_label = -1
-    # 遍历所有标签（从1开始，因为0是背景），找到面积最大的那个
     for i in range(1, num_labels):
         if stats[i, cv2.CC_STAT_AREA] > max_area:
             max_area = stats[i, cv2.CC_STAT_AREA]
             max_label = i
             
-    # [工程化思路] 阈值过滤：如果最大的块面积占比不到全图的 0.5%，说明物体太小或全是噪点
+    # 阈值过滤 1：太小 (噪点)
     if max_area < (h * w * 0.005):
-        return False, None, "主体过小，疑似噪点"
+        return False, None, "Too Small/Noise"
 
-    # 🔥 核心操作：重构 Mask
-    # 创建一个新的干净 Mask，只保留 label 等于 max_label (最大块) 的像素，其余置为 0。
-    # 这步操作能完美去除周围飞溅的"脏东西"。
+    # 🔥 阈值过滤 2 [新增]：太大 (说明割到了桌子/背景)
+    # 如果物体占画面超过 65%，对于一支笔来说是不可能的，肯定是背景
+    if max_area > (h * w * 0.65):
+        return False, None, f"Too Large (Background? {max_area/(h*w):.0%})"
+
     cleaned_mask = (labels == max_label).astype(np.uint8) * 255
 
-    # --- 2. 对清洗后的 Mask 进行“体检” (Verification) ---
-    
-    # [算法逻辑] 轮廓提取 (Find Contours)
-    # RETR_EXTERNAL 只取最外层轮廓，忽略物体内部的孔洞
+    # 2. 几何特征质检
     contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours: return False, None, "清洗后无轮廓"
-    
-    # 取最大轮廓
+    if not contours: return False, None, "No Contour"
     main_cnt = max(contours, key=cv2.contourArea)
-    
-    # [算法逻辑] 实心度 (Solidity) 计算
-    # 凸包 (Convex Hull) 相当于用一根橡皮筋紧紧包住物体的几何形状。
-    # 实心度 = 轮廓面积 / 凸包面积。
-    # 如果物体边缘光滑且形状规则，实心度接近 1.0。
-    # 如果物体有严重的粘连阴影、边缘极其毛糙，轮廓会很不规则，实心度会显著降低。
+
+    # 实心度检查 (放宽一点点)
     hull = cv2.convexHull(main_cnt)
     hull_area = cv2.contourArea(hull)
-    if hull_area == 0: return False, None, "凸包面积为0"
-    
+    if hull_area == 0: return False, None, "Hull Area 0"
     solidity = max_area / hull_area
-    
-    # 阈值设定：0.88 (这是一个经验值，低于此值通常意味着分割质量很差)
-    if solidity < 0.88:
-        return False, None, f"边缘严重毛糙/粘连阴影 (实心度 {solidity:.2f})"
+    if solidity < 0.75: # 从 0.88 放宽到 0.75，允许笔有一些缺口
+        return False, None, f"Rough Edges ({solidity:.2f})"
 
-    # [算法逻辑] 长宽比检查 (Aspect Ratio)
-    # 计算轮廓的外接矩形
+    # 🔥 长宽比检查 [重要修改]
     x, y, w_rect, h_rect = cv2.boundingRect(main_cnt)
-    aspect_ratio = w_rect / h_rect
-    # 防止把长条形的桌子缝隙、墙角线当成物体。如果长宽比超过 4.5:1，认为形状异常。
-    if aspect_ratio > 4.5: 
-        return False, None, f"形状异常 (长宽比 {aspect_ratio:.1f})"
-
-    # 🔥 新增：边缘腐蚀 (Erosion)
-    # [数学形态学] 腐蚀操作
-    # 使用一个 3x3 的卷积核在图像上滑动，只有核覆盖区域全为白色时才保留中心点。
-    # 效果是让白色区域向内收缩一圈 (约 1 像素)。
-    # 目的：切掉物体边缘可能存在的“光晕”或背景杂色，让合成效果更干净。
-    kernel_size = 3 
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    cleaned_mask = cv2.erode(cleaned_mask, kernel, iterations=1)
+    if h_rect == 0: return False, None, "Height 0"
     
-    return True, cleaned_mask, "合格"
+    aspect_ratio = w_rect / h_rect
+    # 如果竖着放，w/h 可能会很小，我们要看长边比短边
+    real_ratio = max(aspect_ratio, 1/aspect_ratio)
+    
+    # 从 4.5 提升到 15.0，允许细长的笔通过
+    if real_ratio > 15.0: 
+        return False, None, f"Bad Ratio ({real_ratio:.1f})"
+
+    # 3. 边缘腐蚀
+    kernel = np.ones((3, 3), np.uint8)
+    cleaned_mask = cv2.erode(cleaned_mask, kernel, iterations=1)
+
+    return True, cleaned_mask, "OK"
 
 # ==============================================================================
 # 函数: get_salient_box
@@ -379,101 +353,71 @@ def get_salient_box(img_path, margin_ratio=0.1):
 # ==============================================================================
 def run_ai_segmentation_pipeline(data_dir: Path):
     """
-    黄金组合流水线：YOLO-World (找框) + SAM 3 (抠图)
-    解决背景溢出问题，恢复边缘锐度。
+    黄金组合 V4: 多点触控保底 + 强力背景抑制 + 比例放宽
     """
     if not HAS_AI: return False
     
+    import logging
+    logging.getLogger("ultralytics").setLevel(logging.ERROR)
+    
     images_dir = data_dir / "images"
     masks_dir = data_dir / "masks"
-    debug_dir = data_dir / "debug_combo" # 新的调试目录
+    debug_dir = data_dir / "debug_combo"
     debug_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
 
     cfg.transforms_file = data_dir / "transforms.json" 
     if not cfg.transforms_file.exists(): return False
 
-    # ================= 1. 获取 Prompt =================
-    print(f"\n✂️ [智能分割] 初始化 (YOLO-World + SAM 3)...")
+    print(f"\n✂️ [智能分割] 初始化 (YOLO V2 + SAM 3 Multi-Point)...")
     try:
         text_prompt = get_central_object_prompt(images_dir)
-        # 💡 优化：去掉介词短语，只保留核心物体，减少YOLO困惑
-        # 例如 "pen on desk" -> "pen"
-        if " on " in text_prompt:
-            text_prompt = text_prompt.split(" on ")[0]
-        if " with " in text_prompt:
-            # 保留 with 也可以，取决于 YOLO-World 的理解，通常短一点更准
-            pass
-    except:
-        text_prompt = "object"
-    
+        if " on " in text_prompt: text_prompt = text_prompt.split(" on ")[0]
+    except: text_prompt = "object"
     if not text_prompt: text_prompt = "object"
     print(f"    🎯 核心 Prompt: '\033[92m{text_prompt}\033[0m'")
 
-    # ================= 2. 加载双模型 =================
-    
-    # A. 加载 YOLO-World (负责找位置)
-    # YOLO-World 非常小且快，能根据文本找框
-    yolo_model_name = "yolov8s-worldv2.pt" # 推荐用 v2 版本
-    yolo_path = cfg.model_root / yolo_model_name
-    
-    # 自动下载/检查 YOLO
-    if not yolo_path.exists():
-        # 如果本地没有，尝试让 ultralytics 下载 (或者你需要手动放进去)
-        print(f"    ⚠️ 未找到 {yolo_path}，尝试使用默认 yolov8s-worldv2.pt")
-        yolo_path = "yolov8s-worldv2.pt" #以此触发自动下载
+    yolo_path = cfg.model_root / "yolov8s-worldv2.pt"
+    if not yolo_path.exists(): yolo_path = "yolov8s-worldv2.pt"
+    sam_path = cfg.model_root / "sam3.pt"
     
     try:
-        print("    -> 加载 YOLO-World (定位器)...")
         det_model = YOLOWorld(str(yolo_path))
-        # 设置 YOLO 寻找的目标
         det_model.set_classes([text_prompt])
-    except Exception as e:
-        print(f"❌ YOLO 加载失败: {e}")
-        return False
-
-    # B. 加载 SAM 3 (负责精细抠图)
-    sam_model_name = "sam3.pt"
-    sam_path = cfg.model_root / sam_model_name
-    try:
-        print("    -> 加载 SAM 3 (手术刀)...")
         sam_model = SAM(str(sam_path))
     except Exception as e:
-        print(f"❌ SAM 3 加载失败: {e}")
+        print(f"❌ 模型加载失败: {e}")
         return False
 
-    # ================= 3. 双阶段推理 =================
-    
     with open(cfg.transforms_file, 'r') as f: meta = json.load(f)
     frames_map = {Path(f["file_path"]).name: f for f in meta["frames"]}
     valid_frames_list = []
     
-    # 获取所有图片
     image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
     total_imgs = len(image_files)
     
     print(f"    -> 开始处理 {total_imgs} 帧...")
-    
     start_time = time.time()
 
     for i, img_path in enumerate(image_files):
         elapsed = time.time() - start_time
         fps = (i + 1) / (elapsed + 1e-6)
+        process_success = False 
         
         try:
+            original_img = cv2.imread(str(img_path))
+            if original_img is None: raise ValueError("无法读取图片")
+            h_real, w_real = original_img.shape[:2]
+
             # --- Step 1: YOLO 找框 ---
-            # conf=0.1: 降低阈值，宁可多找不可漏找，后面有中心点筛选
-            det_results = det_model.predict(img_path, conf=0.1, verbose=False)
-            
-            bboxes = det_results[0].boxes.xyxy.cpu() # 获取所有框
+            det_results = det_model.predict(img_path, conf=0.05, verbose=False) 
+            bboxes = det_results[0].boxes.xyxy.cpu()
             
             final_box = None
+            is_fallback = False 
             
-            # 策略：找最靠近中心的框
             if len(bboxes) > 0:
-                h_img, w_img = det_results[0].orig_shape[:2]
-                center_x, center_y = w_img / 2, h_img / 2
-                
+                center_x, center_y = w_real / 2, h_real / 2
                 min_dist = float('inf')
                 for box in bboxes:
                     bx = (box[0] + box[2]) / 2
@@ -481,103 +425,113 @@ def run_ai_segmentation_pipeline(data_dir: Path):
                     dist = (bx - center_x)**2 + (by - center_y)**2
                     if dist < min_dist:
                         min_dist = dist
-                        final_box = box.unsqueeze(0) # [1, 4]
+                        final_box = box.unsqueeze(0)
             
-            # 如果 YOLO 没找到，使用备用策略 (中心点提示)
-            if final_box is None:
-                # 这种情况下 SAM 效果可能会差，但在视频序列中可以容忍几帧失败
-                # 或者使用上一帧的框（这里为了简化，使用全图中心点）
-                pass 
-
-            # --- Step 2: SAM 3 根据框抠图 ---
+            # --- Step 2: SAM 3 ---
             final_mask = None
-            
             if final_box is not None:
-                # 🔥 关键：传入 bboxes！
-                # SAM 3 收到 bboxes 后，会将注意力严格限制在框内
-                sam_results = sam_model(
-                    img_path, 
-                    bboxes=final_box, 
-                    verbose=False,
-                    device="cuda" if torch.cuda.is_available() else "cpu"
-                )
+                # 方案 A: 有框
+                sam_results = sam_model(img_path, bboxes=final_box, verbose=False)
+            else:
+                # 方案 B: 保底 (多点触控 + 背景抑制)
+                is_fallback = True
+                cx, cy = w_real / 2, h_real / 2
                 
-                if sam_results[0].masks is not None:
-                    final_mask = sam_results[0].masks.data[0].cpu().numpy().astype(np.uint8) * 255
-            
-            # 兜底：如果没Mask，生成全黑
-            if final_mask is None:
-                h, w = cv2.imread(str(img_path)).shape[:2]
-                final_mask = np.zeros((h, w), dtype=np.uint8)
+                # 🔥 关键修改：构建 9 个点
+                # 5个正样本(Label 1): 中心 + 上下左右微偏 (增加打中细长笔的概率)
+                # 4个负样本(Label 0): 图片四个角 (强制 SAM 不选背景)
+                offset = 30 # 偏移量像素
+                input_points = [
+                    [cx, cy], # 中心
+                    [cx-offset, cy], [cx+offset, cy], # 左右
+                    [cx, cy-offset], [cx, cy+offset], # 上下
+                    [0, 0], [w_real, 0], [0, h_real], [w_real, h_real] # 四角背景
+                ]
+                input_labels = [1, 1, 1, 1, 1, 0, 0, 0, 0] # 1是前景，0是背景
+                
+                sam_results = sam_model(img_path, points=input_points, labels=input_labels, verbose=False)
 
-            # --- Step 3: 清洗与保存 (原有逻辑) ---
-            # 日志
-            status_icon = "🎯" if final_box is not None else "⚠️"
-            print(f"       [{i+1}/{total_imgs}] {img_path.name} | {status_icon} Box命中 | ⚡ {fps:.1f} fps   ", end="\r")
+            if sam_results[0].masks is not None:
+                masks_data = sam_results[0].masks.data.cpu().numpy()
+                if masks_data.shape[0] > 0:
+                    areas = np.sum(masks_data, axis=(1, 2))
+                    # 在 Fallback 模式下，我们要小心最大的块可能是桌子
+                    # 但我们在 clean 函数里有 max_area 拦截，所以这里还是取最大
+                    largest_idx = np.argmax(areas)
+                    final_mask = masks_data[largest_idx].astype(np.uint8) * 255
+            
+            if final_mask is None:
+                final_mask = np.zeros((h_real, w_real), dtype=np.uint8)
+
+            # --- Step 3: 清洗与验证 ---
+            status_icon = "🟢" if not is_fallback else "🔵"
+            print(f"       [{i+1}/{total_imgs}] {img_path.name} | {status_icon} | ⚡ {fps:.1f} fps          ", end="\r")
 
             is_good, cleaned_mask, reason = clean_and_verify_mask(final_mask, img_path.name)
 
-            # --- 调试可视化 ---
-            if i % 2 == 0:
-                debug_img = cv2.imread(str(img_path))
-                if debug_img is not None:
-                    # 画 YOLO 的框 (绿色)
-                    if final_box is not None:
-                        x1, y1, x2, y2 = final_box[0].int().tolist()
-                        cv2.rectangle(debug_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    
-                    # 画 SAM 的 Mask (红色半透明)
-                    if is_good:
-                        colored_mask = np.zeros_like(debug_img)
-                        colored_mask[cleaned_mask > 0] = (0, 0, 255)
-                        debug_img = cv2.addWeighted(debug_img, 0.7, colored_mask, 0.3, 0)
-                    else:
-                        cv2.putText(debug_img, f"REJECT: {reason}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            # --- 可视化 ---
+            if i % 2 == 0 or not is_good: 
+                debug_img = original_img.copy()
+                color = (0, 255, 0) if not is_fallback else (255, 100, 0) # 绿色YOLO, 蓝色Point
+                
+                if final_box is not None:
+                    x1, y1, x2, y2 = final_box[0].int().tolist()
+                    cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(debug_img, "YOLO", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                elif is_fallback:
+                    # 画出那5个中心点
+                    cx, cy = int(w_real/2), int(h_real/2)
+                    offset = 30
+                    pts = [(cx, cy), (cx-offset, cy), (cx+offset, cy), (cx, cy-offset), (cx, cy+offset)]
+                    for pt in pts:
+                        cv2.circle(debug_img, (int(pt[0]), int(pt[1])), 5, color, -1)
+                    cv2.putText(debug_img, "MULTI-POINT", (cx-40, cy-40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                    cv2.imwrite(str(debug_dir / f"vis_{img_path.name}"), debug_img)
+                if is_good:
+                    colored_mask = np.zeros_like(debug_img)
+                    colored_mask[cleaned_mask > 0] = (0, 0, 255) 
+                    debug_img = cv2.addWeighted(debug_img, 0.7, colored_mask, 0.3, 0)
+                else:
+                    cv2.putText(debug_img, f"REJECT: {reason}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-            # --- 保存结果 ---
+                cv2.imwrite(str(debug_dir / f"vis_{img_path.name}"), debug_img)
+
+            # --- 保存 ---
             if is_good:
-                original_img = cv2.imread(str(img_path))
-                if original_img is not None:
-                    # 尺寸安全对齐
-                    if cleaned_mask.shape[:2] != original_img.shape[:2]:
-                        cleaned_mask = cv2.resize(cleaned_mask, (original_img.shape[1], original_img.shape[0]), interpolation=cv2.INTER_NEAREST)
-                    
-                    mask_blurred = cv2.GaussianBlur(cleaned_mask, (5, 5), 0)
-                    b, g, r = cv2.split(original_img)
-                    img_bgra = cv2.merge([b, g, r, mask_blurred])
-                    
-                    new_img_path = img_path.with_suffix('.png')
-                    cv2.imwrite(str(new_img_path), img_bgra)
-                    
-                    if img_path.suffix.lower() == '.jpg':
-                        try: img_path.unlink()
-                        except: pass
-                    
-                    cv2.imwrite(str(masks_dir / f"{img_path.stem}.png"), cleaned_mask)
-
-                    if img_path.name in frames_map:
-                        frame_data = frames_map[img_path.name]
-                        frame_data["file_path"] = f"images/{new_img_path.name}"
-                        valid_frames_list.append(frame_data)
-            else:
-                img_path.unlink()
+                if cleaned_mask.shape[:2] != original_img.shape[:2]:
+                    cleaned_mask = cv2.resize(cleaned_mask, (w_real, h_real), interpolation=cv2.INTER_NEAREST)
+                
+                mask_blurred = cv2.GaussianBlur(cleaned_mask, (5, 5), 0)
+                b, g, r = cv2.split(original_img)
+                img_bgra = cv2.merge([b, g, r, mask_blurred])
+                
+                new_img_path = img_path.with_suffix('.png')
+                cv2.imwrite(str(new_img_path), img_bgra)
+                
+                if img_path.name in frames_map:
+                    frame_data = frames_map[img_path.name]
+                    frame_data["file_path"] = f"images/{new_img_path.name}"
+                    valid_frames_list.append(frame_data)
+                process_success = True
 
         except Exception as e:
             print(f"\n❌ Frame {i} Error: {e}")
-            continue
+            process_success = False 
 
-    # 结束
-    print(f"\n\n📊 完成。")
-    print(f"   - 剩余可用: {len(valid_frames_list)}")
+        finally:
+            if img_path.exists() and img_path.suffix.lower() == '.jpg':
+                if process_success:
+                    try: img_path.unlink() 
+                    except: pass
+                else:
+                    try: img_path.unlink()
+                    except: pass
 
+    print(f"\n\n📊 完成。剩余可用: {len(valid_frames_list)}")
     if len(valid_frames_list) == 0: return False
 
     meta["frames"] = valid_frames_list
-    with open(cfg.transforms_file, 'w') as f:
-        json.dump(meta, f, indent=4)
-        
+    with open(cfg.transforms_file, 'w') as f: json.dump(meta, f, indent=4)
     return True
 
 # ================= 辅助工具 =================
