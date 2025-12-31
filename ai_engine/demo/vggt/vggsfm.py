@@ -12,10 +12,6 @@ import cv2 # 引入OpenCV库
 import re # 引入正则库用于日志分析
 
 import os
-os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
-
-import torch
-torch.set_float32_matmul_precision('high') # 开启 TF32 加速
 
 # 🔥【绝杀】强制将编译好的系统级 colmap 路径提到最前面
 # 这样系统找 colmap 时，第一个看到的就是 /usr/local/bin 里的那个好版本
@@ -37,7 +33,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
+MAX_IMAGES = 600 # 🔥 全局最大图片数量限制
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -266,6 +262,62 @@ def perform_percentile_culling(ply_path, json_path, output_path):
 
 # ================= 主流程 =================
 
+# ================= 新增：VGGSfM 封装函数 =================
+def run_vggsfm_wrapper(image_dir, output_colmap_dir, env):
+    """
+    使用 VGGSfM 替代传统的 COLMAP 流程
+    """
+    print(f"\n🚀 [VGGSfM] 正在启动深度学习 SfM 引擎...")
+    
+    # VGGSfM 的根目录 (请根据你的实际安装位置修改)
+    VGGSFM_ROOT = Path.home() / "braindance_workspace/vggsfm"
+    if not VGGSFM_ROOT.exists():
+        print(f"❌ 未找到 VGGSfM 目录: {VGGSFM_ROOT}")
+        print("   -> 请先 clone: git clone https://github.com/facebookresearch/vggsfm.git")
+        raise FileNotFoundError("VGGSfM not installed")
+
+    # 构造命令
+    # VGGSfM 一般使用 demo.py 或类似入口进行推理
+    # 假设你已经配好了名为 'vggsfm_env' 的 conda 环境，或者当前环境已安装依赖
+    # 注意：VGGSfM 默认输出就是 colmap 格式 (cameras.bin, images.bin, points3D.bin)
+    
+    cmd = [
+        "python", str(VGGSFM_ROOT / "demo.py"),
+        "--image_dir", str(image_dir),
+        "--output_dir", str(output_colmap_dir),
+        # 其它可选参数，根据显存调整
+        # "--max_images", str(MAX_IMAGES), 
+        # "--query_frame_num", "10" 
+    ]
+
+    print(f"    -> 执行命令: {' '.join(cmd)}")
+    
+    try:
+        # 建议在一个单独的 Process 中运行，甚至可以切换 conda 环境
+        # 这里假设当前 python 环境或者系统 PATH 里的 python 能跑 VGGSfM
+        subprocess.run(cmd, check=True, env=env)
+        print("✅ VGGSfM 计算完成！")
+        
+        # 检查输出
+        # VGGSfM 输出通常在 output_dir/colmap_reconstruction 或类似子目录
+        # 我们需要确保它符合 sparse/0 的结构
+        sparse_0 = output_colmap_dir / "sparse" / "0"
+        sparse_0.mkdir(parents=True, exist_ok=True)
+        
+        # 简单的搬运逻辑：VGGSfM 的输出可能直接在 output_dir 下
+        for filename in ["cameras.bin", "images.bin", "points3D.bin"]:
+            src = output_colmap_dir / filename
+            if src.exists():
+                shutil.move(str(src), str(sparse_0 / filename))
+            else:
+                # 某些版本可能输出在子文件夹
+                pass 
+                
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ VGGSfM 运行失败: {e}")
+        return False
+
 def run_pipeline(video_path, project_name):
     # --- 全局计时开始 ---
     global_start_time = time.time()
@@ -358,29 +410,9 @@ def run_pipeline(video_path, project_name):
     shutil.rmtree(temp_dir) # 删掉脏区，防止混淆
 
     # =========================================================
-    # 🚀 COLMAP 启动
+    # 🚀 VGGSfM 启动 (替换原 COLMAP 部分)
     # =========================================================
     
-    print(f"    ✅ 准备启动 COLMAP (Linux GPU 模式)...")
-    
-    # 数据库路径
-    colmap_output_dir = data_dir / "colmap"
-    colmap_output_dir.mkdir(parents=True, exist_ok=True)
-    database_path = colmap_output_dir / "database.db"
-    
-    # 绝对路径调用
-    system_colmap_exe = "/usr/local/bin/colmap" 
-    
-    # 双重保险：检查文件是否存在
-    if not os.path.exists(system_colmap_exe):
-        # shutil 已在文件头部导入，直接使用
-        found_path = shutil.which("colmap")
-        if found_path and "conda" not in found_path:
-            system_colmap_exe = found_path
-            print(f"    ⚠️ 警告: /usr/local/bin/colmap 不存在，尝试使用: {system_colmap_exe}")
-        else:
-            pass
-
     full_log_content = []
 
     def run_colmap_step(cmd, step_desc):
@@ -405,41 +437,25 @@ def run_pipeline(video_path, project_name):
             print(f"\n❌ {step_desc} 执行异常: {e}")
             raise e
 
-    # 3. 手动运行 Feature Extractor (特征提取)
-    # 注意：移除 --SiftExtraction.use_gpu 和 --SiftExtraction.num_threads，因为部分 COLMAP 版本不识别这些参数
-    # 如果编译了 CUDA，COLMAP 默认会自动使用 GPU；线程数也会自动管理
-    run_colmap_step([
-        system_colmap_exe, "feature_extractor",
-        "--database_path", str(database_path),
-        "--image_path", str(extracted_images_dir),
-        "--ImageReader.camera_model", "OPENCV",
-        "--ImageReader.single_camera", "1"
-    ], "[1/4] GPU 特征提取")
-
-    # 4. 手动运行 Sequential Matcher (顺序匹配)
-    run_colmap_step([
-        system_colmap_exe, "sequential_matcher",
-        "--database_path", str(database_path),
-        "--SequentialMatching.overlap", "25" 
-    ], "[2/4] GPU 顺序匹配")
-
-    # 4.5 手动运行 Mapper (稀疏重建) - 必须运行此步才能生成点云和质量报告
-    # 我们需要创建 sparse/0 目录，以符合 Nerfstudio 的标准结构
-    sparse_output_dir = colmap_output_dir / "sparse" / "0"
-    sparse_output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"    ✅ 准备启动 VGGSfM (Deep Learning SfM)...")
     
-    run_colmap_step([
-        system_colmap_exe, "mapper",
-        "--database_path", str(database_path),
-        "--image_path", str(extracted_images_dir),
-        "--output_path", str(sparse_output_dir)
-    ], "[3/4] 稀疏重建 (Mapper)")
+    colmap_output_dir = data_dir / "colmap"
+    colmap_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # --- 调用 VGGSfM ---
+    # ⚠️ 注意：这里假设你已经解决了环境依赖问题
+    # 如果 VGGSfM 需要独立的 Conda 环境，你可能需要用 "conda run -n vggsfm python ..." 方式调用
+    
+    success = run_vggsfm_wrapper(extracted_images_dir, colmap_output_dir, env)
+    
+    if not success:
+        print("🛑 VGGSfM 失败，任务终止。")
+        return None
 
-    print(f"✅ COLMAP 计算完成！正在检查并修正目录结构...")
+    print(f"✅ SfM 计算完成！正在检查并修正目录结构...")
 
     # =========================================================
-    # 🔧 [3.5] 目录结构强力修正 (Auto-Fixer)
-    # 目标：无论 COLMAP 把模型生成在哪里，都强行移动到 {data}/colmap/sparse/0
+    # 🔧 [3.5] 目录结构强力修正 (逻辑保持不变，用于兜底)
     # =========================================================
     
     colmap_root = colmap_output_dir  # .../data/colmap
@@ -502,7 +518,7 @@ def run_pipeline(video_path, project_name):
         # 这里可以选择抛出异常，或者让它继续跑看看日志
         raise FileNotFoundError("COLMAP Mapper failed to generate valid model files.")
 
-    # [3.6] 提前同步图片 (为了让 ns-process-data 能找到)
+    # [3.6] 提前同步图片 (保持不变)
     print(f"    -> 正在同步图片: raw_images -> data/images ...")
     dest_images_dir = data_dir / "images"
     dest_images_dir.mkdir(parents=True, exist_ok=True)
@@ -515,70 +531,24 @@ def run_pipeline(video_path, project_name):
         shutil.copy2(str(img_path), str(dest_images_dir / img_path.name))
     print(f"    ✅ 已同步 {len(valid_images)} 张图片。")
 
-    print(f"✅ 数据准备就绪！正在生成 transforms.json (用于后续切割)...")
+    print(f"✅ 数据准备就绪！正在生成 transforms.json...")
 
-    # 5. 运行 ns-process-data (生成 transforms.json)
-    # 修正：--data 指向 data/images，--output-dir 指向 data
-    # 这样它会在 data/colmap 找模型，在 data/images 找图片
+    # 5. 运行 ns-process-data (关键修改)
+    # 因为 VGGSfM 已经生成了 sparse 模型，我们只需要 ns-process-data 做格式转换
+    # 必须加上 --skip-colmap 确保它不会重新跑 COLMAP
     run_colmap_step([
         "ns-process-data", "images", 
             "--data", str(dest_images_dir), 
             "--output-dir", str(data_dir), 
             "--verbose", 
-            "--skip-colmap", 
+            "--skip-colmap", # <--- 关键：告诉 Nerfstudio 不要再跑 COLMAP 了
             "--skip-image-processing", 
             "--num-downscales", "0"
     ], "[4/4] 生成 transforms.json")
-    # --- 质量检测逻辑 ---
-    full_log = "".join(full_log_content)
-    
-    # 1. 检测 "No convergence"
-    if "Termination : No convergence" in full_log:
-        print("\n❌ [严重错误] COLMAP 无法收敛 (No convergence)！")
-        
-        # 用户要求：输出百分比而不是看不懂的 px 误差
-        # 尝试提取匹配率
-        match_pct = re.search(r"COLMAP only found poses for (\d+\.?\d*)% of the images", full_log)
-        if match_pct:
-            print(f"    -> 成功注册图片比例: {match_pct.group(1)}% (质量过低)")
-        else:
-            # 备选方案：从日志中抓取注册数量并手动计算
-            # COLMAP 日志通常包含 "Registered images ... X"
-            reg_match = re.findall(r"Registered images.*?(\d+)", full_log)
-            if reg_match:
-                # 取最后一个匹配到的数量（因为可能有多次迭代）
-                registered_count = int(reg_match[-1])
-                ratio = (registered_count / num_images) * 100 if num_images > 0 else 0
-                print(f"    -> 成功注册图片: {registered_count}/{num_images} ({ratio:.2f}%)")
-            
-        print("🛑 任务已终止，因为生成的稀疏点云质量无法满足训练要求。")
-        
-        # 清理 Linux 临时文件
-        if work_dir.exists():
-            shutil.rmtree(work_dir)
-            print(f"🧹 清理完成: 已删除工作区 {work_dir}")
-        return None
-
-    # 2. 检测匹配率过低
-    # 示例日志: COLMAP only found poses for 10.00% of the images. This is low.
-    match = re.search(r"COLMAP only found poses for (\d+\.?\d*)% of the images", full_log)
-    if match:
-        matched_percentage = float(match.group(1))
-        print(f"\n📊 COLMAP 匹配率检测: {matched_percentage:.2f}%")
-        
-        if matched_percentage < 35.0:
-            print(f"❌ [质量警告] 匹配率过低 (< 35%)！")
-            print("    -> 这意味着大部分图片无法被定位，生成的 3D 场景将严重残缺。")
-            print("🛑 任务已终止。建议：增加图片数量、保证图片清晰度或增加重叠率。")
-            
-            # 清理 Linux 临时文件
-            if work_dir.exists():
-                shutil.rmtree(work_dir)
-                print(f"🧹 清理完成: 已删除工作区 {work_dir}")
-            return None
 
     step1_duration = time.time() - step1_start
     print(f"⏱️ [Step 1 完成] 耗时: {format_duration(step1_duration)}")
+
 
     # [Step 2] 训练
     step2_start = time.time()
@@ -602,7 +572,7 @@ def run_pipeline(video_path, project_name):
             "--pipeline.model.random-init", "False", 
             "--pipeline.model.cull-alpha-thresh", "0.005", 
             *collider_args,
-            "--max-num-iterations", "15000", 
+            "--max-num-iterations", "25000", 
             "--vis", "viewer+tensorboard", 
             "--viewer.quit-on-train-completion", "True", 
             

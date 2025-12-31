@@ -11,25 +11,10 @@ import logging
 import cv2 # 引入OpenCV库
 import re # 引入正则库用于日志分析
 
-import os
-os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
-
-import torch
-torch.set_float32_matmul_precision('high') # 开启 TF32 加速
-
-# 🔥【绝杀】强制将编译好的系统级 colmap 路径提到最前面
-# 这样系统找 colmap 时，第一个看到的就是 /usr/local/bin 里的那个好版本
-sys_path = "/usr/local/bin"
-current_path = os.environ.get("PATH", "")
-
-if sys_path not in current_path.split(os.pathsep)[0]: # 如果不在第一位
-    print(f"⚡ [环境修正] 强制设置 PATH 优先级: {sys_path} -> Priority High")
-    os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
-
-# 验证一下
-import shutil
+# 自动查找可用的 COLMAP，可在 Conda env 下使用
 colmap_loc = shutil.which("colmap")
-print(f"🧐 [自检] 当前脚本使用的 COLMAP 路径: {colmap_loc}")
+print(f"🧐 [自检] 当前使用的 COLMAP: {colmap_loc}")
+# 确保它指向 /home/ltx/miniconda3/envs/vggt/bin/colmap
 
 # 设置日志级别
 logging.getLogger('nerfstudio').setLevel(logging.ERROR) 
@@ -37,7 +22,7 @@ logging.getLogger('nerfstudio').setLevel(logging.ERROR)
 # ================= 🔧 用户配置 (暴力裁剪版) =================
 LINUX_WORK_ROOT = Path.home() / "braindance_workspace"
 SCENE_RADIUS_SCALE = 1.8 
-MAX_IMAGES = 200 # 🔥 全局最大图片数量限制
+MAX_IMAGES = 350 # 🔥 全局最大图片数量限制
 
 # ================= 辅助工具：时间格式化 =================
 def format_duration(seconds):
@@ -279,7 +264,9 @@ def run_pipeline(video_path, project_name):
     output_dir = work_dir / "outputs"
     transforms_file = data_dir / "transforms.json"
     env = os.environ.copy()
-    env["QT_QPA_PLATFORM"] = "offscreen" 
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    # 强制解决 setuptools/distutils 冲突
+    env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
 
     # [Step 1] 数据处理
     step1_start = time.time()
@@ -368,18 +355,19 @@ def run_pipeline(video_path, project_name):
     colmap_output_dir.mkdir(parents=True, exist_ok=True)
     database_path = colmap_output_dir / "database.db"
     
-    # 绝对路径调用
-    system_colmap_exe = "/usr/local/bin/colmap" 
+    # ================= 修正开始 =================
+    # 优先查找系统路径中的 colmap (Conda 环境优先)
+    system_colmap_exe = shutil.which("colmap")
     
-    # 双重保险：检查文件是否存在
-    if not os.path.exists(system_colmap_exe):
-        # shutil 已在文件头部导入，直接使用
-        found_path = shutil.which("colmap")
-        if found_path and "conda" not in found_path:
-            system_colmap_exe = found_path
-            print(f"    ⚠️ 警告: /usr/local/bin/colmap 不存在，尝试使用: {system_colmap_exe}")
+    # 如果找不到，再尝试硬编码路径
+    if not system_colmap_exe:
+        if os.path.exists("/usr/local/bin/colmap"):
+            system_colmap_exe = "/usr/local/bin/colmap"
         else:
-            pass
+            raise FileNotFoundError("❌ 无法找到 colmap 可执行文件，请确保已安装！")
+    
+    print(f"🎯 [执行引擎] 锁定 COLMAP: {system_colmap_exe}")
+    # ================= 修正结束 =================
 
     full_log_content = []
 
@@ -423,17 +411,24 @@ def run_pipeline(video_path, project_name):
         "--SequentialMatching.overlap", "25" 
     ], "[2/4] GPU 顺序匹配")
 
-    # 4.5 手动运行 Mapper (稀疏重建) - 必须运行此步才能生成点云和质量报告
-    # 我们需要创建 sparse/0 目录，以符合 Nerfstudio 的标准结构
-    sparse_output_dir = colmap_output_dir / "sparse" / "0"
-    sparse_output_dir.mkdir(parents=True, exist_ok=True)
+    # 4.5 运行 GLOMAP Mapper (全局重建)
+    # 注意: GLOMAP 会在输出路径下自动创建 '0' 子目录，无需手动创建
+    glomap_output_dir = colmap_output_dir / "sparse"
+    glomap_output_dir.mkdir(parents=True, exist_ok=True)
     
+    # 尝试查找 GLOMAP 可执行文件
+    system_glomap_exe = shutil.which("glomap")
+    if not system_glomap_exe:
+        system_glomap_exe = "/usr/local/bin/glomap"
+    
+    print(f"🚀 切换至 GLOMAP 引擎: {system_glomap_exe}")
+
     run_colmap_step([
-        system_colmap_exe, "mapper",
+        system_glomap_exe, "mapper",
         "--database_path", str(database_path),
         "--image_path", str(extracted_images_dir),
-        "--output_path", str(sparse_output_dir)
-    ], "[3/4] 稀疏重建 (Mapper)")
+        "--output_path", str(glomap_output_dir)
+    ], "[3/4] GLOMAP 全局重建")
 
     print(f"✅ COLMAP 计算完成！正在检查并修正目录结构...")
 
