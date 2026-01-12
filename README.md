@@ -2,8 +2,6 @@
 
 # 🕯️ BrainDance | 流光 · 记
 
-### (Project: Anti-Entropy)
-
 **“物理世界注定走向无序，而我们在比特世界重建永恒。”**
 
 “——这是物理世界的搜索引擎，第二大脑的空间可视化。”
@@ -13,6 +11,8 @@
 ### 🏆 面向空间计算时代的三维语义记忆引擎
 
 #### An Anti-Entropy Engine for Human Memory
+
+![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue)
 
 </div>
 
@@ -85,23 +85,24 @@ BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文
 
 ### 🛠️ 技术架构与实现 (Technical Architecture)
 
-本项目采用 **Mobile-Cloud-Mobile (M-C-M)** 闭环架构，解决了移动端算力不足以进行高质量 3DGS 重建的核心矛盾，同时通过混合管线实现了极速推理与语义交互。
+本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建的全自动化流程。
 
-#### 1. 全栈技术选型 (Tech Stack)
+系统由三部分组成，通过 **Supabase** 进行解耦：
 
-| **模块**             | **关键技术栈**                                         | **核心职责**                                                 |
-| -------------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
-| **Mobile (Client)**  | **Flutter**, **ARCore/ARKit**, **WebGL/Vulkan**        | 负责视频流采集、轻量级 PLY 模型渲染与交互。                  |
-| **Backend (Server)** | **Go (Golang)**, **Gin**, **Redis**, **MySQL**         | 负责高并发任务调度、用户鉴权、大文件分片上传与任务队列管理。 |
-| **AI Engine (Core)** | **Python**, **Nerfstudio**, **LangChain**, **PyTorch** | 负责 3D Gaussian Splatting 训练、Splatfacto 模型推理、CLIP 语义场向量化。 |
-| **Infra (DevOps)**   | **Docker**, **Nginx**, **GPU Cluster**                 | 负责容器化部署与 GPU 算力池的动态分配。                      |
+1.  **Client (Flutter)**: 
+    - 负责视频采集与上传。
+    - 直接连接 Supabase Storage/DB，无中间件。
+    - 通过 Realtime 监听任务进度。
+2.  **BaaS (Supabase)**:
+    - **PostgreSQL**: 核心数据库，通过 **RLS (行级安全策略)** 保证数据隔离。
+    - **Storage**: 存储原始视频 (Raw) 和训练好的模型 (PLY/Splat)。
+    - **Auth**: 管理用户身份。
+3.  **Worker (Python)**:
+    - 部署在 WSL/Linux 显卡服务器上。
+    - 监听数据库的任务队列，自动拉取视频进行 3DGS 训练。
+    - 集成 LangChain + ChromaDB 实现多模态 RAG。
 
-#### 2. 空间 RAG 引擎 (Spatial Semantic Engine)
 
-实现了“像搜索文字一样搜索现实世界”的核心逻辑：
-
-1. **多模态打标**：使用 **Multimodal LLM ** 对视频关键帧进行密集语义理解。
-2. **向量检索**：利用 **LangChain + ChromaDB** 构建空间语义索引，响应用户的自然语言查询（如“我的药放在哪里了？”）。
 
 ------
 
