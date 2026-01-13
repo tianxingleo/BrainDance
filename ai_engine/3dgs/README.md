@@ -1,54 +1,50 @@
-### 📂 推荐目录结构 (Directory Structure)
+BrainDance/
+├── main.py                    # [入口] 实例化主 Pipeline 并运行
+├── config.yaml
+├── src/
+    ├── __init__.py
+    ├── core/                  # [核心数据]
+    │   ├── __init__.py
+    │   └── context.py         # 定义 PipelineContext (包含 3D 和 RAG 的所有数据字段)
+    │
+    ├── modules/               # [原子工具] (只会干具体的活，不知道流程)
+    │   ├── __init__.py
+    │   ├── reconstruction/    # 3D 相关工具
+    │   │   ├── colmap.py
+    │   │   └── nerfstudio.py
+    │   └── rag/               # RAG 相关工具
+    │       ├── vector_db.py
+    │       ├── llm_client.py
+    │       └── text_splitter.py
+    │
+    └── pipelines/             # [流程编排] (负责组装工具)
+        ├── __init__.py
+        ├── base.py            # [基类] 定义所有 Pipeline 的标准行为
+        ├── main_pipeline.py   # [总指挥] BrainDance 总流程
+        │
+        └── sub_pipelines/     # [子流程]
+            ├── __init__.py
+            ├── recon_pipe.py  # 3D 重建子流水线
+            └── rag_pipe.py    # RAG 知识库子流水线
 
-Plaintext
 
-```
-ai_engine/
-├── config/                 # [配置层] 全局配置与环境变量
+BrainDance/
+├── main.py                    # [入口] 只留最后那十几行启动代码
+├── src/
 │   ├── __init__.py
-│   ├── settings.py         # 加载 .env，定义路径、超参数 (TRAIN_ITERATIONS等)
-│   └── logging_config.py   # 日志格式定义 (文件+控制台输出)
-│
-├── core/                   # [核心域] 具体的业务算法逻辑 (与外部设施解耦)
-│   ├── reconstruction/     # -> 分支 A: 3D 重建相关
+│   ├── config.py              # [配置] 存放 PipelineConfig
+│   ├── core/                  # [核心]
 │   │   ├── __init__.py
-│   │   ├── colmap_runner.py  # 封装 Colmap 命令行调用
-│   │   ├── nerfstudio_runner.py # 封装 ns-train 训练命令
-│   │   └── analyzer.py       # 场景分析 (Sparse点云分析，确定裁剪框)
-│   │
-│   └── semantic/           # -> 分支 B: 语义理解相关 (RAG)
+│   │   └── pipeline.py        # [流程] 存放 run_pipeline 函数
+│   ├── modules/               # [业务类] 存放那几个大 Class
+│   │   ├── __init__.py
+│   │   ├── ai_segmentor.py    # 存放 AISegmentor + get_central_object_prompt
+│   │   ├── glomap_runner.py   # 存放 GlomapRunner
+│   │   ├── image_proc.py      # 存放 ImageProcessor
+│   │   └── nerf_engine.py     # 存放 NerfstudioEngine
+│   └── utils/                 # [工具函数] 存放 def 开头的纯算法函数
 │       ├── __init__.py
-│       ├── frame_extractor.py # OpenCV 抽帧逻辑
-│       ├── vlm_client.py     # 多模态大模型 API 客户端 (阿里/OpenAI)
-│       └── vector_store.py   # ChromaDB 增删改查封装
-│
-├── infrastructure/         # [基础设施层] 外部服务适配器
-│   ├── __init__.py
-│   ├── minio_client.py     # MinIO 上传/下载/预签名封装
-│   ├── redis_client.py     # Redis 连接池与队列操作
-│   └── db_models.py        # (可选) 如果 Python 直连 MySQL，定义 ORM 模型
-│
-├── pipelines/              # [流程层] 业务流程编排 (Orchestration)
-│   ├── __init__.py
-│   ├── base_pipeline.py    # 定义 Pipeline 基类 (错误处理、状态回调)
-│   └── task_processor.py   # 核心处理流：下载 -> 并行(3DGS, RAG) -> 上传 -> 回调
-│
-├── schemas/                # [协议层] 数据模型定义 (Pydantic)
-│   ├── __init__.py
-│   └── task_payload.py     # 定义 Redis 任务 JSON 的结构验证
-│
-├── utils/                  # [工具层] 通用工具
-│   ├── __init__.py
-│   ├── file_utils.py       # 文件清理、路径检查
-│   ├── process_utils.py    # subprocess.run 的封装 (捕获日志)
-│   └── gpu_utils.py        # 显存检测、GPU 锁 (防止多任务冲突)
-│
-├── main.py                 # [入口] 程序启动入口 (Worker Loop)
-├── requirements.txt        # 依赖清单
-├── Dockerfile              # 容器化构建文件
-└── .env                    # 环境变量 (不要提交到 Git)
-```
-
-------
-
-### 
+│       ├── common.py          # 存放 format_duration
+│       ├── cv_algorithms.py   # 存放 clean_and_verify_mask, get_salient_box
+│       ├── geometry.py        # 存放 analyze_and_calculate_adaptive_collider
+│       └── ply_utils.py       # 存放 perform_percentile_culling
