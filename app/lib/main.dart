@@ -4,7 +4,7 @@ import 'package:path/path.dart' as path_joiner;
 import 'dart:io';// For Platform.localeName
 import 'language.dart';
 import 'dir_and_file.dart';
-
+//App基础设置
 class AppConfig {
   static const settingsFileName = "settings.txt";
   static const appName = 'BrainDance';
@@ -42,12 +42,7 @@ class AppConfig {
 String textLocalize(String id) {
   return AppConfig.langMap[id] ?? id;
 }
-void main() async {
-  //加载默认数据
-  AppConfig.langMap = Localize.getLangMap(Platform.localeName);
-  runApp(const MyApp());
-}
-
+//App定义
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -59,138 +54,205 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: AppConfig.primaryColor),
       ),
-      home: MyHomePage(title : "home_page"),
+      initialRoute: '/',  // 初始路由路径
+      routes: {  // 路由表：路径 -> 页面构建器
+        '/': (context) => MainScreen(),  // 根路径对应主屏幕
+        '/example': (context) => RecallPage(),  // "/example"路径对应....
+      },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+void main() async {
+  //加载默认数据
+  AppConfig.langMap = Localize.getLangMap(Platform.localeName);
+  runApp(const MyApp());
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+
+//主屏幕
+class MainScreen extends StatefulWidget {  // 主屏幕StatefulWidget
+  @override
+  State<MainScreen> createState() => _MainScreenState();  // 创建状态
+}
+//4大页面
+class RecallPage extends StatefulWidget {
+  const RecallPage({super.key});
+
+  @override
+  State<RecallPage> createState() => _RecallPageState();
+}
+class RecordPage extends StatelessWidget {
+  const RecordPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Record Page'),
+      ),
+      body: Center(
+        child: Text('This is the Record Page'),
+      ),
+    );
+  }
+}
+class GeneratePage extends StatelessWidget {
+  const GeneratePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Generate Page'),
+      ),
+      body: Center(
+        child: Text('This is the Generate Page'),
+      ),
+    );
+  }
+}
+class SettingsPage extends StatefulWidget {
+  final VoidCallback? onLanguageChanged;
+  const SettingsPage({super.key, this.onLanguageChanged});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();  // 创建状态
+}
+//占位页面
+class LoadingPage extends StatelessWidget {
+  const LoadingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Text('Now Loading...'),
+      ),
+    );
+  }
+}
+
+
+//主屏幕导航
+class _MainScreenState extends State<MainScreen> {
+  int _currentIndex = 0;  // 当前选中的底部导航索引
+  bool isLoading = true; //加载状态
+  
+  late final List<Widget> _pages = [  // 页面列表
+    RecallPage(),      // 页面0: 主页：过往回忆
+    RecordPage(),    // 页面1: 相机记录
+    GeneratePage(),   // 页面2: 图文生成
+    SettingsPage(onLanguageChanged: _updateState), // 页面3: 设置
+  ];
+  
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _getPage(_currentIndex),  // 根据索引显示对应页面
+      bottomNavigationBar: BottomNavigationBar(  // 底部导航栏
+        backgroundColor: AppConfig.primaryColor,
+        selectedItemColor: Colors.white,
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _currentIndex,  // 当前选中索引
+        onTap: (index) => setState(() => _currentIndex = index),  // 点击切换索引并更新状态
+        items: [  // 导航项列表
+          BottomNavigationBarItem(icon: Icon(Icons.home), label : textLocalize("recall")),
+          BottomNavigationBarItem(icon: Icon(Icons.camera), label : textLocalize("record")),
+          BottomNavigationBarItem(icon: Icon(Icons.add_photo_alternate), label : textLocalize("generate")),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label : textLocalize("settings")),
+        ],
+      )
+    );
+  }
   @override
   void initState() {
     super.initState();  // 必须调用父类方法
     _loading();//加载AppConfig
   }
-  int _counter = 0;
-
   void _loading() async {
     await AppConfig.loadFromSettings();
-    setState(() {});
+    isLoading = false;
+    _updateState(); // 更新状态以显示主界面
   }
-  void _incrementCounter() async {
-    setState(() {
-      _counter += 1;
-    });
+  void _updateState() {
+    setState(() {}); // 触发状态更新
   }
-  void _decrementCounter() {
+  Widget _getPage(int index) {
+    if (isLoading) {
+      return LoadingPage(); // 显示加载页面
+    }
+    return _pages[index];
+  }
+}
+//过往回忆界面状态
+class _RecallPageState extends State<RecallPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppConfig.accentColor,
+      appBar: AppBar(
+        backgroundColor: AppConfig.primaryColor,//Theme.of(context).colorScheme.inversePrimary
+        title: Container(
+          alignment: Alignment.centerLeft, // 关键：顶部对齐
+          child: Text(
+            textLocalize("home_page"),
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              fontFamily: "宋体",
+              color: Colors.white,
+            )
+          ),
+        ),
+        toolbarHeight: 60,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: .start,
+          children: [
+            Text(''),
+            Text(
+              ''
+            ),
+          ],
+        ),
+      ),
+      /*floatingActionButton: Stack(
+        children: [
+          
+        ],
+      ),*/
+    );
+  }
+}
+//设置界面状态
+class _SettingsPageState extends State<SettingsPage> {
+  void _changeLanguage() {
     if (AppConfig.langMap['locale'] == 'en_US') {
       AppConfig.langMap = Localize.getLangMap('zh_CN');
     } else {
       AppConfig.langMap = Localize.getLangMap('en_US');
     }
     AppConfig.saveToSettings();
-    setState(() {
-      _counter -= 1;
-    });
+    widget.onLanguageChanged?.call();
+    setState(() {});
   }
-
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      backgroundColor: AppConfig.accentColor,
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: AppConfig.primaryColor,//Theme.of(context).colorScheme.inversePrimary
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Container(
-          alignment: Alignment.topLeft, // 关键：顶部对齐
-          height: 200, // AppBar 的标准高度
-          child: Text(
-            textLocalize("home_page"),
-          ),
-        ),
-        toolbarHeight: 200,
+        title: Text(textLocalize("settings")),
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .start,
-          children: [
-            Text(textLocalize("main")),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: Stack(
-        children: [
-          Positioned(
-            bottom: 16,
-            right: 160,
-            child:
-              TDButton(
-                onTap: _incrementCounter,
-                text: '增加按钮',
+        child: TDButton(
+                onTap: _changeLanguage,
+                text: textLocalize('set_lang'),
                 size: TDButtonSize.large,
                 shape: TDButtonShape.rectangle,
                 theme: TDButtonTheme.primary,
               ),
-          ),
-          Positioned(
-            bottom: 16,
-            left: 160,
-            child:
-              TDButton(
-                onTap: _decrementCounter,
-                text: '切换按钮',
-                size: TDButtonSize.large,
-                shape: TDButtonShape.rectangle,
-                theme: TDButtonTheme.primary,
-              ),
-          ),
-        ],
       ),
     );
   }

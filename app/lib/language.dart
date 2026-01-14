@@ -6,7 +6,11 @@ enum Language {
       "title" : "流光 · 记",
       "home_page" : "流光 · 记主界面",
       "main" : "你已推动按钮这么多次：",
-      "main_2" : "切换语言并保存",
+      "set_lang" : "切换语言并保存",
+      "recall" : "过往回忆",
+      "record" : "相机记录",
+      "generate" : "图文生成",
+      "settings" : "设置",
     },
   ),
   en (
@@ -16,7 +20,11 @@ enum Language {
       "title" : "Brain Dance",
       "home_page" : "Brain Dance Home Page",
       "main" : "You have pushed the button this many times:",
-      "main_2" : "Change Language and Save",
+      "set_lang" : "Change Language and Save",
+      "recall" : "Recall",
+      "record" : "Record",
+      "generate" : "Generate",
+      "settings" : "Settings",
     },
   );
   const Language({
