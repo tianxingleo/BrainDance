@@ -194,7 +194,46 @@ class CloudWorker:
             
             # 🔥 调用核心管线! 
             # 传入回调函数 on_pipeline_log，实现实时日志
-            final_ply_path = run_pipeline(cfg, log_callback=on_pipeline_log)
+            # 🟢 [修改点 1] 运行 Pipeline 并接收元数据
+            # 这里的 run_pipeline 现在返回两个值: (ply_path, metadata_dict)
+            try:
+                result = run_pipeline(cfg, log_callback=on_pipeline_log)
+                
+                # 兼容性处理：防止 pipeline 还没改成返回 tuple 导致报错
+                if isinstance(result, tuple):
+                    final_ply_path, metadata = result
+                else:
+                    final_ply_path, metadata = result, {}
+            except Exception as e:
+                # 即使 Pipeline 报错（比如被 AI 拦截了），我们也尝试捕获它跑出的 metadata
+                # 这里暂时简单处理，依赖 result 在报错前是否已经产生（实际报错时 result 不会返回）
+                # 生产环境下可以把 metadata 放在异常对象里抛出
+                raise e
+
+            # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
+            # 不管训练是否成功，只要有分析结果，都应该存下来
+            if metadata:
+                update_data = {}
+                
+                # 1. 同步分数
+                if "ai_score" in metadata:
+                    update_data["quality_score"] = metadata["ai_score"]
+                
+                # 2. 同步标签
+                if "ai_tags" in metadata:
+                    update_data["tags"] = metadata["ai_tags"]
+                
+                # 3. 同步评价原因 (新!)
+                if "ai_reason" in metadata:
+                    update_data["quality_reason"] = metadata["ai_reason"]
+                
+                # 执行更新
+                if update_data:
+                    self.supabase.table(self.TABLE_NAME)\
+                        .update(update_data)\
+                        .eq("id", task_id)\
+                        .execute()
+                    on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
 
             # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
             if not final_ply_path or not Path(final_ply_path).exists():
