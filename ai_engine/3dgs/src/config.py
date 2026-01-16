@@ -24,6 +24,13 @@ class PipelineConfig:
 
     enable_ai: bool = False
     
+    # 🟢 [新增] 场景理解开关与 API Key
+    enable_scene_analysis: bool = True 
+    dashscope_api_key: str = field(default_factory=lambda: os.getenv("DASHSCOPE_API_KEY", ""))
+    
+    # 🟢 [新增] 质检阈值
+    min_quality_score: int = field(default_factory=lambda: int(os.getenv("MIN_QUALITY_SCORE", 40)))
+
     # 🟢 [新增] 接收共享模型路径
     shared_model_dir: Path = field(default_factory=lambda: Path("./models"))
 
