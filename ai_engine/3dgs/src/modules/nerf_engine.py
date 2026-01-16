@@ -44,7 +44,7 @@ class NerfstudioEngine:
             "--pipeline.model.cull-alpha-thresh", "0.05",
             "--pipeline.model.stop-split-at", "10000",
             *collider_args,
-            "--max-num-iterations", "15000",
+            "--max-num-iterations", str(self.cfg.training_iterations),
             "--vis", "viewer+tensorboard",
             "--viewer.quit-on-train-completion", "True",
             "nerfstudio-data",
