@@ -86,8 +86,8 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     if cfg.enable_scene_analysis:
         log(f"🧐 [AI 质检] 阈值: {cfg.min_quality_score} 分")
         
-        # 接收 4 个返回值
-        passed, score, reason, tags = scene_analyzer.run(raw_images_dir, log_callback=log)
+        # 接收 6 个返回值
+        passed, score, reason, tags, description, objects = scene_analyzer.run(raw_images_dir, log_callback=log)
         
         # 🟢 记录日志
         status_icon = "✅" if passed else "❌"
@@ -98,6 +98,8 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
         pipeline_metadata["ai_score"] = score
         pipeline_metadata["ai_tags"] = tags
         pipeline_metadata["ai_reason"] = reason
+        pipeline_metadata["ai_description"] = description
+        pipeline_metadata["ai_objects"] = objects
 
         if not passed:
             err_msg = f"AI 质检不通过 ({score}分 < {cfg.min_quality_score}分): {reason}"
