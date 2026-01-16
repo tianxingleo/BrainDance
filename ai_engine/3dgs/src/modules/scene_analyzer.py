@@ -18,34 +18,35 @@ class SceneAnalyzer:
 
     def run(self, images_dir, log_callback=None):
         """
-        返回: (passed: bool, score: int, reason: str, tags: list)
+        返回: (passed: bool, score: int, reason: str, tags: list, description: str, objects: list)
         """
         if not self.api_key:
-            return True, 60, "No API Key (Skipped)", []
+            return True, 60, "No API Key (Skipped)", [], "", []
 
         # 随机抽图逻辑 (保持不变)
         all_images = sorted([f for f in os.listdir(images_dir) if f.endswith(('.jpg', '.png'))])
-        if len(all_images) < 5: return False, 0, "图片过少", []
+        if len(all_images) < 5: return False, 0, "图片过少", [], "", []
         selected_files = random.sample(all_images, min(6, len(all_images)))
         
-        # 🟢 [关键修改] 使用宽容的评分制 Prompt
+        # 🟢 [修改 Prompt] 让 AI 不仅打分，还要做详细描述
         prompt = f"""
-        你是一个 3D 建模专家。请评估这些视频截图是否适合进行 3D Gaussian Splatting 重建。
+        你是一个 3D 建模专家。请分析这些图片，提取用于构建 RAG 知识库的元数据。
+
+        请完成两个任务：
+        1. **质量评估**：打分 (0-100) 并判断是否适合 3DGS 建图。
+        2. **内容描述**：详细描述场景内容，包括主体物体、颜色、材质、环境背景。
         
-        请给出一个 0-100 的评分：
-        - 80-100: 完美（光照充足，纹理丰富，清晰）
-        - 60-79: 良好（有轻微瑕疵但不影响生成）
-        - 40-59: 一般（环境较差/弱光/部分模糊，但勉强可用）
-        - 0-39: 不可用（纯黑/纯白/全屏马赛克/完全无纹理）
+        及格线：{self.cfg.min_quality_score} 分。
         
-        当前设定的及格线是 {self.cfg.min_quality_score} 分。
-        只要不是完全无法使用的废片，请尽量给高分以通过检查。
-        
-        请返回 JSON 格式：
+        请严格输出 JSON 格式：
         {{
-            "score": 45,                // 评分
-            "reason": "光线较暗，且有轻微运动模糊，但物体轮廓可见，勉强通过。",
-            "tags": ["室内", "弱光", "人像", "低纹理"] // 提取3-5个场景标签
+            "score": 85,
+            "reason": "光照充足，纹理清晰。",
+            "tags": ["室内", "红色", "马克杯", "木桌"],
+            
+            // 👇 新增：RAG 专用字段
+            "description": "一张深色的实木桌子上放着一个红色的陶瓷马克杯，杯子有反光，背景是模糊的办公室环境，光线来自左侧窗户。",
+            "objects": ["红色马克杯", "实木桌子", "窗户"]
         }}
         """
 
@@ -68,15 +69,18 @@ class SceneAnalyzer:
             resp = completion.choices[0].message.content.replace("```json", "").replace("```", "")
             result = json.loads(resp)
             
+            # 解析结果
             score = result.get("score", 0)
             reason = result.get("reason", "Unknown")
             tags = result.get("tags", [])
-            
-            # 🟢 [核心逻辑] 拿分数和配置里的阈值比
             passed = score >= self.cfg.min_quality_score
             
-            return passed, score, reason, tags
+            # 🟢 [新增] 提取描述信息
+            description = result.get("description", "")
+            objects = result.get("objects", [])
+            
+            return passed, score, reason, tags, description, objects
 
         except Exception as e:
             if log_callback: log_callback(f"⚠️ 分析出错: {e}")
-            return True, 60, "Analysis Error (Default Pass)", []
+            return True, 60, "Analysis Error (Default Pass)", [], "", []
