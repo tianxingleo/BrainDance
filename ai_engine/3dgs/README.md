@@ -1,50 +1,146 @@
-BrainDance/
-├── main.py                    # [入口] 实例化主 Pipeline 并运行
-├── config.yaml
-├── src/
-    ├── __init__.py
-    ├── core/                  # [核心数据]
-    │   ├── __init__.py
-    │   └── context.py         # 定义 PipelineContext (包含 3D 和 RAG 的所有数据字段)
-    │
-    ├── modules/               # [原子工具] (只会干具体的活，不知道流程)
-    │   ├── __init__.py
-    │   ├── reconstruction/    # 3D 相关工具
-    │   │   ├── colmap.py
-    │   │   └── nerfstudio.py
-    │   └── rag/               # RAG 相关工具
-    │       ├── vector_db.py
-    │       ├── llm_client.py
-    │       └── text_splitter.py
-    │
-    └── pipelines/             # [流程编排] (负责组装工具)
-        ├── __init__.py
-        ├── base.py            # [基类] 定义所有 Pipeline 的标准行为
-        ├── main_pipeline.py   # [总指挥] BrainDance 总流程
-        │
-        └── sub_pipelines/     # [子流程]
-            ├── __init__.py
-            ├── recon_pipe.py  # 3D 重建子流水线
-            └── rag_pipe.py    # RAG 知识库子流水线
 
+---
 
+# 🧠 BrainDance AI Engine - 3DGS Cloud Node
+
+> **BrainDance 核心计算后端**：基于 Supabase 消息队列与 Nerfstudio 的云原生 3D 高斯泼溅（3DGS）生成引擎。
+
+本项目是 BrainDance 的核心 AI 算力节点，负责监听云端任务、自动下载用户上传的视频、执行全自动 3D 重建流程（COLMAP/GLOMAP + Splatfacto），并将最终的 3D 模型（PLY）与日志实时回传至云端。
+
+## ✨ 核心特性
+
+* **☁️ 云原生架构**：通过 Supabase 实现完全解耦的“生产者-消费者”模式，前端只管发任务，后端自动排队处理。
+* **🔄 全自动流水线**：一键完成 `视频抽帧` -> `位姿解算 (COLMAP)` -> `AI 场景分析` -> `3DGS 训练` -> `模型后处理`。
+* **📡 实时状态同步**：训练进度与详细日志实时推送到 Supabase 数据库，支持前端远程监控。
+* **🚀 混合运行模式**：支持 `本地调试模式`（直接处理文件）和 `云端监听模式`（无人值守工单处理）。
+
+## 📂 项目结构
+
+```text
 BrainDance/
-├── main.py                    # [入口] 只留最后那十几行启动代码
+├── main.py                    # [入口] 程序启动入口 (模式选择器)
+├── .env                       # [配置] 环境变量 (Supabase Key 等敏感信息)
 ├── src/
-│   ├── __init__.py
-│   ├── config.py              # [配置] 存放 PipelineConfig
-│   ├── core/                  # [核心]
-│   │   ├── __init__.py
-│   │   └── pipeline.py        # [流程] 存放 run_pipeline 函数
-│   ├── modules/               # [业务类] 存放那几个大 Class
-│   │   ├── __init__.py
-│   │   ├── ai_segmentor.py    # 存放 AISegmentor + get_central_object_prompt
-│   │   ├── glomap_runner.py   # 存放 GlomapRunner
-│   │   ├── image_proc.py      # 存放 ImageProcessor
-│   │   └── nerf_engine.py     # 存放 NerfstudioEngine
-│   └── utils/                 # [工具函数] 存放 def 开头的纯算法函数
-│       ├── __init__.py
-│       ├── common.py          # 存放 format_duration
-│       ├── cv_algorithms.py   # 存放 clean_and_verify_mask, get_salient_box
-│       ├── geometry.py        # 存放 analyze_and_calculate_adaptive_collider
-│       └── ply_utils.py       # 存放 perform_percentile_culling
+│   ├── config.py              # [配置] PipelineConfig 配置类定义
+│   ├── core/                  # [核心逻辑]
+│   │   ├── pipeline.py        # 3DGS 生成主流水线 (run_pipeline)
+│   │   └── worker.py          # Supabase 轮询器与上传下载逻辑
+│   ├── modules/               # [功能模块]
+│   │   ├── ai_segmentor.py    # AI 语义分割与物体提取
+│   │   ├── glomap_runner.py   # GLOMAP/COLMAP 位姿解算封装
+│   │   ├── image_proc.py      # 图像预处理 (抽帧、锐化等)
+│   │   └── nerf_engine.py     # Nerfstudio 训练引擎封装
+│   └── utils/                 # [工具库]
+│       ├── common.py          # 通用工具 (如时间格式化)
+│       ├── cv_algorithms.py   # 计算机视觉算法 (Mask处理、包围盒计算)
+│       ├── geometry.py        # 几何分析 (自动计算裁剪框)
+│       └── ply_utils.py       # PLY 点云后处理工具
+
+```
+
+## 🛠️ 环境准备
+
+### 1. 硬件要求
+
+* **GPU**: NVIDIA RTX 30/40/50 系列 (显存 >= 8GB)
+* **OS**: Linux (推荐 Ubuntu 22.04) 或 Windows WSL2
+* **CUDA**: 11.8 或 12.x
+
+### 2. 软件依赖
+
+确保已安装 `nerfstudio` 和 `ffmpeg`。
+
+```bash
+# 1. 创建并激活 Conda 环境
+conda create -n braindance python=3.10
+conda activate braindance
+
+# 2. 安装 PyTorch (根据你的 CUDA 版本调整)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# 3. 安装依赖库
+pip install nerfstudio supabase python-dotenv
+
+```
+
+### 3. 环境变量配置 (.env)
+
+在项目根目录下新建 `.env` 文件，填入你的 Supabase 配置：
+
+```ini
+# Supabase 连接信息
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_KEY=your_service_role_key_here
+
+# 存储桶与表名配置
+SUPABASE_BUCKET=braindance-assets
+SUPABASE_TABLE=processing_tasks
+
+```
+
+## 💾 数据库设计 (Supabase)
+
+请确保 Supabase 中包含以下 Table 和 Storage Bucket。
+
+### Table: `processing_tasks`
+
+| 字段名 | 类型 | 描述 |
+| --- | --- | --- |
+| `id` | `uuid` | 主键，自动生成 |
+| `user_id` | `text` | 用户 ID |
+| `scene_id` | `text` | 场景/项目唯一标识 |
+| `status` | `text` | 状态: `pending` (排队), `processing` (处理中), `completed` (完成), `failed` (失败) |
+| `logs` | `jsonb` | 实时日志数组，结构: `[{"ts": 123, "msg": "..."}]` |
+| `created_at` | `timestamp` | 创建时间 |
+
+### Storage Bucket: `braindance-assets`
+
+文件存储路径规范：
+
+* **输入视频**: `{user_id}/{scene_id}/raw/video.mp4`
+* **输出模型**: `{user_id}/{scene_id}/output/point_cloud.ply`
+
+## 🚀 运行指南
+
+### 模式 A：云端监听模式 (生产环境)
+
+启动 Worker，持续监听 Supabase 的 `pending` 任务。
+
+```bash
+python main.py
+
+```
+
+*输出示例：*
+
+> 🚀 [CloudWorker] 启动! 正在监听表: [processing_tasks]
+> .....
+> 📥 [接收任务] ID: ... | Scene: party_01
+
+### 模式 B：本地调试模式 (开发测试)
+
+不经过数据库，直接处理本地视频文件。
+
+```bash
+python main.py /path/to/your/video.mp4
+
+```
+
+*输出示例：*
+
+> 💿 启动本地模式: video.mp4
+> ... (开始直接运行 Pipeline)
+
+## 🔄 工作流原理
+
+1. **用户** 在前端上传视频，Supabase Storage 存入文件，Database 插入一条 `status='pending'` 的记录。
+2. **Worker** (`worker.py`) 轮询检测到新记录，将状态改为 `processing`。
+3. **下载**：自动从 Storage 下载 `video.mp4` 到本地临时目录。
+4. **生成**：调用 `pipeline.py`，执行 COLMAP 解算与 Gaussian Splatting 训练。
+5. **同步**：训练过程中，日志通过回调函数实时写入 Database 的 `logs` 字段。
+6. **上传**：训练结束后，将生成的 PLY 模型上传回 Storage。
+7. **完成**：更新 Database 记录状态为 `completed`。
+
+---
+
+*BrainDance Team © 2026*
