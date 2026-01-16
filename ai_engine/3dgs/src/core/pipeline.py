@@ -18,9 +18,22 @@ from src.modules.nerf_engine import NerfstudioEngine
 # 3. 引入辅助工具
 from src.utils.common import format_duration
 
-def run_pipeline(cfg: PipelineConfig):
+def run_pipeline(cfg: PipelineConfig, log_callback=None):
+    """
+    log_callback: 一个函数，接受字符串参数，例如 log_callback("Step 1: 开始处理...")
+    """
+    
+    # 定义一个内部辅助函数，同时打印到控制台和发送给回调
+    def log(message):
+        print(message) # 打印到本地终端
+        if log_callback:
+            # 加上时间戳让日志更专业
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            log_callback(f"[{timestamp}] {message}")
+
     global_start_time = time.time()
-    print(f"\n🚀 [BrainDance Engine] 启动任务: {cfg.project_name}")
+    project_name = cfg.project_name
+    log(f"🚀 [Pipeline] 启动任务: {project_name}")
     
     # 1. 实例化所有模块
     img_processor = ImageProcessor(cfg)
@@ -32,17 +45,20 @@ def run_pipeline(cfg: PipelineConfig):
     # ==========================================
     # Step 1: 数据准备
     # ==========================================
+    log(f"🎬 [1/3] 开始视频抽帧与图片预处理...")
     # 初始化目录
     if cfg.project_dir.exists(): shutil.rmtree(cfg.project_dir, ignore_errors=True)
     cfg.project_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(str(cfg.video_path), str(cfg.project_dir / cfg.video_path.name))
     
-    # 抽帧 (这里逻辑简单，直接写这里也行，或者封装进 ImageProcessor)
+    # 抽帧
     temp_dir = cfg.project_dir / "temp_extract"
     temp_dir.mkdir(parents=True, exist_ok=True)
+    log(f"    -> 正在进行 FFmpeg 抽帧...")
     subprocess.run(["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
                     "-vf", "fps=10", "-q:v", "2", 
                     str(temp_dir / "frame_%05d.jpg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log(f"    -> FFmpeg 抽帧完成")
     
     # 清洗
     img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=0.85)
@@ -50,7 +66,6 @@ def run_pipeline(cfg: PipelineConfig):
     # 移动图片到 raw_images
     raw_images_dir = cfg.project_dir / "raw_images"
     raw_images_dir.mkdir(parents=True, exist_ok=True)
-    # 简单的移动逻辑保留在这里，或者也可以移入 ImageProcessor
     all_imgs = sorted(list(temp_dir.glob("*")))
     limit = cfg.max_images
     if len(all_imgs) > limit:
@@ -58,28 +73,41 @@ def run_pipeline(cfg: PipelineConfig):
         all_imgs = [all_imgs[i] for i in sorted(list(set(indices)))]
     for img in all_imgs: shutil.copy2(str(img), str(raw_images_dir / img.name))
     shutil.rmtree(temp_dir)
+    log(f"    -> 图片准备完成，共 {len(all_imgs)} 张")
 
     # ==========================================
-    # Step 2: GOLMAP
+    # Step 2: GLOMAP
     # ==========================================
+    log(f"⚙️ 正在进行位姿解算 (GLOMAP)...")
+    if log_callback: 
+        log_callback("提示: 解算过程可能较慢，请耐心等待...")
+    
     if not glomap_runner.run():
-        print("❌ Pipeline 中断：GLOMAP 失败")
-        return
+        log("❌ Pipeline 中断：GLOMAP 失败")
+        return None
+    log(f"    -> 位姿解算完成")
 
     # ==========================================
     # Step 3: AI
     # ==========================================
-    # 这里会自动判断是否开启，内部已处理异常
+    log(f"🤖 正在进行 AI 语义分割...")
     ai_segmentor.run()
+    log(f"    -> AI 处理完成")
 
     # ==========================================
-    # Step 4 & 5: 训练与导出
+    # Step 2: 训练 (对应用户 [2/3])
     # ==========================================
+    log(f"🧠 [2/3] 开始 3DGS 训练...")
     try:
         nerf_engine.train()
-        final_path = nerf_engine.export()
-        print(f"\n🎉 任务完成！结果位于: {final_path}")
+        log(f"    -> 训练完成，开始导出...")
+        final_ply_path = nerf_engine.export()
+        
+        log(f"💾 [3/3] 导出 PLY 完成: {final_ply_path}")
+        log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
+        return str(final_ply_path)
     except Exception as e:
-        print(f"❌ 训练/导出阶段失败: {e}")
-
-    print(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
+        log(f"❌ 训练/导出阶段失败: {e}")
+        return None
+    
+    

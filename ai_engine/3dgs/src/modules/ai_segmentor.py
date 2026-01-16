@@ -119,14 +119,18 @@ class AISegmentor:
         
         # 2. 加载模型
         try:
-            # 自动迁移模型文件逻辑
+            # 🟢 [强制] 使用公共共享目录加载模型
+            yolo_path = self.cfg.shared_model_dir / "yolov8s-worldv2.pt"
+            sam_path = self.cfg.shared_model_dir / "sam2.1_l.pt"
+
+            # 确保目录存在
+            self.cfg.shared_model_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 自动迁移模型文件逻辑 (如果本地有则优先移动到共享目录)
             self._ensure_model_exists("yolov8s-worldv2.pt")
             self._ensure_model_exists("sam2.1_l.pt")
             
-            yolo_path = self.cfg.work_root / "yolov8s-worldv2.pt"
-            sam_path = self.cfg.work_root / "sam2.1_l.pt"
-            
-            print("    -> 正在加载 AI 模型...")
+            print(f"    -> 正在加载 AI 模型: {yolo_path}")
             det_model = YOLOWorld(str(yolo_path))
             det_model.set_classes([text_prompt])
             sam_model = SAM(str(sam_path))
@@ -211,9 +215,11 @@ class AISegmentor:
             return "central object"
 
     def _ensure_model_exists(self, model_name):
-        target = self.cfg.work_root / model_name
+        # 🟢 修改为共享目录
+        target = self.cfg.shared_model_dir / model_name
         local = Path(__file__).parent / model_name
         if not target.exists() and local.exists():
+            print(f"    -> 正在从本地迁移模型到共享目录: {model_name}")
             shutil.copy2(str(local), str(target))
 
     def _pick_center_box(self, bboxes, img_shape):

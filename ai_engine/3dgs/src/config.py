@@ -1,7 +1,11 @@
 # src/config.py
 from dataclasses import dataclass, field
 from pathlib import Path
+from dotenv import load_dotenv
 import os
+
+# 确保在导入 config 时就加载环境变量
+load_dotenv()
 
 @dataclass
 class PipelineConfig:
@@ -9,38 +13,54 @@ class PipelineConfig:
     project_name: str
     video_path: Path
     
-    # 2. 【选填项】有默认值的配置 (对应你原代码的全局变量)
-    work_root: Path = Path.home() / "braindance_workspace"
-    max_images: int = 180
-    force_spherical_culling: bool = True 
-    scene_radius_scale: float = 1.8
-    keep_percentile: float = 0.9
-    enable_ai: bool = True  # 新增控制开关
+    # 2. 【选填项】
+    work_root: Path = Path("output")
     
-    # 3. 【自动计算项】用户不用传，我自己算出来的路径
-    # field(init=False) 的意思是：这个变量存在，但在初始化(__init__)时不需要作为参数传入
-    project_dir: Path = field(init=False)
-    data_dir: Path = field(init=False)
-    images_dir: Path = field(init=False)
-    masks_dir: Path = field(init=False)
-    transforms_file: Path = field(init=False)
-    vocab_tree_path: Path = field(init=False)
+    # 🟢 [修改] 默认值改为从 os.getenv 读取，如果没有则使用备用值
+    max_images: int = field(default_factory=lambda: int(os.getenv("MAX_IMAGES", 500)))
+    
+    # 🟢 [新增] 训练迭代步数
+    training_iterations: int = field(default_factory=lambda: int(os.getenv("TRAINING_ITERATIONS", 15000)))
+
+    enable_ai: bool = False
+    
+    # 🟢 [新增] 接收共享模型路径
+    shared_model_dir: Path = field(default_factory=lambda: Path("./models"))
+
+    # 引擎核心参数
+    force_spherical_culling: bool = False 
+    scene_radius_scale: float = 1.0
+    keep_percentile: float = 0.8
+
+    @property
+    def project_dir(self) -> Path:
+        return self.work_root
+
+    @property
+    def data_dir(self) -> Path:
+        return self.project_dir / "data"
+
+    @property
+    def images_dir(self) -> Path:
+        return self.data_dir / "images"
+
+    @property
+    def masks_dir(self) -> Path:
+        return self.data_dir / "masks"
+
+    @property
+    def transforms_file(self) -> Path:
+        return self.data_dir / "transforms.json"
+
+    @property
+    def vocab_tree_path(self) -> Path:
+        return self.work_root / "vocab_tree_flickr100k_words.bin"
 
     def __post_init__(self):
         """
         这个函数会在类初始化完成之后，自动执行！
-        我们在这里集中处理所有的路径拼接和环境设置。
+        我们在这里集中处理环境设置。
         """
-        # --- A. 自动计算路径 (再也不用在主函数里写一遍了) ---
-        self.project_dir = self.work_root / self.project_name
-        self.data_dir = self.project_dir / "data"
-        self.images_dir = self.data_dir / "images"
-        self.masks_dir = self.data_dir / "masks"
-        self.transforms_file = self.data_dir / "transforms.json"
-        
-        # 词汇树路径 (对应原代码 VOCAB_TREE_PATH)
-        self.vocab_tree_path = self.work_root / "vocab_tree_flickr100k_words.bin"
-
         # --- B. 环境修正 (对应原代码的 PATH 设置逻辑) ---
         # 把设置环境变量的逻辑搬到这里，保证 config 一加载，环境就是对的
         # sys_path = "/usr/local/bin"
