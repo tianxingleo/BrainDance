@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 # 引入项目内部配置类和核心管线函数
 from src.config import PipelineConfig
 from src.core.pipeline import run_pipeline
+from src.modules.rag_memory import RagMemory # 🟢 引入新模块
+from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
 
 # [初始化] 加载当前目录下的 .env 文件
 # 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
@@ -46,6 +48,10 @@ class CloudWorker:
         # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
         self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
         
+        # 🟢 初始化记忆模块
+        self.memory = RagMemory(self.supabase)
+        self.kb = KnowledgeBase(self.supabase) # 🟢 实例化知识库
+
         # --- 4. 准备本地工作区 ---
         # 🟢 [修改后] 找回原来的 "braindance_workspace"，实现路径归一化
         # 这样所有的任务数据和模型都会存放在 /home/ltx/braindance_workspace
@@ -234,6 +240,15 @@ class CloudWorker:
                         .eq("id", task_id)\
                         .execute()
                     on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
+                
+                # 🟢 2. [新增] 存入 RAG 向量库 (只有当包含描述信息时才存)
+                if "ai_description" in metadata:
+                    on_pipeline_log("🧠 正在生成场景记忆 (Embedding)...")
+                    self.memory.save_to_knowledge_base(
+                        task_data=task,
+                        description=metadata["ai_description"],
+                        objects=metadata.get("ai_objects", [])
+                    )
 
             # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
             if not final_ply_path or not Path(final_ply_path).exists():
@@ -263,6 +278,17 @@ class CloudWorker:
                         file_options={"content-type": "application/json", "x-upsert": "true"}
                     )
                 on_pipeline_log("上传 transforms.json 成功")
+
+            # =================== 🟢 [RAG 集成] 资产入库 ===================
+            # 只有当 AI 成功生成了描述，才存入知识库
+            if metadata and "ai_description" in metadata:
+                on_pipeline_log("📚 正在将资产存入知识库...")
+                self.kb.add_asset(
+                    task_data=task,
+                    metadata=metadata,
+                    ply_path=upload_ply_key  # 记录云端路径
+                )
+            # =============================================================
 
             # =================== 阶段 E: 完结撒花 ===================
             # 更新状态为 'completed'
