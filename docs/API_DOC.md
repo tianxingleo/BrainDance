@@ -98,13 +98,17 @@ final assets = await supabase.from('model_assets')
 前端**必须**严格遵守以下路径格式，否则后端 Worker 无法读取文件。
 
 ```text
-{user_id}/                   <-- 第一级：用户 UUID
-  └── {scene_id}/            <-- 第二级：场景 ID (与数据库一致)
-      ├── raw/
-      │   └── video.mp4      <-- [上传] 原始视频，固定文件名
-      └── output/
-          ├── point_cloud.ply  <-- [下载] 3D 模型
-          └── transforms.json  <-- [下载] 预览参数
+braindance-assets/ (Bucket)
+└── {user_id}/                   <-- 第一级：用户隔离
+    └── {scene_id}/              <-- 第二级：项目/场景隔离
+        ├── raw/                 <-- 原始素材
+        │   └── video.mp4
+        ├── processed/           <-- 抽帧图片
+        │   ├── frame_001.jpg
+        │   └── frame_002.jpg
+        └── output/              <-- 训练结果
+            ├── point_cloud.ply
+            └── gaussian_splat.splat
 ```
 
 ### 4.3 下载链接拼接
