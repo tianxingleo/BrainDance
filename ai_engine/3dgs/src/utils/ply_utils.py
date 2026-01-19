@@ -1,4 +1,8 @@
-# [工具函数] 存放 perform_percentile_culling
+# src/utils/ply_utils.py
+# 功能：提供PLY点云处理工具函数
+# 实现：包含点云后处理和切割算法
+# 逻辑：基于统计分位数对点云进行切割，去除背景伪影
+# 包含：点云分位数切割函数、PLY文件处理算法
 import json
 import numpy as np
 from pathlib import Path

@@ -1,3 +1,8 @@
+# src/modules/scene_analyzer.py
+# 功能：实现场景分析功能，使用Qwen-VL对图像进行质量评估和内容描述
+# 实现：调用阿里云Qwen-VL大模型，分析图像质量并生成场景描述
+# 逻辑：1. 随机抽选图像 2. 调用Qwen-VL进行分析 3. 生成质量评分和场景描述 4. 返回分析结果
+# 包含：SceneAnalyzer类、图像编码方法、场景分析方法、质量评估算法
 import os
 import base64
 import json

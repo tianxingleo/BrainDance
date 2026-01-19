@@ -1,4 +1,8 @@
-# [业务类] 存放 GlomapRunner
+# src/modules/glomap_runner.py
+# 功能：实现GLOMAP位姿解算功能，处理图像的特征提取、匹配和三维重建
+# 实现：调用COLMAP和GLOMAP可执行文件，执行完整的位姿解算流程
+# 逻辑：1. 特征提取 2. 顺序匹配 3. 全局重建 4. 目录结构修正 5. 生成transforms.json 6. 质量检查
+# 包含：GlomapRunner类、GLOMAP流程控制、COLMAP接口调用、质量检查算法
 import os
 import shutil
 import subprocess

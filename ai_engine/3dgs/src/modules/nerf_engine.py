@@ -1,4 +1,8 @@
-# [业务类] 存放 NerfstudioEngine
+# src/modules/nerf_engine.py
+# 功能：实现Nerfstudio训练引擎功能，执行3DGS训练和模型导出
+# 实现：调用ns-train和ns-export命令，进行splatfacto模型训练和PLY导出
+# 逻辑：1. 计算场景参数(Collider) 2. 执行splatfacto训练 3. 导出PLY模型 4. 点云后处理(切割)
+# 包含：NerfstudioEngine类、训练方法、导出方法、点云后处理算法
 import os
 import shutil
 import subprocess
