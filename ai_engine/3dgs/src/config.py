@@ -43,7 +43,7 @@ class PipelineConfig:
     min_quality_score: int = field(default_factory=lambda: int(os.getenv("MIN_QUALITY_SCORE", 40)))
 
     # 🟢 [新增] 接收共享模型路径
-    shared_model_dir: Path = field(default_factory=lambda: Path("./models"))
+    shared_model_dir: Path = field(default_factory=lambda: BASE_DIR.parent.parent / "models")
 
     # 引擎核心参数
     force_spherical_culling: bool = False
