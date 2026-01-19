@@ -7,6 +7,7 @@ class PipelineFactory:
         pipelines = {
             "video_3dgs": Video3DGSPipeline,
             "multi_image": MultiImagePipeline,
+            # "video_3dgs_nomask": Video3DGSNoMaskPipeline,  # 假设这是另一个已定义的流水线类
             # 未来可以加 "single_image_tripo" 等
         }
         
