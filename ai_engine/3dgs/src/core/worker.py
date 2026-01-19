@@ -176,16 +176,10 @@ class CloudWorker:
             
             task_type = task.get('task_type', 'video_3dgs')
             
-            if task_type == 'single_image_sam3d':
-                # 单图任务：下载图片
+            if task_type in ('single_image_sam3d', 'single_image_sharp'):
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
                 storage_path = f"{user_id}/{scene_id}/raw/image.png"
                 on_pipeline_log("下载单张图片...")
-            else:
-                # 视频任务：下载视频 (默认兼容)
-                input_path = self.CACHE_DIR / f"{scene_id}.mp4"
-                storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
-                on_pipeline_log("下载视频...")
             
             # 下载文件流并写入本地
             try:

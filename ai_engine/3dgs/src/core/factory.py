@@ -1,6 +1,7 @@
 from src.pipelines.video_3dgs import Video3DGSPipeline
 from src.pipelines.image_to_3d import MultiImagePipeline
 from src.pipelines.single_image_sam3d import SingleImageSAM3DPipeline
+from src.pipelines.single_image_sharp import SingleImageSharpPipeline
 
 class PipelineFactory:
     @staticmethod
@@ -9,6 +10,7 @@ class PipelineFactory:
             "video_3dgs": Video3DGSPipeline,
             "multi_image": MultiImagePipeline,
             "single_image_sam3d": SingleImageSAM3DPipeline,
+            "single_image_sharp": SingleImageSharpPipeline,
         }
         
         pipeline_class = pipelines.get(task_type)

@@ -54,6 +54,9 @@ class PipelineConfig:
     sam3d_repo_path: Path = field(default_factory=lambda: BASE_DIR / "src/libs/sam-3d-objects")
     sam3d_checkpoint_dir: Path = field(default_factory=lambda: BASE_DIR.parent.parent / "models/sam3d/checkpoints")
 
+    # [新增] SHARP 相关配置
+    sharp_repo_path: Path = field(default_factory=lambda: BASE_DIR / "src/libs/ml-sharp")
+
     @property
     def project_dir(self) -> Path:
         return self.work_root
