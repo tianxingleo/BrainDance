@@ -15,9 +15,9 @@ class SingleImageSAM3DPipeline(BasePipeline):
         
         config = PipelineConfig()
         repo_path = params.get('repo_path', str(config.sam3d_repo_path))
-        model_dir = params.get('model_dir', str(config.sam3d_checkpoint_dir))
+        model_dir = params.get('model_dir', str(config.shared_model_dir))
         
-        self.log(f"⚙️ 初始化 SAM3D 引擎 (Repo: {repo_path})")
+        self.log(f"⚙️ 初始化 SAM3D 引擎 (Repo: {repo_path}, Model: {model_dir})")
         engine = SAM3DEngine(repo_path=repo_path, model_dir=model_dir)
         
         custom_mask = params.get('mask_path')
