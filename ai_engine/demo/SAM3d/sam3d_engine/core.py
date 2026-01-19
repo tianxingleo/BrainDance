@@ -27,10 +27,10 @@ class SAM3DEngine:
         os.chdir(self.repo_path)
         
         # 2. 初始化抠图器
-        # 如果未指定 model_dir，默认假设在当前脚本运行目录的 models 下，或者你指定的公共目录
+        # 如果未指定 model_dir，默认指向 demo 根目录 (即 sam3d_engine 的上两级目录)
         if model_dir is None:
-            # 假设模型在 demo 根目录
-            model_dir = Path(__file__).parent.parent 
+            # core.py 在 demo/SAM3d/sam3d_engine/ 下，所以 parent.parent.parent 是 demo/
+            model_dir = Path(__file__).parent.parent.parent 
         self.mask_generator = MaskGenerator(model_dir=model_dir)
 
     def _setup_path(self):
@@ -56,6 +56,11 @@ class SAM3DEngine:
             # 调用 MaskGenerator 自动生成
             # 默认使用 smart 模式，如果模型不在会自动降级
             mask = self.mask_generator.get_mask(image_path, method="smart")
+            
+        # 💾 [调试] 保存抠出的 Mask 供查看
+        mask_save_path = output_dir / f"{image_path.stem}_mask.png"
+        Image.fromarray(mask).save(mask_save_path)
+        print(f"🎭 Mask 已保存至: {mask_save_path}")
         # --- 🟢 自动抠图逻辑 End ---
 
         # 准备配置
@@ -74,9 +79,54 @@ class SAM3DEngine:
             pipeline = inference._pipeline
             pipeline.device = torch.device('cuda')
 
-        # 读取图片
+        # ==================== 🛠️ [外科手术] 切除 Mesh 解码器 ====================
+        # 原因：我们只生成 3DGS，不需要 Mesh。且 Mesh 解码依赖 Kaolin，环境 Mock 会报错。
+        # 操作：用一个 dummy 替换掉它，跳过复杂计算。
+        print("🔪 [System] 正在移除冗余的 Mesh 解码器以防止崩溃...")
+        class DummyMeshDecoder(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return None 
+
+        if "slat_decoder_mesh" in pipeline.models:
+            pipeline.models["slat_decoder_mesh"] = DummyMeshDecoder()
+            pipeline.models["slat_decoder_mesh"].to('cpu') 
+        # ===========================================================================
+
+        # ==================== 🛠️ [外科手术] 屏蔽后处理函数 ====================
+        # 原因：Pipeline 还是会尝试读取 mesh 数据，我们需要让它闭嘴。
+        # 操作：把 postprocess_slat_output 替换，并在调用原逻辑前删除 mesh 键。
+        print("🔧 [System] 正在 Patch 后处理管线...")
+        import types
+        original_postprocess = pipeline.postprocess_slat_output
+
+        def safe_postprocess(self, outputs, *args, **kwargs):
+            # 🛡️ 核心修复：彻底移除 mesh 键，强制 Pipeline 跳过所有针对网格的后处理。
+            # 这不仅能防止崩溃，还能确保原始逻辑能够成功走到 "gaussian" -> "gs" 的处理部分。
+            if "mesh" in outputs:
+                del outputs["mesh"]
+            return original_postprocess(outputs, *args, **kwargs)
+
+        pipeline.postprocess_slat_output = types.MethodType(safe_postprocess, pipeline)
+        # ===========================================================================
+
+        # 读取图片并限制分辨率 (显存保护)
         pil_image = Image.open(image_path).convert("RGBA")
+        orig_w, orig_h = pil_image.size
+        
+        target_size = 400
+        if max(orig_w, orig_h) > target_size:
+            scale = target_size / max(orig_w, orig_h)
+            new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+            pil_image = pil_image.resize((new_w, new_h), Image.LANCZOS)
+            print(f"    📉 [显存保护] 图片降采样至: {new_w} x {new_h}")
+            
         image_rgb = np.array(pil_image)[:, :, :3]
+        
+        # 确保 Mask 尺寸与处理后的图片一致
+        if mask.shape[0] != image_rgb.shape[0] or mask.shape[1] != image_rgb.shape[1]:
+            mask_pil = Image.fromarray(mask)
+            mask_pil = mask_pil.resize((pil_image.width, pil_image.height), Image.NEAREST)
+            mask = np.array(mask_pil)
 
         try:
             # Stage 1
@@ -92,6 +142,9 @@ class SAM3DEngine:
             # Stage 2
             print("🚀 [Stage 2] 生成 3DGS...")
             self._switch_stage1_to_stage2(pipeline)
+            
+            # 🟢 [修复] 显式指定解码格式为 gaussian，跳过不需要的格式
+            pipeline.decode_formats = ["gaussian"]
             
             original_sample = pipeline.sample_sparse_structure
             pipeline.sample_sparse_structure = lambda *args, **kwargs: stage1_out
@@ -161,6 +214,8 @@ class SAM3DEngine:
         if "slat_decoder_gs" in pipeline.models and pipeline.models["slat_decoder_gs"] is not None:
             pipeline.models["slat_decoder_gs"].to('cuda')
 
+        # 🟢 [移除] 不再需要搬运 slat_decoder_mesh，因为它已被替换为 Dummy 且保持在 CPU
+        
         if "slat_condition_embedder" in pipeline.condition_embedders:
             embedder = pipeline.condition_embedders["slat_condition_embedder"]
             if embedder is not None:
