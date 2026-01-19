@@ -1,3 +1,8 @@
+# src/core/worker.py
+# 功能：实现云端工作者逻辑，监听任务队列并处理3D重建任务
+# 实现：通过Supabase轮询任务，下载资源，执行pipeline，上传结果
+# 逻辑：1. 轮询Supabase任务 2. 锁定任务 3. 下载资源 4. 执行pipeline 5. 上传结果 6. 清理资源
+# 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
 import time
 import os
 from pathlib import Path
@@ -8,8 +13,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 
 # 引入项目内部配置类和核心管线函数
-from src.config import PipelineConfig
-from src.core.pipeline import run_pipeline
+from src.core.factory import PipelineFactory  # 🟢 引入工厂
 from src.modules.rag_memory import RagMemory # 🟢 引入新模块
 from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
 
@@ -186,35 +190,31 @@ class CloudWorker:
                 raise RuntimeError(f"视频下载失败 (路径: {storage_path}): {e}")
 
             # =================== 阶段 C: 执行引擎 ===================
+            # 1. 获取任务类型和参数
+            task_type = task.get('task_type', 'video_3dgs') # 默认兼容旧数据
+            task_params = task.get('task_params', {})
+            
             # 准备输出目录
             task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
             
-            # 实例化配置对象 (Config)
-            cfg = PipelineConfig(
-                project_name=scene_id,
-                video_path=video_path,
-                work_root=task_output_dir, # 设定工作目录
-                enable_ai=True,            # 开启 AI 增强
-                shared_model_dir=self.MODELS_DIR  # 🟢 传入共享模型目录
-            )
+            # 2. 准备上下文 (把通用的东西打包)
+            context = {
+                "task_id": task_id,
+                "scene_id": scene_id,
+                "work_root": task_output_dir,
+                "log_callback": on_pipeline_log,
+                "shared_model_dir": self.MODELS_DIR
+            }
+
+            # 3. [核心修改] 通过工厂实例化 Pipeline
+            on_pipeline_log(f"正在加载流水线: {task_type}")
+            pipeline = PipelineFactory.get_pipeline(task_type, context)
             
-            # 🔥 调用核心管线! 
-            # 传入回调函数 on_pipeline_log，实现实时日志
-            # 🟢 [修改点 1] 运行 Pipeline 并接收元数据
-            # 这里的 run_pipeline 现在返回两个值: (ply_path, metadata_dict)
-            try:
-                result = run_pipeline(cfg, log_callback=on_pipeline_log)
-                
-                # 兼容性处理：防止 pipeline 还没改成返回 tuple 导致报错
-                if isinstance(result, tuple):
-                    final_ply_path, metadata = result
-                else:
-                    final_ply_path, metadata = result, {}
-            except Exception as e:
-                # 即使 Pipeline 报错（比如被 AI 拦截了），我们也尝试捕获它跑出的 metadata
-                # 这里暂时简单处理，依赖 result 在报错前是否已经产生（实际报错时 result 不会返回）
-                # 生产环境下可以把 metadata 放在异常对象里抛出
-                raise e
+            # 4. [核心修改] 执行多态的 run 方法
+            # 注意：input_path 可能是视频路径，也可能是 zip 包路径，根据 type 决定下载逻辑
+            # 这里简化演示，假设都已经下载到了 video_path
+            
+            final_ply_path, metadata = pipeline.run(video_path, task_params)
 
             # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
             # 不管训练是否成功，只要有分析结果，都应该存下来
@@ -269,9 +269,10 @@ class CloudWorker:
 
             # 2. 上传 transforms.json (用于网页预览)
             # 假设该文件在 PLY 同级目录或配置指定的目录
-            if cfg.transforms_file.exists():
+            transforms_file = task_output_dir / "data" / "transforms.json"
+            if transforms_file.exists():
                 upload_json_key = f"{user_id}/{scene_id}/output/transforms.json"
-                with open(cfg.transforms_file, 'rb') as f:
+                with open(transforms_file, 'rb') as f:
                     self.supabase.storage.from_(self.BUCKET_NAME).upload(
                         path=upload_json_key,
                         file=f,

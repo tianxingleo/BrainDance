@@ -1,4 +1,8 @@
-# [工具函数] 存放 format_duration
+# src/utils/common.py
+# 功能：提供通用工具函数
+# 实现：包含各种通用的辅助函数
+# 逻辑：提供可复用的工具方法
+# 包含：时间格式化函数
 import datetime
 
 def format_duration(seconds):

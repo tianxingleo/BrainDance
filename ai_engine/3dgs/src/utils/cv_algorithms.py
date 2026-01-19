@@ -1,3 +1,8 @@
+# src/utils/cv_algorithms.py
+# 功能：提供计算机视觉算法工具函数
+# 实现：包含图像处理和分析的算法函数
+# 逻辑：提供可复用的计算机视觉算法
+# 包含：Mask清洗验证函数、显著区域计算函数
 import cv2
 import numpy as np
 import torch

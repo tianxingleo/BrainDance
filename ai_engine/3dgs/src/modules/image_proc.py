@@ -1,4 +1,8 @@
-# [业务类] 存放 ImageProcessor
+# src/modules/image_proc.py
+# 功能：实现图像处理功能，包括模糊图像过滤和图像质量分析
+# 实现：使用OpenCV进行图像分析，通过拉普拉斯算子计算图像清晰度
+# 逻辑：1. 遍历图像文件夹 2. 计算每张图像的清晰度得分 3. 根据得分过滤模糊图像 4. 控制图像数量
+# 包含：ImageProcessor类、智能模糊图像过滤算法、图像质量分析方法
 import shutil
 import cv2
 import numpy as np

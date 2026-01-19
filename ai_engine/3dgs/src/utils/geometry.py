@@ -1,4 +1,8 @@
-# [工具函数] 存放 analyze_and_calculate_adaptive_collider
+# src/utils/geometry.py
+# 功能：提供几何分析工具函数，用于计算3D场景的自适应碰撞器参数
+# 实现：通过分析相机轨迹判断场景类型并计算合适的包围盒参数
+# 逻辑：1. 解析相机位姿 2. 分析视线方向 3. 判断场景类型 4. 计算碰撞器参数
+# 包含：自适应碰撞器计算函数、场景类型分析算法
 import json
 import numpy as np
 from pathlib import Path

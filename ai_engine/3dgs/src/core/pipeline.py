@@ -1,5 +1,8 @@
-# [流程] 存放 run_pipeline 函数
 # src/core/pipeline.py
+# 功能：实现3DGS生成主流水线，协调各模块完成完整3D重建流程
+# 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
+# 逻辑：1. 视频抽帧与预处理 2. AI质检 3. 位姿解算 4. AI语义分割 5. 3DGS训练与导出
+# 包含：run_pipeline主函数、各模块实例化、流程控制逻辑、日志回调机制
 import time
 import shutil
 import subprocess
