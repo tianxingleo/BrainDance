@@ -315,6 +315,7 @@ sequenceDiagram
 - **[gsplat](https://github.com/nerfstudio-project/gsplat)**: 极速 CUDA 光栅化后端，为云端训练提供了性能保障。
 - **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria 的原始论文实现，奠定了理论基础。
 - **[SAM3D](https://github.com/ ScreenVerse/sam-3d-objects)**: 单图 3DGS 生成框架，支持从单张照片重建高质量 3D 模型。
+- **[SHARP](https://github.com/apple/ml-sharp)**: Apple 的高质量单图 3DGS 生成模型，通过神经网络直接预测高斯泼溅参数。
 
 #### Infrastructure & AI (基础设施与人工智能)
 

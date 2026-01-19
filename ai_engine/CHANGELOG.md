@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 🚀 新增功能
+
+- **集成 SHARP 单图 3DGS 流水线**：新增基于 apple/ml-sharp 的单图生成 3DGS 自动化工作流
+  - 新增 SharpEngine 引擎模块，封装 sharp predict 子进程调用
+  - 新增 SingleImageSharpPipeline 流水线类
+  - 新增 prepare_sharp_test.py 自动化测试脚本
+  - 引入 ml-sharp 仓库到 src/libs/ml-sharp
+  - Worker 支持处理 single_image_sharp 任务类型
+
+### 📝 文档完善
+
+- 更新项目文档，添加 SHARP 集成相关说明
+
 暂无未发布的变更。
 
 ## [2.0.0] - 2026-01-19

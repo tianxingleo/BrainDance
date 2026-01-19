@@ -99,7 +99,8 @@ INSERT INTO processing_tasks (
 | task_type | 下载资源 | 说明 |
 |-----------|----------|------|
 | `video_3dgs` | 视频 (video.mp4) | 传统视频转3DGS |
-| `single_image_sam3d` | 图片 (image.png) | 单张图片生成3DGS |
+| `single_image_sam3d` | 图片 (image.png) | 单张图片生成3DGS (SAM3D) |
+| `single_image_sharp` | 图片 (image.png) | 单张图片生成3DGS (SHARP) |
 
 ---
 

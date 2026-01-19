@@ -68,7 +68,7 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 - **3D重建**：Nerfstudio, Gaussian Splatting, Splatfacto
 - **位姿估计**：COLMAP, GLOMAP
 - **AI模型**：Qwen-VL, SAM 2.1, YOLO World, text-embedding-v2
-- **单图重建**：SAM3D, DINOv2
+- **单图重建**：SAM3D, SHARP, DINOv2
 
 ### 数据库与存储
 - **向量数据库**：Supabase + pgvector
@@ -349,6 +349,16 @@ ai_engine/
   - 图片自动降采样（最大400px）
   - 分阶段GPU切换（Stage1/Stage2）
 - **支持**：自定义Mask输入
+
+### SharpEngine
+- **功能**：基于SHARP的单图3DGS生成
+- **流程**：封装 sharp predict 命令行工具
+- **特性**：
+  - 子进程调用管理
+  - 自动GPU设备分配 (CUDA_VISIBLE_DEVICES=0)
+  - 自动查找生成的 .ply 文件
+- **输入**：单张图片 (image.png)
+- **输出**：3DGS 模型 (model.ply)
 
 ### MaskGenerator
 - **功能**：智能抠图生成

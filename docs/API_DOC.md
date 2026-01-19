@@ -60,6 +60,7 @@
 |---|------|---------|
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
+| `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
 
 **task_params 字段说明 (single_image_sam3d):**
 
@@ -84,6 +85,17 @@ final res = await supabase.from('processing_tasks').insert({
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'single_image_sam3d',
   'task_params': '{}',  // 可选自定义参数
+  'status': 'pending'
+}).select();
+```
+
+**创建 SHARP 单图任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260120_001',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'single_image_sharp',
+  'task_params': '{}',  // SHARP 无额外参数
   'status': 'pending'
 }).select();
 ```
