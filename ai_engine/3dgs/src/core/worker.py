@@ -172,27 +172,43 @@ class CloudWorker:
             }).eq("id", task_id).execute()
 
             # =================== 阶段 B: 下载资源 ===================
-            on_pipeline_log("正在从云端下载视频...")
+            on_pipeline_log("正在从云端下载资源...")
             
-            # 构造本地存储路径: ./temp_cache/xxx.mp4
-            video_path = self.CACHE_DIR / f"{scene_id}.mp4"
-            # 构造云端下载路径: user_id/scene_id/raw/video.mp4
-            storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
+            task_type = task.get('task_type', 'video_3dgs')
+            
+            if task_type == 'single_image_sam3d':
+                # 单图任务：下载图片
+                input_path = self.CACHE_DIR / f"{scene_id}.png"
+                storage_path = f"{user_id}/{scene_id}/raw/image.png"
+                on_pipeline_log("下载单张图片...")
+            else:
+                # 视频任务：下载视频 (默认兼容)
+                input_path = self.CACHE_DIR / f"{scene_id}.mp4"
+                storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
+                on_pipeline_log("下载视频...")
             
             # 下载文件流并写入本地
             try:
-                with open(video_path, 'wb') as f:
-                    # 从指定 Bucket 下载
+                with open(input_path, 'wb') as f:
                     res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
                     f.write(res)
             except Exception as e:
-                # 针对下载失败做特殊说明，方便排查是路径不对还是网络问题
-                raise RuntimeError(f"视频下载失败 (路径: {storage_path}): {e}")
+                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}")
 
             # =================== 阶段 C: 执行引擎 ===================
             # 1. 获取任务类型和参数
-            task_type = task.get('task_type', 'video_3dgs') # 默认兼容旧数据
-            task_params = task.get('task_params', {})
+            task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
+            
+            # task_params 可能是 JSON 字符串，需要解析
+            task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
+            try:
+                import json
+                if isinstance(task_params_raw, str):
+                    task_params = json.loads(task_params_raw) if task_params_raw else {}
+                else:
+                    task_params = task_params_raw
+            except Exception:
+                task_params = {}
             
             # 准备输出目录
             task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
@@ -211,10 +227,9 @@ class CloudWorker:
             pipeline = PipelineFactory.get_pipeline(task_type, context)
             
             # 4. [核心修改] 执行多态的 run 方法
-            # 注意：input_path 可能是视频路径，也可能是 zip 包路径，根据 type 决定下载逻辑
-            # 这里简化演示，假设都已经下载到了 video_path
+            # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
             
-            final_ply_path, metadata = pipeline.run(video_path, task_params)
+            final_ply_path, metadata = pipeline.run(str(input_path), task_params)
 
             # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
             # 不管训练是否成功，只要有分析结果，都应该存下来
@@ -318,17 +333,17 @@ class CloudWorker:
             # =================== 🧹 清理工作 (新增逻辑) ===================
             import shutil # 确保引入 shutil
 
-            # 1. 删除源视频文件
-            if 'video_path' in locals() and video_path.exists():
+            # 1. 删除源文件 (视频或图片)
+            if 'input_path' in locals() and input_path.exists():
                 try:
-                    os.remove(video_path)
-                    print(f"🗑️ 已删除临时视频: {video_path.name}")
+                    os.remove(input_path)
+                    print(f"🗑️ 已删除临时文件: {input_path.name}")
                 except Exception as e:
-                    print(f"⚠️ 删除视频失败: {e}")
+                    print(f"⚠️ 删除文件失败: {e}")
             
             # 2. 删除任务输出目录 (包含图片、COLMAP数据、PLY等所有中间产物)
             # ⚠️ 警告：如果你还没有修改 ai_segmentor.py 让模型下载到公共目录，
-            # 这里的删除操作会把下载在里面的 AI 模型也删掉！请务必先做“模型搬家”。
+            # 这里的删除操作会把下载在里面的 AI 模型也删掉！请务必先做"模型搬家"。
             if 'task_output_dir' in locals() and task_output_dir.exists():
                 try:
                     shutil.rmtree(task_output_dir)

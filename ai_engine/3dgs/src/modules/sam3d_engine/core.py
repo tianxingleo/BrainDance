@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from pathlib import Path
 from PIL import Image
+from typing import Optional
 
 # 引入之前的模块
 from .mocks import inject_rtx50_mocks
@@ -13,7 +14,7 @@ from .utils import generate_cpu_config
 from .masking import MaskGenerator
 
 class SAM3DEngine:
-    def __init__(self, repo_path: str, model_dir: str = None):
+    def __init__(self, repo_path: str, model_dir: Optional[str] = None):
         """
         :param repo_path: sam-3d-objects 仓库路径
         :param model_dir: AI 模型路径 (yolo/sam)，默认为 repo_path 同级
@@ -43,7 +44,7 @@ class SAM3DEngine:
         if repo_str not in sys.path:
             sys.path.insert(0, repo_str)
 
-    def run(self, image_path: str, output_dir: str, mask_path: str = None):
+    def run(self, image_path: str, output_dir: str, mask_path: Optional[str] = None):
         image_path = Path(image_path)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

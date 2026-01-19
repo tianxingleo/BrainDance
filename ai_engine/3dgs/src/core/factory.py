@@ -1,5 +1,6 @@
 from src.pipelines.video_3dgs import Video3DGSPipeline
 from src.pipelines.image_to_3d import MultiImagePipeline
+from src.pipelines.single_image_sam3d import SingleImageSAM3DPipeline
 
 class PipelineFactory:
     @staticmethod
@@ -7,8 +8,7 @@ class PipelineFactory:
         pipelines = {
             "video_3dgs": Video3DGSPipeline,
             "multi_image": MultiImagePipeline,
-            # "video_3dgs_nomask": Video3DGSNoMaskPipeline,  # 假设这是另一个已定义的流水线类
-            # 未来可以加 "single_image_tripo" 等
+            "single_image_sam3d": SingleImageSAM3DPipeline,
         }
         
         pipeline_class = pipelines.get(task_type)
