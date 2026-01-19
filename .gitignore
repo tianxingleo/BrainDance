@@ -146,6 +146,18 @@ faiss_index/
 .lancedb/
 *.lance/
 
-# Qdrant (本地存储)
-storage/
-qdrant_storage/
+# =========================
+# 7. BrainDance Specific: VS Code Tunnel & Binaries (VS Code隧道残留)
+# =========================
+# 根目录二进制文件
+code
+code\ \(deleted\)..update
+vscode_cli.tar.gz
+*.exe
+*.dll
+*.so
+*.dylib
+
+# VS Code Tunnel / Remote SSH 残留
+.vscode-server/
+.vscode-cli/

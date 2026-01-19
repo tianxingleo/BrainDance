@@ -126,43 +126,48 @@ Plaintext
 
 ```
 BrainDance/
-├── app/                  # [Flutter] 移动端主工程
-│   ├── lib/              #   - UI 交互与状态管理 (Bloc/Provider)
-│   ├── assets/           #   - 静态资源
-│   └── README.md         #   - 📱 移动端开发指南
-│
-├── supabase/             # [BaaS] 云端基础设施 (Serverless)
-│   ├── functions/        #   - [Deno] Edge Functions (业务逻辑)
-│   │   └── search/       #       - 语义搜索接口 (RAG Search API)
-│   ├── migrations/       #   - [SQL] 数据库结构变更历史
-│   ├── seed.sql          #   - 初始化测试数据
-│   └── config.toml       #   - Supabase 本地开发配置
-│
 ├── ai_engine/            # [Python] 核心算法引擎 (Worker)
-│   ├── src/              #   - 源代码
-│   │   ├── core/         #       - Pipeline 基类、工厂、Worker
-│   │   ├── pipelines/    #       - Pipeline 实现
-│   │   │   ├── video_3dgs.py      #       - 视频 3DGS Pipeline
-│   │   │   └── single_image_sam3d.py  #       - 单图 SAM3D Pipeline
-│   │   ├── modules/      #       - 功能模块
-│   │   │   ├── sam3d_engine/      #           - SAM3D 单图引擎
-│   │   │   ├── nerf_engine.py     #           - 3DGS 训练引擎
-│   │   │   ├── glomap_runner.py   #           - 位姿解算
-│   │   │   └── knowledge_base.py  #           - RAG 知识库
-│   │   ├── libs/         #       - 内嵌依赖库
-│   │   │   └── sam-3d-objects/    #           - SAM3D 推理库
-│   │   └── utils/        #       - 工具函数
-│   ├── tests/            #   - 测试脚本
-│   ├── requirements.txt  #   - Python 依赖
-│   └── README.md         #   - 🧠 算法引擎部署指南
+│   ├── 3dgs/             #   - 3DGS 核心引擎
+│   │   ├── src/          #   - 源代码
+│   │   │   ├── core/         #       - Pipeline 基类、工厂、Worker
+│   │   │   ├── pipelines/    #       - Pipeline 实现
+│   │   │   │   ├── video_3dgs.py      #       - 视频 3DGS Pipeline
+│   │   │   │   └── single_image_sam3d.py  #       - 单图 SAM3D Pipeline
+│   │   │   ├── modules/      #       - 功能模块
+│   │   │   │   ├── sam3d_engine/      #           - SAM3D 单图引擎
+│   │   │   │   ├── nerf_engine.py     #           - 3DGS 训练引擎
+│   │   │   │   ├── glomap_runner.py   #           - 位姿解算
+│   │   │   │   └── knowledge_base.py  #           - RAG 知识库
+│   │   │   ├── libs/         #       - 内嵌依赖库
+│   │   │   │   └── sam-3d-objects/    #           - SAM3D 推理库
+│   │   │   └── utils/        #       - 工具函数
+│   │   ├── tests/            #   - 测试脚本
+│   │   ├── requirements.txt  #   - Python 依赖
+│   │   └── main.py           #   - 程序入口
+│   ├── demo/              #   - 演示脚本与测试数据
+│   ├── models/            #   - AI 模型缓存目录
+│   ├── rag/               #   - RAG 数据处理
+│   └── log/               #   - 日志文件
 │
-└── docs/                 # [Doc] 项目文档
-    ├── database.md       #   - 数据库表结构与 RLS 规范
-    ├── api_guide.md      #   - 前后端接口协作契约
-    └── architecture.md   #   - 详细架构设计图
+├── supabase/              # [BaaS] 云端基础设施 (Serverless)
+│   ├── migrations/        #   - [SQL] 数据库结构变更历史
+│   ├── seed.sql           #   - 初始化测试数据
+│   ├── config.toml        #   - Supabase 本地开发配置
+│   └── README.md          #   - ☁️ 后端部署指南
+│
+├── docs/                  # [Doc] 项目文档
+│   ├── API_DOC.md         #   - API 接口文档
+│   ├── BrainDance 项目协作规范与开发协议 (v1.0).md  #   - 开发规范
+│   ├── 代办/               #   - 待办事项
+│   └── 技术报告/           #   - 技术报告
+│
+└── README.md              #   - 本文件
 ```
 
-### 
+> **说明**: 
+> - `app/` (Flutter 移动端) 正在开发中，尚未纳入本仓库
+> - `supabase/functions/` (搜索 Edge Functions) 正在开发中
+```
 
 ## 🚀 快速开始 (Quick Start)
 
