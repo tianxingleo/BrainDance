@@ -48,15 +48,42 @@
 | `id` | uuid | ❌ | 主键，**插入时留空**，数据库会自动生成并返回 |
 | `scene_id` | string | ✅ | **场景唯一标识**，建议前端生成 `timestamp_random` |
 | `user_id` | uuid | ✅ | 当前登录用户的 ID |
+| `task_type` | string | ❌ | 任务类型，默认 `video_3dgs` |
+| `task_params` | json | ❌ | 任务参数，JSON格式 |
 | `status` | string | ✅ | 固定填 `pending` |
 | `logs` | json | ❌ | (只读) 实时日志，格式 `[{"ts":..., "msg":...}]` |
 | `quality_score`| int | ❌ | (只读) AI 评分 |
 
-**创建任务示例 (Dart):**
+**task_type 可选值:**
+
+| 值 | 说明 | 输入文件 |
+|---|------|---------|
+| `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
+| `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
+
+**task_params 字段说明 (single_image_sam3d):**
+
+| 参数 | 类型 | 说明 |
+|-----|------|------|
+| `mask_path` | string | 可选，自定义Mask图片路径 |
+
+**创建视频任务示例 (Dart):**
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260118_001',
   'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'video_3dgs',
+  'status': 'pending'
+}).select();
+```
+
+**创建单图任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260119_001',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'single_image_sam3d',
+  'task_params': '{}',  // 可选自定义参数
   'status': 'pending'
 }).select();
 ```
@@ -102,7 +129,8 @@ braindance-assets/ (Bucket)
 └── {user_id}/                   <-- 第一级：用户隔离
     └── {scene_id}/              <-- 第二级：项目/场景隔离
         ├── raw/                 <-- 原始素材
-        │   └── video.mp4
+        │   ├── video.mp4        # 视频任务 (task_type: video_3dgs)
+        │   └── image.png        # 单图任务 (task_type: single_image_sam3d)
         ├── processed/           <-- 抽帧图片
         │   ├── frame_001.jpg
         │   └── frame_002.jpg
@@ -177,3 +205,12 @@ braindance-assets/ (Bucket)
 3.  **前端拼接下载链接**:
     `https://<ProjectID>.supabase.co/storage/v1/object/public/braindance-assets/` + `ply_path`
 4.  将完整链接喂给 3D 渲染组件进行展示。
+
+### 流程四：单图3DGS任务 (Create Single Image Task)
+1.  **生成 ID**: 前端生成一个 `scene_id`。
+2.  **上传图片**: 将文件上传至 Storage: `{user_id}/{scene_id}/raw/image.png`。
+3.  **写入数据库**: 向 `processing_tasks` 插入一条记录，设置 `task_type` 为 `single_image_sam3d`。
+4.  **监听状态**: 使用 Supabase Realtime 订阅该条记录的 `UPDATE` 事件。
+    *   当 `status` 变为 `processing` -> 显示进度条。
+    *   当 `logs` 数组更新 -> 显示实时日志。
+    *   当 `status` 变为 `completed` -> 拼接 URL 下载并展示模型。

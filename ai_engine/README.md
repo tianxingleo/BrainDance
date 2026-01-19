@@ -21,6 +21,12 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 - 集成COLMAP/GLOMAP进行精确位姿估计
 - 支持多种场景类型的自适应优化
 
+### 单图3DGS生成
+- 基于SAM3D的单张照片3D重建，无需视频
+- 支持自定义Mask输入实现精确控制
+- 内嵌推理库，零外部依赖
+- 智能抠图：YOLO World / SAM 2.1 / Simple 降级
+
 ### 语义理解与搜索
 - 集成Qwen-VL多模态AI进行场景理解
 - 自动生成场景描述、物体清单和标签
@@ -39,14 +45,20 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 ## 🏗️ 系统架构
 
 ```
-[视频输入] → [图像预处理] → [AI场景分析] → [3DGS训练] → [模型输出] → [向量索引]
-     ↓                           ↓              ↓              ↓           ↓
-[质量评估] ← [智能清洗] ← [位姿解算] ← [语义分割] ← [参数优化] ← [后处理]
+[输入] → 根据 task_type 分支
+   │
+   ├── video_3dgs ─→ 图像预处理 → AI场景分析 → 位姿解算 → 3DGS训练 → 模型输出
+   │      ↓                           ↓              ↓              ↓
+   │      ↓                      [质量评估]    [智能清洗]    [参数优化]
+   │
+   └── single_image_sam3d ─→ 智能抠图 → SAM3D推理 → 模型输出
+           ↓                       ↓            ↓
+           ↓                 [YOLO/SAM]   [Stage1+Stage2]
 ```
 
 ### 架构组件
-- **任务调度层**：Supabase数据库与实时消息队列
-- **AI处理层**：多模态AI模型与3DGS训练引擎  
+- **任务调度层**：Supabase数据库与实时消息队列，支持多任务类型
+- **AI处理层**：多模态AI模型、3DGS训练引擎、SAM3D单图引擎
 - **存储层**：向量数据库与模型资产管理系统
 - **接口层**：REST API与WebSocket实时通信
 
@@ -56,6 +68,7 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 - **3D重建**：Nerfstudio, Gaussian Splatting, Splatfacto
 - **位姿估计**：COLMAP, GLOMAP
 - **AI模型**：Qwen-VL, SAM 2.1, YOLO World, text-embedding-v2
+- **单图重建**：SAM3D, DINOv2
 
 ### 数据库与存储
 - **向量数据库**：Supabase + pgvector
@@ -130,10 +143,19 @@ cp .env.example .env
 
 ## 🎮 运行模式
 
-### 本地处理模式
+### 本地视频处理模式
 ```bash
 # 直接处理本地视频文件
 python main.py /path/to/your/video.mp4
+```
+
+### 单图本地测试模式
+```bash
+# 使用 SAM3D 处理单张图片
+python tests/test_local_single_image.py
+
+# 或指定图片路径
+python tests/test_local_single_image.py --file /path/to/image.png
 ```
 
 ### 云端监听模式
@@ -172,6 +194,30 @@ result, metadata = run_pipeline(cfg)
 # 输出结果
 print(f"3D模型路径: {result}")
 print(f"AI分析结果: {metadata}")
+```
+
+### 单图 SAM3D 用法
+```python
+from src.core.factory import PipelineFactory
+
+# 创建上下文
+context = {
+    "task_id": "scene_001",
+    "scene_id": "scene_001",
+    "work_root": "./output",
+    "log_callback": lambda msg: print(f"[LOG] {msg}"),
+}
+
+# 获取 SAM3D Pipeline
+pipeline = PipelineFactory.get_pipeline("single_image_sam3d", context)
+
+# 执行单图生成
+ply_path, metadata = pipeline.run("image.png", {
+    "mask_path": "mask.png"  # 可选：指定Mask
+})
+
+print(f"3D模型: {ply_path}")
+print(f"元数据: {metadata}")
 ```
 
 ### 云端任务处理
@@ -234,20 +280,35 @@ ai_engine/
 │   │   ├── config.py      # 配置管理
 │   │   ├── core/          # 核心业务逻辑
 │   │   │   ├── pipeline.py  # 3DGS处理流水线
-│   │   │   └── worker.py    # 云端任务处理器
+│   │   │   ├── pipeline_base.py  # Pipeline基类
+│   │   │   ├── worker.py    # 云端任务处理器
+│   │   │   └── factory.py   # Pipeline工厂
+│   │   ├── pipelines/      # Pipeline实现
+│   │   │   ├── video_3dgs.py      # 视频3DGS Pipeline
+│   │   │   ├── single_image_sam3d.py  # 单图SAM3D Pipeline
+│   │   │   └── image_to_3d.py    # 多图Pipeline
 │   │   ├── modules/       # 功能模块
 │   │   │   ├── image_proc.py      # 图像预处理
 │   │   │   ├── glomap_runner.py   # 位姿解算
 │   │   │   ├── scene_analyzer.py  # 场景分析
 │   │   │   ├── ai_segmentor.py    # AI分割
 │   │   │   ├── nerf_engine.py     # 3D训练引擎
-│   │   │   └── knowledge_base.py  # 知识库
+│   │   │   ├── knowledge_base.py  # 知识库
+│   │   │   └── sam3d_engine/      # SAM3D引擎模块
+│   │   │       ├── core.py        # SAM3DEngine主引擎
+│   │   │       ├── masking.py     # 智能抠图
+│   │   │       ├── mocks.py       # RTX50兼容层
+│   │   │       └── memory.py      # CPU内存加载
+│   │   ├── libs/          # 内嵌依赖库
+│   │   │   └── sam-3d-objects/    # SAM3D推理库
 │   │   └── utils/         # 工具函数
 │   │       ├── common.py      # 通用工具
 │   │       ├── cv_algorithms.py  # CV算法
 │   │       ├── geometry.py      # 几何计算
 │   │       └── ply_utils.py     # PLY处理
-│   └── docs/              # 文档
+│   └── tests/             # 测试脚本
+│       ├── test_local_single_image.py  # 单图测试
+│       └── test_pipeline_cases.py      # 单元测试
 └── demo/                  # 演示脚本
     ├── process_3dgs.py    # 3D处理脚本
     └── results/           # 输出结果
@@ -280,6 +341,21 @@ ai_engine/
 - **算法**：Splatfacto训练、自适应Collider计算
 - **后处理**：点云切割、质量优化
 
+### SAM3DEngine
+- **功能**：基于SAM3D的单图3DGS生成
+- **流程**：智能抠图 → Stage1结构生成 → Stage2高斯生成
+- **优化**：
+  - 显存保护：强制权重加载至CPU RAM
+  - 图片自动降采样（最大400px）
+  - 分阶段GPU切换（Stage1/Stage2）
+- **支持**：自定义Mask输入
+
+### MaskGenerator
+- **功能**：智能抠图生成
+- **支持**：YOLO World / SAM 2.1 / Simple 降级
+- **特性**：自动检测模型可用性
+- **降级策略**：优先使用YOLO World，失败则SAM 2.1，最后Simple
+
 ### KnowledgeBase
 - **功能**：RAG向量存储与语义检索
 - **技术**：text-embedding-v2、pgvector索引
@@ -288,7 +364,7 @@ ai_engine/
 ### CloudWorker
 - **功能**：云端任务队列监听与处理
 - **架构**：生产者-消费者模式
-- **特性**：实时日志同步、错误恢复
+- **特性**：实时日志同步、错误恢复、任务类型路由
 
 ## ⚡ 性能优化
 
