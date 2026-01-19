@@ -1,4 +1,8 @@
-# [业务类] 存放 AISegmentor + get_central_object_prompt
+# src/modules/ai_segmentor.py
+# 功能：实现AI语义分割功能，使用YOLO和SAM模型进行物体检测和分割
+# 实现：结合YOLO World进行目标检测，使用SAM进行精确分割，通过Qwen-VL分析中心物体
+# 逻辑：1. 调用Qwen-VL分析中心物体 2. 使用YOLO检测物体 3. 使用SAM进行分割 4. 处理和验证mask 5. 保存透明PNG
+# 包含：AISegmentor类、get_central_object_prompt函数、AI分割流水线、mask处理算法
 import os
 import os
 import shutil

@@ -1,6 +1,11 @@
 # src/config.py
+# 功能：定义Pipeline配置类，管理项目的所有配置参数
+# 实现：使用dataclass定义配置项，从环境变量加载默认值
+# 逻辑：1. 定义配置项及其默认值 2. 从环境变量加载配置 3. 设置必要的环境变量
+# 包含：PipelineConfig数据类、环境变量加载逻辑、目录路径属性
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 import os
 
@@ -9,12 +14,15 @@ load_dotenv()
 
 @dataclass
 class PipelineConfig:
-    # 1. 【必填项】用户初始化时必须给我的
-    project_name: str
-    video_path: Path
+    # 1. 【基本属性】
+    project_name: str = "default_project"
+    video_path: Optional[Path] = None
     
-    # 2. 【选填项】
-    work_root: Path = Path("output")
+    # 2. 【核心配置】
+    work_root: Path = Path("./temp_workspace")
+    
+    # 🟢 [修复] 必须添加这一行，给一个默认训练步数 (兼容旧代码中的 .iterations)
+    iterations: int = 30000
     
     # 🟢 [修改] 默认值改为从 os.getenv 读取，如果没有则使用备用值
     max_images: int = field(default_factory=lambda: int(os.getenv("MAX_IMAGES", 500)))
@@ -42,6 +50,10 @@ class PipelineConfig:
     @property
     def project_dir(self) -> Path:
         return self.work_root
+
+    @project_dir.setter
+    def project_dir(self, value: Path):
+        self.work_root = value
 
     @property
     def data_dir(self) -> Path:

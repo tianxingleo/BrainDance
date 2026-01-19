@@ -1,3 +1,8 @@
+# src/modules/knowledge_base.py
+# 功能：实现知识库管理功能，将生成的3D模型存入向量数据库并支持语义搜索
+# 实现：使用文本嵌入服务生成向量，通过Supabase存储和检索3D模型资产
+# 逻辑：1. 生成文本向量 2. 构造资产记录 3. 存储到数据库 4. 支持语义搜索
+# 包含：KnowledgeBase类、向量生成方法、资产存储方法、语义搜索方法
 import os
 import json
 from openai import OpenAI

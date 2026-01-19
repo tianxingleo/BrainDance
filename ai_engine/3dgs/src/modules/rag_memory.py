@@ -1,3 +1,8 @@
+# src/modules/rag_memory.py
+# 功能：实现RAG记忆模块，将场景信息存入向量数据库用于后续检索
+# 实现：使用阿里云DashScope的文本嵌入服务生成向量，存储到Supabase向量表
+# 逻辑：1. 将文本转换为向量 2. 将向量和元数据存入数据库 3. 支持场景检索
+# 包含：RagMemory类、文本嵌入方法、知识库存储方法
 import os
 from openai import OpenAI
 from supabase import Client
