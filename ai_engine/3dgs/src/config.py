@@ -12,6 +12,9 @@ import os
 # 确保在导入 config 时就加载环境变量
 load_dotenv()
 
+# 项目根目录 (用于计算相对路径)
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 @dataclass
 class PipelineConfig:
     # 1. 【基本属性】
@@ -43,9 +46,13 @@ class PipelineConfig:
     shared_model_dir: Path = field(default_factory=lambda: Path("./models"))
 
     # 引擎核心参数
-    force_spherical_culling: bool = False 
+    force_spherical_culling: bool = False
     scene_radius_scale: float = 1.0
     keep_percentile: float = 0.8
+
+    # [新增] SAM3D 相关配置
+    sam3d_repo_path: Path = field(default_factory=lambda: BASE_DIR / "src/libs/sam-3d-objects")
+    sam3d_checkpoint_dir: Path = field(default_factory=lambda: BASE_DIR.parent.parent / "models/sam3d/checkpoints")
 
     @property
     def project_dir(self) -> Path:
