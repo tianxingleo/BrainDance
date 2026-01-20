@@ -7,7 +7,12 @@ import os
 import base64
 import json
 import random
-from openai import OpenAI
+import re
+import ast
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 from src.config import PipelineConfig
 
 class SceneAnalyzer:
@@ -89,3 +94,99 @@ class SceneAnalyzer:
         except Exception as e:
             if log_callback: log_callback(f"⚠️ 分析出错: {e}")
             return True, 60, "Analysis Error (Default Pass)", [], "", []
+
+    def analyze_single_image(self, image_path: str, log_callback=None) -> dict:
+        """
+        [新增] 针对单张图片的分析接口。
+
+        返回值: dict 包含以下字段（尽量保持与多图 run 返回结构一致，方便上层使用）：
+            {
+                "score": int,
+                "reason": str,
+                "tags": list[str],
+                "description": str,
+                "objects": list[str]
+            }
+
+        如果 API Key 不存在或分析失败，返回空的默认结构（不会抛异常，保证流水线可继续）。
+        """
+        # 如果没有配置 API Key，直接返回空结构，避免抛错
+        if not self.api_key:
+            if log_callback:
+                log_callback("⚠️ [SceneAnalyzer] 未配置 DASHSCOPE_API_KEY，跳过单图分析")
+            return {"score": 0, "reason": "No API Key", "tags": [], "description": "", "objects": []}
+
+        # 构造 Prompt（简洁，要求直接返回纯 JSON）
+        prompt = """
+        你是一个图像分析专家。请仔细分析这张图片并以纯 JSON 格式返回以下字段：
+        1) score: 图片适合用于 3DGS 重建的质量分数（0-100）
+        2) reason: 简短说明评分理由
+        3) tags: 5-10 个关键词标签
+        4) description: 对场景的详细自然语言描述
+        5) objects: 图中主要物体列表
+
+        请严格返回 JSON，形如：
+        {"score": 85, "reason": "光照充足", "tags": ["室内","红色杯子"], "description": "...", "objects": ["红色杯子","桌子"]}
+        """
+
+        messages = [
+            {"role": "system", "content": "You are a helpful image analysis assistant."},
+            {"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(image_path)}"}}
+            ]}
+        ]
+
+        try:
+            if log_callback:
+                log_callback(f"🤖 [Qwen-VL] 正在分析单张图片: {image_path}")
+
+            if OpenAI is None:
+                raise RuntimeError("OpenAI client not available in environment")
+
+            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
+
+            resp = completion.choices[0].message.content
+            # 清洗模型可能返回的代码块标记
+            resp = str(resp).replace("```json", "").replace("```", "").strip()
+
+            # 尝试提取第一个 JSON 对象（模型有时会返回多余文本）
+            m = re.search(r"(\{.*\})", resp, flags=re.S)
+            json_text = m.group(1) if m else resp
+
+            # 多轮解析尝试：标准 json -> 替换单引号 -> ast.literal_eval
+            result = None
+            parse_errors = []
+            try:
+                result = json.loads(json_text)
+            except Exception as e1:
+                parse_errors.append(str(e1))
+                try:
+                    # 有些模型会用单引号或python dict格式返回
+                    alt = json_text.replace("'", '"')
+                    result = json.loads(alt)
+                except Exception as e2:
+                    parse_errors.append(str(e2))
+                    try:
+                        result = ast.literal_eval(json_text)
+                    except Exception as e3:
+                        parse_errors.append(str(e3))
+
+            if result is None:
+                raise ValueError(f"Failed to parse model JSON output. Attempts: {parse_errors}. Raw: {resp}")
+
+            # 规范化输出字段
+            return {
+                "score": int(result.get("score", 0)),
+                "reason": result.get("reason", ""),
+                "tags": result.get("tags", []),
+                "description": result.get("description", ""),
+                "objects": result.get("objects", [])
+            }
+
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ [SceneAnalyzer] 单图分析出错: {e}")
+            # 返回安全默认值，保证流水线继续
+            return {"score": 0, "reason": "Analysis Error", "tags": [], "description": "", "objects": []}

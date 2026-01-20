@@ -214,6 +214,13 @@ class Video3DGSPipeline(BasePipeline):
             self.log(f"💾 导出 PLY 完成: {final_ply_path}")
             self.log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
             
+            # 上传 PLY 并在 model_assets 中写入记录（非强制，内部容错）
+            try:
+                self.upload_and_record(str(final_ply_path), pipeline_metadata, params)
+            except Exception:
+                # upload_and_record 内部已捕获异常，这里保证不抛出
+                pass
+
             # 返回最终结果
             return str(final_ply_path), pipeline_metadata
             
