@@ -112,14 +112,14 @@ python ai_engine/demo/process_3dgs_clean.py --video_path ./data/input/my_room.mp
   - [x] 完成视频到 3DGS 的自动化 Python 脚本 (`process_3dgs.py`)。
   - [x] 验证 COLMAP 位姿解算与 Nerfstudio 的对接。
   - [x] 本地 Viewer 预览。
-- [ ] **Phase 2: 云端化与移动端适配**
-  - [ ] 部署后端 API 接口，接收移动端上传的数据包。
-  - [ ] 优化移动端 WebGL 查看器 (基于 LumaAI 或 SuperSplat 内核)。
-  - [ ] 实现模型压缩，适配 4G/5G 网络传输。
-- [ ] **Phase 3: 记忆深搜 (Memory RAG)**
-  - [ ] 接入多模态大模型 (Gemini/GPT-4V)。
-  - [ ] 实现 3D 场景内的物体识别与标签化。
-  - [ ] 开发自然语言检索接口 ("Show me the books on the shelf")。
+- [x] **Phase 2: 云端化与移动端适配**
+- [x] 部署后端 API 接口，接收移动端上传的数据包。
+- [x] 优化移动端 WebGL 查看器 (基于 LumaAI 或 SuperSplat 内核)。
+- [x] 实现模型压缩，适配 4G/5G 网络传输。
+- [x] **Phase 3: 记忆深搜 (Memory RAG)**
+- [x] 接入多模态大模型 (Gemini/GPT-4V)。
+- [x] 实现 3D 场景内的物体识别与标签化。
+- [x] 开发自然语言检索接口 ("Show me the books on the shelf")。
 
 ## 🤝 贡献与社区
 
