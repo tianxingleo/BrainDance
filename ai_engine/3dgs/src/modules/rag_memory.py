@@ -47,9 +47,13 @@ class RagMemory:
         """保存到 Supabase 向量表"""
         try:
             # 1. 生成向量
-            # 将“描述 + 物品列表 + Tags”组合在一起变成向量，增加搜索命中率
+            # 将"描述 + 物品列表 + Tags"组合在一起变成向量，增加搜索命中率
             combined_text = f"{description} 包含物体: {', '.join(objects)} 标签: {task_data.get('tags', [])}"
             vector = self.embed_text(combined_text)
+
+            # ⚠️ 关键修复: pgvector 期望 JSON 数组格式 "[...]"，不是 PostgreSQL 数组 "{...}"
+            # 直接使用 Python list，supabase Python SDK 会将其序列化为 JSON 数组
+            embedding_json = vector  # Python list 会自动序列化为 JSON 数组 [0.1, 0.2, ...]
 
             # 2. 构造与 model_assets 表一致的行并存入数据库
             tags = task_data.get('tags') or []
@@ -61,7 +65,7 @@ class RagMemory:
                 "description": description,
                 "objects": objects,
                 "tags": tags,
-                "embedding": vector,
+                "embedding": embedding_json,  # 使用 Python list (自动序列化为 JSON 数组)
                 # 尝试从 task_data 里读取 ply_path/preview 路径，若无则 None
                 "ply_path": task_data.get('ply_path'),
                 "meta_info": meta_info,

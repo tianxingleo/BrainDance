@@ -11,6 +11,7 @@
 *   📱 **Frontend (Flutter)**: 直接读写数据库（创建任务、监听进度、下载模型）。
 *   ⚙️ **AI Engine (Python)**: 监听任务队列，下载视频，生成 3D 模型，回填 Embedding 向量。
 *   🗄️ **Supabase**: 负责身份认证 (Auth)、任务调度 (DB)、文件存储 (Storage) 和 向量检索 (Vector)。
+*   ⚡ **Edge Functions (Deno)**: Serverless 函数层，负责语义搜索接口，保护 API Key 不暴露给前端。
 
 ---
 
@@ -18,7 +19,7 @@
 
 | 服务 | 端口 | 访问地址 | 说明 |
 |------|------|----------|------|
-| **Kong (API Gateway)** | 54321 | http://127.0.0.1:54321 | 主 API 入口（REST, GraphQL, Storage, Auth） |
+| **Kong (API Gateway)** | 54321 | http://127.0.0.1:54321 | 主 API 入口（REST, GraphQL, Storage, Auth, Edge Functions） |
 | **PostgreSQL** | 54322 | postgresql://postgres:postgres@127.0.0.1:54322/postgres | 数据库连接 |
 | **Studio** | 54323 | http://127.0.0.1:54323 | Web 管理界面（推荐使用） |
 | **Inbucket (Mailpit)** | 54324 | http://127.0.0.1:54324 | 邮件测试服务器 |
@@ -28,6 +29,7 @@
 - REST API: http://127.0.0.1:54321/rest/v1
 - GraphQL: http://127.0.0.1:54321/graphql/v1
 - Storage: http://127.0.0.1:54321/storage/v1
+- Edge Functions: http://127.0.0.1:54321/functions/v1/{function-name}
 - Studio: http://127.0.0.1:54323
 
 ---
@@ -167,6 +169,152 @@ SUPABASE_TABLE=processing_tasks     # 任务表名称
 
 ---
 
+## ⚡ Edge Functions (语义搜索)
+
+本项目使用 **Supabase Edge Functions (Deno)** 实现语义搜索功能。
+
+### 功能说明
+
+- **自然语言搜索**: 用户输入"红色杯子"，系统自动理解意图并搜索相关 3D 模型
+- **智能时间过滤**: 支持"上周拍的"、"上个月"等自然语言时间描述
+- **语义向量匹配**: 使用 AI 生成语义向量，在 pgvector 中进行相似度搜索
+
+### 文件位置
+
+```
+supabase/functions/search-models/
+├── index.ts      # Edge Function 主程序 (Deno/TypeScript)
+├── test.ts       # 自动化测试 (Deno Test)
+└── .env.local    # 本地环境变量配置 (不提交 git)
+```
+
+### 快速开始
+
+#### 1. 配置环境变量
+
+编辑 `supabase/functions/search-models/.env.local`：
+
+```bash
+# DashScope API Key (必填)
+DASHSCOPE_API_KEY=sk-your-api-key-here
+```
+
+获取 DashScope Key: https://dashscope.console.aliyun.com/
+
+#### 2. 启动 Edge Function
+
+```bash
+cd supabase/functions/search-models
+supabase functions serve search-models --no-verify-jwt --env-file .env.local
+```
+
+启动成功后显示：
+```
+Serving functions at:
+- http://127.0.0.1:54321/functions/v1/search-models
+```
+
+#### 3. 测试搜索接口
+
+```bash
+# 简单搜索
+curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"红色杯子"}'
+
+# 带时间过滤的搜索
+curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"上周拍的照片"}'
+```
+
+#### 4. 运行自动化测试
+
+```bash
+deno test --allow-all supabase/functions/search-models/test.ts
+```
+
+### API 文档
+
+| 项目 | 说明 |
+| :--- | :--- |
+| **URL** | `/functions/v1/search-models` |
+| **Method** | `POST` |
+| **Content-Type** | `application/json` |
+
+**请求参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+| :--- | :--- | :---: | :--- |
+| `query` | string | ✅ | 搜索关键词，支持自然语言 |
+
+**请求示例**:
+```bash
+curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"红色杯子"}'
+```
+
+**响应示例**:
+```json
+{
+  "success": true,
+  "intent": {
+    "original_query": "红色杯子",
+    "parsed_search_text": "红色杯子",
+    "filter_start": null,
+    "filter_end": null
+  },
+  "results": []
+}
+```
+
+### 技术实现
+
+| 组件 | 技术 |
+| :--- | :--- |
+| **运行时** | Deno 1.46+ |
+| **语言** | TypeScript |
+| **LLM** | DashScope qwen-plus (意图解析) |
+| **Embedding** | DashScope text-embedding-v2 (1536 维) |
+| **向量搜索** | pgvector (`match_model_assets` RPC) |
+| **数据库** | PostgreSQL + Supabase JS |
+
+### 开发说明
+
+#### 添加新的 Edge Function
+
+```bash
+# 创建新的 Edge Function
+supabase functions new my-new-function
+
+# 编辑代码
+supabase/functions/my-new-function/index.ts
+```
+
+#### 修改现有代码
+
+1. 编辑 `supabase/functions/search-models/index.ts`
+2. 重启 Edge Function:
+   ```bash
+   # Ctrl+C 停止当前服务
+   supabase functions serve search-models --no-verify-jwt --env-file .env.local
+   ```
+
+#### 查看日志
+
+```bash
+supabase functions logs search-models
+```
+
+### 相关文档
+
+- [API 接入文档](../docs/API_DOC.md) - 前端调用接口说明
+- [本地部署指南](../docs/LOCAL_DEPLOYMENT.md) - 完整的本地开发指南
+- [API 测试报告](../docs/API_TEST_REPORT.md) - 测试结果记录
+
+---
+
 ## 💾 备份与恢复 (Backup & Restore)
 
 ### 备份数据库
@@ -229,6 +377,23 @@ docker compose logs -f
 
 # 查看特定服务日志
 docker logs supabase_db_BrainDance -f
+```
+
+### 5. Edge Functions 命令
+
+```bash
+# 启动 Edge Function 开发服务器
+cd supabase/functions/search-models
+supabase functions serve search-models --no-verify-jwt --env-file .env.local
+
+# 部署 Edge Function 到云端
+supabase functions deploy search-models
+
+# 查看 Edge Function 日志
+supabase functions logs search-models
+
+# 运行 Edge Function 测试
+deno test --allow-all supabase/functions/search-models/test.ts
 ```
 
 ---

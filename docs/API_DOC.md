@@ -156,40 +156,155 @@ braindance-assets/ (Bucket)
 
 ---
 
-## 5. 自定义接口 (Python API)（这一部分还没做好，只是本地跑了，api没有做，先留个坑位）
+## 5. 语义搜索接口 (Search API)
 
-部分复杂逻辑无法通过 Supabase 直接完成，需调用以下 HTTP 接口。
+本项目使用 **Supabase Edge Function (Deno)** 实现语义搜索功能，替代原有的 Python HTTP 接口。
 
-### 5.1 语义搜索模型
-通过自然语言搜索历史模型库。
+### 5.1 接口地址
 
-- **URL**: `/search`
-- **Method**: `GET`
+| 环境 | URL | 说明 |
+| :--- | :--- | :--- |
+| **本地开发** | `http://127.0.0.1:54321/functions/v1/search-models` | 需要启动本地 Supabase |
+| **生产环境** | `https://<项目ID>.supabase.co/functions/v1/search-models` | 云端 Edge Function |
 
-**请求参数 (Query Params):**
+### 5.2 请求说明
+
+- **Method**: `POST`
+- **Content-Type**: `application/json`
+- **认证**: 需要携带 `Authorization` Header (使用 Anon Key)
+
+### 5.3 请求参数
 
 | 参数 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `q` | string | 是 | 搜索词，如 "红色的杯子" |
-| `start` | date | 否 | 开始时间 `2025-01-01` |
-| `end` | date | 否 | 结束时间 `2025-12-31` |
+| :--- | :--- | :---: | :--- |
+| `query` | string | ✅ | 搜索关键词，支持自然语言，如 "红色杯子"、"上周拍的照片" |
 
-**响应示例 (JSON):**
+**请求示例**:
+```bash
+curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <ANON_KEY>' \
+  -d '{"query":"红色杯子"}'
+```
 
+### 5.4 响应格式
+
+**成功响应**:
 ```json
 {
-  "code": 200,
-  "data": [
+  "success": true,
+  "intent": {
+    "original_query": "红色杯子",
+    "parsed_search_text": "红色杯子",
+    "filter_start": null,
+    "filter_end": null
+  },
+  "results": [
     {
+      "id": "uuid",
       "scene_id": "scene_20260118_001",
       "description": "桌子上的红色马克杯...",
-      "score": 0.89,
-      "model_url": "https://.../point_cloud.ply",
-      "created_at": "2026-01-18T10:00:00Z"
+      "ply_path": "user_123/scene_001/output/point_cloud.ply",
+      "created_at": "2026-01-18T10:00:00Z",
+      "similarity": 0.89
     }
   ]
 }
 ```
+
+**错误响应**:
+```json
+{
+  "success": false,
+  "error": "错误描述信息"
+}
+```
+
+### 5.5 智能时间过滤
+
+系统会自动解析自然语言中的时间词：
+
+| 用户输入 | 解析结果 |
+| :--- | :--- |
+| "红色杯子" | `search_text: "红色杯子"`, `time: 无过滤` |
+| "上周拍的红色杯子" | `search_text: "红色杯子"`, `time: 上周的时间范围` |
+| "去年生日的照片" | `search_text: "生日照片"`, `time: 去年的范围` |
+
+### 5.6 Flutter 调用示例
+
+```dart
+/// 语义搜索模型
+///
+/// 使用 Edge Function 进行自然语言搜索
+/// 支持自动时间过滤和语义匹配
+///
+/// @param query 搜索关键词，支持自然语言
+/// @returns 搜索结果列表
+Future<List<SearchResult>> searchModels(String query) async {
+  try {
+    final response = await supabase.functions.invoke(
+      'search-models',
+      body: {'query': query},
+    );
+
+    if (response.data['success'] == true) {
+      final results = response.data['results'] as List;
+      return results.map((r) => SearchResult.fromJson(r)).toList();
+    } else {
+      throw Exception(response.data['error'] ?? '搜索失败');
+    }
+  } catch (e) {
+    debugPrint('搜索出错: $e');
+    return [];
+  }
+}
+
+/// 搜索结果模型
+class SearchResult {
+  final String id;
+  final String sceneId;
+  final String description;
+  final String plyPath;
+  final DateTime createdAt;
+  final double similarity;
+
+  SearchResult({
+    required this.id,
+    required this.sceneId,
+    required this.description,
+    required this.plyPath,
+    required this.createdAt,
+    required this.similarity,
+  });
+
+  /// 获取模型下载链接
+  String getModelUrl(String supabaseUrl) {
+    return '$supabaseUrl/storage/v1/object/public/braindance-assets/$plyPath';
+  }
+
+  factory SearchResult.fromJson(Map<String, dynamic> json) {
+    return SearchResult(
+      id: json['id'] ?? '',
+      sceneId: json['scene_id'] ?? '',
+      description: json['description'] ?? '',
+      plyPath: json['ply_path'] ?? '',
+      createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+      similarity: (json['similarity'] ?? 0).toDouble(),
+    );
+  }
+}
+```
+
+### 5.7 错误码说明
+
+| HTTP 状态码 | 错误信息 | 说明 |
+| :--- | :--- | :--- |
+| 400 | `缺少或无效的搜索关键词 'query'` | 未提供 query 参数 |
+| 400 | `搜索关键词不能为空` | query 为空字符串 |
+| 400 | `搜索关键词过长（最大 500 字符）` | query 超过 500 字符 |
+| 500 | `未配置 DASHSCOPE_API_KEY` | 服务器配置错误 |
+| 500 | `向量生成失败` | AI 服务调用失败 |
+| 500 | `数据库查询失败` | 数据库错误 |
 
 ---
 
@@ -207,9 +322,13 @@ braindance-assets/ (Bucket)
     *   当 `status` 变为 `completed` -> 拼接 URL 下载并展示模型。
 
 ### 流程二：搜索模型 (Search)
-1.  用户输入文字。
-2.  调用 Python API `/search?q=...`。
-3.  获取返回列表，直接使用列表中的 `model_url` 进行渲染展示。
+1.  用户输入自然语言搜索词，如"红色杯子"或"上周拍的照片"。
+2.  调用 Edge Function: `supabase.functions.invoke('search-models', body: {'query': query})`。
+3.  系统自动：
+    - 解析搜索意图（提取搜索词和时间范围）。
+    - 调用 AI 生成语义向量。
+    - 在向量数据库中搜索相似模型。
+4.  获取返回列表，使用 `results[].ply_path` 拼接下载链接进行渲染。
 
 ### 流程三：查看我的模型 (My Models)
 1.  调用 Supabase SDK: `.from('model_assets').select('*')`。
