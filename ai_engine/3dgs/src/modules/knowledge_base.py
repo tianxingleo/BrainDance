@@ -60,6 +60,10 @@ class KnowledgeBase:
             return False
 
         # 3. 构造数据库记录
+        # ⚠️ 关键修复: pgvector 期望 JSON 数组格式 "[...]"，不是 PostgreSQL 数组 "{...}"
+        # 直接使用 Python list，supabase Python SDK 会将其序列化为 JSON 数组
+        embedding_json = vector  # Python list 会自动序列化为 JSON 数组 [0.1, 0.2, ...]
+
         record = {
             "scene_id": scene_id,
             "user_id": task_data.get('user_id'),
@@ -69,7 +73,7 @@ class KnowledgeBase:
             "description": description,
             "objects": objects,
             "tags": tags,
-            "embedding": vector,
+            "embedding": embedding_json,  # 使用 Python list (自动序列化为 JSON 数组)
             
             # 资产路径 (用于未来复用)
             "ply_path": ply_path,
