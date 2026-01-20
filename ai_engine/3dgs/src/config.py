@@ -12,6 +12,11 @@ import os
 # 确保在导入 config 时就加载环境变量
 load_dotenv()
 
+# 规范化 SUPABASE_URL：确保末尾有单个斜杠，避免多个地方重复修正
+_supabase_url_raw = os.getenv("SUPABASE_URL", "")
+if _supabase_url_raw:
+    os.environ["SUPABASE_URL"] = _supabase_url_raw.rstrip('/') + '/'
+
 # 项目根目录 (用于计算相对路径)
 BASE_DIR = Path(__file__).resolve().parent.parent
 

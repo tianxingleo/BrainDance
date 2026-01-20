@@ -167,3 +167,4 @@ vscode_cli.tar.gz
 # =========================
 AGENTS.md
 .opencode.json
+.opencode/

@@ -1,6 +1,9 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple, Optional
+from pathlib import Path
+import json
+import os
 
 class BasePipeline(ABC):
     """
@@ -86,3 +89,96 @@ class BasePipeline(ABC):
         默认实现为空。
         """
         pass
+
+    def run_rag_analysis(self, input_path: str) -> Dict[str, Any]:
+        """调用 SceneAnalyzer 对单张图片进行语义分析并返回标准化的元数据字典。
+
+        返回字段：ai_description, ai_tags, ai_objects, ai_score, ai_reason
+        如果分析失败，返回空字典并在日志中记录警告。
+        """
+        try:
+            # 延迟导入，避免在缺少依赖时模块导入失败
+            from src.config import PipelineConfig
+            from src.modules.scene_analyzer import SceneAnalyzer
+
+            cfg = PipelineConfig()
+            analyzer = SceneAnalyzer(cfg)
+            self.log("🧠 [RAG] 开始语义分析...")
+            analysis = analyzer.analyze_single_image(input_path)
+            rag_meta = {
+                "ai_description": analysis.get("description", ""),
+                "ai_tags": analysis.get("tags", []),
+                "ai_objects": analysis.get("objects", []),
+                "ai_score": analysis.get("score", 0),
+                "ai_reason": analysis.get("reason", "")
+            }
+            self.log(f"    -> ✅ RAG 分析完成: tags={rag_meta['ai_tags']}")
+            return rag_meta
+        except Exception as e:
+            self.log(f"    -> ⚠️ RAG 分析失败，已跳过: {e}", level="WARN")
+            return {}
+
+    def upload_and_record(self, ply_path: str, metadata: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
+        """将生成的 ply 上传到 Supabase Storage 并在 model_assets 写入记录。
+
+        返回 remote_path（在存储桶内的 key）或 None。
+        所有异常都会被捕获并记录为日志，不抛出。
+        """
+        try:
+            supabase_url = os.getenv("SUPABASE_URL", "")
+            supabase_key = os.getenv("SUPABASE_KEY", "")
+            bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
+            scene_id = params.get("scene_id") or Path(ply_path).stem
+
+            if not supabase_url or not supabase_key:
+                self.log("    -> ℹ️ Supabase 凭据未配置，跳过上传与入库")
+                return None
+
+            try:
+                from supabase import create_client as _create_client
+            except Exception:
+                _create_client = None
+
+            if _create_client is None:
+                self.log("    -> ℹ️ Supabase 客户端不可用，跳过上传与入库")
+                return None
+
+            sb = _create_client(supabase_url, supabase_key)
+
+            with open(ply_path, "rb") as f:
+                remote_path = f"{scene_id}/{Path(ply_path).name}"
+                try:
+                    res = sb.storage.from_(bucket).upload(remote_path, f)
+                except Exception as e:
+                    self.log(f"    -> ⚠️ Supabase 上传失败: {e}", level="WARN")
+                    return None
+
+            # Try to get a public URL if available
+            public = None
+            try:
+                public = sb.storage.from_(bucket).get_public_url(remote_path)
+            except Exception:
+                public = None
+
+            # Prepare record for model_assets
+            try:
+                record = {
+                    "scene_id": scene_id,
+                    "description": metadata.get("ai_description", ""),
+                    "tags": metadata.get("ai_tags", []),
+                    "objects": metadata.get("ai_objects", []),
+                    "ply_path": remote_path,
+                    "meta_info": {"ai_score": metadata.get("ai_score", 0), "ai_reason": metadata.get("ai_reason", "")}
+                }
+                insert_res = sb.table("model_assets").insert(record).execute()
+                if getattr(insert_res, "error", None):
+                    self.log(f"    -> ⚠️ Supabase 写入 model_assets 失败: {insert_res.error}", level="WARN")
+                else:
+                    self.log(f"    -> ✅ 已上传到 Supabase: {public or remote_path}")
+            except Exception as e:
+                self.log(f"    -> ⚠️ 写入 Supabase 时出错: {e}", level="WARN")
+
+            return remote_path
+        except Exception as e:
+            self.log(f"    -> ⚠️ 处理上传/入库时发生异常: {e}", level="WARN")
+            return None
