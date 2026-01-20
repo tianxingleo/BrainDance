@@ -10,6 +10,7 @@ class AppConfig {
   static const settingsFileName = "settings.txt";
   static const appName = 'BrainDance';
   static const version = '1.0.0';
+  static const publishDate = '2026-01-01';
   static const settingsCount = 20;
   static Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
   static Color accentColor = Color.fromRGBO(232, 234, 220, 1);
