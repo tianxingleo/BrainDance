@@ -307,7 +307,10 @@ supabase start
 Worker 负责监听本地 Supabase 的任务队列并调用 GPU 进行训练。
 
 ```bash
-cd ai_engine
+# 激活 conda 环境
+conda activate gs_linux_backup
+
+cd ai_engine/3dgs
 
 # 1. 安装依赖
 pip install -r requirements.txt

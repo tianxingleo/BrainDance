@@ -100,6 +100,9 @@ supabase status
 
 ### AI 引擎 (3DGS Worker)
 ```bash
+# 激活 conda 环境
+conda activate gs_linux_backup
+
 cd ai_engine/3dgs
 
 # 安装依赖
