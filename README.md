@@ -191,14 +191,30 @@ BrainDance/
 # 1. 进入项目根目录
 cd BrainDance
 
-# 2. 启动 Supabase 本地服务
+# 2. 进入 Supabase 目录并启动服务
+cd supabase
 supabase start
 
 # 3. 🎉 记录输出的 API URL 和 Keys (Anon / Service Role)
-#    - API URL: http://127.0.0.1:54321
-#    - DB URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-#    - Studio: http://127.0.0.1:54323 (Web 控制台)
 ```
+
+#### 服务端口说明
+
+| 服务 | 端口 | 访问地址 | 说明 |
+|------|------|----------|------|
+| **API Gateway** | 54321 | http://127.0.0.1:54321 | REST API、GraphQL、Storage、Auth 入口 |
+| **PostgreSQL** | 54322 | postgresql://postgres:postgres@127.0.0.1:54322/postgres | 数据库连接 |
+| **Studio** | 54323 | http://127.0.0.1:54323 | Web 管理界面（推荐使用） |
+| **Mailpit** | 54324 | http://127.0.0.1:54324 | 邮件测试服务器 |
+
+#### 常用访问地址
+
+| 服务 | 地址 |
+|------|------|
+| REST API | http://127.0.0.1:54321/rest/v1 |
+| GraphQL | http://127.0.0.1:54321/graphql/v1 |
+| Storage | http://127.0.0.1:54321/storage/v1 |
+| Studio | http://127.0.0.1:54323 |
 
 #### 2. 启动计算引擎 (AI Worker)
 
