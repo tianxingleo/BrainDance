@@ -174,21 +174,8 @@ class CloudWorker:
             # =================== 阶段 B: 下载资源 ===================
             on_pipeline_log("正在从云端下载资源...")
             
-            # 获取任务类型：优先使用 task_type 字段，否则从 tags 中推断
-            task_type = task.get('task_type', '').lower() if task.get('task_type') else ''
-            
-            # 如果 task_type 为空，尝试从 tags 中推断
-            if not task_type:
-                tags = task.get('tags', [])
-                if isinstance(tags, str):
-                    tags = [tags]
-                if 'sam3d' in tags or 'single_image' in tags:
-                    task_type = 'single_image_sam3d'
-                elif 'sharp' in tags:
-                    task_type = 'single_image_sharp'
-                else:
-                    task_type = 'video_3dgs'
-            
+            # 获取任务类型：直接使用 task_type 字段，默认 video_3dgs
+            task_type = task.get('task_type', 'video_3dgs')
             print(f"🔧 检测到任务类型: {task_type}")
             
             # 根据任务类型确定下载路径
