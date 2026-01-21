@@ -1,3 +1,26 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:49710bfd13c03ad23068eec29db7247343ac53820b61bdf7a48e1d7e754d8280
-size 602
+import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import basicSsl from '@vitejs/plugin-basic-ssl'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    basicSsl()
+  ],
+  base: './', 
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    host: '0.0.0.0',
+    https: true,
+    // 【✅ 必须添加以下 headers 才能让 3DGS 运行】
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    }
+  }
+})
