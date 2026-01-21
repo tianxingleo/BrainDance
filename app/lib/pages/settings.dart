@@ -1,6 +1,7 @@
+import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
-import '../app_filesys.dart';
+import '../app_configs.dart';
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -11,15 +12,13 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
   late final TabController _tabController;
   late final ScrollController _scrollController;
   static const TextStyle tabTextStyle = TextStyle(fontSize: 16, fontFamily : 'MSYH');
-  late List<int> _pickerSelectedIndex; // 选择器选中项索引;
+  static final List<int> _pickerSelectedIndex = List.filled(2, -1); // 选择器选中项索引;
   @override
   void initState() {//若 tab 数量有变，需同步修改 length
     super.initState();
     _tabController = TabController(length: 4, vsync: this, animationDuration: Duration(milliseconds: 200));  // 正确初始化
-    _pickerSelectedIndex = List.filled(2, -1); // 初始化选择器索引
     _scrollController = ScrollController();
   }
-
   @override
   void dispose() {
     _tabController.dispose();  // 在 dispose 中释放资源
@@ -32,15 +31,14 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     } else {
       setLanguage('en_US');
     }
-    AppConfig.saveMsgToSettings();
+    SetConfig.saveMsgToFile();
     if (mounted) {
       setState(() {});
     }
   }
-  
   @override
   Widget build(BuildContext context) {
-    List<Widget> tabContents = [
+    final TDTabBar myTabBar = 
       TDTabBar(
         tabs: [
           TDTab(text: textLocalize('set_tab1')),
@@ -52,16 +50,10 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
         showIndicator: true,
         indicatorPadding: EdgeInsets.all(4.0),
         indicatorWidth: 60,
-        onTap: (index) {
-          setState(() {});
-        },
         labelStyle: tabTextStyle,
         unselectedLabelStyle: tabTextStyle,
-      )
-    ];
-    switch (_tabController.index) {
-      case 0:
-        TDCellGroup cells = TDCellGroup(
+      );
+    final TDCellGroup cells0 = TDCellGroup(
           cells: [
             TDCell(//语言切换单元格
               arrow: false,
@@ -79,7 +71,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
                 onChanged: (cell) {
                   setState(() {
                     setNightMode(!AppConfig.isNightMode);
-                    AppConfig.saveMsgToSettings();
+                    SetConfig.saveMsgToFile();
                   });
                   return true;
                 }
@@ -87,19 +79,13 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
             ),
           ],
         );
-        tabContents.add(cells);
-        break;
-      case 1:
-        TDCellGroup cells = TDCellGroup(
+    final TDCellGroup cells1 = TDCellGroup(
           cells: [
             _buildPicker(context, pickerTitle: 'PickerTest1', pickerIndex: 0),
             _buildPicker(context, pickerTitle: 'PickerTest2', pickerIndex: 1),
           ],
         );
-        tabContents.add(cells);
-        break;
-      case 2:
-        TDCellGroup cells = TDCellGroup(
+    final TDCellGroup cells2 = TDCellGroup(
           cells: [
             TDCell(//版本信息
               arrow: false,
@@ -111,12 +97,17 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
               title: textLocalize('set_pub'),
               note: AppConfig.publishDate,
             ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_cache'),
+              onClick:(cell) async {
+                TDToast.showText(textLocalize("tip_cache"), context: context);
+                await DirSystem.deleteDir(await DirFinder.cacheDir());
+              },
+            ),
           ],
         );
-        tabContents.add(cells);
-        break;
-      case 3:
-        Widget sb = Scrollbar(
+    final Widget sb = Scrollbar(
           controller: _scrollController,
           child: ListView.builder(
             controller: _scrollController,
@@ -124,15 +115,22 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
             itemBuilder: (context, index) => ListTile(title: Text('Item $index')),
           ),
         );
-        tabContents.add(Expanded(child: sb));
-        break;
-    }
     return Scaffold(
       appBar: AppBar(
         title: Text(textLocalize("settings")),
       ),
       body: Column(
-        children: tabContents
+        children: [
+          myTabBar,
+          Expanded(
+            child: TDTabBarView(
+              controller: _tabController,
+              children: [
+                cells0, cells1, cells2, sb
+              ]
+            ) 
+          ),
+        ]
       )
     );
   }
@@ -142,7 +140,7 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
     int pickerIndex = 0,
     List<String> pickerData = const ['Option 1', 'Option 2', 'Option 3'],
   }) {
-    int selectedIndex = _pickerSelectedIndex[pickerIndex];
+    final int selectedIndex = _pickerSelectedIndex[pickerIndex];
     return TDCell(//版本信息
       arrow: true,
       title: pickerTitle,
@@ -150,6 +148,8 @@ class _SettingsPageState extends State<SettingsPage> with SingleTickerProviderSt
       onClick: (click) {
         TDPicker.showMultiPicker(
           context,
+          titleHeight: 40,
+          pickerHeight: 200,
           title: pickerTitle,
           onConfirm: (selected) {
             setState(() {

@@ -1,6 +1,7 @@
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path_joiner;
 import 'dart:io';
+import '../app_configs.dart';//for appName
 //All functions here is safe to use.
 class DirFinder {
   //Part 1: Find Directories
@@ -10,7 +11,7 @@ class DirFinder {
     {
       return await getApplicationDocumentsDirectory().then((value) {
         if (Platform.isWindows) {
-          return path_joiner.join(value.path,"BrainDance");//If projectName changes, it should be changed.
+          return path_joiner.join(value.path, AppConfig.appName);//If projectName changes, it should be changed.
         }
         return value.path;
       });
@@ -23,7 +24,9 @@ class DirFinder {
   static Future<String> cacheDir() async {
     try
     {
-      return await getApplicationCacheDirectory().then((value) => value.path);
+      return await getApplicationCacheDirectory().then((value) {
+        return value.path;
+      });
     }
     catch (e)
     {
@@ -88,7 +91,7 @@ class DirSystem {
     }
   }
   static Future<bool> ensureDir(String path) async {
-    bool exists = await checkDirExists(path);
+    final bool exists = await checkDirExists(path);
     if (!exists)
     {
       return await createDir(path);
@@ -123,20 +126,20 @@ class FileSystem {
   }
   static Future<List<String>> readFile(String path) async {
       final file = File(path);
-      String content;
+      final String content;
       try
       {
         content = await file.readAsString();
+        return content.replaceAll('\r','').split("\n");
       }
       catch (e)
       {
-        content = "";
+        return [""];
       }
-      return content.replaceAll('\r','').split("\n");
   }
   static Future<bool> writeFile(String path, List<String> lines) async {
     final file = File(path);
-    String content = lines.join("\n");
+    final String content = lines.join("\n");
     try
     {
       await file.writeAsString(content);

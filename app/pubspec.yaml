@@ -37,6 +37,7 @@ dependencies:
   path_provider: ^2.1.5
   path: ^1.9.1
   tdesign_flutter: ^0.2.6
+  video_thumbnail_pro: ^0.7.3
 
 dev_dependencies:
   flutter_test:
@@ -79,13 +80,10 @@ flutter:
   assets:
     - assets/theme.json
     - assets/fonts/
+    - assets/sprites/
   fonts:
     - family: MSYH
       fonts:
         - asset: assets/fonts/msyh.ttc
-        - asset: assets/fonts/msyhbd.ttc
-          weight: 700
-        - asset: assets/fonts/msyhl.ttc
-          weight: 300
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package

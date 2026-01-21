@@ -6,15 +6,18 @@ import 'pages/recall.dart';
 import 'pages/record.dart';
 import 'pages/generate.dart';
 import 'pages/settings.dart';
-import 'app_filesys.dart';
+import 'app_configs.dart';
 //App Run
 late final TDThemeData themeData;
-late VoidCallback? onThemeChanged;
-late VoidCallback? onLanguageChanged;
+late final VoidCallback? onThemeChanged;
+late final VoidCallback? onLanguageChanged;
+List<TDUploadFile> uploadedImages = [];
+List<TDUploadFile> uploadedVideos = [];
+String uploadedText = "";
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  var themeJsonString = await rootBundle.loadString('assets/theme.json');
+  final String themeJsonString = await rootBundle.loadString('assets/theme.json');
   /// 开启多套主题功能
   TDTheme.needMultiTheme(true);
   /// 默认浅色主题,xxxDark为深色主题
@@ -31,10 +34,53 @@ class MyApp extends StatefulWidget {
   @override
   State<MyApp> createState() => _MyAppState();
 }
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    onThemeChanged = _updateTheme;
+    WidgetsBinding.instance.addObserver(this); // 注册观察者
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 移除观察者
+    super.dispose();
+  }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // 应用进入后台（例如用户按了Home键、切换到其他应用）
+      // 在此处执行保存操作
+      //Image
+      List<String> imagePaths = [];
+      for (TDUploadFile file in uploadedImages) {
+        imagePaths.add(file.assetPath.toString());
+      }
+      if (imagePaths.isNotEmpty) {
+        GenConfig.saveImagePathsFile(imagePaths);
+      } else {
+        GenConfig.deleteImagePathsFile();
+      }
+      //Text
+      if (uploadedText.isNotEmpty) {
+        GenConfig.saveTextFile(uploadedText);
+      } else {
+        GenConfig.deleteTextFile();
+      }
+      //Video
+      List<String> videoPaths = [];
+      for (TDUploadFile file in uploadedVideos) {
+        videoPaths.add(file.assetPath.toString());
+      }
+      if (videoPaths.isNotEmpty) {
+        GenConfig.saveVideoPathsFile(videoPaths);
+      } else {
+        GenConfig.deleteVideoPathsFile();
+      }
+    }
+  }
   @override
   Widget build(BuildContext context) {
-    onThemeChanged = _updateTheme;
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
@@ -84,20 +130,25 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;  // 当前选中的底部导航索引
   bool isLoading = true; //加载状态
   
-  late final List<Widget> _pages = [  // 页面列表
+  static const List<Widget> _pages = [  // 页面列表
     RecallPage(),      // 页面0: 主页：过往回忆
     RecordPage(),    // 页面1: 相机记录
     GeneratePage(),   // 页面2: 图文生成
     SettingsPage(), // 页面3: 设置
   ];
-  //final TextStyle unselectedTextStyle = TextStyle(fontSize: 10);
-  final TextStyle selectedTextStyle = TextStyle(fontSize: 10);
+  //static const TextStyle unselectedTextStyle = TextStyle(fontSize: 10);
+  static const TextStyle selectedTextStyle = TextStyle(fontSize: 10);
   static const double unselectedSize = 32;
   static const double selectedSize = 36;
   
   @override
-  Widget build(BuildContext context) {
+  void initState() {
+    super.initState();
     onLanguageChanged = _updateState;
+    _loading();
+  }
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       body: _getPage(_currentIndex),  // 根据索引显示对应页面
       bottomNavigationBar: TDBottomTabBar(  // 底部导航栏
@@ -145,15 +196,10 @@ class _MainScreenState extends State<MainScreen> {
       )
     );
   }
-  @override
-  void initState() {
-    super.initState();  // 必须调用父类方法
-    _loading();//加载AppConfig
-  }
   void _loading() async {
-    bool suc = await AppConfig.loadMsgFromSettingsFile();
+    final bool suc = await SetConfig.loadMsgFromFile();
     if (suc) {
-      AppConfig.loadSettingsFromMsg();
+      SetConfig.loadSettingsFromMsg();
     }
     isLoading = false;
     _updateState(); // 更新状态以显示主界面

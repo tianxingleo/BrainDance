@@ -1,6 +1,6 @@
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
-import '../app_filesys.dart';
+import '../app_configs.dart';
 class RecordPage extends StatelessWidget {
   const RecordPage({super.key});
 
