@@ -97,6 +97,12 @@
 *.patch filter=lfs diff=lfs merge=lfs -text
 *.sql filter=lfs diff=lfs merge=lfs -text
 *.git-id filter=lfs diff=lfs merge=lfs -text
+*.hpp filter=lfs diff=lfs merge=lfs -text
+*.rb filter=lfs diff=lfs merge=lfs -text
+*.php filter=lfs diff=lfs merge=lfs -text
+*.java filter=lfs diff=lfs merge=lfs -text
+*.go filter=lfs diff=lfs merge=lfs -text
+*.rs filter=lfs diff=lfs merge=lfs -text
 *.pt !text -filter -merge -diff
 *.pth !text -filter -merge -diff
 *.ckpt !text -filter -merge -diff
@@ -128,12 +134,6 @@
 *.npz !text -filter -merge -diff
 *.parquet !text -filter -merge -diff
 vscode_cli.tar.gz !text -filter -merge -diff
-*.hpp filter=lfs diff=lfs merge=lfs -text
-*.rb filter=lfs diff=lfs merge=lfs -text
-*.php filter=lfs diff=lfs merge=lfs -text
-*.java filter=lfs diff=lfs merge=lfs -text
-*.go filter=lfs diff=lfs merge=lfs -text
-*.rs filter=lfs diff=lfs merge=lfs -text
 *.mp4:*.png:*.jpg:*.ttc:*.glb:*.zip:*.pt:*.pth:*.ckpt:*.h5:*.hdf5:*.safetensors:*.mov:*.avi:*.mkv:*.webm:*.wav:*.mp3:*.flac:*.aac:*.exr:*.hdr:*.exe:*.dll:*.so:*.dylib:*.a:*.lib:*.tar:*.gz:*.7z:*.rar:*.npz:*.parquet !text -filter -merge -diff
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.ckpt filter=lfs diff=lfs merge=lfs -text
