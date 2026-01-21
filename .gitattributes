@@ -1,156 +1,62 @@
 # Git LFS 大文件跟踪配置
-# 生成时间: 2026-01-20
+# 修复时间: 2026-01-21
+# 原则：只跟踪真正的大文件（>1MB），不跟踪源代码和配置文件
 
+# =========================
 # 机器学习模型文件
 *.pt filter=lfs diff=lfs merge=lfs -text
 *.pth filter=lfs diff=lfs merge=lfs -text
+*.ckpt filter=lfs diff=lfs merge=lfs -text
 *.h5 filter=lfs diff=lfs merge=lfs -text
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
-# 3D模型文件
-*.ply filter=lfs diff=lfs merge=lfs -text
-*.obj filter=lfs diff=lfs merge=lfs -text
-*.fbx filter=lfs diff=lfs merge=lfs -text
-*.gltf filter=lfs diff=lfs merge=lfs -text
-*.glb filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
 # 视频文件
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.mov filter=lfs diff=lfs merge=lfs -text
 *.avi filter=lfs diff=lfs merge=lfs -text
 *.mkv filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
 # 音频文件
 *.wav filter=lfs diff=lfs merge=lfs -text
 *.mp3 filter=lfs diff=lfs merge=lfs -text
-# 图像序列（可选）
-*.exr filter=lfs diff=lfs merge=lfs -text
-# 数据文件（可选）
-*.npz filter=lfs diff=lfs merge=lfs -text
-*.parquet filter=lfs diff=lfs merge=lfs -text
-*.gitignore filter=lfs diff=lfs merge=lfs -text
-*.md filter=lfs diff=lfs merge=lfs -text
-*.yml filter=lfs diff=lfs merge=lfs -text
-/patching/hydra filter=lfs diff=lfs merge=lfs -text
-*.toml filter=lfs diff=lfs merge=lfs -text
-*.txt filter=lfs diff=lfs merge=lfs -text
-*.gitmodules filter=lfs diff=lfs merge=lfs -text
-*.ipynb filter=lfs diff=lfs merge=lfs -text
-*.png filter=lfs diff=lfs merge=lfs -text
-*.jpg filter=lfs diff=lfs merge=lfs -text
-*.py filter=lfs diff=lfs merge=lfs -text
-/LICENSE filter=lfs diff=lfs merge=lfs -text
-*.json filter=lfs diff=lfs merge=lfs -text
-*.DS_Store filter=lfs diff=lfs merge=lfs -text
-*.nojekyll filter=lfs diff=lfs merge=lfs -text
-*.js filter=lfs diff=lfs merge=lfs -text
-*.css filter=lfs diff=lfs merge=lfs -text
-*.html filter=lfs diff=lfs merge=lfs -text
-*.ico filter=lfs diff=lfs merge=lfs -text
-*.yaml filter=lfs diff=lfs merge=lfs -text
-*.python-version filter=lfs diff=lfs merge=lfs -text
-/ACKNOWLEDGEMENTS filter=lfs diff=lfs merge=lfs -text
-/LICENSE_MODEL filter=lfs diff=lfs merge=lfs -text
-*.in filter=lfs diff=lfs merge=lfs -text
-*.gif filter=lfs diff=lfs merge=lfs -text
-*.pdf filter=lfs diff=lfs merge=lfs -text
-*.ini filter=lfs diff=lfs merge=lfs -text
-*.db-shm filter=lfs diff=lfs merge=lfs -text
-*.db-wal filter=lfs diff=lfs merge=lfs -text
-*.0 filter=lfs diff=lfs merge=lfs -text
-*.metadata filter=lfs diff=lfs merge=lfs -text
-*.kts filter=lfs diff=lfs merge=lfs -text
-*.xml filter=lfs diff=lfs merge=lfs -text
-*.kt filter=lfs diff=lfs merge=lfs -text
-*.properties filter=lfs diff=lfs merge=lfs -text
-*.plist filter=lfs diff=lfs merge=lfs -text
-*.xcconfig filter=lfs diff=lfs merge=lfs -text
-*.pbxproj filter=lfs diff=lfs merge=lfs -text
-*.xcworkspacedata filter=lfs diff=lfs merge=lfs -text
-*.xcsettings filter=lfs diff=lfs merge=lfs -text
-*.xcscheme filter=lfs diff=lfs merge=lfs -text
-*.swift filter=lfs diff=lfs merge=lfs -text
-*.storyboard filter=lfs diff=lfs merge=lfs -text
-*.h filter=lfs diff=lfs merge=lfs -text
-*.dart filter=lfs diff=lfs merge=lfs -text
-*.cc filter=lfs diff=lfs merge=lfs -text
-*.cmake filter=lfs diff=lfs merge=lfs -text
-*.xib filter=lfs diff=lfs merge=lfs -text
-*.entitlements filter=lfs diff=lfs merge=lfs -text
-*.lock filter=lfs diff=lfs merge=lfs -text
-*.rc filter=lfs diff=lfs merge=lfs -text
-*.cpp filter=lfs diff=lfs merge=lfs -text
-*.manifest filter=lfs diff=lfs merge=lfs -text
-*.ttc filter=lfs diff=lfs merge=lfs -text
-*.ts filter=lfs diff=lfs merge=lfs -text
-*.vue filter=lfs diff=lfs merge=lfs -text
-*.svg filter=lfs diff=lfs merge=lfs -text
-/code filter=lfs diff=lfs merge=lfs -text
-*.gz filter=lfs diff=lfs merge=lfs -text
-/supabase/.branches/_current_branch filter=lfs diff=lfs merge=lfs -text
-/supabase/.temp/cli-latest filter=lfs diff=lfs merge=lfs -text
-/ai_engine/3dgs/src/libs/ml-sharp/ACKNOWLEDGEMENTS filter=lfs diff=lfs merge=lfs -text
-/ai_engine/3dgs/src/libs/ml-sharp/LICENSE filter=lfs diff=lfs merge=lfs -text
-/ai_engine/3dgs/src/libs/ml-sharp/LICENSE_MODEL filter=lfs diff=lfs merge=lfs -text
-/ai_engine/3dgs/src/libs/sam-3d-objects/LICENSE filter=lfs diff=lfs merge=lfs -text
-/ai_engine/3dgs/src/libs/sam-3d-objects/patching/hydra filter=lfs diff=lfs merge=lfs -text
-*.log filter=lfs diff=lfs merge=lfs -text
-*.pid filter=lfs diff=lfs merge=lfs -text
-*.sh filter=lfs diff=lfs merge=lfs -text
-*.patch filter=lfs diff=lfs merge=lfs -text
-*.sql filter=lfs diff=lfs merge=lfs -text
-*.git-id filter=lfs diff=lfs merge=lfs -text
-*.hpp filter=lfs diff=lfs merge=lfs -text
-*.rb filter=lfs diff=lfs merge=lfs -text
-*.php filter=lfs diff=lfs merge=lfs -text
-*.java filter=lfs diff=lfs merge=lfs -text
-*.go filter=lfs diff=lfs merge=lfs -text
-*.rs filter=lfs diff=lfs merge=lfs -text
-*.pt !text -filter -merge -diff
-*.pth !text -filter -merge -diff
-*.ckpt !text -filter -merge -diff
-*.h5 !text -filter -merge -diff
-*.hdf5 !text -filter -merge -diff
-*.safetensors !text -filter -merge -diff
-*.mp4 !text -filter -merge -diff
-*.mov !text -filter -merge -diff
-*.avi !text -filter -merge -diff
-*.mkv !text -filter -merge -diff
-*.webm !text -filter -merge -diff
-*.wav !text -filter -merge -diff
-*.mp3 !text -filter -merge -diff
-*.flac !text -filter -merge -diff
-*.aac !text -filter -merge -diff
-*.exr !text -filter -merge -diff
-*.hdr !text -filter -merge -diff
-*.exe !text -filter -merge -diff
-*.dll !text -filter -merge -diff
-*.so !text -filter -merge -diff
-*.dylib !text -filter -merge -diff
-*.a !text -filter -merge -diff
-*.lib !text -filter -merge -diff
-*.zip !text -filter -merge -diff
-*.tar !text -filter -merge -diff
-*.gz !text -filter -merge -diff
-*.7z !text -filter -merge -diff
-*.rar !text -filter -merge -diff
-*.npz !text -filter -merge -diff
-*.parquet !text -filter -merge -diff
-vscode_cli.tar.gz !text -filter -merge -diff
-*.mp4:*.png:*.jpg:*.ttc:*.glb:*.zip:*.pt:*.pth:*.ckpt:*.h5:*.hdf5:*.safetensors:*.mov:*.avi:*.mkv:*.webm:*.wav:*.mp3:*.flac:*.aac:*.exr:*.hdr:*.exe:*.dll:*.so:*.dylib:*.a:*.lib:*.tar:*.gz:*.7z:*.rar:*.npz:*.parquet !text -filter -merge -diff
-*.zip filter=lfs diff=lfs merge=lfs -text
-*.ckpt filter=lfs diff=lfs merge=lfs -text
-*.safetensors filter=lfs diff=lfs merge=lfs -text
-*.webm filter=lfs diff=lfs merge=lfs -text
 *.flac filter=lfs diff=lfs merge=lfs -text
 *.aac filter=lfs diff=lfs merge=lfs -text
+# 图像序列与高分辨率图像
+*.exr filter=lfs diff=lfs merge=lfs -text
 *.hdr filter=lfs diff=lfs merge=lfs -text
+# 编译产物与二进制文件
 *.exe filter=lfs diff=lfs merge=lfs -text
 *.dll filter=lfs diff=lfs merge=lfs -text
 *.so filter=lfs diff=lfs merge=lfs -text
 *.dylib filter=lfs diff=lfs merge=lfs -text
 *.a filter=lfs diff=lfs merge=lfs -text
 *.lib filter=lfs diff=lfs merge=lfs -text
+# 归档文件
+*.zip filter=lfs diff=lfs merge=lfs -text
 *.tar filter=lfs diff=lfs merge=lfs -text
+*.gz filter=lfs diff=lfs merge=lfs -text
 *.7z filter=lfs diff=lfs merge=lfs -text
 *.rar filter=lfs diff=lfs merge=lfs -text
+# 数据文件
+*.npz filter=lfs diff=lfs merge=lfs -text
+*.parquet filter=lfs diff=lfs merge=lfs -text
+# 注意：3D 文件（.ply, .obj, .glb, .gltf 等）不追踪，由 .gitignore 处理
+# 原因：3DGS 训练生成的 .ply 文件通常是临时文件，不需要版本控制
+# 项目特定路径（模型文件）
+ai_engine/**/*.pt filter=lfs diff=lfs merge=lfs -text
+ai_engine/**/*.pth filter=lfs diff=lfs merge=lfs -text
+ai_engine/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
+# 第三方库特定文件
+/ai_engine/3dgs/src/libs/ml-sharp/ACKNOWLEDGEMENTS filter=lfs diff=lfs merge=lfs -text
+/ai_engine/3dgs/src/libs/ml-sharp/LICENSE filter=lfs diff=lfs merge=lfs -text
+/ai_engine/3dgs/src/libs/ml-sharp/LICENSE_MODEL filter=lfs diff=lfs merge=lfs -text
+/ai_engine/3dgs/src/libs/sam-3d-objects/LICENSE filter=lfs diff=lfs merge=lfs -text
+/ai_engine/3dgs/src/libs/sam-3d-objects/patching/hydra filter=lfs diff=lfs merge=lfs -text
+*.mp4:*.png:*.jpg:*.ttc:*.glb:*.zip:*.pt:*.pth:*.ckpt:*.h5:*.hdf5:*.safetensors:*.mov:*.avi:*.mkv:*.webm:*.wav:*.mp3:*.flac:*.aac:*.exr:*.hdr:*.exe:*.dll:*.so:*.dylib:*.a:*.lib:*.tar:*.gz:*.7z:*.rar:*.npz:*.parquet !text -filter -merge -diff
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.ttc filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text
 *.py:*.md:*.txt:*.json:*.yaml:*.yml:*.toml:*.sh:*.ini:*.in:*.lock:*.log:*.id:*.cfg:*.conf:*.config !text -filter -merge -diff
 *.py !text !filter !merge !diff
 *.md !text !filter !merge !diff
