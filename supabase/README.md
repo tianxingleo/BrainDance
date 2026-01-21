@@ -4,13 +4,6 @@
 
 这是一个基于 Supabase 的本地后端环境，服务于 BrainDance 项目。它不仅提供 PostgreSQL 数据库和对象存储，还集成了 `pgvector` 用于 RAG（检索增强生成）语义搜索功能。
 
-> **📚 相关文档**
-> - [项目主文档](../README.md) - 项目概述、架构说明
-> - [docs 文档索引](../docs/README.md) - 完整文档导航
-> - [API 接口文档](../docs/API_DOC.md) - 前端接入规范
-> - [本地部署指南](../docs/LOCAL_DEPLOYMENT.md) - 完整部署流程
-> - [开发环境配置](../docs/开发环境配置.md) - 详细配置指南
-
 ## 🏗️ 架构说明 (Architecture)
 
 本项目作为 **数据中台**，连接前端与计算节点：

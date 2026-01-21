@@ -7,15 +7,6 @@
 
 本项目是 BrainDance 的核心 AI 算力节点，负责监听云端任务、自动下载用户上传的视频、执行全自动 3D 重建流程（COLMAP/GLOMAP + Splatfacto），并将最终的 3D 模型（PLY）与日志实时回传至云端。
 
-> **📚 相关文档**
-> - [项目主文档](../../README.md) - 项目概述、架构说明
-> - [docs 文档索引](../../docs/README.md) - 完整文档导航
-> - [快速开始指南](../../docs/快速开始指南.md) - 5步启动开发环境
-> - [开发环境配置](../../docs/开发环境配置.md) - 详细配置指南
-> - [AI Engine 文档](../README.md) - AI 引擎整体说明
-> - [测试指南](../../docs/4.测试/测试指南.md) - 测试规范
-> - [贡献指南](../../docs/5.贡献/贡献指南.md) - 代码贡献流程
-
 ## ✨ 核心特性
 
 * **☁️ 云原生架构**：通过 Supabase 实现完全解耦的“生产者-消费者”模式，前端只管发任务，后端自动排队处理。
@@ -86,42 +77,6 @@ SUPABASE_BUCKET=braindance-assets
 SUPABASE_TABLE=processing_tasks
 
 ```
-
-### 4. SAM3D 模型配置
-
-> **⚠️ 重要**: SAM3D 模型需要单独申请和下载，详见 [SAM3D 模型设置教程](../../docs/SAM3D_MODEL_SETUP.md)
-
-**快速配置**：
-
-1. **申请访问权限**（首次必须）
-   - 访问 https://huggingface.co/facebook/sam-3d-objects
-   - 填写申请表单，等待 Meta 批准
-
-2. **下载模型**（约 12.5GB）
-   ```bash
-   pip install "huggingface_hub[cli]"
-   huggingface-cli login
-
-   hf download --repo-type model --local-dir checkpoints facebook/sam-3d-objects
-   mv checkpoints/checkpoints checkpoints/hf
-   ```
-
-3. **设置环境变量**
-   ```bash
-   # 在 .env 文件中添加
-   SAM3D_REPO_PATH=/path/to/your/sam-3d-objects
-   SAM3D_CHECKPOINT_DIR=/path/to/your/sam-3d-objects/checkpoints/hf
-   ```
-
-**验证配置**：
-```bash
-python -c "from src.config import PipelineConfig; c = PipelineConfig(); print(c.sam3d_repo_path)"
-```
-
-**硬件要求**：
-- 显存: 12GB+
-- 系统内存: 48GB+
-- 磁盘空间: 50GB+
 
 ## 💾 数据库设计 (Supabase)
 

@@ -88,6 +88,22 @@ BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文
 
 本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建的全自动化流程。
 
+<<<<<<< HEAD
+系统由三部分组成，通过 **Supabase** 进行解耦：
+
+1.  **Client (Flutter)**: 
+    - 负责视频采集与上传。
+    - 直接连接 Supabase Storage/DB，无中间件。
+    - 通过 Realtime 监听任务进度。
+2.  **BaaS (Supabase)**:
+    - **PostgreSQL**: 核心数据库，通过 **RLS (行级安全策略)** 保证数据隔离。
+    - **Storage**: 存储原始视频 (Raw) 和训练好的模型 (PLY/Splat)。
+    - **Auth**: 管理用户身份。
+3.  **Worker (Python)**:
+    - 部署在 WSL/Linux 显卡服务器上。
+    - 监听数据库的任务队列，自动拉取视频进行 3DGS 训练。
+    - 集成 LangChain + ChromaDB 实现多模态 RAG。
+=======
 系统由四部分组成，通过 **Supabase** 进行解耦：
 
 1. **Client (Flutter)**:
@@ -108,15 +124,14 @@ BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文
    - **Serverless API**: 承载轻量级业务逻辑。
    - **Semantic Search**: 负责 RAG 语义检索接口，调用 LLM Embedding API 并进行向量匹配，保护 API Key 不泄露。
 4. **AI Worker (Python)**:
-   - 部署在 WSL/Linux 显卡服务器上的纯计算节点。
-   - **Consumer**: 监听数据库的任务队列，自动拉取视频或图片。
-   - **Training**: 运行 3DGS/Nerfstudio 训练管线，生成 PLY 模型。
-   - **Single Image**: 支持基于 SAM3D 的单图 3DGS 生成，无需视频。
-   - **Understanding**: 调用多模态大模型 (Qwen-VL) 进行场景理解与自动打标 (Auto-Tagging)。
-
+    - 部署在 WSL/Linux 显卡服务器上的纯计算节点。
+    - **Consumer**: 监听数据库的任务队列，自动拉取视频或图片。
+    - **Training**: 运行 3DGS/Nerfstudio 训练管线，生成 PLY 模型。
+    - **Single Image**: 支持基于 SAM3D 的单图 3DGS 生成，无需视频。
     - **Understanding**: 调用多模态大模型 (Qwen-VL) 进行场景理解与自动打标 (Auto-Tagging)。
+>>>>>>> 54064f775e45e9dee03c105d6a1f14f37f1e86fb
 
-详细架构说明请参考：[系统架构文档](docs/2.架构说明/系统架构.md)
+
 
 ------
 
@@ -128,6 +143,75 @@ Plaintext
 
 ```
 BrainDance/
+<<<<<<< HEAD
+├── app/                  # [Flutter] 移动端主工程
+│   ├── lib/              #   - UI 交互逻辑与状态管理
+│   ├── android/          #   - ARCore 原生调用通道 (Platform Channel)
+│   └── web_viewer/       #   - 基于 Three.js/WebGPU 的 3DGS 渲染内核
+│
+├── server/               # [Go] 业务后端服务
+│   ├── api/              #   - RESTful 接口定义
+│   ├── internal/         #   - 业务逻辑 (Auth, File, Task)
+│   └── pkg/              #   - 公共库 (Database, Redis, S3)
+│
+├── ai_engine/            # [Python] 核心算法引擎
+│   ├── core/             #   - 3DGS 训练管线 (Nerfstudio 封装)
+│   ├── rag/              #   - 向量检索与多模态打标脚本
+│   └── scripts/          #   - 数据预处理与转换工具 (COLMAP/FFmpeg)
+│
+├── deploy/               # [Ops] 部署配置
+│   ├── docker-compose.yml
+│   └── nginx/
+│
+└── docs/                 # [Doc] 项目文档与规范
+    ├── api_v1.yaml       #   - OpenAPI 接口契约
+    └── architecture.png
+```
+
+### 
+
+## 🚀 快速开始 (Quick Start)
+
+### 环境要求
+
+- **Backend**: NVIDIA GPU (CUDA 11.8+), Python 3.10+
+- **Frontend**: Flutter SDK, Android Studio / Xcode
+- **Server**: Go 1.20+
+
+### 部署步骤
+
+#### 1. 启动计算引擎 (AI Engine)
+
+#### 2. 启动业务后端 (Server)
+
+#### 3. 启动移动端 (App)
+
+
+
+### 📚 参考与致谢 (References & Acknowledgements)
+
+本项目是站在巨人肩膀上的探索。核心算法与渲染能力大量借鉴并集成了以下优秀的开源项目，特此致谢：
+
+#### Core Algorithms (算法核心)
+
+- **[nerfstudio](https://github.com/nerfstudio-project/nerfstudio)**: 提供了模块化最强的 NeRF/3DGS 训练框架，本项目的训练管线基于 `splatfacto` 模型修改。
+- **[gsplat](https://github.com/nerfstudio-project/gsplat)**: 极速 CUDA 光栅化后端，为云端训练提供了性能保障。
+- **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria 的原始论文实现，奠定了理论基础。
+
+#### Rendering & Viewer (渲染与查看器)
+
+- **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
+- **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
+
+#### AI & RAG (人工智能与检索)
+
+- **[LangChain](https://github.com/langchain-ai/langchain)**: 构建了本项目的空间语义检索链路。
+- **[LGM](https://github.com/3DTopia/LGM)** / **[3DTopia](https://github.com/3DTopia/3DTopia)**: 为本项目未来的“文生 3D”与“图生 3D”功能提供了生成式模型支持。
+
+
+
+
+=======
 ├── ai_engine/            # [Python] 核心算法引擎 (Worker)
 │   ├── 3dgs/             #   - 3DGS 核心引擎
 │   │   ├── src/          #   - 源代码
@@ -169,46 +253,9 @@ BrainDance/
 > **说明**: 
 > - `app/` (Flutter 移动端) 正在开发中，尚未纳入本仓库
 > - `supabase/functions/` (搜索 Edge Functions) 正在开发中
+```
 
 ## 🚀 快速开始 (Quick Start)
-
-### 环境要求
-
-- **Backend**: NVIDIA GPU (CUDA 11.8+), Python 3.10+
-- **Frontend**: Flutter SDK, Android Studio / Xcode
-- **Server**: Go 1.20+
-
-### 部署步骤
-
-#### 1. 启动计算引擎 (AI Engine)
-
-#### 2. 启动业务后端 (Server)
-
-#### 3. 启动移动端 (App)
-
-
-
-### 📚 参考与致谢 (References & Acknowledgements)
-
-本项目是站在巨人肩膀上的探索。核心算法与渲染能力大量借鉴并集成了以下优秀的开源项目，特此致谢：
-
-#### Core Algorithms (算法核心)
-
-- **[nerfstudio](https://github.com/nerfstudio-project/nerfstudio)**: 提供了模块化最强的 NeRF/3DGS 训练框架，本项目的训练管线基于 `splatfacto` 模型修改。
-- **[gsplat](https://github.com/nerfstudio-project/gsplat)**: 极速 CUDA 光栅化后端，为云端训练提供了性能保障。
-- **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria 的原始论文实现，奠定了理论基础。
-
-#### Rendering & Viewer (渲染与查看器)
-
-- **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
-- **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
-
-#### AI & RAG (人工智能与检索)
-
-- **[LangChain](https://github.com/langchain-ai/langchain)**: 构建了本项目的空间语义检索链路。
-- **[LGM](https://github.com/3DTopia/LGM)** / **[3DTopia](https://github.com/3DTopia/3DTopia)**: 为本项目未来的"文生 3D"与"图生 3D"功能提供了生成式模型支持。
-
-#### Infrastructure & AI (基础设施与人工智能)
 
 ### 环境要求 (Prerequisites)
 
@@ -290,34 +337,6 @@ cd app
 # 2. 运行 App
 flutter run
 ```
-
-## 📖 深入阅读 (Further Reading)
-
-了解更多关于 BrainDance 的技术细节和架构设计：
-
-### 📊 技术前沿性分析
-
-- **[项目技术前沿性分析](docs/技术报告/项目技术前沿性分析.md)**: 详细分析 BrainDance 所采用的各项核心技术的发布时间、学术来源和前沿性。涵盖 3D Gaussian Splatting、SAM 3D、SHARP、GLOMAP 等前沿技术的深度解读。
-
-### 🚀 快速开始
-
-- **[快速开始指南](docs/快速开始指南.md)**: 5 步快速启动系统，30 分钟内搭建开发环境
-- **[开发环境配置](docs/开发环境配置.md)**: 详细的环境配置步骤和故障排除
-
-### 🏗️ 架构设计
-
-- **[项目架构](docs/1.总览/项目架构.md)**: 系统整体架构概览、组件关系、数据流转
-- **[系统架构](docs/2.架构说明/系统架构.md)**: 详细架构说明、组件设计、技术选型
-
-### 📚 API 与接口
-
-- **[API 接口文档](docs/API_DOC.md)**: 完整的 API 接口说明
-- **[数据库设计](docs/3.API文档/数据库设计.md)**: PostgreSQL 表结构、索引、函数设计
-
-### 🤝 贡献指南
-
-- **[贡献指南](docs/5.贡献/贡献指南.md)**: 代码贡献流程和规范
-- **[测试指南](docs/4.测试/测试指南.md)**: 测试策略、测试用例、测试规范
 
 
 
@@ -414,6 +433,10 @@ sequenceDiagram
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
 
+
+
+
+>>>>>>> 54064f775e45e9dee03c105d6a1f14f37f1e86fb
 
 我们相信，科技不应只是冰冷的参数竞赛。 **最好的科技，是让此在（Dasein）不再孤独，让瞬间成为永恒。**
 
