@@ -96,6 +96,7 @@
 *.sh filter=lfs diff=lfs merge=lfs -text
 *.patch filter=lfs diff=lfs merge=lfs -text
 *.sql filter=lfs diff=lfs merge=lfs -text
+*.git-id filter=lfs diff=lfs merge=lfs -text
 *.pt !text -filter -merge -diff
 *.pth !text -filter -merge -diff
 *.ckpt !text -filter -merge -diff
