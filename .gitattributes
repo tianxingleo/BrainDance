@@ -52,7 +52,6 @@ ai_engine/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/ml-sharp/LICENSE_MODEL filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/sam-3d-objects/LICENSE filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/sam-3d-objects/patching/hydra filter=lfs diff=lfs merge=lfs -text
-*.mp4:*.png:*.jpg:*.ttc:*.glb:*.zip:*.pt:*.pth:*.ckpt:*.h5:*.hdf5:*.safetensors:*.mov:*.avi:*.mkv:*.webm:*.wav:*.mp3:*.flac:*.aac:*.exr:*.hdr:*.exe:*.dll:*.so:*.dylib:*.a:*.lib:*.tar:*.gz:*.7z:*.rar:*.npz:*.parquet !text -filter -merge -diff
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.ttc filter=lfs diff=lfs merge=lfs -text
