@@ -317,7 +317,63 @@ supabase functions logs search-models
 
 ## 💾 备份与恢复 (Backup & Restore)
 
-### 备份数据库
+### 快速备份方案（推荐）
+
+BrainDance 提供一键同步脚本 `save.sh`，简化数据库结构、数据备份和代码提交流程。
+
+#### 一键备份
+
+```bash
+# 在项目根目录下执行（和 supabase 文件夹同级）
+
+# 使用描述性名称（推荐）
+./save.sh add_vector_support
+
+# 或使用时间戳（自动生成）
+./save.sh
+```
+
+**脚本会自动执行**：
+1. 📜 生成数据库迁移文件（`supabase/migrations/`）
+2. 🌱 更新种子数据（`supabase/seed.sql`）
+3. 💅 格式化 Deno Functions 代码
+4. 📦 提交到 Git 本地仓库
+5. ☁️ 推送到 GitHub（需手动执行 `git push`）
+
+**何时使用**：
+- ✅ 安装了新的 PostgreSQL 插件（如 vector）
+- ✅ 修改了数据库表结构
+- ✅ 更新了 Deno Functions 代码
+- ✅ 需要保存测试数据供队友使用
+
+#### 队友如何恢复
+
+你的队友（或你换了新电脑）只需两步即可获得相同的环境：
+
+**1. Clone 仓库**
+```bash
+git clone https://github.com/yourusername/BrainDance.git
+cd BrainDance
+```
+
+**2. 一键启动**
+```bash
+supabase start
+```
+
+Supabase 会自动：
+- 应用 `supabase/migrations/` 下的所有迁移脚本
+- 导入 `supabase/seed.sql` 中的测试数据
+- 启动所有服务（数据库、API、Storage 等）
+
+---
+
+### 高级备份方案
+
+如果需要更细粒度的备份控制，可以使用以下手动命令：
+
+#### 备份完整数据库（包括结构 + 数据）
+
 ```bash
 cd supabase
 docker exec supabase_db_BrainDance pg_dump -U postgres -d postgres \
@@ -325,7 +381,8 @@ docker exec supabase_db_BrainDance pg_dump -U postgres -d postgres \
 docker cp supabase_db_BrainDance:/tmp/backup.dump ./backups/
 ```
 
-### 恢复数据库
+#### 恢复完整数据库
+
 ```bash
 cd supabase
 docker cp ./backups/backup.dump supabase_db_BrainDance:/tmp/
@@ -333,7 +390,22 @@ docker exec supabase_db_BrainDance pg_restore -U postgres -d postgres \
   -c /tmp/backup.dump
 ```
 
-### 备份存储文件
+#### 仅备份数据（Seed 数据）
+
+```bash
+cd supabase
+supabase db dump --data-only > seed.sql
+```
+
+#### 仅备份结构（Schema）
+
+```bash
+cd supabase
+supabase db dump --schema-only > schema.sql
+```
+
+#### 备份存储文件
+
 ```bash
 # 打包存储卷
 docker run --rm \
@@ -342,6 +414,39 @@ docker run --rm \
   alpine:latest \
   sh -c "cd /source && tar czvf /backup/storage.tar.gz ."
 ```
+
+---
+
+### 备份策略建议
+
+| 场景 | 推荐方案 | 说明 |
+|------|----------|------|
+| **日常开发** | `./save.sh` | 自动生成迁移 + 提交 Git |
+| **版本发布** | `./save.sh release_v1.0` | 清晰的版本命名 |
+| **灾难恢复** | 完整数据库备份 | 使用 pg_dump 生成 .dump 文件 |
+| **迁移数据** | 仅数据备份 | 使用 `--data-only` 生成 seed.sql |
+
+---
+
+### 常见问题
+
+**Q: `./save.sh` 报错 "command not found"?**
+A: 确保在项目根目录下执行脚本，并且已添加执行权限：
+```bash
+chmod +x save.sh
+```
+
+**Q: 迁移文件太多，如何清理？**
+A: 不建议删除迁移文件，因为它们记录了数据库的完整演进历史。如需重置，可使用 `supabase db reset`。
+
+**Q: 如何查看已生成的迁移文件？**
+A: 迁移文件位于 `supabase/migrations/` 目录，按时间顺序排列：
+```bash
+ls -lt supabase/migrations/
+```
+
+**Q: 为什么推荐使用 `save.sh` 而不是手动备份？**
+A: `save.sh` 集成了迁移生成、数据备份和代码管理，是更适合团队协作的工作流。手动备份适用于特殊场景。
 
 ---
 
