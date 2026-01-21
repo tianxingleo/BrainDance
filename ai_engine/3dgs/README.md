@@ -87,6 +87,42 @@ SUPABASE_TABLE=processing_tasks
 
 ```
 
+### 4. SAM3D 模型配置
+
+> **⚠️ 重要**: SAM3D 模型需要单独申请和下载，详见 [SAM3D 模型设置教程](../../docs/SAM3D_MODEL_SETUP.md)
+
+**快速配置**：
+
+1. **申请访问权限**（首次必须）
+   - 访问 https://huggingface.co/facebook/sam-3d-objects
+   - 填写申请表单，等待 Meta 批准
+
+2. **下载模型**（约 12.5GB）
+   ```bash
+   pip install "huggingface_hub[cli]"
+   huggingface-cli login
+
+   hf download --repo-type model --local-dir checkpoints facebook/sam-3d-objects
+   mv checkpoints/checkpoints checkpoints/hf
+   ```
+
+3. **设置环境变量**
+   ```bash
+   # 在 .env 文件中添加
+   SAM3D_REPO_PATH=/path/to/your/sam-3d-objects
+   SAM3D_CHECKPOINT_DIR=/path/to/your/sam-3d-objects/checkpoints/hf
+   ```
+
+**验证配置**：
+```bash
+python -c "from src.config import PipelineConfig; c = PipelineConfig(); print(c.sam3d_repo_path)"
+```
+
+**硬件要求**：
+- 显存: 12GB+
+- 系统内存: 48GB+
+- 磁盘空间: 50GB+
+
 ## 💾 数据库设计 (Supabase)
 
 请确保 Supabase 中包含以下 Table 和 Storage Bucket。
