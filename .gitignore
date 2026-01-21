@@ -173,3 +173,13 @@ AGENTS.md
 
 # BFG Repo-Cleaner 报告目录
 bfg-report/
+.bfg-report/
+..bfg-report/
+
+# =========================
+# 9. Sensitive / Temporary Files (临时文件)
+# =========================
+PR_BODY.md
+create_pr.sh
+CLAUDE.md
+docs/old/idea.pdf
