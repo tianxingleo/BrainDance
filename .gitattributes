@@ -52,7 +52,6 @@ ai_engine/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/ml-sharp/LICENSE_MODEL filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/sam-3d-objects/LICENSE filter=lfs diff=lfs merge=lfs -text
 /ai_engine/3dgs/src/libs/sam-3d-objects/patching/hydra filter=lfs diff=lfs merge=lfs -text
-*.py:*.md:*.txt:*.json:*.yaml:*.yml:*.toml:*.sh:*.ini:*.in:*.lock:*.log:*.id:*.cfg:*.conf:*.config !text -filter -merge -diff
 *.py !text !filter !merge !diff
 *.md !text !filter !merge !diff
 *.txt !text !filter !merge !diff
