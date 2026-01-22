@@ -20,6 +20,9 @@ $RECYCLE.BIN/
 !.vscode/extensions.json
 *.code-workspace
 
+# Claude Code
+.claude/
+
 # PyCharm / IntelliJ
 .idea/
 *.iml
