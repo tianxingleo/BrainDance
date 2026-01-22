@@ -1,164 +1,142 @@
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path_joiner;
 import 'dart:io';
-import '../app_configs.dart';//for appName
+import '../app_configs.dart'; //for appName
+
 //All functions here is safe to use.
 class DirFinder {
   //Part 1: Find Directories
   //Notice: DownloadsDir can be nothing!
   static Future<String> documentsDir() async {
-    try
-    {
+    try {
       return await getApplicationDocumentsDirectory().then((value) {
         if (Platform.isWindows) {
-          return path_joiner.join(value.path, AppConfig.appName);//If projectName changes, it should be changed.
+          return path_joiner.join(
+            value.path,
+            AppConfig.appName,
+          ); //If projectName changes, it should be changed.
         }
         return value.path;
       });
-    }
-    catch (e)
-    {
+    } catch (e) {
       return "";
     }
   }
+
   static Future<String> cacheDir() async {
-    try
-    {
+    try {
       return await getApplicationCacheDirectory().then((value) {
         return value.path;
       });
-    }
-    catch (e)
-    {
+    } catch (e) {
       return "";
     }
   }
+
   static Future<String> supportDir() async {
-    try
-    {
+    try {
       return await getApplicationSupportDirectory().then((value) => value.path);
-    }
-    catch (e)
-    {
+    } catch (e) {
       return "";
     }
   }
+
   static Future<String> downloadsDir() async {
-    try
-    {
+    try {
       return await getDownloadsDirectory().then((value) {
         return (value == null) ? "" : value.path;
       });
-    }
-    catch (e)
-    {
-      try
-      {
+    } catch (e) {
+      try {
         return await getTemporaryDirectory().then((value) {
           return value.path;
         });
-      }
-      catch (e)
-      {
+      } catch (e) {
         return "";
       }
     }
   }
 }
+
 class DirSystem {
   //Part 2: Check & Do Directories
   static Future<bool> checkDirExists(String path) async {
     final dir = Directory(path);
-    try
-    {
+    try {
       return await dir.exists();
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }
+
   static Future<bool> createDir(String path) async {
     final dir = Directory(path);
-    try
-    {
+    try {
       await dir.create(recursive: true);
       return true;
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }
+
   static Future<bool> ensureDir(String path) async {
     final bool exists = await checkDirExists(path);
-    if (!exists)
-    {
+    if (!exists) {
       return await createDir(path);
     }
     return true;
   }
+
   static Future<bool> deleteDir(String path) async {
     final dir = Directory(path);
-    try
-    {
+    try {
       await dir.delete(recursive: true);
       return true;
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }
 }
+
 class FileSystem {
   //Part 3: File I/O
   static Future<bool> checkFileExists(String path) async {
     final file = File(path);
-    try
-    {
+    try {
       return await file.exists();
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }
+
   static Future<List<String>> readFile(String path) async {
-      final file = File(path);
-      final String content;
-      try
-      {
-        content = await file.readAsString();
-        return content.replaceAll('\r','').split("\n");
-      }
-      catch (e)
-      {
-        return [""];
-      }
+    final file = File(path);
+    final String content;
+    try {
+      content = await file.readAsString();
+      return content.replaceAll('\r', '').split("\n");
+    } catch (e) {
+      return [""];
+    }
   }
+
   static Future<bool> writeFile(String path, List<String> lines) async {
     final file = File(path);
     final String content = lines.join("\n");
-    try
-    {
+    try {
       await file.writeAsString(content);
       return true;
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }
+
   static Future<bool> deleteFile(String path) async {
     final file = File(path);
-    try
-    {
+    try {
       await file.delete();
       return true;
-    }
-    catch (e)
-    {
+    } catch (e) {
       return false;
     }
   }

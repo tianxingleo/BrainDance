@@ -1,6 +1,5 @@
 import 'package:video_thumbnail_pro/video_thumbnail_pro.dart';
 import 'package:video_thumbnail_pro/index.dart';
-import 'package:braindance/extra_func_v2/file_stream.dart';
 import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:path/path.dart' as path;
 
@@ -17,17 +16,21 @@ class VThumb {
     }
     return thumb;
   }
+
   static Future<bool> hasThumb(String videoPath) async {
     final pathThumb = await getPath(videoPath);
     return await FileSystem.checkFileExists(pathThumb);
   }
+
   static Future<String> getPath(String videoPath) async {
     final fname = "${path.basenameWithoutExtension(videoPath)}.jpg";
     return path.join(await DirFinder.cacheDir(), fname);
   }
+
   static Future<String> generate(String videoPath) async {
-    final fname = "";//"${path.basenameWithoutExtension(videoPath)}.jpeg";
-    final pathThumb = await FileStream.appGetPath(DirFinder.cacheDir(), fname);
+    final pathThumb = await DirFinder.cacheDir();
+    await DirSystem.ensureDir(pathThumb);
+    final outputFPath = path.join(pathThumb, "${path.basenameWithoutExtension(videoPath)}.jpg");
     if (pathThumb.isEmpty) {
       return '';
     }
@@ -39,12 +42,11 @@ class VThumb {
         timeMs: 0, // 生成缩略图的时间点，单位毫秒（1秒）
         thumbnailPath: pathThumb,
       );
-    }
-    catch(e) {
+    } catch (e) {
       return '';
     }
-    if (await FileSystem.checkFileExists(pathThumb)) {
-      return pathThumb;
+    if (await FileSystem.checkFileExists(outputFPath)) {
+      return outputFPath;
     }
     return '';
   }

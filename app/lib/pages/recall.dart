@@ -1,19 +1,22 @@
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import '../app_configs.dart';
+
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
 
   @override
   State<RecallPage> createState() => _RecallPageState();
 }
+
 class _RecallPageState extends State<RecallPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppConfig.accentColor,
       appBar: AppBar(
-        backgroundColor: AppConfig.primaryColor,//Theme.of(context).colorScheme.inversePrimary
+        backgroundColor: AppConfig
+            .primaryColor, //Theme.of(context).colorScheme.inversePrimary
         title: Container(
           alignment: Alignment.centerLeft, // 关键：顶部对齐
           child: Text(
@@ -22,7 +25,7 @@ class _RecallPageState extends State<RecallPage> {
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Colors.white,
-            )
+            ),
           ),
         ),
         toolbarHeight: 60,
@@ -30,12 +33,7 @@ class _RecallPageState extends State<RecallPage> {
       body: Center(
         child: Column(
           mainAxisAlignment: .start,
-          children: [
-            Text(''),
-            Text(
-              ''
-            ),
-          ],
+          children: [Text(''), Text('')],
         ),
       ),
       /*floatingActionButton: Stack(
