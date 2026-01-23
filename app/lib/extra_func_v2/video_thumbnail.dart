@@ -5,35 +5,18 @@ import 'package:path/path.dart' as path;
 
 class VThumb {
   static Future<String> ensureThumb(String videoPath) async {
-    var thumb = "assets/sprites/video-camera.png";
-    if (!await VThumb.hasThumb(videoPath)) {
-      var temp = await VThumb.generate(videoPath);
-      if (temp.isNotEmpty) {
-        thumb = temp;
-      }
-    } else {
-      thumb = await VThumb.getPath(videoPath);
-    }
-    return thumb;
-  }
-
-  static Future<bool> hasThumb(String videoPath) async {
-    final pathThumb = await getPath(videoPath);
-    return await FileSystem.checkFileExists(pathThumb);
-  }
-
-  static Future<String> getPath(String videoPath) async {
     final fname = "${path.basenameWithoutExtension(videoPath)}.jpg";
-    return path.join(await DirFinder.cacheDir(), fname);
-  }
-
-  static Future<String> generate(String videoPath) async {
-    final pathThumb = await DirFinder.cacheDir();
-    await DirSystem.ensureDir(pathThumb);
-    final outputFPath = path.join(pathThumb, "${path.basenameWithoutExtension(videoPath)}.jpg");
-    if (pathThumb.isEmpty) {
-      return '';
+    final pathThumb = path.join(await DirFinder.cacheDir(),"thumbNails");
+    final pathThumbFull = path.join(pathThumb, fname);
+    if (await FileSystem.checkFileExists(pathThumbFull)) {
+      return pathThumbFull;
     }
+
+    final thumb = "assets/sprites/video-camera.png";
+    if (pathThumb.isEmpty) {
+      return thumb;
+    }
+    await DirSystem.ensureDir(pathThumb);
     try {
       await VideoThumbnailPro.thumbnailFile(
         video: videoPath,
@@ -43,11 +26,11 @@ class VThumb {
         thumbnailPath: pathThumb,
       );
     } catch (e) {
-      return '';
+      return thumb;
     }
-    if (await FileSystem.checkFileExists(outputFPath)) {
-      return outputFPath;
+    if (await FileSystem.checkFileExists(pathThumbFull)) {
+      return pathThumbFull;
     }
-    return '';
+    return thumb;
   }
 }

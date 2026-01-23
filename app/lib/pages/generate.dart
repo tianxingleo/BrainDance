@@ -1,3 +1,4 @@
+import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/app_configs.dart';
@@ -5,6 +6,7 @@ import 'package:braindance/main.dart';
 import 'dart:io';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as path_joiner;
 
 class GeneratePage extends StatefulWidget {
   const GeneratePage({super.key});
@@ -25,7 +27,7 @@ class _GeneratePageState extends State<GeneratePage>
     fontFamily: 'MSYH',
   );
   static const int maxImageCount = 3;
-  static const int sizeLimit = 4096;//文件大小限制(kb)
+  static const int sizeLimit = 4096; //文件大小限制(kb)
   static bool firstCheck = true; //检测用户是否是第一次打开该界面
   final ImagePicker _picker = ImagePicker();
   void loadCache() async {
@@ -55,80 +57,100 @@ class _GeneratePageState extends State<GeneratePage>
     setState(() {});
   }
 
-  void _showActionSheet(BuildContext context, bool isImage) {
-    void e(TDActionSheetItem item, int index) async {
-      if (index == 0) {
-        XFile? file;
-        if (isImage) {
-          file = await _picker.pickImage(source: ImageSource.camera);
-        } else {
-          file = await _picker.pickVideo(
-            source: ImageSource.camera,
-            maxDuration: const Duration(minutes: 3),
-          );
-        }
-        if (file != null) {
-          //文件处理
-        }
-      } else {
-        if (isImage) {
-          final List<XFile> images = await _picker.pickMultiImage();
-          final capacity = maxImageCount - uploadedImages.length;
-          if (images.length > capacity) {
-            if (context.mounted) {
-              TDToast.showText(
-                  textLocalize("tip_overquan"),
-                  context: context,
-              );
-            }
-          }
-          final minLength = (capacity > images.length)
-            ? images.length
-            : capacity;
-          for (int i = 0; i < minLength; i++) {
-            var image = images[i];
-            if (await image.length() ~/ 1024 > sizeLimit) {
-              if (context.mounted) {
-                TDToast.showText(
-                    textLocalize("tip_oversize"),
-                    context: context,
-                );
-              }
-              continue;
-            }
-            uploadedImages.add(
-              TDUploadFile(
-                key: 1,
-                assetPath: image.path,
-                file: File(image.path),
-              ),
-            );
-          }
-        } else {
-          final XFile? video = await _picker.pickVideo(
-            source: ImageSource.gallery,
-          );
-          if (video != null) {
-            uploadedVideos.add(
-              TDUploadFile(
-                key: 1,
-                assetPath: video.path,
-                file: File(await VThumb.ensureThumb(video.path)),
-              ),
-            );
-          }
-        }
+  Future<String> _uploadImages(List<XFile> images) async {
+    String msg = "";
+    final capacity = maxImageCount - uploadedImages.length;
+    if (images.length > capacity) {
+      msg = textLocalize("tip_overquan");
+    }
+    final minLength = (capacity > images.length) ? images.length : capacity;
+    for (int i = 0; i < minLength; i++) {
+      var image = images[i];
+      if (await image.length() ~/ 1024 > sizeLimit) {
+        msg = textLocalize("tip_oversize");
+        continue;
       }
-      setState(() {});
+      uploadedImages.add(
+        TDUploadFile(key: 1, assetPath: image.path, file: File(image.path)),
+      );
+    }
+    return msg;
+  }
+
+  Future<String> _uploadVideo(XFile? video) async {
+    if (video == null) {
+      return textLocalize("tip_fail");
     }
 
+    uploadedVideos.add(
+      TDUploadFile(
+        key: 1,
+        assetPath: video.path,
+        file: File(await VThumb.ensureThumb(video.path)),
+      ),
+    );
+    return "";
+  }
+
+  void _showActionSheet(BuildContext context, bool isImage) {
     TDActionSheet(
       context,
-      onSelected: e,
       items: [
         TDActionSheetItem(label: textLocalize("gen_shot")),
         TDActionSheetItem(label: textLocalize("gen_gallery")),
       ],
+      onSelected: (item, index) async {
+        if (index == 0) {
+          XFile? file;
+          if (isImage) {
+            file = await _picker.pickImage(source: ImageSource.camera);
+          } else {
+            file = await _picker.pickVideo(
+              source: ImageSource.camera,
+              maxDuration: const Duration(minutes: 3),
+            );
+          }
+          if (file != null) {
+            final newPath = path_joiner.join(
+              await DirFinder.supportDir(),
+              "camera",
+            );
+            final newPathFull = path_joiner.join(newPath, file.name);
+            try {
+              await DirSystem.ensureDir(newPath);
+              await file.saveTo(newPathFull);
+              await FileSystem.deleteFile(file.path);
+              XFile fileSaved = XFile(newPathFull);
+              late final String msg;
+              if (isImage) {
+                msg = await _uploadImages(List.filled(1, fileSaved));
+              } else {
+                msg = await _uploadVideo(fileSaved);
+              }
+              if (msg.isNotEmpty && context.mounted) {
+                TDToast.showText(msg, context: context);
+              }
+            } catch (e) {
+              if (context.mounted) {
+                TDToast.showText(textLocalize("tip_fail"), context: context);
+              }
+            }
+          } else {
+            late final String msg;
+            if (isImage) {
+              msg = await _uploadImages(await _picker.pickMultiImage());
+            } else {
+              msg = await _uploadVideo(
+                await _picker.pickVideo(source: ImageSource.gallery),
+              );
+            }
+            if (msg.isNotEmpty && context.mounted) {
+              TDToast.showText(msg, context: context);
+            }
+          }
+          setState(() {});
+        }
+      },
     ).show();
   }
 

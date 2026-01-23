@@ -35,6 +35,7 @@ enum Language {
       "tip_oversize": "上传的文件太大了！",
       "tip_overquan": "你上传的文件太多了！",
       "tip_cache": "已成功清除缓存",
+      "tip_fail" : "文件上传失败！",
     },
   ),
   en(
@@ -74,6 +75,7 @@ enum Language {
       "tip_oversize": "Uploaded file(s) are too large!",
       "tip_overquan": "You have uploaded too many files!",
       "tip_cache": "The cache is successfully cleared",
+      "tip_fail" : "Failed to upload file(s)!",
     },
   );
 
