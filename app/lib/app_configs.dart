@@ -5,6 +5,8 @@ import 'extra_func/dir_and_file.dart';
 import 'extra_func/theme_provider.dart';
 import 'extra_func_v2/file_stream.dart';
 import 'main.dart';
+import 'package:path/path.dart' as path_joiner;
+import 'package:camera/camera.dart';
 
 //App基础设置
 class AppConfig {
@@ -14,8 +16,11 @@ class AppConfig {
   static late Map<String, String> langMap;
   static bool isNightMode = false;
 
-  static Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
-  static Color accentColor = Color.fromRGBO(232, 234, 220, 1);
+  static late final List<CameraDescription> cameras;
+  static final cacheDir = DirFinder.cacheDir();
+  static final supportDir = DirFinder.supportDir();
+  static final Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
+  static final Color accentColor = Color.fromRGBO(232, 234, 220, 1);
 }
 
 /*
@@ -27,48 +32,56 @@ load... - Future<String> / Future<List<String>>
 save... - Future<void>
  */
 class GenConfig {
+  static const cameraDir = "camera";
   static const imagePathsFileName = "genImagePaths.txt";
   static const videoPathsFileName = "genVideoPaths.txt";
   static const textFileName = "genText.txt";
 
+  static Future<String> getCameraDir() async {
+    return path_joiner.join(
+      await AppConfig.supportDir,
+      "camera",
+    );
+  }
+
   static Future<List<String>> loadImagePathsFile() async {
-    return await FileStream.appLoad(DirFinder.cacheDir(), imagePathsFileName);
+    return await FileStream.appLoad(AppConfig.cacheDir, imagePathsFileName);
   }
 
   static Future<String> loadTextFile() async {
     final List<String> result = await FileStream.appLoad(
-      DirFinder.cacheDir(),
+      AppConfig.cacheDir,
       textFileName,
     );
     return result.join();
   }
 
   static Future<List<String>> loadVideoPathsFile() async {
-    return await FileStream.appLoad(DirFinder.cacheDir(), videoPathsFileName);
+    return await FileStream.appLoad(AppConfig.cacheDir, videoPathsFileName);
   }
 
   static Future<void> saveImagePathsFile(List<String> paths) async {
-    await FileStream.appSave(DirFinder.cacheDir(), imagePathsFileName, paths);
+    await FileStream.appSave(AppConfig.cacheDir, imagePathsFileName, paths);
   }
 
   static Future<void> saveTextFile(String text) async {
-    await FileStream.appSave(DirFinder.cacheDir(), textFileName, [text]);
+    await FileStream.appSave(AppConfig.cacheDir, textFileName, [text]);
   }
 
   static Future<void> saveVideoPathsFile(List<String> paths) async {
-    await FileStream.appSave(DirFinder.cacheDir(), videoPathsFileName, paths);
+    await FileStream.appSave(AppConfig.cacheDir, videoPathsFileName, paths);
   }
 
   static Future<void> deleteImagePathsFile() async {
-    await FileStream.appDel(DirFinder.cacheDir(), imagePathsFileName);
+    await FileStream.appDel(AppConfig.cacheDir, imagePathsFileName);
   }
 
   static Future<void> deleteTextFile() async {
-    await FileStream.appDel(DirFinder.cacheDir(), textFileName);
+    await FileStream.appDel(AppConfig.cacheDir, textFileName);
   }
 
   static Future<void> deleteVideoPathsFile() async {
-    await FileStream.appDel(DirFinder.cacheDir(), videoPathsFileName);
+    await FileStream.appDel(AppConfig.cacheDir, videoPathsFileName);
   }
 }
 
@@ -80,7 +93,7 @@ class SetConfig {
     //返回是否成功
     final bool suc;
     settingsMsg = await FileStream.appLoad(
-      DirFinder.supportDir(),
+      AppConfig.supportDir,
       settingsFileName,
     );
     suc = settingsMsg.isNotEmpty;
@@ -93,7 +106,7 @@ class SetConfig {
 
   static Future<void> saveMsgToFile() async {
     await FileStream.appSave(
-      DirFinder.supportDir(),
+      AppConfig.supportDir,
       settingsFileName,
       settingsMsg,
     );

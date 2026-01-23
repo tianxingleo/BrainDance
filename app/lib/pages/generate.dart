@@ -20,6 +20,7 @@ class _GeneratePageState extends State<GeneratePage>
   late final TabController _tabController;
   late final ScrollController _scrollController;
   late final TextEditingController _textEditingController;
+  final ImagePicker _picker = ImagePicker();
   static Key _uploadKey = UniqueKey();
   static Key _uploadKey2 = UniqueKey();
   static const TextStyle tabTextStyle = TextStyle(
@@ -28,8 +29,7 @@ class _GeneratePageState extends State<GeneratePage>
   );
   static const int maxImageCount = 3;
   static const int sizeLimit = 4096; //文件大小限制(kb)
-  static bool firstCheck = true; //检测用户是否是第一次打开该界面
-  final ImagePicker _picker = ImagePicker();
+  static bool firstCheck = false; //检测用户是否不是第一次打开该界面
   void loadCache() async {
     //Image
     final List<String> paths = await GenConfig.loadImagePathsFile();
@@ -111,10 +111,7 @@ class _GeneratePageState extends State<GeneratePage>
             );
           }
           if (file != null) {
-            final newPath = path_joiner.join(
-              await DirFinder.supportDir(),
-              "camera",
-            );
+            final newPath = await GenConfig.getCameraDir();
             final newPathFull = path_joiner.join(newPath, file.name);
             try {
               await DirSystem.ensureDir(newPath);
@@ -165,16 +162,19 @@ class _GeneratePageState extends State<GeneratePage>
     _scrollController = ScrollController();
     _textEditingController = TextEditingController();
     if (firstCheck) {
-      //在此处执行加载缓存数据操作
-      loadCache();
-      //Cancel firstCheck
-      firstCheck = false;
+      return;
     }
+    firstCheck = true;
+    //以下代码只会执行一次
+    //在此处执行加载缓存数据操作
+    loadCache();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _scrollController.dispose();
+    _textEditingController.dispose();
     super.dispose();
   }
 

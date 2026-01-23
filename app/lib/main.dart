@@ -1,3 +1,4 @@
+import 'package:camera/camera.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -12,10 +13,12 @@ import 'app_configs.dart';
 late final TDThemeData themeData;
 late final VoidCallback? onThemeChanged;
 late final VoidCallback? onLanguageChanged;
+VoidCallback onCameraUpdate = () {}; 
 List<TDUploadFile> uploadedImages = [];
 List<TDUploadFile> uploadedVideos = [];
 String uploadedText = "";
 Future<void> main() async {
+  //Theme
   WidgetsFlutterBinding.ensureInitialized();
 
   final String themeJsonString = await rootBundle.loadString(
@@ -31,6 +34,8 @@ Future<void> main() async {
       TDTheme.defaultData();
 
   initializeAppConfig(); //加载默认数据
+  //
+  AppConfig.cameras = await availableCameras();
   runApp(const MyApp());
 }
 
@@ -58,6 +63,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      onCameraUpdate();
+    }
     if (state == AppLifecycleState.paused) {
       // 应用进入后台（例如用户按了Home键、切换到其他应用）
       // 在此处执行保存操作
