@@ -10,6 +10,7 @@ import 'package:camera/camera.dart';
 
 //App基础设置
 class AppConfig {
+  static const fontFamily = 'HarmonyOS_Sans';
   static const appName = 'BrainDance';
   static const version = '1.0.0';
   static const publishDate = '2026-01-01';

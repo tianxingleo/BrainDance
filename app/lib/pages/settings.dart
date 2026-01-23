@@ -16,7 +16,7 @@ class _SettingsPageState extends State<SettingsPage>
   late final ScrollController _scrollController;
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
-    fontFamily: 'MSYH',
+    fontFamily: AppConfig.fontFamily,
   );
   static final List<int> _pickerSelectedIndex = List.filled(2, -1); // 选择器选中项索引;
   @override

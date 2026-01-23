@@ -105,12 +105,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       title: "Brain Dance",
       theme: themeData.systemThemeDataLight?.copyWith(
         textTheme: themeData.systemThemeDataLight?.textTheme.apply(
-          fontFamily: 'MSYH',
+          fontFamily: AppConfig.fontFamily,
         ),
       ),
       darkTheme: themeData.systemThemeDataDark?.copyWith(
         textTheme: themeData.systemThemeDataDark?.textTheme.apply(
-          fontFamily: 'MSYH',
+          fontFamily: AppConfig.fontFamily,
         ),
       ),
       themeMode: ThemeModeProvider.themeMode,

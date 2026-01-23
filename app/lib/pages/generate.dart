@@ -25,7 +25,7 @@ class _GeneratePageState extends State<GeneratePage>
   static Key _uploadKey2 = UniqueKey();
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
-    fontFamily: 'MSYH',
+    fontFamily: AppConfig.fontFamily,
   );
   static const int maxImageCount = 3;
   static const int sizeLimit = 4096; //文件大小限制(kb)

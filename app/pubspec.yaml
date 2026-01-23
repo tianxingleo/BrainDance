@@ -84,8 +84,8 @@ flutter:
     - assets/fonts/
     - assets/sprites/
   fonts:
-    - family: MSYH
+    - family: HarmonyOS_Sans
       fonts:
-        - asset: assets/fonts/msyh.ttc
+        - asset: assets/fonts/HarmonyOS_Sans_SC_Regular.ttf
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
