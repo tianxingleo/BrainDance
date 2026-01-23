@@ -7,6 +7,28 @@
 
 本项目是 BrainDance 的核心 AI 算力节点，负责监听云端任务、自动下载用户上传的视频、执行全自动 3D 重建流程（COLMAP/GLOMAP + Splatfacto），并将最终的 3D 模型（PLY）与日志实时回传至云端。
 
+## 📑 文档导航
+
+本文档分为两个部分：
+
+### 第一部分：Cloud Node 部署指南
+- [快速开始](#-快速开始) - 5 分钟上手
+- [环境准备](#-环境准备) - 硬件和软件要求
+- [运行模式](#-运行模式) - 本地/云端/单图模式
+- [工作流原理](#-工作流原理) - 系统架构和数据流
+
+**适合读者**：运维人员、新用户、快速部署者
+
+### 第二部分：RAG 系统设计文档
+- [设计核心逻辑](#1-设计核心逻辑-design-philosophy) - 架构原则
+- [数据库结构](#2-数据库结构-schema-structure) - Schema 设计
+- [内容生成策略](#3-内容生成策略-content-strategy) - 向量化策略
+- [搜索与交互流程](#4-搜索与交互流程-search-workflow) - 检索流程
+
+**适合读者**：开发者、架构师、研究人员
+
+---
+
 ## ✨ 核心特性
 
 * **☁️ 云原生架构**：通过 Supabase 实现完全解耦的“生产者-消费者”模式，前端只管发任务，后端自动排队处理。
@@ -143,7 +165,13 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-*BrainDance Team © 2026*
+# 📚 第二部分：RAG 系统设计文档
+
+> **语义检索增强生成架构的完整设计说明**
+
+本部分详细说明 BrainDance 的"语义+元数据"混合检索系统设计，将 3D 模型从"死文件"变成"活知识"。
+
+---
 
 这就是你现在的 **BrainDance 智能资产库 (RAG System)** 的完整设计文档。
 
@@ -151,7 +179,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-### 1. 设计核心逻辑 (Design Philosophy)
+## 1. 设计核心逻辑 (Design Philosophy)
 
 目前的架构设计遵循以下 4 个核心原则：
 
@@ -176,7 +204,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-### 2. 数据库结构 (Schema Structure)
+## 2. 数据库结构 (Schema Structure)
 
 这是目前 Supabase 中 `model_assets` 表的物理结构：
 
@@ -196,7 +224,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-### 3. 内容生成策略 (Content Strategy)
+## 3. 内容生成策略 (Content Strategy)
 
 当 `Worker` 调用 `knowledge_base.py` 入库时，它不仅仅是存数据，还在做**数据清洗和加权**。
 
@@ -229,7 +257,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-### 4. 搜索与交互流程 (Search Workflow)
+## 4. 搜索与交互流程 (Search Workflow)
 
 当用户发起搜索时，系统经历以下步骤：
 
@@ -258,7 +286,27 @@ python main.py /path/to/your/video.mp4
 
 
 
+
 ### 总结
 
-你现在拥有的不仅仅是一个文件存储系统，而是一个**具备“理解能力”的 3D 资产管理平台**。它知道你每个模型长什么样、包含什么东西、是什么时候做的，并且能通过自然语言瞬间找到它。
+你现在拥有的不仅仅是一个文件存储系统，而是一个**具备"理解能力"的 3D 资产管理平台**。它知道你每个模型长什么样、包含什么东西、是什么时候做的，并且能通过自然语言瞬间找到它。
+
+---
+
+## 🎯 总结
+
+本文档介绍了 BrainDance 3DGS Cloud Node 的完整技术架构和 RAG 语义检索系统的设计原理。
+
+**第一部分**涵盖了如何部署和运行 3DGS 生成引擎，**第二部分**深入讲解了语义检索系统的设计哲学和实现细节。
+
+## 🔗 相关文档
+
+- [上层文档](../README.md) - BrainDance AI Engine 总览
+- [快速开始指南](../../docs/快速开始指南.md) - 30 分钟上手
+- [API 接口文档](../../docs/API_DOC.md) - 完整接口说明
+- [返回顶部](#-braindance-ai-engine---3dgs-cloud-node)
+
+---
+
+**BrainDance Team © 2026**
 

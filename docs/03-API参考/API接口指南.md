@@ -2,7 +2,7 @@
 
 # BrainDance API 接入文档 (v1.0)
 
-本文档描述了 BrainDance 3DGS 引擎的前端接入规范。本项目采用 **Supabase (BaaS) + Python (微服务)** 的混合架构。
+本文档描述了 BrainDance 3DGS 引擎的前端接入规范。本项目采用 **Supabase (BaaS)** 纯云原生架构，使用 Edge Functions 提供语义搜索能力。
 
 ## 1. 环境配置 (Environment)
 
@@ -10,14 +10,41 @@
 
 | 服务名称 | 本地开发 (Local) | 生产环境 (Prod) | 说明 |
 | :--- | :--- | :--- | :--- |
-| **Supabase URL (项目ID在网页Reference ID)** | `http://127.0.0.1:54321` | `https://<你的项目ID>.supabase.co` | 核心数据库、Auth、Storage |
-| **Python API（还没做完）** | `http://127.0.0.1:8000` | `https://api.braindance.com` | 仅用于语义搜索 |
+| **Supabase URL** | `http://127.0.0.1:54321` | `https://<你的项目ID>.supabase.co` | 核心数据库、Auth、Storage |
+| **Edge Functions** | `http://127.0.0.1:54321/functions/v1` | `https://<项目ID>.supabase.co/functions/v1` | 语义搜索、API 保护 |
 
-### 1.2 密钥 (Public Keys)
+### 1.2 密钥配置 (Public Keys)
 
-前端初始化 SDK 时请使用以下 Key。**严禁在前端使用 `service_role` key。**
+前端初始化 SDK 时需要使用 Supabase Anon Key。**严禁在前端使用 `service_role` key。**
 
-- **Supabase Anon Key（具体之前发了好像不记得了）**: `xxxx`
+#### 获取 API Key
+
+- **本地开发**：运行 `supabase start` 后，终端会显示 Anon Key
+- **生产环境**：在 Supabase Dashboard → Settings → API 获取
+
+#### 环境变量配置
+
+前端项目应配置以下环境变量：
+
+```env
+# .env.local (Vite)
+VITE_SUPABASE_URL=http://127.0.0.1:54321  # 本地开发
+# VITE_SUPABASE_URL=https://<项目ID>.supabase.co  # 生产环境
+
+VITE_SUPABASE_ANON_KEY=<你的-Anon-Key>
+```
+
+**Flutter 配置示例**：
+```dart
+// lib/config/supabase_config.dart
+class SupabaseConfig {
+  static const String url = String.fromEnvironment('SUPABASE_URL',
+    defaultValue: 'http://127.0.0.1:54321');
+  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+}
+```
+
+⚠️ **安全警告**：严禁在代码中硬编码 API Key，必须使用环境变量。
 
 ---
 
@@ -136,19 +163,26 @@ final assets = await supabase.from('model_assets')
 ### 4.2 目录结构规范
 前端**必须**严格遵守以下路径格式，否则后端 Worker 无法读取文件。
 
-```text
-braindance-assets/ (Bucket)
-└── {user_id}/                   <-- 第一级：用户隔离
-    └── {scene_id}/              <-- 第二级：项目/场景隔离
-        ├── raw/                 <-- 原始素材
-        │   ├── video.mp4        # 视频任务 (task_type: video_3dgs)
-        │   └── image.png        # 单图任务 (task_type: single_image_sam3d)
-        ├── processed/           <-- 抽帧图片
-        │   ├── frame_001.jpg
-        │   └── frame_002.jpg
-        └── output/              <-- 训练结果
-            ├── point_cloud.ply
-            └── gaussian_splat.splat
+```mermaid
+graph TD
+    A[braindance-assets Bucket<br/>存储桶] --> B[user_id 用户ID<br/>第一级：用户隔离]
+    B --> C[scene_id 场景ID<br/>第二级：项目/场景隔离]
+    C --> D[raw/ 原始素材]
+    C --> E[processed/ 抽帧图片]
+    C --> F[output/ 训练结果]
+    D --> G[video.mp4<br/>视频任务<br/>task_type: video_3dgs]
+    D --> H[image.png<br/>单图任务<br/>task_type: single_image_sam3d]
+    E --> I[frame_001.jpg]
+    E --> J[frame_002.jpg]
+    F --> K[point_cloud.ply<br/>3DGS模型]
+    F --> L[gaussian_splat.splat<br/>高斯泼溅]
+
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style C fill:#f0e1ff
+    style D fill:#ffe1f0
+    style E fill:#ffe1f0
+    style F fill:#e1ffe1
 ```
 
 ### 4.3 下载链接拼接
