@@ -38,6 +38,9 @@ class _RecordPageState extends State<RecordPage> {
         }
   }
   bool cameraUpdate() {
+    if (!firstCheck && !cameraEnabled) {
+      return false;
+    }
     bool suc = true;
     
     cameraController.initialize().then((_) {

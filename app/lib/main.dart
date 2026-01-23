@@ -35,7 +35,12 @@ Future<void> main() async {
 
   initializeAppConfig(); //加载默认数据
   //
+  try {
   AppConfig.cameras = await availableCameras();
+  }
+  catch (e) {
+    AppConfig.cameras = [];
+  }
   runApp(const MyApp());
 }
 
