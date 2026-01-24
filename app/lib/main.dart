@@ -13,7 +13,9 @@ import 'app_configs.dart';
 late final TDThemeData themeData;
 late final VoidCallback? onThemeChanged;
 late final VoidCallback? onLanguageChanged;
-VoidCallback onCameraUpdate = () {}; 
+late final bool cameraEnabled;
+CameraController? cameraController;
+VoidCallback onCameraInitialize = () {}; 
 List<TDUploadFile> uploadedImages = [];
 List<TDUploadFile> uploadedVideos = [];
 String uploadedText = "";
@@ -37,8 +39,15 @@ Future<void> main() async {
   //
   try {
   AppConfig.cameras = await availableCameras();
+  //...
+  AppConfig.cameras.removeAt(7);
+  AppConfig.cameras.removeAt(5);
+  //..
+  cameraEnabled = AppConfig.cameras.isNotEmpty;
+  //print(AppConfig.cameras.length);
   }
   catch (e) {
+    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
     AppConfig.cameras = [];
   }
   runApp(const MyApp());
@@ -68,10 +77,20 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      onCameraUpdate();
-    }
-    if (state == AppLifecycleState.paused) {
+    switch (state) {
+    case AppLifecycleState.inactive:
+      if ((cameraController == null) || (!cameraController!.value.isInitialized)) {
+        break;
+      }
+      cameraController!.dispose();
+      break;
+    case AppLifecycleState.resumed:
+      if ((cameraController == null) || (!cameraController!.value.isInitialized)) {
+        break;
+      }
+      onCameraInitialize();
+      break;
+    case AppLifecycleState.paused:
       // 应用进入后台（例如用户按了Home键、切换到其他应用）
       // 在此处执行保存操作
       //Image
@@ -100,6 +119,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       } else {
         GenConfig.deleteVideoPathsFile();
       }
+      break;
+    default:
+
     }
   }
 

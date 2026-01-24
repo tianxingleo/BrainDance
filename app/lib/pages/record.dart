@@ -11,39 +11,26 @@ class RecordPage extends StatefulWidget {
   State<RecordPage> createState() => _RecordPageState();
 }
 class _RecordPageState extends State<RecordPage> {
-  static bool firstCheck = true;
-  static late final bool cameraEnabled;
-  static late CameraController cameraController;
-  @override
-  void initState() {
-    super.initState();
-    onCameraUpdate = cameraUpdate;
-    bool ce = (AppConfig.cameras.isNotEmpty);
-    //相机初始化
-    if (!ce) {
-      if (firstCheck) {
-        firstCheck = false;
-        //可直接锁定cameraEnabled状态
-        cameraEnabled = false;
+  static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
+  static int camNum = 0;
+  void cameraSwitch() {
+    camNum++;
+    if (camNum == AppConfig.cameras.length) {
+      camNum = 0;
+    }
+    if (cameraController == null) {
+      cameraInitialize();
+    } else {
+      cameraController!.setDescription(AppConfig.cameras[camNum]);
+      if (mounted) {
+        setState(() {});
       }
-      return;
     }
-    cameraController = CameraController(AppConfig.cameras[0], ResolutionPreset.max);
-    
-    ce = cameraUpdate();
-        if (firstCheck) {
-          firstCheck = false;
-          //以下代码只会执行一次
-          cameraEnabled = ce;
-        }
   }
-  bool cameraUpdate() {
-    if (!firstCheck && !cameraEnabled) {
-      return false;
-    }
+  Future<bool> cameraInitialize() async {
+    cameraController = CameraController(AppConfig.cameras[camNum], resolutionPreset);
     bool suc = true;
-    
-    cameraController.initialize().then((_) {
+    await cameraController!.initialize().then((_) {
       if (mounted) {
         setState(() {});
       }
@@ -52,29 +39,53 @@ class _RecordPageState extends State<RecordPage> {
     });
     return suc;
   }
+  /// Returns a suitable camera icon for [direction].
+IconData getCameraLensIcon(CameraLensDirection direction) {
+  switch (direction) {
+    case CameraLensDirection.back:
+      return Icons.camera_rear;
+    case CameraLensDirection.front:
+      return Icons.camera_front;
+    case CameraLensDirection.external:
+      return Icons.camera;
+  }
+  // This enum is from a different package, so a new value could be added at
+  // any time. The example should keep working if that happens.
+  // ignore: dead_code
+  return Icons.camera;
+}
+ @override
+  void initState() {
+    super.initState();
+    //相机初始化
+    if (!cameraEnabled) {
+      return;
+    }
+    //滥用
+    onCameraInitialize = cameraInitialize;
+    cameraInitialize();
+  }
   @override
   void dispose() {
-    if (cameraEnabled) {
-      cameraController.dispose();
-    }
+    //恢复
     super.dispose();
   }
   @override
   Widget build(BuildContext context) {
     late final Widget cameraView;
     if(cameraEnabled) {
-      cameraView = Expanded(child: CameraPreview(cameraController));
+      cameraView = CameraPreview(cameraController!);
     } else {
-      cameraView = Container();
+      cameraView = Center(child: Text(textLocalize("reco_camun")));
     }
     return Scaffold(
-      body: Center(
-        child: cameraView,
-      ),
+      body: cameraView,
       floatingActionButton: Align(
         alignment: Alignment(0, 0.9),
-        child: TDButton(text: 'Button1', onTap: () {
-          cameraUpdate();
+        child: TDButton(text: 'Current Camera: $camNum', onTap: () {
+          if (cameraEnabled) {
+          cameraSwitch();
+          }
         })
       ),
     );

@@ -146,5 +146,9 @@ void setNightMode(bool isNight) {
 }
 
 void initializeAppConfig() {
+  try {
   AppConfig.langMap = Localize.getLangMap(Platform.localeName);
+  } catch (e) {
+    AppConfig.langMap = Localize.getLangMap("en_US");
+  }
 }
