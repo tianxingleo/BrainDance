@@ -10,6 +10,7 @@ class RecordPage extends StatefulWidget {
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
+
 class _RecordPageState extends State<RecordPage> {
   static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
   static int camNum = 0;
@@ -25,37 +26,43 @@ class _RecordPageState extends State<RecordPage> {
       setState(() {});
     }
   }
+
   Future<bool> cameraInitialize() async {
     cameraController = CameraController(
       AppConfig.cameras[camNum],
       resolutionPreset,
     );
     bool suc = true;
-    await cameraController!.initialize().then((_) {
-      if (mounted) {
-        setState(() {});
-      }
-    }).catchError((Object e) {
-      suc = false;
-    });
+    await cameraController!
+        .initialize()
+        .then((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        })
+        .catchError((Object e) {
+          suc = false;
+        });
     return suc;
   }
+
   /// Returns a suitable camera icon for [direction].
-IconData getCameraLensIcon(CameraLensDirection direction) {
-  switch (direction) {
-    case CameraLensDirection.back:
-      return Icons.camera_rear;
-    case CameraLensDirection.front:
-      return Icons.camera_front;
-    case CameraLensDirection.external:
-      return Icons.camera;
+  IconData getCameraLensIcon(CameraLensDirection direction) {
+    switch (direction) {
+      case CameraLensDirection.back:
+        return Icons.camera_rear;
+      case CameraLensDirection.front:
+        return Icons.camera_front;
+      case CameraLensDirection.external:
+        return Icons.camera;
+    }
+    // This enum is from a different package, so a new value could be added at
+    // any time. The example should keep working if that happens.
+    // ignore: dead_code
+    return Icons.camera;
   }
-  // This enum is from a different package, so a new value could be added at
-  // any time. The example should keep working if that happens.
-  // ignore: dead_code
-  return Icons.camera;
-}
- @override
+
+  @override
   void initState() {
     super.initState();
     //相机初始化
@@ -65,14 +72,15 @@ IconData getCameraLensIcon(CameraLensDirection direction) {
     onCameraInitialize = cameraInitialize;
     cameraInitialize();
   }
-  
-@override
-void dispose() {
-  cameraController?.dispose();
-  cameraController = null;  // 防止内存泄漏和误用
-  onCameraInitialize = () {};
-  super.dispose();
-}
+
+  @override
+  void dispose() {
+    cameraController?.dispose();
+    cameraController = null; // 防止内存泄漏和误用
+    onCameraInitialize = () {};
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     late final Widget cameraView;
@@ -87,11 +95,14 @@ void dispose() {
       body: cameraView,
       floatingActionButton: Align(
         alignment: Alignment(0, 0.9),
-        child: TDButton(text: 'Current Camera: $camNum', onTap: () {
-          if (cameraEnabled) {
-            cameraSwitch();
-          }
-        })
+        child: TDButton(
+          text: 'Current Camera: $camNum',
+          onTap: () {
+            if (cameraEnabled) {
+              cameraSwitch();
+            }
+          },
+        ),
       ),
     );
   }

@@ -16,7 +16,7 @@ late final VoidCallback? onLanguageChanged;
 late final bool cameraEnabled;
 //相机相关
 CameraController? cameraController;
-VoidCallback onCameraInitialize = () {}; 
+VoidCallback onCameraInitialize = () {};
 //上传相关
 List<TDUploadFile> uploadedImages = [];
 List<TDUploadFile> uploadedVideos = [];
@@ -38,17 +38,10 @@ Future<void> main() async {
       TDTheme.defaultData();
 
   initializeAppConfig(); //加载默认数据
-  //
   try {
-  AppConfig.cameras = await availableCameras();
-  //...
-  //AppConfig.cameras.removeAt(7);
-  //AppConfig.cameras.removeAt(5);
-  //..
-  cameraEnabled = AppConfig.cameras.isNotEmpty;
-  //print(AppConfig.cameras.length);
-  }
-  catch (e) {
+    AppConfig.cameras = await availableCameras();
+    cameraEnabled = AppConfig.cameras.isNotEmpty;
+  } catch (e) {
     //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
     AppConfig.cameras = [];
   }
@@ -67,7 +60,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    onThemeChanged = () {setState(() {});};
+    onThemeChanged = () {
+      setState(() {});
+    };
     WidgetsBinding.instance.addObserver(this); // 注册观察者
   }
 
@@ -80,50 +75,51 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
-    case AppLifecycleState.inactive:
-      if ((cameraController == null) || (!cameraController!.value.isInitialized)) {
+      case AppLifecycleState.inactive:
+        if ((cameraController == null) ||
+            (!cameraController!.value.isInitialized)) {
+          break;
+        }
+        cameraController!.dispose();
         break;
-      }
-      cameraController!.dispose();
-      break;
-    case AppLifecycleState.resumed:
-      if ((cameraController == null) || (!cameraController!.value.isInitialized)) {
+      case AppLifecycleState.resumed:
+        if ((cameraController == null) ||
+            (!cameraController!.value.isInitialized)) {
+          break;
+        }
+        onCameraInitialize();
         break;
-      }
-      onCameraInitialize();
-      break;
-    case AppLifecycleState.paused:
-      // 应用进入后台（例如用户按了Home键、切换到其他应用）
-      // 在此处执行保存操作
-      //Image
-      List<String> imagePaths = [];
-      for (TDUploadFile file in uploadedImages) {
-        imagePaths.add(file.assetPath.toString());
-      }
-      if (imagePaths.isNotEmpty) {
-        GenConfig.saveImagePathsFile(imagePaths);
-      } else {
-        GenConfig.deleteImagePathsFile();
-      }
-      //Text
-      if (uploadedText.isNotEmpty) {
-        GenConfig.saveTextFile(uploadedText);
-      } else {
-        GenConfig.deleteTextFile();
-      }
-      //Video
-      List<String> videoPaths = [];
-      for (TDUploadFile file in uploadedVideos) {
-        videoPaths.add(file.assetPath.toString());
-      }
-      if (videoPaths.isNotEmpty) {
-        GenConfig.saveVideoPathsFile(videoPaths);
-      } else {
-        GenConfig.deleteVideoPathsFile();
-      }
-      break;
-    default:
-
+      case AppLifecycleState.paused:
+        // 应用进入后台（例如用户按了Home键、切换到其他应用）
+        // 在此处执行保存操作
+        //Image
+        List<String> imagePaths = [];
+        for (TDUploadFile file in uploadedImages) {
+          imagePaths.add(file.assetPath.toString());
+        }
+        if (imagePaths.isNotEmpty) {
+          GenConfig.saveImagePathsFile(imagePaths);
+        } else {
+          GenConfig.deleteImagePathsFile();
+        }
+        //Text
+        if (uploadedText.isNotEmpty) {
+          GenConfig.saveTextFile(uploadedText);
+        } else {
+          GenConfig.deleteTextFile();
+        }
+        //Video
+        List<String> videoPaths = [];
+        for (TDUploadFile file in uploadedVideos) {
+          videoPaths.add(file.assetPath.toString());
+        }
+        if (videoPaths.isNotEmpty) {
+          GenConfig.saveVideoPathsFile(videoPaths);
+        } else {
+          GenConfig.deleteVideoPathsFile();
+        }
+        break;
+      default:
     }
   }
 

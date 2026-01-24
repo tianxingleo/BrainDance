@@ -45,9 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Allows users to record video footage and upload it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Enables users to record video audio and upload it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Makes it easy for users to save videos/photos to their phones.</string>
 </dict>
 </plist>

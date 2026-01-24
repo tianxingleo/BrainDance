@@ -6,7 +6,7 @@ import 'package:braindance/main.dart';
 import 'dart:io';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as path_joiner;
+import 'package:photo_manager/photo_manager.dart';
 
 class GeneratePage extends StatefulWidget {
   const GeneratePage({super.key});
@@ -99,25 +99,41 @@ class _GeneratePageState extends State<GeneratePage>
         TDActionSheetItem(label: textLocalize("gen_shot")),
         TDActionSheetItem(label: textLocalize("gen_gallery")),
       ],
+      cancelText: textLocalize("gen_cancel"),
       onSelected: (item, index) async {
         if (index == 0) {
-          XFile? file;
+          final XFile? file;
+          late final AssetEntity newAsset;
+          final PermissionState ps = await PhotoManager.requestPermissionExtend();
+          if (!ps.isAuth) {
+            if (context.mounted) {
+              TDToast.showText(textLocalize("tip_no_permission"), context: context);
+            }
+            return;
+          }
           if (isImage) {
             file = await _picker.pickImage(source: ImageSource.camera);
+            if (file == null) {
+              return;
+            }
+            newAsset = await PhotoManager.editor.saveImageWithPath(file.path, title: file.name);
           } else {
             file = await _picker.pickVideo(
               source: ImageSource.camera,
               maxDuration: const Duration(minutes: 3),
             );
+            if (file == null) {
+              return;
+            }
+            newAsset = await PhotoManager.editor.saveVideo(File(file.path), title: file.name);
           }
-          if (file != null) {
-            final newPath = await GenConfig.getCameraDir();
-            final newPathFull = path_joiner.join(newPath, file.name);
-            try {
-              await DirSystem.ensureDir(newPath);
-              await file.saveTo(newPathFull);
+          try {
               await FileSystem.deleteFile(file.path);
-              XFile fileSaved = XFile(newPathFull);
+              File? f = await newAsset.originFile;
+              if (f == null) {
+                throw();
+              }
+              XFile fileSaved = XFile(f.path);
               late final String msg;
               if (isImage) {
                 msg = await _uploadImages(List.filled(1, fileSaved));
@@ -146,7 +162,6 @@ class _GeneratePageState extends State<GeneratePage>
             }
           }
           setState(() {});
-        }
       },
     ).show();
   }

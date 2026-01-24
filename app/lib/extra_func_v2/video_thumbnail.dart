@@ -6,7 +6,7 @@ import 'package:path/path.dart' as path;
 class VThumb {
   static Future<String> ensureThumb(String videoPath) async {
     final fname = "${path.basenameWithoutExtension(videoPath)}.jpg";
-    final pathThumb = path.join(await DirFinder.cacheDir(),"thumbNails");
+    final pathThumb = path.join(await DirFinder.cacheDir(), "thumbNails");
     final pathThumbFull = path.join(pathThumb, fname);
     if (await FileSystem.checkFileExists(pathThumbFull)) {
       return pathThumbFull;

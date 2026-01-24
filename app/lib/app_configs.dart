@@ -5,7 +5,6 @@ import 'extra_func/dir_and_file.dart';
 import 'extra_func/theme_provider.dart';
 import 'extra_func_v2/file_stream.dart';
 import 'main.dart';
-import 'package:path/path.dart' as path_joiner;
 import 'package:camera/camera.dart';
 
 //App基础设置
@@ -37,13 +36,6 @@ class GenConfig {
   static const imagePathsFileName = "genImagePaths.txt";
   static const videoPathsFileName = "genVideoPaths.txt";
   static const textFileName = "genText.txt";
-
-  static Future<String> getCameraDir() async {
-    return path_joiner.join(
-      await AppConfig.supportDir,
-      "camera",
-    );
-  }
 
   static Future<List<String>> loadImagePathsFile() async {
     return await FileStream.appLoad(AppConfig.cacheDir, imagePathsFileName);
@@ -147,7 +139,7 @@ void setNightMode(bool isNight) {
 
 void initializeAppConfig() {
   try {
-  AppConfig.langMap = Localize.getLangMap(Platform.localeName);
+    AppConfig.langMap = Localize.getLangMap(Platform.localeName);
   } catch (e) {
     AppConfig.langMap = Localize.getLangMap("en_US");
   }
