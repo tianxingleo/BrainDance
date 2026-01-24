@@ -13,22 +13,23 @@ class RecordPage extends StatefulWidget {
 class _RecordPageState extends State<RecordPage> {
   static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
   static int camNum = 0;
-  void cameraSwitch() {
+  Future<void> cameraSwitch() async {
     camNum++;
     if (camNum == AppConfig.cameras.length) {
       camNum = 0;
     }
-    if (cameraController == null) {
-      cameraInitialize();
+    if ((cameraController == null) || !cameraController!.value.isInitialized) {
+      await cameraInitialize();
     } else {
       cameraController!.setDescription(AppConfig.cameras[camNum]);
-      if (mounted) {
-        setState(() {});
-      }
+      setState(() {});
     }
   }
   Future<bool> cameraInitialize() async {
-    cameraController = CameraController(AppConfig.cameras[camNum], resolutionPreset);
+    cameraController = CameraController(
+      AppConfig.cameras[camNum],
+      resolutionPreset,
+    );
     bool suc = true;
     await cameraController!.initialize().then((_) {
       if (mounted) {
@@ -61,22 +62,26 @@ IconData getCameraLensIcon(CameraLensDirection direction) {
     if (!cameraEnabled) {
       return;
     }
-    //滥用
     onCameraInitialize = cameraInitialize;
     cameraInitialize();
   }
-  @override
-  void dispose() {
-    //恢复
-    super.dispose();
-  }
+  
+@override
+void dispose() {
+  cameraController?.dispose();
+  cameraController = null;  // 防止内存泄漏和误用
+  onCameraInitialize = () {};
+  super.dispose();
+}
   @override
   Widget build(BuildContext context) {
     late final Widget cameraView;
-    if(cameraEnabled) {
-      cameraView = CameraPreview(cameraController!);
-    } else {
+    if (!cameraEnabled) {
       cameraView = Center(child: Text(textLocalize("reco_camun")));
+    } else if (!cameraController!.value.isInitialized) {
+      cameraView = Center(child: Text(textLocalize("reco_wait")));
+    } else {
+      cameraView = CameraPreview(cameraController!);
     }
     return Scaffold(
       body: cameraView,
@@ -84,7 +89,7 @@ IconData getCameraLensIcon(CameraLensDirection direction) {
         alignment: Alignment(0, 0.9),
         child: TDButton(text: 'Current Camera: $camNum', onTap: () {
           if (cameraEnabled) {
-          cameraSwitch();
+            cameraSwitch();
           }
         })
       ),

@@ -14,8 +14,10 @@ late final TDThemeData themeData;
 late final VoidCallback? onThemeChanged;
 late final VoidCallback? onLanguageChanged;
 late final bool cameraEnabled;
+//相机相关
 CameraController? cameraController;
 VoidCallback onCameraInitialize = () {}; 
+//上传相关
 List<TDUploadFile> uploadedImages = [];
 List<TDUploadFile> uploadedVideos = [];
 String uploadedText = "";
@@ -40,8 +42,8 @@ Future<void> main() async {
   try {
   AppConfig.cameras = await availableCameras();
   //...
-  AppConfig.cameras.removeAt(7);
-  AppConfig.cameras.removeAt(5);
+  //AppConfig.cameras.removeAt(7);
+  //AppConfig.cameras.removeAt(5);
   //..
   cameraEnabled = AppConfig.cameras.isNotEmpty;
   //print(AppConfig.cameras.length);
@@ -65,7 +67,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    onThemeChanged = _updateTheme;
+    onThemeChanged = () {setState(() {});};
     WidgetsBinding.instance.addObserver(this); // 注册观察者
   }
 
@@ -148,10 +150,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         '/example': (context) => RecallPage(), // "/example"路径对应....
       },
     );
-  }
-
-  void _updateTheme() {
-    setState(() {}); // 触发状态更新以应用新的主题
   }
 }
 
