@@ -41,9 +41,26 @@ Future<void> main() async {
   try {
     AppConfig.cameras = await availableCameras();
     cameraEnabled = AppConfig.cameras.isNotEmpty;
+    //摄像机分类。
+    for (var cam in AppConfig.cameras) {
+      switch (cam.lensDirection) {
+        case CameraLensDirection.front:
+          AppConfig.frontCameras.add(cam);
+          break;
+        case CameraLensDirection.back:
+          AppConfig.backCameras.add(cam);
+          break;
+        case CameraLensDirection.external:
+          AppConfig.externalCameras.add(cam);
+          break;
+      }
+    }
   } catch (e) {
     //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
     AppConfig.cameras = [];
+    AppConfig.frontCameras = [];
+    AppConfig.backCameras = [];
+    AppConfig.externalCameras = [];
   }
   runApp(const MyApp());
 }

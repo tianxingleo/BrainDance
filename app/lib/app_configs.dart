@@ -17,6 +17,9 @@ class AppConfig {
   static bool isNightMode = false;
 
   static late final List<CameraDescription> cameras;
+  static late final List<CameraDescription> frontCameras;
+  static late final List<CameraDescription> backCameras;
+  static late final List<CameraDescription> externalCameras;
   static final cacheDir = DirFinder.cacheDir();
   static final supportDir = DirFinder.supportDir();
   static final Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
