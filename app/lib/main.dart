@@ -1,3 +1,4 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:camera/camera.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
@@ -39,10 +40,10 @@ Future<void> main() async {
 
   initializeAppConfig(); //加载默认数据
   try {
-    AppConfig.cameras = await availableCameras();
-    cameraEnabled = AppConfig.cameras.isNotEmpty;
+    final List<CameraDescription> camsTemp = await availableCameras();
+    cameraEnabled = camsTemp.isNotEmpty;
     //摄像机分类。
-    for (var cam in AppConfig.cameras) {
+    for (var cam in camsTemp) {
       switch (cam.lensDirection) {
         case CameraLensDirection.front:
           AppConfig.frontCameras.add(cam);
@@ -55,6 +56,7 @@ Future<void> main() async {
           break;
       }
     }
+    AppConfig.cameras = camsTemp;
   } catch (e) {
     //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
     AppConfig.cameras = [];
@@ -62,6 +64,12 @@ Future<void> main() async {
     AppConfig.backCameras = [];
     AppConfig.externalCameras = [];
   }
+  //supabase
+  await Supabase.initialize(
+    url: 'any',
+    anonKey: 'any',
+  );
+
   runApp(const MyApp());
 }
 
