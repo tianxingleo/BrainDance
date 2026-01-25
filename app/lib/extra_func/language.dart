@@ -28,6 +28,19 @@ enum Language {
       "gen_shot": "拍照",
       "gen_gallery": "从相册中选择",
       "gen_cancel": "取消",
+      "reco_tip_title1" : "一、设备与设置",
+      "reco_tip_title2" : "二、拍摄环境与操作",
+      "reco_tip_title3" : "三、后期检查",
+      "reco_tip1" : """设备：使用支持1080p/30fps录像的智能手机或相机。
+稳定：建议使用三脚架，避免画面抖动。
+分辨率与帧率：在设置中手动选择 1920×1080（1080p） 和 30fps。
+曝光：使用自动曝光模式。如光线明暗变化大，可手动锁定曝光。
+对焦：使用自动连续对焦模式。""",
+      "reco_tip2" : """光线：在光线均匀、充足的条件下拍摄。避免逆光（如背景是窗户）。
+动作：拍摄时，尽量避免快速移动或晃动相机。
+内容：规划不同的拍摄内容和角度，避免画面重复。""",
+      "reco_tip3" : """如视频使用手机自带相机软件拍摄，请用剪辑软件（如剪映）检查视频，剪掉抖动、模糊或过曝的片段。
+最终导出时，确认参数为 1080p 和 30fps。""",
       "reco_camun": "相机访问被拒绝。\n请在系统设置中启用相机权限。",
       "reco_wait": "相机初始化中...",
       "recall": "过往回忆",
@@ -72,6 +85,19 @@ enum Language {
       "gen_shot": "Use Camera",
       "gen_gallery": "Choose from Gallery",
       "gen_cancel": "Cancel",
+      "reco_tip_title1" : "1. Equipment & Settings",
+      "reco_tip_title2" : "2. Shooting Environment & Operation",
+      "reco_tip_title3" : "3. Post-Shooting Check",
+      "reco_tip1" : """Device: Use a smartphone or camera that supports 1080p/30fps video recording.
+Stability: It is recommended to use a tripod to avoid shaky footage.
+Resolution & Frame Rate: Manually select 1920x1080 (1080p) and 30fps in the settings.
+Exposure: Use auto-exposure mode. If there are significant changes in lighting, manually lock the exposure.
+Focus: Use continuous auto-focus mode.""",
+      "reco_tip2" : """Lighting: Shoot under even and sufficient lighting. Avoid backlighting (e.g., having a window as the background).
+Movement: During shooting, try to avoid rapid movements or shaking of the camera.
+Content: Plan diverse shooting content and angles to avoid repetitive footage.""",
+      "reco_tip3" : """If the video was shot using a phone's built-in camera app, use editing software (e.g., CapCut) to review the video and trim any shaky, blurry, or overexposed segments.
+When finally exporting, confirm the settings are 1080p and 30fps.""",
       "reco_camun":
           "Cannot access the camera.\nPlease check and grant the camera permission in your device settings to continue.",
       "reco_wait": "Initializing the camera...",
