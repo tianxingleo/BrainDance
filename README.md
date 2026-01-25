@@ -320,12 +320,31 @@ sequenceDiagram
 
 - **[Supabase](https://github.com/supabase/supabase)**: 本项目的灵魂。提供了开箱即用的 Auth、Storage 和 Realtime 能力，让我们能专注于 3D 业务逻辑。
 - **[pgvector](https://github.com/pgvector/pgvector)**: PostgreSQL 的向量扩展，替代了 ChromaDB，为本项目提供了高性能的 RAG 检索能力。
-- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: 强大的多模态大模型，赋予了 3D 场景“被理解”的能力（自动打标与描述）。
+- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: 强大的多模态大模型，赋予了 3D 场景"被理解"的能力（自动打标与描述）。
+- **[Ultralytics YOLO](https://www.ultralytics.com/zh/yolo)**: 使用了最新的 **YOLO12** (2025) 和 **YOLO26** 目标检测模型，为场景提供实时物体识别与开放词汇检测能力。YOLO12 引入以注意力为中心的架构，YOLO26 专为边缘和低功耗设备设计。
+- **[Qwen3-Embedding](https://help.aliyun.com/zh/model-studio/general-text-embedding/)**: 阿里巴巴 2025 年最新发布的文本嵌入模型系列，在多项 benchmarks 上达到 SOTA 水平，为本项目的 RAG 检索提供高精度语义向量支持。
 
 #### Rendering & Viewer (渲染与查看器)
 
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
+
+#### Mobile Client Ecosystem (移动端与视觉设计)
+
+- **[TDesign Flutter](https://tdesign.tencent.com/flutter)**: 腾讯开源的企业级移动端组件库。
+  - **Design System**: 采用了 TDesign 的设计规范与深色模式 (`theme.json` 来源：[TDesign Dark Mode](https://tdesign.tencent.com/flutter/dark-mode))。
+  - **Iconography**: 使用了 TDesign Icons (如 Video-camera Icon) 保持视觉统一 ([来源](https://tdesign.tencent.com/icons))。
+- **HarmonyOS Sans**: 采用华为鸿蒙字体作为应用主字体，优化多屏阅读体验。
+- **Dependencies (关键依赖)**:
+  - `Dart SDK`: 3.10.7
+  - `tdesign_flutter`: ^0.2.7
+  - `camera`: ^0.11.3
+  - `photo_manager`: ^3.8.3
+  - `video_thumbnail_pro`: ^0.7.3
+  - `image_picker`: ^1.1.2
+  - `path_provider`: ^2.1.5
+  - `path`: ^1.9.1
+  - `cupertino_icons`: ^1.0.8
 
 
 
