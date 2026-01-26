@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:camera/camera.dart';
 
 class RecoConfig {
+  //更新
+  static VoidCallback? onUpdate;
   //程序
-  static bool cameraEnabled = false;
+  static late final bool cameraEnabled;
   static late final List<CameraDescription> cameras;
   static List<CameraDescription> frontCameras = List.empty(growable: true);
   static List<CameraDescription> backCameras = List.empty(growable: true);
@@ -20,6 +21,7 @@ class RecoConfig {
     await cameraController!.initialize().catchError((Object e) {
       suc = false;
     });
+    onUpdate?.call();
     return suc;
   }
 
@@ -33,6 +35,7 @@ class RecoConfig {
     } else {
       cameraController!.setDescription(cameras[camNum]);
     }
+    onUpdate?.call();
   }
 
   //相机自动更新
@@ -49,7 +52,7 @@ class RecoConfig {
         (!cameraController!.value.isInitialized)) {
       return;
     }
-    cameraController!.dispose();
+    cameraController?.dispose();
   }
 
   //获取图标
@@ -66,33 +69,3 @@ class RecoConfig {
     return Icons.camera;
   }
 }
-
-//相机初始化
-final cameraEnabledProvider = FutureProvider<bool>((ref) async {
-  try {
-    final List<CameraDescription> camsTemp = await availableCameras();
-    //摄像机分类。
-    for (var cam in camsTemp) {
-      switch (cam.lensDirection) {
-        case CameraLensDirection.front:
-          RecoConfig.frontCameras.add(cam);
-          break;
-        case CameraLensDirection.back:
-          RecoConfig.backCameras.add(cam);
-          break;
-        case CameraLensDirection.external:
-          RecoConfig.externalCameras.add(cam);
-          break;
-      }
-    }
-    RecoConfig.cameras = camsTemp;
-    return camsTemp.isNotEmpty;
-  } catch (e) {
-    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
-    RecoConfig.cameras = [];
-    RecoConfig.frontCameras = [];
-    RecoConfig.backCameras = [];
-    RecoConfig.externalCameras = [];
-    return false;
-  }
-});

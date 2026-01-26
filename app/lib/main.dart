@@ -1,3 +1,5 @@
+import 'package:camera/camera.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/configs/reco_config.dart';
@@ -18,12 +20,41 @@ final themeData = TDTheme.defaultData();
 //MainScreen
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
+  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
+  //Camera
+  try {
+    final List<CameraDescription> camsTemp = await availableCameras();
+    //摄像机分类。
+    for (var cam in camsTemp) {
+      switch (cam.lensDirection) {
+        case CameraLensDirection.front:
+          RecoConfig.frontCameras.add(cam);
+          break;
+        case CameraLensDirection.back:
+          RecoConfig.backCameras.add(cam);
+          break;
+        case CameraLensDirection.external:
+          RecoConfig.externalCameras.add(cam);
+          break;
+      }
+    }
+    RecoConfig.cameras = camsTemp;
+    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
+  } catch (e) {
+    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
+    RecoConfig.cameras = [];
+    RecoConfig.frontCameras = [];
+    RecoConfig.backCameras = [];
+    RecoConfig.externalCameras = [];
+    RecoConfig.cameraEnabled = false;
+  }
+  //
   runApp(const ProviderScope(child: MyApp()));
 }
 

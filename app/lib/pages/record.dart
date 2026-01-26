@@ -10,25 +10,27 @@ class RecordPage extends StatefulWidget {
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
-
 class _RecordPageState extends State<RecordPage> {
-  @override
+ @override
   void initState() {
     super.initState();
     //相机初始化
     if (!RecoConfig.cameraEnabled) {
       return;
     }
+    RecoConfig.onUpdate = () {setState(() {
+      
+    });};
     RecoConfig.cameraInitialize();
   }
-
-  @override
-  void dispose() {
-    RecoConfig.cameraController?.dispose();
-    RecoConfig.cameraController = null; // 防止内存泄漏和误用
-    super.dispose();
-  }
-
+  
+@override
+void dispose() {
+  RecoConfig.cameraController?.dispose();
+  RecoConfig.cameraController = null;  // 防止内存泄漏和误用
+  RecoConfig.onUpdate = () {};
+  super.dispose();
+}
   @override
   Widget build(BuildContext context) {
     late final Widget cameraView;
@@ -43,14 +45,11 @@ class _RecordPageState extends State<RecordPage> {
       body: cameraView,
       floatingActionButton: Align(
         alignment: Alignment(0, 0.9),
-        child: TDButton(
-          text: 'Current Camera: ${RecoConfig.camNum}',
-          onTap: () {
-            if (RecoConfig.cameraEnabled) {
-              RecoConfig.cameraSwitch();
-            }
-          },
-        ),
+        child: TDButton(text: 'Current Camera: ${RecoConfig.camNum}', onTap: () {
+          if (RecoConfig.cameraEnabled) {
+            RecoConfig.cameraSwitch();
+          }
+        })
       ),
     );
   }
