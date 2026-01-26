@@ -40,6 +40,7 @@ dependencies:
   photo_manager: ^3.8.3
   supabase_flutter: ^2.12.0
   webview_flutter: ^4.13.1
+  flutter_riverpod: ^3.2.0
 
 dev_dependencies:
   flutter_test:
@@ -80,7 +81,6 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   assets:
-    - assets/theme.json
     - assets/fonts/
     - assets/sprites/
   fonts:

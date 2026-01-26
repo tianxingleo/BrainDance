@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
-import '../main.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
-class ThemeModeProvider extends ChangeNotifier {
-  static ThemeMode _themeMode = ThemeMode.light;
+class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  ThemeModeNotifier() : super(ThemeMode.light);
+  ThemeMode get themeMode {
+    return state;
+  }
 
-  static ThemeMode get themeMode => _themeMode;
-
-  static void setThemeMode(ThemeMode mode) {
-    _themeMode = mode;
-    onThemeChanged?.call();
+  void setThemeMode(ThemeMode mode) {
+    state = mode;
   }
 }
+
+final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
+  (ref) => ThemeModeNotifier(),
+);

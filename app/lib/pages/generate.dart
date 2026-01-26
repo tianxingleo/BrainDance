@@ -1,12 +1,12 @@
 import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:braindance/app_configs.dart';
-import 'package:braindance/main.dart';
+import 'package:braindance/configs/app_config.dart';
 import 'dart:io';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:braindance/configs/gen_config.dart';
 
 class GeneratePage extends StatefulWidget {
   const GeneratePage({super.key});
@@ -34,19 +34,19 @@ class _GeneratePageState extends State<GeneratePage>
     //Image
     final List<String> paths = await GenConfig.loadImagePathsFile();
     for (String path in paths) {
-      uploadedImages.add(
+      GenConfig.uploadedImages.add(
         TDUploadFile(key: 1, assetPath: path, file: File(path)),
       );
     }
     //Text
     final String text = await GenConfig.loadTextFile();
     if (text.isNotEmpty) {
-      uploadedText = text;
+      GenConfig.uploadedText = text;
     }
     //Video
     final List<String> paths2 = await GenConfig.loadVideoPathsFile();
     for (String path in paths2) {
-      uploadedVideos.add(
+      GenConfig.uploadedVideos.add(
         TDUploadFile(
           key: 1,
           assetPath: path,
@@ -59,7 +59,7 @@ class _GeneratePageState extends State<GeneratePage>
 
   Future<String> _uploadImages(List<XFile> images) async {
     String msg = "";
-    final capacity = maxImageCount - uploadedImages.length;
+    final capacity = maxImageCount - GenConfig.uploadedImages.length;
     if (images.length > capacity) {
       msg = textLocalize("tip_overquan");
     }
@@ -70,7 +70,7 @@ class _GeneratePageState extends State<GeneratePage>
         msg = textLocalize("tip_oversize");
         continue;
       }
-      uploadedImages.add(
+      GenConfig.uploadedImages.add(
         TDUploadFile(key: 1, assetPath: image.path, file: File(image.path)),
       );
     }
@@ -82,7 +82,7 @@ class _GeneratePageState extends State<GeneratePage>
       return textLocalize("tip_fail");
     }
 
-    uploadedVideos.add(
+    GenConfig.uploadedVideos.add(
       TDUploadFile(
         key: 1,
         assetPath: video.path,
@@ -104,10 +104,14 @@ class _GeneratePageState extends State<GeneratePage>
         if (index == 0) {
           final XFile? file;
           late final AssetEntity newAsset;
-          final PermissionState ps = await PhotoManager.requestPermissionExtend();
+          final PermissionState ps =
+              await PhotoManager.requestPermissionExtend();
           if (!ps.isAuth) {
             if (context.mounted) {
-              TDToast.showText(textLocalize("tip_no_permission"), context: context);
+              TDToast.showText(
+                textLocalize("tip_no_permission"),
+                context: context,
+              );
             }
             return;
           }
@@ -116,7 +120,10 @@ class _GeneratePageState extends State<GeneratePage>
             if (file == null) {
               return;
             }
-            newAsset = await PhotoManager.editor.saveImageWithPath(file.path, title: file.name);
+            newAsset = await PhotoManager.editor.saveImageWithPath(
+              file.path,
+              title: file.name,
+            );
           } else {
             file = await _picker.pickVideo(
               source: ImageSource.camera,
@@ -125,43 +132,46 @@ class _GeneratePageState extends State<GeneratePage>
             if (file == null) {
               return;
             }
-            newAsset = await PhotoManager.editor.saveVideo(File(file.path), title: file.name);
+            newAsset = await PhotoManager.editor.saveVideo(
+              File(file.path),
+              title: file.name,
+            );
           }
           try {
-              await FileSystem.deleteFile(file.path);
-              File? f = await newAsset.originFile;
-              if (f == null) {
-                throw();
-              }
-              XFile fileSaved = XFile(f.path);
-              late final String msg;
-              if (isImage) {
-                msg = await _uploadImages(List.filled(1, fileSaved));
-              } else {
-                msg = await _uploadVideo(fileSaved);
-              }
-              if (msg.isNotEmpty && context.mounted) {
-                TDToast.showText(msg, context: context);
-              }
-            } catch (e) {
-              if (context.mounted) {
-                TDToast.showText(textLocalize("tip_fail"), context: context);
-              }
+            await FileSystem.deleteFile(file.path);
+            File? f = await newAsset.originFile;
+            if (f == null) {
+              throw ();
             }
-          } else {
+            XFile fileSaved = XFile(f.path);
             late final String msg;
             if (isImage) {
-              msg = await _uploadImages(await _picker.pickMultiImage());
+              msg = await _uploadImages(List.filled(1, fileSaved));
             } else {
-              msg = await _uploadVideo(
-                await _picker.pickVideo(source: ImageSource.gallery),
-              );
+              msg = await _uploadVideo(fileSaved);
             }
             if (msg.isNotEmpty && context.mounted) {
               TDToast.showText(msg, context: context);
             }
+          } catch (e) {
+            if (context.mounted) {
+              TDToast.showText(textLocalize("tip_fail"), context: context);
+            }
           }
-          setState(() {});
+        } else {
+          late final String msg;
+          if (isImage) {
+            msg = await _uploadImages(await _picker.pickMultiImage());
+          } else {
+            msg = await _uploadVideo(
+              await _picker.pickVideo(source: ImageSource.gallery),
+            );
+          }
+          if (msg.isNotEmpty && context.mounted) {
+            TDToast.showText(msg, context: context);
+          }
+        }
+        setState(() {});
       },
     ).show();
   }
@@ -218,7 +228,7 @@ class _GeneratePageState extends State<GeneratePage>
       case 0:
         final TDUpload myTDUpload = TDUpload(
           key: _uploadKey,
-          files: uploadedImages,
+          files: GenConfig.uploadedImages,
           multiple: true,
           max: maxImageCount,
           onUploadTap: () {
@@ -227,11 +237,14 @@ class _GeneratePageState extends State<GeneratePage>
           onChange: (files, type) {
             switch (type) {
               case TDUploadType.add:
-                uploadedImages = [...uploadedImages, ...files];
+                GenConfig.uploadedImages = [
+                  ...GenConfig.uploadedImages,
+                  ...files,
+                ];
                 break;
               case TDUploadType.remove:
                 for (var f in files) {
-                  uploadedImages.remove(f);
+                  GenConfig.uploadedImages.remove(f);
                 }
                 break;
               case TDUploadType.replace:
@@ -267,7 +280,8 @@ class _GeneratePageState extends State<GeneratePage>
             child: SizedBox(
               height:
                   80 +
-                  ((uploadedImages.length + 1) / capacity).ceil() * 171, // 明确高度
+                  ((GenConfig.uploadedImages.length + 1) / capacity).ceil() *
+                      171, // 明确高度
               child: Stack(
                 children: stackChildren, // Positioned 放在 Stack 中
               ),
@@ -279,7 +293,7 @@ class _GeneratePageState extends State<GeneratePage>
       case 1:
         var lineCount = (MediaQuery.of(context).size.height - 350) ~/ 25;
         lineCount = (lineCount > 0) ? lineCount : 1;
-        _textEditingController.text = uploadedText;
+        _textEditingController.text = GenConfig.uploadedText;
         tabContents.add(
           Expanded(
             child: Stack(
@@ -299,7 +313,7 @@ class _GeneratePageState extends State<GeneratePage>
                     maxLines: lineCount,
                     minLines: lineCount,
                     onChanged: (value) {
-                      uploadedText = value;
+                      GenConfig.uploadedText = value;
                     },
                     decoration: BoxDecoration(
                       color: TDTheme.of(context).bgColorContainer,
@@ -322,7 +336,7 @@ class _GeneratePageState extends State<GeneratePage>
         final TDUpload myTDUpload = TDUpload(
           type: TDUploadBoxType.circle,
           key: _uploadKey2,
-          files: uploadedVideos,
+          files: GenConfig.uploadedVideos,
           multiple: false,
           onUploadTap: () {
             _showActionSheet(context, false);
@@ -330,11 +344,14 @@ class _GeneratePageState extends State<GeneratePage>
           onChange: (files, type) {
             switch (type) {
               case TDUploadType.add:
-                uploadedVideos = [...uploadedVideos, ...files];
+                GenConfig.uploadedVideos = [
+                  ...GenConfig.uploadedVideos,
+                  ...files,
+                ];
                 break;
               case TDUploadType.remove:
                 for (var f in files) {
-                  uploadedVideos.remove(f);
+                  GenConfig.uploadedVideos.remove(f);
                 }
                 break;
               case TDUploadType.replace:
@@ -370,7 +387,8 @@ class _GeneratePageState extends State<GeneratePage>
             child: SizedBox(
               height:
                   120 +
-                  ((uploadedVideos.length + 1) / capacity).ceil() * 171, // 明确高度
+                  ((GenConfig.uploadedVideos.length + 1) / capacity).ceil() *
+                      171, // 明确高度
               child: Stack(
                 children: stackChildren, // Positioned 放在 Stack 中
               ),

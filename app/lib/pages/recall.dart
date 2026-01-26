@@ -1,6 +1,6 @@
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
-import '../app_configs.dart';
+import '../configs/app_config.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});

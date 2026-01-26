@@ -1,0 +1,98 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:camera/camera.dart';
+
+class RecoConfig {
+  //程序
+  static bool cameraEnabled = false;
+  static late final List<CameraDescription> cameras;
+  static List<CameraDescription> frontCameras = List.empty(growable: true);
+  static List<CameraDescription> backCameras = List.empty(growable: true);
+  static List<CameraDescription> externalCameras = List.empty(growable: true);
+  static CameraController? cameraController;
+  //可变
+  static int camNum = 0;
+  static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
+  //基础函数
+  static Future<bool> cameraInitialize() async {
+    cameraController = CameraController(cameras[camNum], resolutionPreset);
+    bool suc = true;
+    await cameraController!.initialize().catchError((Object e) {
+      suc = false;
+    });
+    return suc;
+  }
+
+  static Future<void> cameraSwitch() async {
+    camNum++;
+    if (camNum == cameras.length) {
+      camNum = 0;
+    }
+    if ((cameraController == null) || !cameraController!.value.isInitialized) {
+      await cameraInitialize();
+    } else {
+      cameraController!.setDescription(cameras[camNum]);
+    }
+  }
+
+  //相机自动更新
+  static void refreshCamera() {
+    if ((cameraController == null) ||
+        (!cameraController!.value.isInitialized)) {
+      return;
+    }
+    cameraInitialize();
+  }
+
+  static void disposeCamera() {
+    if ((cameraController == null) ||
+        (!cameraController!.value.isInitialized)) {
+      return;
+    }
+    cameraController!.dispose();
+  }
+
+  //获取图标
+  static IconData getCameraLensIcon(CameraLensDirection direction) {
+    switch (direction) {
+      case CameraLensDirection.back:
+        return Icons.camera_rear;
+      case CameraLensDirection.front:
+        return Icons.camera_front;
+      case CameraLensDirection.external:
+        return Icons.camera;
+    }
+    // ignore: dead_code
+    return Icons.camera;
+  }
+}
+
+//相机初始化
+final cameraEnabledProvider = FutureProvider<bool>((ref) async {
+  try {
+    final List<CameraDescription> camsTemp = await availableCameras();
+    //摄像机分类。
+    for (var cam in camsTemp) {
+      switch (cam.lensDirection) {
+        case CameraLensDirection.front:
+          RecoConfig.frontCameras.add(cam);
+          break;
+        case CameraLensDirection.back:
+          RecoConfig.backCameras.add(cam);
+          break;
+        case CameraLensDirection.external:
+          RecoConfig.externalCameras.add(cam);
+          break;
+      }
+    }
+    RecoConfig.cameras = camsTemp;
+    return camsTemp.isNotEmpty;
+  } catch (e) {
+    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
+    RecoConfig.cameras = [];
+    RecoConfig.frontCameras = [];
+    RecoConfig.backCameras = [];
+    RecoConfig.externalCameras = [];
+    return false;
+  }
+});
