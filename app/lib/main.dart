@@ -59,15 +59,26 @@ void main() async {
 }
 
 //App定义
-class MyApp extends StatelessWidget with WidgetsBindingObserver {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
-
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this); // 注册观察者
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 移除观察者
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addObserver(this); // 注册观察者
     return const Home();
   }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {

@@ -6,14 +6,14 @@ Widget setTab2(VoidCallback onUpdate, BuildContext context) {
   return TDCellGroup(
     cells: [
       Picker.buildPicker(
-        onUpdate: onUpdate,
         context,
+        onUpdate: onUpdate,
         pickerTitle: 'PickerTest1',
         pickerIndex: 0,
       ),
       Picker.buildPicker(
-        onUpdate: onUpdate,
         context,
+        onUpdate: onUpdate,
         pickerTitle: 'PickerTest2',
         pickerIndex: 1,
       ),
