@@ -14,6 +14,7 @@ import 'pages/settings.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'debug_tool.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
@@ -26,7 +27,7 @@ void main() async {
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
-  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
+  SupabaseApi.supabase = (await Supabase.initialize(url: SupabaseApi.apiPath, anonKey: SupabaseApi.anonKey)).client;//Supabase
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();

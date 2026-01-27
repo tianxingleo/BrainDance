@@ -1,6 +1,7 @@
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import '../configs/app_config.dart';
+import '../debug_tool.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -10,6 +11,18 @@ class RecallPage extends StatefulWidget {
 }
 
 class _RecallPageState extends State<RecallPage> {
+  @override
+  void initState() {
+    super.initState();
+    DebugVar.onUpdate = () {setState(() {
+      
+    });};
+  }
+  @override
+  void dispose() {
+    DebugVar.onUpdate = null;
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -33,14 +46,13 @@ class _RecallPageState extends State<RecallPage> {
       body: Center(
         child: Column(
           mainAxisAlignment: .start,
-          children: [Text(''), Text('')],
+          children: [Text(DebugVar.debugText)],
         ),
       ),
-      /*floatingActionButton: Stack(
-        children: [
-          
-        ],
-      ),*/
+      floatingActionButton: TDButton(
+        text: "Test Button",
+        onTap: SupabaseApi.test,
+      ),
     );
   }
 }
