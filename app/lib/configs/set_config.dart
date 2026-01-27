@@ -42,10 +42,10 @@ class SetConfig {
 
   static Future<bool> loadMsgFromFile() async {
     //返回是否成功
-    final int count = settingsCount - settingsMsg.length;
     final bool suc;
     settingsMsg = await FileStream.appLoad(AppDir.support, settingsFileName);
     suc = settingsMsg.isNotEmpty;
+    final int count = settingsCount - settingsMsg.length;
     settingsMsg = [
       ...settingsMsg,
       ...List.filled(count > 0 ? count : 0, ""),
