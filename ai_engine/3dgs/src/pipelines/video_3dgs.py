@@ -2,6 +2,7 @@
 # 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
 # 逻辑：1. 视频抽帧与预处理 2. AI质检 3. 位姿解算 4. AI语义分割 5. 3DGS训练与导出
 # 包含：run主函数、各模块实例化、流程控制逻辑、日志回调机制
+import os
 import time
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from src.modules.glomap_runner import GlomapRunner
 from src.modules.ai_segmentor import AISegmentor
 from src.modules.nerf_engine import NerfstudioEngine
 from src.modules.scene_analyzer import SceneAnalyzer
+from src.modules.da3_runner import DA3Runner
 
 # 引入辅助工具
 from src.utils.common import format_duration
@@ -47,7 +49,8 @@ class Video3DGSPipeline(BasePipeline):
         # 直接在括号里传参初始化
         cfg = PipelineConfig(
             project_name=self.scene_id,  # 传入场景名
-            video_path=video_path_obj    # 传入视频路径
+            video_path=video_path_obj,   # 传入视频路径
+            mapper_type=params.get('mapper_type', os.getenv("MAPPER_TYPE", "glomap"))
         )
         
         # 单独设置工作目录 (因为 PipelineConfig 可能默认计算的是别的路径)
@@ -87,9 +90,18 @@ class Video3DGSPipeline(BasePipeline):
         # ==========================================
         # 1. 实例化所有业务模块
         # ==========================================
-        img_processor = ImageProcessor(cfg)
+        img_processor = ImageProcessor(cfg, log_callback=self.log)
         scene_analyzer = SceneAnalyzer(cfg)
-        glomap_runner = GlomapRunner(cfg)
+        
+        # 🟢 根据参数或配置决定使用的是哪种解算引擎
+        mapper_type = params.get('mapper_type', cfg.mapper_type)
+        if mapper_type == 'da3':
+            mapper_runner = DA3Runner(cfg, log_callback=self.log)
+            self.log("    -> 使用引擎: Depth Anything 3")
+        else:
+            mapper_runner = GlomapRunner(cfg)
+            self.log("    -> 使用引擎: GLOMAP")
+            
         ai_segmentor = AISegmentor(cfg)
         nerf_engine = NerfstudioEngine(cfg)
 
@@ -178,12 +190,12 @@ class Video3DGSPipeline(BasePipeline):
                 raise RuntimeError(err_msg)
 
         # ==========================================
-        # Step 2: GLOMAP 位姿解算
+        # Step 2: 位姿解算
         # ==========================================
-        self.log(f"⚙️ [2/4] 正在进行位姿解算 (GLOMAP)...")
-        # 传递日志回调给 GlomapRunner (如果它支持的话)
-        if not glomap_runner.run():
-            err_msg = "❌ Pipeline 中断：GLOMAP 解算失败"
+        self.log(f"⚙️ [2/4] 正在进行位姿解算 ({mapper_type.upper()})...")
+        # 传递日志回调给 Runner (如果它支持的话)
+        if not mapper_runner.run():
+            err_msg = f"❌ Pipeline 中断：{mapper_type.upper()} 解算失败"
             self.log(err_msg, level="ERROR")
             raise RuntimeError(err_msg)
         self.log(f"    -> 位姿解算完成")

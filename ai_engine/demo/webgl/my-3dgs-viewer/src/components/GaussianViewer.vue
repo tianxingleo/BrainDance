@@ -3,14 +3,82 @@ import { onMounted, onBeforeUnmount, ref } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
+import gsap from 'gsap';
 
 const containerRef = ref(null);
 const isVRMode = ref(false); 
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
-let viewer = null;
-let particleSystem = null;
+const cameraPoses = ref([]); 
+const activeImage = ref(''); // 当前激活的参考图
+const sceneMetadata = ref({}); // 存储 FOV 等元数据
+const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
+const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
+
+let viewer;
+let particleSystem;
+
+const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
+
+const updateDebugInfo = () => {
+  if (!viewer || !viewer.camera) return;
+  const euler = new THREE.Euler().setFromQuaternion(viewer.camera.quaternion, 'YXZ');
+  debugInfo.value = {
+    x: (euler.x * 180 / Math.PI).toFixed(1),
+    y: (euler.y * 180 / Math.PI).toFixed(1),
+    z: (euler.z * 180 / Math.PI).toFixed(1)
+  };
+};
+
+const copyMatrixToClipboard = () => {
+  if (!viewer || !viewer.camera) return;
+  const matrix = viewer.camera.matrixWorld.elements;
+  const data = {
+    image: activeImage.value,
+    matrix: Array.from(matrix),
+    debug: debugInfo.value,
+    delta: rotationDelta.value
+  };
+  const str = JSON.stringify(data);
+  navigator.clipboard.writeText(str);
+  alert("相机数据已复制到剪贴板！请发送给我。");
+  console.log("Current Debug Camera Data:", data);
+};
+
+const manualMove = (axis, dist) => {
+  if (!viewer || !viewer.camera) return;
+  if (viewer.controls) viewer.controls.enabled = false;
+  
+  if (axis === 'x') viewer.camera.translateX(dist);
+  if (axis === 'y') viewer.camera.translateY(dist);
+  if (axis === 'z') viewer.camera.translateZ(dist);
+  
+  viewer.camera.updateProjectionMatrix();
+};
+
+const manualRotate = (axis, angleDeg) => {
+  if (!viewer || !viewer.camera) return;
+  
+  if (viewer.controls) viewer.controls.enabled = false;
+
+  const angle = angleDeg * Math.PI / 180;
+  
+  if (axis === 'x') {
+    viewer.camera.rotateX(angle);
+    rotationDelta.value.x += angleDeg;
+  }
+  if (axis === 'y') {
+    viewer.camera.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), angle);
+    rotationDelta.value.y += angleDeg;
+  }
+  if (axis === 'z') {
+    viewer.camera.rotateZ(angle);
+  }
+  
+  viewer.camera.updateProjectionMatrix();
+  updateDebugInfo();
+};
 
 // --- 1. 状态管理 ---
 const PHASE = {
@@ -219,7 +287,102 @@ const applyAdvancedShader = (mesh) => {
   material.needsUpdate = true;
 };
 
-// --- 4. 初始化 ---
+// --- 5. 初始化 ---
+const flyToImage = (poseData) => {
+  if (!viewer || !viewer.camera) return;
+
+  // 更新参考图
+  activeImage.value = poseData.image_url;
+
+  // 1. 设置 FOV (如果元数据中有)
+  // 如果是广角，h / (2 * fl) 的 atan 值会比较大
+  if (sceneMetadata.value.h && sceneMetadata.value.fl_y) {
+    const fov = 2 * Math.atan(sceneMetadata.value.h / (2 * sceneMetadata.value.fl_y)) * (180 / Math.PI);
+    gsap.to(viewer.camera, { fov: fov, duration: 1.5, onUpdate: () => viewer.camera.updateProjectionMatrix() });
+    console.log(`[Camera] Apply FOV: ${fov.toFixed(2)}`);
+  }
+
+  // 2. 强行减小近剪裁面，防止“穿模”或由于贴太近导致不显示
+  // 对于 3DGS，极小的 near 是必要的
+  if (viewer.camera.near > 0.001) {
+    viewer.camera.near = 0.001; 
+    viewer.camera.updateProjectionMatrix();
+  }
+
+  // 3. 将 1D 数组转回 Matrix4
+  const targetMatrix = new THREE.Matrix4();
+  if (Array.isArray(poseData.matrix[0])) {
+    // 4x4 double array
+    targetMatrix.set(
+        poseData.matrix[0][0], poseData.matrix[0][1], poseData.matrix[0][2], poseData.matrix[0][3],
+        poseData.matrix[1][0], poseData.matrix[1][1], poseData.matrix[1][2], poseData.matrix[1][3],
+        poseData.matrix[2][0], poseData.matrix[2][1], poseData.matrix[2][2], poseData.matrix[2][3],
+        poseData.matrix[3][0], poseData.matrix[3][1], poseData.matrix[3][2], poseData.matrix[3][3]
+    );
+  } else {
+    // Column-major flattened
+    targetMatrix.fromArray(poseData.matrix);
+  }
+  
+  // 2. 提取位置和旋转
+  const targetPosition = new THREE.Vector3();
+  const targetQuaternion = new THREE.Quaternion();
+  const dummyScale = new THREE.Vector3();
+  targetMatrix.decompose(targetPosition, targetQuaternion, dummyScale);
+
+  // 3. 计算看向目标 (LookAt)
+  // 相机面向 -Z 轴，计算其前方 5 个单位的位置作为焦点
+  const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
+  const targetLookAt = targetPosition.clone().add(forwardVector.clone().multiplyScalar(2.0)); 
+
+  // 4. 开始 GSAP 动画
+  isAutoRotate.value = false;
+  
+  const cam = viewer.camera;
+  const startPos = cam.position.clone();
+  const startQuat = cam.quaternion.clone();
+  
+  // 创建一个中间对象来驱动 slerp 插值
+  const animState = { t: 0 };
+  
+  gsap.killTweensOf(cam.position);
+  gsap.killTweensOf(cam.quaternion);
+  gsap.killTweensOf(animState);
+
+  // 暂时禁用控制器
+  if (viewer.controls) viewer.controls.enabled = false;
+
+  gsap.to(animState, {
+    t: 1.0,
+    duration: 1.5,
+    ease: "power2.inOut",
+    onUpdate: () => {
+      // 1. 位置插值 (Lerp)
+      cam.position.lerpVectors(startPos, targetPosition, animState.t);
+      
+      // 2. 旋转插值 (Slerp) - 关键！
+      // 直接修改 quaternion 的 x,y,z,w 属性在 GSAP 中往往会导致非最短路径旋转
+      // 使用 Three.js 原生的 slerpQuaternions 可以完美处理球面插值
+      cam.quaternion.slerpQuaternions(startQuat, targetQuaternion, animState.t);
+      
+      cam.updateProjectionMatrix();
+    },
+    onComplete: () => {
+      // 记录初始飞到后的欧拉角
+      const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
+      arrivalEuler.value = {
+        x: (euler.x * 180 / Math.PI).toFixed(1),
+        y: (euler.y * 180 / Math.PI).toFixed(1),
+        z: (euler.z * 180 / Math.PI).toFixed(1)
+      };
+      rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
+      updateDebugInfo();
+      
+      console.log("飞跃完成，记录初始角度:", arrivalEuler.value);
+    }
+  });
+};
+
 const getViewerConfig = () => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   return {
@@ -261,8 +424,31 @@ const initViewer = async () => {
     await viewer.addSplatScene('/models/scene_auto_sync_raw.ply', {
       'showLoadingUI': true,
       'progressiveLoad': false,
-      'rotation': [1, 0, 0, 0],
+      'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
+
+    // 加载相机位姿
+    fetch('/models/webgl_poses.json')
+      .then(res => res.json())
+      .then(data => {
+        // 数据适配
+        if (data.frames) {
+          sceneMetadata.value = {
+            w: data.w,
+            h: data.h,
+            fl_x: data.fl_x,
+            fl_y: data.fl_y
+          };
+          cameraPoses.value = data.frames.map(frame => ({
+            id: frame.id,
+            matrix: frame.matrix,
+            image_url: frame.image_url
+          }));
+        } else {
+          cameraPoses.value = data; // 兼容 参考.txt 格式
+        }
+      })
+      .catch(err => console.error("加载位姿失败:", err));
     
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false; 
@@ -356,11 +542,17 @@ const initViewer = async () => {
 
 const setupDesktopControls = () => {
   if (!viewer) return;
+  // 清理现有控制器
   if (viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
+  
+  // [DEBUG] 暂时禁用控制器
+  /*
   const controls = new ArcballControls(viewer.camera, viewer.renderer.domElement, viewer.threeScene);
   controls.setGizmosVisible(false);
   controls.enableDamping = true;
   viewer.controls = controls;
+  */
+  console.log("Controls explicitly disabled for debugging");
 };
 
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
@@ -399,8 +591,62 @@ const checkProtocol = () => {
   isSecureContext.value = isLocal || isHttps;
 };
 
-onMounted(() => { if (containerRef.value) { checkProtocol(); initViewer(); } });
+const isDragging = ref(false);
+const lastMouse = { x: 0, y: 0 };
+// const rotationDelta removed here
+
+// --- 简单拖拽微调逻辑 ---
+const onMouseDown = (e) => {
+  isDragging.value = true;
+  lastMouse.x = e.clientX;
+  lastMouse.y = e.clientY;
+};
+
+const onMouseMove = (e) => {
+  if (!isDragging.value || !viewer || !viewer.camera) return;
+  
+  const dx = e.clientX - lastMouse.x;
+  const dy = e.clientY - lastMouse.y;
+  const sensitivity = 0.2;
+  
+  // 计算增量 (度)
+  const deltaYaw = -dx * sensitivity;
+  const deltaPitch = -dy * sensitivity;
+  
+  rotationDelta.value.x += deltaPitch; // Pitch (X轴)
+  rotationDelta.value.y += deltaYaw;   // Yaw (Y轴)
+  
+  // X轴旋转 (俯仰) - 本地轴
+  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
+  // Y轴旋转 (偏航) - 世界轴 (更符合直觉)
+  viewer.camera.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), deltaYaw * Math.PI / 180);
+  
+  viewer.camera.updateProjectionMatrix();
+  updateDebugInfo();
+  
+  lastMouse.x = e.clientX;
+  lastMouse.y = e.clientY;
+};
+
+const onMouseUp = () => { isDragging.value = false; };
+
+onMounted(() => { 
+  if (containerRef.value) { 
+    checkProtocol(); 
+    initViewer(); 
+    
+    // 绑定原生事件用于调试拖拽
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  } 
+});
+
 onBeforeUnmount(async () => {
+  window.removeEventListener('mousedown', onMouseDown);
+  window.removeEventListener('mousemove', onMouseMove);
+  window.removeEventListener('mouseup', onMouseUp);
+  
   if (viewer) {
       viewer.renderer.setAnimationLoop(null);
       await viewer.dispose();
@@ -409,7 +655,11 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="app-container">
+  <div class="app-container" 
+    @mousedown="onMouseDown" 
+    @mousemove="onMouseMove" 
+    @mouseup="onMouseUp" 
+    @mouseleave="onMouseUp">
     <div ref="containerRef" class="viewer-container"></div>
     <div v-if="isLoading" class="loading-overlay">正在处理...</div>
     <div class="controls-ui">
@@ -420,14 +670,154 @@ onBeforeUnmount(async () => {
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
     </div>
+
+    <!-- 调试面板 -->
+    <div class="debug-panel" v-if="cameraPoses.length > 0">
+      <div class="debug-title">镜头调试器</div>
+      <div class="debug-row">飞越起点: {{ arrivalEuler.x }}, {{ arrivalEuler.y }}, {{ arrivalEuler.z }}</div>
+      <div class="debug-row">当前视角: <b>{{ debugInfo.x }}, {{ debugInfo.y }}, {{ debugInfo.z }}</b></div>
+      <div class="debug-row" style="color:#ffcc00;">手动修正: <b>X:{{ rotationDelta.x.toFixed(1) }}°, Y:{{ rotationDelta.y.toFixed(1) }}°</b></div>
+      <hr style="border:0; border-top:1px solid #333; margin:8px 0;" />      
+      <div class="debug-title">旋转控制 (Rotation)</div>      <div class="debug-controls">
+        <button class="mini-btn" @click="manualRotate('x', 5)">X+5 (俯仰)</button>
+        <button class="mini-btn" @click="manualRotate('y', 5)">Y+5 (偏航)</button>
+        <button class="mini-btn" @click="manualRotate('z', 5)">Z+5 (滚转)</button>
+        <button class="mini-btn" @click="manualRotate('x', -5)">X-5</button>
+        <button class="mini-btn" @click="manualRotate('y', -5)">Y-5</button>
+        <button class="mini-btn" @click="manualRotate('z', -5)">Z-5</button>
+        <button class="mini-btn" @click="manualRotate('x', 90)">X+90</button>
+        <button class="mini-btn" @click="manualRotate('y', 90)">Y+90</button>
+        <button class="mini-btn" @click="manualRotate('z', 90)">Z+90</button>
+        <button class="mini-btn" @click="manualRotate('x', -90)">X-90</button>
+        <button class="mini-btn" @click="manualRotate('y', -90)">Y-90</button>
+        <button class="mini-btn" @click="manualRotate('z', -90)">Z-90</button>
+      </div>
+
+      <div class="debug-title" style="margin-top:10px;">移动控制 (Translation)</div>
+      <div class="debug-controls">
+        <button class="mini-btn" @click="manualMove('x', 0.1)">X 右移</button>
+        <button class="mini-btn" @click="manualMove('y', 0.1)">Y 上移</button>
+        <button class="mini-btn" @click="manualMove('z', 0.1)">Z 后退</button>
+        <button class="mini-btn" @click="manualMove('x', -0.1)">X 左移</button>
+        <button class="mini-btn" @click="manualMove('y', -0.1)">Y 下移</button>
+        <button class="mini-btn" @click="manualMove('z', -0.1)">Z 前进</button>
+      </div>
+      <div style="margin-top:10px; display:flex; gap:5px;">
+        <button class="mini-btn" style="flex:1; border-color:#0f0;" @click="copyMatrixToClipboard">复制最终矩阵</button>
+      </div>
+      <div style="font-size:9px; color:#666; margin-top:5px;">对齐后点击复制，发送给我</div>
+    </div>
+
+    <!-- 镜头轨道小功能 -->
+    <div class="camera-track" v-if="cameraPoses.length > 0">
+      <div 
+        v-for="(pose, index) in cameraPoses" 
+        :key="pose.id" 
+        class="camera-btn"
+        :class="{ active: activeImage === pose.image_url }"
+        @click="flyToImage(pose)"
+      >
+        <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
+        <span v-else>镜头 {{ index + 1 }}</span>
+      </div>
+    </div>
+
+    <!-- 参考图对比悬浮窗 -->
+    <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''">
+      <div class="ref-title">参考原图</div>
+      <img :src="activeImage" class="ref-img" />
+      <div class="ref-info" v-if="sceneMetadata.fl_y">
+         <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
+         <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 / Math.PI)).toFixed(1) }}°</span>
+         <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
+      </div>
+      <div class="ref-hint">点击关闭对比</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; }
+.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
 .viewer-container { width: 100%; height: 100%; }
 .controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
 .loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
 button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
 button.active { background: #22c55e; border-color: #22c55e; }
+
+/* 镜头轨道样式 */
+.camera-track {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  max-width: 90vw;
+  padding: 12px 18px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  z-index: 100;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.camera-btn {
+  width: 80px;
+  height: 60px;
+  background: #222;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: 0.2s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+}
+.camera-btn.active { border-color: #22c55e; }
+.btn-thumb { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+.camera-btn:hover .btn-thumb { opacity: 1; }
+.camera-btn.active .btn-thumb { opacity: 1; }
+
+/* 参考图浮窗 */
+.reference-overlay {
+  position: absolute;
+  top: 100px;
+  right: 20px;
+  width: 280px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+  z-index: 150;
+  cursor: pointer;
+}
+.ref-title { font-size: 12px; color: #aaa; margin-bottom: 8px; text-align: center; }
+.ref-img { width: 100%; border-radius: 6px; border: 1px solid #444; margin-bottom: 8px; }
+.ref-info { font-size: 11px; color: #ddd; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 5px; }
+.info-tag { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; }
+.ref-hint { font-size: 10px; color: #666; text-align: center; margin-top: 5px; }
+
+/* 调试面板 */
+.debug-panel {
+  position: absolute;
+  top: 100px;
+  right: 320px;
+  background: rgba(0,0,0,0.8);
+  padding: 10px;
+  border-radius: 8px;
+  color: #0f0;
+  font-family: monospace;
+  font-size: 11px;
+  z-index: 150;
+  border: 1px solid #33cc33;
+}
+.debug-title { margin-bottom: 5px; color: #fff; font-weight: bold; font-size: 13px; }
+.debug-row { margin-bottom: 4px; color: #0f0; }
+.debug-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.mini-btn { padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; cursor: pointer; }
+.mini-btn:hover { background: #444; }
+
 </style>
