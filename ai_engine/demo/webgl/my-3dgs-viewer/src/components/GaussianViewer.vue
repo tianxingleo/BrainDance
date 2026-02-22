@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
@@ -11,10 +11,32 @@ const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
 const cameraPoses = ref([]); 
+const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
+
+const filteredPoses = computed(() => {
+  if (!searchQuery.value.trim()) {
+    // 没搜索时，只展示有打标结果的镜头
+    return cameraPoses.value.filter(pose => pose.tag);
+  }
+  // 如果输入了搜索词，执行基于标签的文本包含匹配
+  const query = searchQuery.value.trim().toLowerCase();
+  return cameraPoses.value.filter(pose => 
+    pose.tag && pose.tag.toLowerCase().includes(query)
+  );
+});
+
+const searchAndFly = () => {
+  if (filteredPoses.value.length > 0) {
+    // 直接飞向过滤后的第一个镜头
+    flyToImage(filteredPoses.value[0]);
+  } else {
+    alert("场景中没有找到符合该描述的视角哦~");
+  }
+};
 
 let viewer;
 let particleSystem;
@@ -439,7 +461,7 @@ const initViewer = async () => {
     });
 
     // 加载相机位姿
-    fetch('/models/webgl_poses.json')
+    fetch('/models/webgl_poses_with_tags.json')
       .then(res => res.json())
       .then(data => {
         // 数据适配
@@ -453,7 +475,8 @@ const initViewer = async () => {
           cameraPoses.value = data.frames.map(frame => ({
             id: frame.id,
             matrix: frame.matrix,
-            image_url: frame.image_url
+            image_url: frame.image_url,
+            tag: frame.tag
           }));
         } else {
           cameraPoses.value = data; // 兼容 参考.txt 格式
@@ -682,13 +705,26 @@ onBeforeUnmount(async () => {
       </button>
     </div>
 
-    <!-- 调试面板 -->
+    <!-- 搜索功能 -->
+    <div class="search-panel">
+      <input 
+        type="text"
+        v-model="searchQuery" 
+        @keyup.enter="searchAndFly"
+        placeholder="搜索想要的视角 (如: 正面特写...)" 
+        class="search-input"
+      />
+      <button @click="searchAndFly" class="search-btn">🔍 搜索视角</button>
+    </div>
+
+    <!-- 调试面板 - 已注释 -->
+    <!--
     <div class="debug-panel" v-if="cameraPoses.length > 0">
       <div class="debug-title">镜头调试器</div>
       <div class="debug-row">飞越起点: {{ arrivalEuler.x }}, {{ arrivalEuler.y }}, {{ arrivalEuler.z }}</div>
       <div class="debug-row">当前视角: <b>{{ debugInfo.x }}, {{ debugInfo.y }}, {{ debugInfo.z }}</b></div>
       <div class="debug-row" style="color:#ffcc00;">手动修正: <b>X:{{ rotationDelta.x.toFixed(1) }}°, Y:{{ rotationDelta.y.toFixed(1) }}°</b></div>
-      <hr style="border:0; border-top:1px solid #333; margin:8px 0;" />      
+      <hr style="border:0; border-top:1px solid #333; margin:8px 0;" />
       <div class="debug-title">旋转控制 (Rotation)</div>      <div class="debug-controls">
         <button class="mini-btn" @click="manualRotate('x', 5)">X+5 (俯仰)</button>
         <button class="mini-btn" @click="manualRotate('y', 5)">Y+5 (偏航)</button>
@@ -718,18 +754,23 @@ onBeforeUnmount(async () => {
       </div>
       <div style="font-size:9px; color:#666; margin-top:5px;">对齐后点击复制，发送给我</div>
     </div>
+    -->
 
     <!-- 镜头轨道小功能 -->
-    <div class="camera-track" v-if="cameraPoses.length > 0">
+    <div class="camera-track" v-if="filteredPoses.length > 0">
       <div 
-        v-for="(pose, index) in cameraPoses" 
+        v-for="(pose, index) in filteredPoses" 
         :key="pose.id" 
         class="camera-btn"
         :class="{ active: activeImage === pose.image_url }"
         @click="flyToImage(pose)"
       >
         <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
-        <span v-else>镜头 {{ index + 1 }}</span>
+        <div v-if="pose.tag" class="camera-tag-overlay">
+          <div class="camera-title-mini">镜 {{ pose.id.split('.')[0].replace('frame_', '') }}</div>
+          <div class="camera-tag-text">{{ pose.tag }}</div>
+        </div>
+        <span v-else-if="!pose.image_url">镜头 {{ index + 1 }}</span>
       </div>
     </div>
 
@@ -773,8 +814,8 @@ button.active { background: #22c55e; border-color: #22c55e; }
   border: 1px solid rgba(255,255,255,0.1);
 }
 .camera-btn {
-  width: 80px;
-  height: 60px;
+  width: 100px;
+  height: 70px;
   background: #222;
   border-radius: 8px;
   cursor: pointer;
@@ -786,11 +827,65 @@ button.active { background: #22c55e; border-color: #22c55e; }
   align-items: center;
   justify-content: center;
   color: #888;
+  position: relative;
 }
 .camera-btn.active { border-color: #22c55e; }
-.btn-thumb { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
-.camera-btn:hover .btn-thumb { opacity: 1; }
-.camera-btn.active .btn-thumb { opacity: 1; }
+.btn-thumb { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+.camera-btn:hover .btn-thumb { opacity: 0.9; }
+.camera-btn.active .btn-thumb { opacity: 0.9; }
+
+/* 悬浮标签文字 */
+.camera-tag-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  align-items: center;
+  pointer-events: none;
+}
+.camera-title-mini { font-size: 10px; opacity: 0.8; }
+.camera-tag-text { font-size: 12px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
+
+/* 搜索栏样式 */
+.search-panel {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 10px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.search-input {
+  width: 250px;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.9);
+  outline: none;
+  font-size: 14px;
+}
+
+.search-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #22c55e;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+.search-btn:hover { background: #1fae51; }
 
 /* 参考图浮窗 */
 .reference-overlay {
