@@ -291,81 +291,88 @@ const applyAdvancedShader = (mesh) => {
 const flyToImage = (poseData) => {
   if (!viewer || !viewer.camera) return;
 
+  const cam = viewer.camera;
+  const splatMesh = viewer.getSplatMesh(); // 获取当前加载的高斯模型
+
   // 更新参考图
   activeImage.value = poseData.image_url;
 
-  // 1. 设置 FOV (如果元数据中有)
-  // 如果是广角，h / (2 * fl) 的 atan 值会比较大
-  if (sceneMetadata.value.h && sceneMetadata.value.fl_y) {
-    const fov = 2 * Math.atan(sceneMetadata.value.h / (2 * sceneMetadata.value.fl_y)) * (180 / Math.PI);
-    gsap.to(viewer.camera, { fov: fov, duration: 1.5, onUpdate: () => viewer.camera.updateProjectionMatrix() });
-    console.log(`[Camera] Apply FOV: ${fov.toFixed(2)}`);
-  }
+  // 1. 读取原始矩阵 (假设后端传来的是按列优先的 16 位数组)
+  const rawMatrix = new THREE.Matrix4().fromArray(poseData.matrix);
 
-  // 2. 强行减小近剪裁面，防止“穿模”或由于贴太近导致不显示
-  // 对于 3DGS，极小的 near 是必要的
-  if (viewer.camera.near > 0.001) {
-    viewer.camera.near = 0.001; 
-    viewer.camera.updateProjectionMatrix();
-  }
-
-  // 3. 将 1D 数组转回 Matrix4
-  const targetMatrix = new THREE.Matrix4();
-  if (Array.isArray(poseData.matrix[0])) {
-    // 4x4 double array
-    targetMatrix.set(
-        poseData.matrix[0][0], poseData.matrix[0][1], poseData.matrix[0][2], poseData.matrix[0][3],
-        poseData.matrix[1][0], poseData.matrix[1][1], poseData.matrix[1][2], poseData.matrix[1][3],
-        poseData.matrix[2][0], poseData.matrix[2][1], poseData.matrix[2][2], poseData.matrix[2][3],
-        poseData.matrix[3][0], poseData.matrix[3][1], poseData.matrix[3][2], poseData.matrix[3][3]
-    );
-  } else {
-    // Column-major flattened
-    targetMatrix.fromArray(poseData.matrix);
-  }
+  // === 修正：移除多余的坐标系转换 ===
+  // 用户反馈：当前状态下再旋转X轴180度才正确。
+  // 原有的 makeScale(1, -1, -1) 本质就是X轴转180度。
+  // 如果还需要再转180度，说明不需要转，或者需要抵消。
+  // 我们先尝试直接移除这个转换，保持原始矩阵方向。
+  // const cvToGl = new THREE.Matrix4().makeScale(1, -1, -1);
+  // rawMatrix.multiply(cvToGl); 
   
-  // 2. 提取位置和旋转
+  // 如果移除后反了，说明 export_poses.py 也没转，那就需要取消注释下面这行来手动修正：
+  // const manualFix = new THREE.Matrix4().makeRotationX(Math.PI);
+  // rawMatrix.multiply(manualFix);
+
+  // === 核心修正 2：跟随模型的世界矩阵同步旋转/缩放 ===
+  // 将相机的原始矩阵，乘以高斯模型目前在 Three.js 世界中的矩阵
+  const finalMatrix = new THREE.Matrix4();
+  if (splatMesh) {
+    // 这样无论模型怎么被 `rotation: [1,0,0,0]` 旋转，相机都会跟过去
+    splatMesh.updateMatrixWorld();
+    finalMatrix.copy(splatMesh.matrixWorld).multiply(rawMatrix);
+  } else {
+    finalMatrix.copy(rawMatrix);
+  }
+
+  // 提取最终对齐后的 位置 和 旋转
   const targetPosition = new THREE.Vector3();
   const targetQuaternion = new THREE.Quaternion();
-  const dummyScale = new THREE.Vector3();
-  targetMatrix.decompose(targetPosition, targetQuaternion, dummyScale);
+  const targetScale = new THREE.Vector3();
+  finalMatrix.decompose(targetPosition, targetQuaternion, targetScale);
 
-  // 3. 计算看向目标 (LookAt)
-  // 相机面向 -Z 轴，计算其前方 5 个单位的位置作为焦点
-  const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
-  const targetLookAt = targetPosition.clone().add(forwardVector.clone().multiplyScalar(2.0)); 
-
-  // 4. 开始 GSAP 动画
-  isAutoRotate.value = false;
+  // === 核心修正 3：同步真实相机的视场角 (FOV) ===
+  const fl_y = poseData.fl_y || sceneMetadata.value.fl_y;
+  const h = poseData.h || sceneMetadata.value.h;
+  if (fl_y && h) {
+    // 物理焦距转 Three.js 垂直视场角公式
+    const targetFov = 2 * Math.atan((h / 2) / fl_y) * (180 / Math.PI);
+    gsap.to(cam, {
+      fov: targetFov,
+      duration: 1.5,
+      ease: "power3.inOut",
+      onUpdate: () => cam.updateProjectionMatrix() // 必须更新投影矩阵才生效
+    });
+  }
   
-  const cam = viewer.camera;
+  // 强行减小近剪裁面，防止“穿模”或由于贴太近导致不显示
+  if (cam.near > 0.001) {
+    cam.near = 0.001; 
+    cam.updateProjectionMatrix();
+  }
+
+  // 计算控制器焦点：看向相机正前方 5 个单位处
+  const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
+  const targetLookAt = targetPosition.clone().add(forwardVector.multiplyScalar(5.0)); 
+
+  // 停用当前控制
+  isAutoRotate.value = false;
+  if (viewer.controls) viewer.controls.enabled = false;
+
   const startPos = cam.position.clone();
   const startQuat = cam.quaternion.clone();
-  
-  // 创建一个中间对象来驱动 slerp 插值
   const animState = { t: 0 };
-  
+
   gsap.killTweensOf(cam.position);
   gsap.killTweensOf(cam.quaternion);
   gsap.killTweensOf(animState);
 
-  // 暂时禁用控制器
-  if (viewer.controls) viewer.controls.enabled = false;
-
+  // 开始丝滑运镜
   gsap.to(animState, {
     t: 1.0,
     duration: 1.5,
-    ease: "power2.inOut",
+    ease: "power3.inOut",
     onUpdate: () => {
-      // 1. 位置插值 (Lerp)
       cam.position.lerpVectors(startPos, targetPosition, animState.t);
-      
-      // 2. 旋转插值 (Slerp) - 关键！
-      // 直接修改 quaternion 的 x,y,z,w 属性在 GSAP 中往往会导致非最短路径旋转
-      // 使用 Three.js 原生的 slerpQuaternions 可以完美处理球面插值
       cam.quaternion.slerpQuaternions(startQuat, targetQuaternion, animState.t);
-      
-      cam.updateProjectionMatrix();
     },
     onComplete: () => {
       // 记录初始飞到后的欧拉角
@@ -378,7 +385,11 @@ const flyToImage = (poseData) => {
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
       updateDebugInfo();
       
-      console.log("飞跃完成，记录初始角度:", arrivalEuler.value);
+      if (viewer.controls) {
+        viewer.controls.target.copy(targetLookAt);
+        viewer.controls.update();
+        viewer.controls.enabled = true;
+      }
     }
   });
 };

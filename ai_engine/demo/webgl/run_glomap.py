@@ -622,6 +622,18 @@ def run_pipeline(video_path, project_name):
         "ns-export", "gaussian-splat", "--load-config", str(latest_run/"config.yml"), 
         "--output-dir", str(work_dir)
     ], check=True, env=env)
+    
+    # 导出相机
+    cameras_export_dir = work_dir / "cameras_export"
+    cameras_export_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run([
+            "ns-export", "cameras", "--load-config", str(latest_run/"config.yml"), 
+            "--output-dir", str(cameras_export_dir)
+        ], check=True, env=env)
+    except Exception as e:
+        print(f"⚠️ 无法使用 ns-export cameras 导出相机, 可能是版本不支持: {e}")
+        
     time.sleep(5) 
 
     # [Step 3.5] 分位数暴力切割
@@ -664,100 +676,82 @@ def run_pipeline(video_path, project_name):
     transforms_src = data_dir / "transforms.json"
     dataparser_src = latest_run / "dataparser_transforms.json"
     
-    # --- 姿态预处理逻辑 (WebGL 优化版) ---
-    if transforms_src.exists() and dataparser_src.exists():
-        print("🔄 正在生成 WebGL 友好姿态文件 (相机对齐版 + FOV)...")
+    # === 新姿态生成逻辑：直接读取 ns-export cameras 的绝对正确相机位姿 ===
+    cameras_json_path = work_dir / "cameras_export" / "transforms_train.json"
+    if transforms_src.exists() and cameras_json_path.exists():
+        print("🔄 正在读取 ns-export cameras 导出的对齐相机数据...")
         try:
+            # 1. 提取元数据 (FOV等)
             with open(transforms_src, 'r') as f:
-                transforms_data = json.load(f)
-            with open(dataparser_src, 'r') as f:
-                dataparser_data = json.load(f)
+                orig_data = json.load(f)
+            fl_x = orig_data.get("fl_x")
+            fl_y = orig_data.get("fl_y")
+            w = orig_data.get("w")
+            h = orig_data.get("h")
+            camera_model = orig_data.get("camera_model")
             
-            # 构建全局变换
-            transform_matrix = np.array(dataparser_data['transform'])
-            global_transform = np.eye(4)
-            global_transform[:3, :4] = transform_matrix
-            global_scale = dataparser_data['scale']
+            # 2. 提取对齐后的矩阵
+            with open(cameras_json_path, 'r') as f:
+                frames_list = json.load(f)
+                
+            webgl_poses = []
+
+            for frame in frames_list:
+                # ns-export cameras 输出为 3x4
+                c2w_3x4 = np.array(frame['transform'])
+                # 补成 4x4
+                c2w = np.eye(4)
+                c2w[:3, :4] = c2w_3x4
+                
+                # 注意：Three.js 的 Matrix4.fromArray 默认接受列优先 (Column-major) 数组
+                # 所以这里必须用 .T 转置后再 flatten！
+                c2w_threejs = c2w.T.flatten().tolist()
+                
+                # resolving image path
+                file_path = frame.get('file_path')
+                img_name = Path(file_path).name
+                
+                # copy image
+                src_img = data_dir / "images" / img_name
+                if not src_img.exists():
+                    src_img = Path(file_path)
+                    
+                if src_img.exists():
+                    shutil.copy2(str(src_img), str(webgl_images_dir / img_name))
+                else:
+                    print(f"⚠️ 无法复制参考图，找不到文件: {src_img}")
+                
+                webgl_poses.append({
+                    "id": img_name,
+                    "fl_y": fl_y,
+                    "h": h,
+                    "matrix": c2w_threejs,
+                    "image_url": f"/models/images/{img_name}"
+                })
             
-            # 对 frames 按文件名中的数字进行自然排序
+            # 对 webgl_poses 根据 id 自然排序
             def natural_sort_key(s):
                 return [int(text) if text.isdigit() else text.lower()
-                        for text in re.split('([0-9]+)', s)]
-            
-            transforms_data["frames"].sort(key=lambda x: natural_sort_key(x["file_path"]))
-
-            # [Hardcoded Transform] Based on calc_transform.py result for Frame 19 Alignment
-            # This aligns the Nerfstudio World to our desired WebGL World (Z-up, looking at model)
-            T_fix = np.array([
-                [ 0.4036,  0.0878, -0.9107,  0.2725],
-                [ 0.909,  -0.1513,  0.3883, -0.7134],
-                [-0.1037, -0.9846, -0.1409, -0.1315],
-                [ 0.,      0.,      0.,      1.    ]
-            ])
-            print("🔧 应用硬编码位姿修正矩阵 T_fix...")
-
-            webgl_poses = []
-            for frame in transforms_data["frames"]:
-                # 1. 获取原始 c2w (4x4)
-                c2w = np.array(frame["transform_matrix"])
-                
-                # 2. 应用 Nerfstudio 全局变换 (包含旋转和缩放)
-                c2w_ns = global_transform @ c2w
-                c2w_ns[:3, 3] *= global_scale  # 应用全局缩放
-                
-                # --- 核心修订：测试不同坐标系映射 ---
-                # 理论上：Nerfstudio 的 c2w 已经由 global_transform 对齐过了（通常是 Y 或 Z 朝上）
-                # 我们不再进行手动 diag(1,-1,-1) 翻转，直接看原始矩阵的效果
-                # c2w_webgl = c2w_ns.copy()
-                
-                # Viser / Nerfstudio Viewer 采用的是 +X Right, +Y Up, +Z Forward (Wait, no)
-                # Three.js Camera: +X Right, +Y Up, +Z Back (OpenGL Standard)
-                # Nerfstudio/OpenCV Camera: +X Right, +Y Down, +Z Forward
-                
-                # 要把 OpenCV 相机放在 OpenGL 世界里并让它看向正确方向：
-                # 1. 位置不变 (c2w[:3,3])
-                # 2. 轴向变换：Y_gl = -Y_cv, Z_gl = -Z_cv
-                # 这等价于绕 X 轴旋转 180 度。
-                
-                # 修正：之前我们试过 diag(1,-1,-1) 没成功，可能是因为 Nerfstudio 这种导出
-                # 已经是 "World" 坐标经过 dataparser 处理过的。
-                
-                # 让我们尝试另一个经典转换：[x, -y, -z]
-                # 这也是 GaussianSplats3D 官方示例加载 Nerfstudio 数据的做法
-                
-                R_cam_flip = np.diag([1, -1, -1, 1])
-                c2w_webgl_temp = c2w_ns @ R_cam_flip
-                
-                # [NEW] 应用 T_fix 修正
-                # M_final = T_fix @ M_curr
-                c2w_webgl = T_fix @ c2w_webgl_temp
-                
-                # 4. 复制图片到公共目录以供显示
-                src_img = data_dir / frame["file_path"]
-                if src_img.exists():
-                    shutil.copy2(str(src_img), str(webgl_images_dir / src_img.name))
-
-                webgl_poses.append({
-                    "id": src_img.name,
-                    "matrix": c2w_webgl.tolist(),
-                    "image_url": f"/models/images/{src_img.name}"
-                })
+                        for text in re.split('([0-9]+)', s['id'])]
+            webgl_poses.sort(key=natural_sort_key)
             
             # 导出带参数的 JSON
             output_data = {
-                "w": transforms_data.get("w"),
-                "h": transforms_data.get("h"),
-                "fl_x": transforms_data.get("fl_x"), # 这里的修正！不要乘以 global_scale，它是像素单位
-                "fl_y": transforms_data.get("fl_y"),
-                "camera_model": transforms_data.get("camera_model"),
+                "w": w,
+                "h": h,
+                "fl_x": fl_x,
+                "fl_y": fl_y,
+                "camera_model": camera_model,
                 "frames": webgl_poses
             }
                 
             with open(final_webgl_poses, 'w') as f:
                 json.dump(output_data, f, indent=4)
-            print(f"✅ WebGL 姿态文件与 {len(webgl_poses)} 张参考图已准备就绪。")
+            print(f"✅ WebGL 姿态文件与 {len(webgl_poses)} 张参考图已准备就绪 (基于 ns-export cameras)。")
         except Exception as e:
             print(f"❌ 姿态预处理失败: {e}")
+    else:
+        print("❌ 未找到 transforms_train.json 或 transforms.json，请检查 ns-export cameras 是否执行成功。")
     if final_ply_to_use and final_ply_to_use.exists():
         try:
             # 1. 复制最终 PLY (可能是裁剪过的)
