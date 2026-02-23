@@ -1,26 +1,15 @@
 <script setup>
-<<<<<<< HEAD
-import { onMounted, onBeforeUnmount, ref } from 'vue';
-import * as THREE from 'three';
-import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
-import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
-=======
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import gsap from 'gsap';
->>>>>>> origin/tianxingleo-da3
 
 const containerRef = ref(null);
 const isVRMode = ref(false); 
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
-<<<<<<< HEAD
-let viewer = null;
-let particleSystem = null;
-=======
 const cameraPoses = ref([]); 
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
@@ -112,7 +101,6 @@ const manualRotate = (axis, angleDeg) => {
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
 };
->>>>>>> origin/tianxingleo-da3
 
 // --- 1. 状态管理 ---
 const PHASE = {
@@ -321,9 +309,6 @@ const applyAdvancedShader = (mesh) => {
   material.needsUpdate = true;
 };
 
-<<<<<<< HEAD
-// --- 4. 初始化 ---
-=======
 // --- 5. 初始化 ---
 const flyToImage = (poseData) => {
   if (!viewer || !viewer.camera) return;
@@ -431,7 +416,6 @@ const flyToImage = (poseData) => {
   });
 };
 
->>>>>>> origin/tianxingleo-da3
 const getViewerConfig = () => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   return {
@@ -473,10 +457,6 @@ const initViewer = async () => {
     await viewer.addSplatScene('/models/scene_auto_sync_raw.ply', {
       'showLoadingUI': true,
       'progressiveLoad': false,
-<<<<<<< HEAD
-      'rotation': [1, 0, 0, 0],
-    });
-=======
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
@@ -503,7 +483,6 @@ const initViewer = async () => {
         }
       })
       .catch(err => console.error("加载位姿失败:", err));
->>>>>>> origin/tianxingleo-da3
     
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false; 
@@ -597,24 +576,17 @@ const initViewer = async () => {
 
 const setupDesktopControls = () => {
   if (!viewer) return;
-<<<<<<< HEAD
-  if (viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
-=======
   // 清理现有控制器
   if (viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
   
   // [DEBUG] 暂时禁用控制器
   /*
->>>>>>> origin/tianxingleo-da3
   const controls = new ArcballControls(viewer.camera, viewer.renderer.domElement, viewer.threeScene);
   controls.setGizmosVisible(false);
   controls.enableDamping = true;
   viewer.controls = controls;
-<<<<<<< HEAD
-=======
   */
   console.log("Controls explicitly disabled for debugging");
->>>>>>> origin/tianxingleo-da3
 };
 
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
@@ -653,10 +625,6 @@ const checkProtocol = () => {
   isSecureContext.value = isLocal || isHttps;
 };
 
-<<<<<<< HEAD
-onMounted(() => { if (containerRef.value) { checkProtocol(); initViewer(); } });
-onBeforeUnmount(async () => {
-=======
 const isDragging = ref(false);
 const lastMouse = { x: 0, y: 0 };
 // const rotationDelta removed here
@@ -713,7 +681,6 @@ onBeforeUnmount(async () => {
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
   
->>>>>>> origin/tianxingleo-da3
   if (viewer) {
       viewer.renderer.setAnimationLoop(null);
       await viewer.dispose();
@@ -722,15 +689,11 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-<<<<<<< HEAD
-  <div class="app-container">
-=======
   <div class="app-container" 
     @mousedown="onMouseDown" 
     @mousemove="onMouseMove" 
     @mouseup="onMouseUp" 
     @mouseleave="onMouseUp">
->>>>>>> origin/tianxingleo-da3
     <div ref="containerRef" class="viewer-container"></div>
     <div v-if="isLoading" class="loading-overlay">正在处理...</div>
     <div class="controls-ui">
@@ -741,8 +704,6 @@ onBeforeUnmount(async () => {
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
     </div>
-<<<<<<< HEAD
-=======
 
     <!-- 搜索功能 -->
     <div class="search-panel">
@@ -824,24 +785,16 @@ onBeforeUnmount(async () => {
       </div>
       <div class="ref-hint">点击关闭对比</div>
     </div>
->>>>>>> origin/tianxingleo-da3
   </div>
 </template>
 
 <style scoped>
-<<<<<<< HEAD
-.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; }
-=======
 .app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
->>>>>>> origin/tianxingleo-da3
 .viewer-container { width: 100%; height: 100%; }
 .controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
 .loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
 button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
 button.active { background: #22c55e; border-color: #22c55e; }
-<<<<<<< HEAD
-</style>
-=======
 
 /* 镜头轨道样式 */
 .camera-track {
@@ -974,4 +927,3 @@ button.active { background: #22c55e; border-color: #22c55e; }
 .mini-btn:hover { background: #444; }
 
 </style>
->>>>>>> origin/tianxingleo-da3
