@@ -156,7 +156,28 @@ class MainScreen extends ConsumerWidget {
     return Scaffold(
       body: isLoading
           ? Scaffold(body: Center(child: Text('Now Loading...')))
-          : getPage(pageIndex, ref),
+          : AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.05, 0.0),
+                      end: Offset.zero,
+                    ).animate(CurvedAnimation(
+                      parent: animation,
+                      curve: Curves.easeOutCubic,
+                    )),
+                    child: child,
+                  ),
+                );
+              },
+              child: Container(
+                key: ValueKey<int>(pageIndex),
+                child: getPage(pageIndex, ref),
+              ),
+            ),
       bottomNavigationBar: TDBottomTabBar(
         // 底部导航栏
         TDBottomTabBarBasicType.iconText,

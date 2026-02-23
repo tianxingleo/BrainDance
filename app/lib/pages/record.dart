@@ -42,14 +42,94 @@ void dispose() {
       cameraView = CameraPreview(RecoConfig.cameraController!);
     }
     return Scaffold(
-      body: cameraView,
-      floatingActionButton: Align(
-        alignment: Alignment(0, 0.9),
-        child: TDButton(text: 'Current Camera: ${RecoConfig.camNum}', onTap: () {
-          if (RecoConfig.cameraEnabled) {
-            RecoConfig.cameraSwitch();
-          }
-        })
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Positioned.fill(child: cameraView),
+          // 顶部控制栏
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 16,
+            right: 24,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+              ),
+              child: IconButton(
+                icon: Icon(TDIcons.refresh, color: Colors.white, size: 24),
+                padding: const EdgeInsets.all(12),
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  if (RecoConfig.cameraEnabled) {
+                    RecoConfig.cameraSwitch();
+                  }
+                },
+              ),
+            ),
+          ),
+          // 底部控制栏
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: 140,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.9),
+                    Colors.black.withValues(alpha: 0.5),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.6, 1.0],
+                ),
+              ),
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    // 预留拍照/录像功能
+                    TDToast.showText('Recording...', context: context);
+                  },
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          spreadRadius: 2,
+                        )
+                      ],
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 4,
+                              spreadRadius: 1,
+                            )
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

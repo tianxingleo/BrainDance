@@ -1,4 +1,4 @@
-import 'package:braindance/extra_func/dir_and_file.dart';
+﻿import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -16,10 +16,13 @@ class GeneratePage extends StatefulWidget {
 }
 
 class _GeneratePageState extends State<GeneratePage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final TabController _tabController;
   late final ScrollController _scrollController;
   late final TextEditingController _textEditingController;
+  late final AnimationController _bgAnimController;
+  late final Animation<Alignment> _topAlignment;
+  late final Animation<Alignment> _bottomAlignment;
   final ImagePicker _picker = ImagePicker();
   static Key _uploadKey = UniqueKey();
   static Key _uploadKey2 = UniqueKey();
@@ -28,8 +31,8 @@ class _GeneratePageState extends State<GeneratePage>
     fontFamily: AppConfig.fontFamily,
   );
   static const int maxImageCount = 3;
-  static const int sizeLimit = 4096; //文件大小限制(kb)
-  static bool firstCheck = false; //检测用户是否不是第一次打开该界面
+  static const int sizeLimit = 4096; //鏂囦欢澶у皬闄愬埗(kb)
+  static bool firstCheck = false; //妫€娴嬬敤鎴锋槸鍚︿笉鏄涓€娆℃墦寮€璇ョ晫闈?
   void loadCache() async {
     //Image
     final List<String> paths = await GenConfig.loadImagePathsFile();
@@ -186,17 +189,62 @@ class _GeneratePageState extends State<GeneratePage>
     );
     _scrollController = ScrollController();
     _textEditingController = TextEditingController();
+
+    _bgAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 40),
+    )..repeat(reverse: true);
+
+    _topAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+        weight: 1,
+      ),
+    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
+
+    _bottomAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
+        weight: 1,
+      ),
+    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
+
     if (firstCheck) {
       return;
     }
     firstCheck = true;
-    //以下代码只会执行一次
-    //在此处执行加载缓存数据操作
+    //浠ヤ笅浠ｇ爜鍙細鎵ц涓€娆?
+    //鍦ㄦ澶勬墽琛屽姞杞界紦瀛樻暟鎹搷浣?
     loadCache();
   }
 
   @override
   void dispose() {
+    _bgAnimController.dispose();
     _tabController.dispose();
     _scrollController.dispose();
     _textEditingController.dispose();
@@ -206,22 +254,32 @@ class _GeneratePageState extends State<GeneratePage>
   @override
   Widget build(BuildContext context) {
     final List<Widget> tabContents = [
-      TDTabBar(
-        outlineType: TDTabBarOutlineType.card,
-        tabs: [
-          TDTab(text: textLocalize('gen_pic')),
-          TDTab(text: textLocalize('gen_text')),
-          TDTab(text: textLocalize('gen_video')),
-        ],
-        controller: _tabController,
-        showIndicator: true,
-        indicatorPadding: EdgeInsets.all(4.0),
-        indicatorWidth: 60,
-        onTap: (index) {
-          setState(() {});
-        },
-        labelStyle: tabTextStyle,
-        unselectedLabelStyle: tabTextStyle,
+      Container(
+        color: TDTheme.of(context).whiteColor1,
+        child: TDTabBar(
+          tabs: [
+            TDTab(text: textLocalize('gen_pic')),
+            TDTab(text: textLocalize('gen_text')),
+            TDTab(text: textLocalize('gen_video')),
+          ],
+          controller: _tabController,
+          showIndicator: true,
+          indicatorPadding: const EdgeInsets.all(4.0),
+          indicatorWidth: 24, // 鏇寸煭鐨勬寚绀哄櫒鏄惧緱鏇寸簿鑷?
+          indicatorHeight: 3,
+          indicatorColor: AppConfig.primaryColor,
+          onTap: (index) {
+            setState(() {});
+          },
+          labelStyle: tabTextStyle.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppConfig.primaryColor,
+          ),
+          unselectedLabelStyle: tabTextStyle.copyWith(
+            fontWeight: FontWeight.w400,
+            color: TDTheme.of(context).fontGyColor3,
+          ),
+        ),
       ),
     ];
     switch (_tabController.index) {
@@ -258,79 +316,105 @@ class _GeneratePageState extends State<GeneratePage>
           width: 150,
           height: 150,
         );
-        final List<Widget> stackChildren = [
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(textLocalize('gen_tip_pic')),
-          ),
-          Positioned(
-            top: 60,
-            left: 20,
-            width: MediaQuery.of(context).size.width - 20,
-            child: myTDUpload,
-          ),
-        ];
-        int capacity = (MediaQuery.of(context).size.width - 9) ~/ 161;
-        capacity = capacity > 0 ? capacity : 1;
         final Widget sb = Scrollbar(
           controller: _scrollController,
           child: SingleChildScrollView(
             controller: _scrollController,
-            child: SizedBox(
-              height:
-                  80 +
-                  ((GenConfig.uploadedImages.length + 1) / capacity).ceil() *
-                      171, // 明确高度
-              child: Stack(
-                children: stackChildren, // Positioned 放在 Stack 中
-              ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TDText(
+                  textLocalize('gen_tip_pic'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: myTDUpload,
+                ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
+              ],
             ),
           ),
         );
         tabContents.add(Expanded(child: sb));
         break;
       case 1:
-        var lineCount = (MediaQuery.of(context).size.height - 350) ~/ 25;
-        lineCount = (lineCount > 0) ? lineCount : 1;
         _textEditingController.text = GenConfig.uploadedText;
-        tabContents.add(
-          Expanded(
-            child: Stack(
+        final Widget sb = Scrollbar(
+          controller: _scrollController,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Positioned(
-                  top: 20,
-                  left: 20,
-                  child: Text(textLocalize('gen_tip_text')),
+                TDText(
+                  textLocalize('gen_tip_text'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
                 ),
-                Positioned(
-                  width: MediaQuery.of(context).size.width - 20,
-                  top: 60,
-                  left: 10,
+                const SizedBox(height: 24),
+                Container(
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
                   child: TDTextarea(
                     controller: _textEditingController,
                     hintText: textLocalize("gen_tip_textbox"),
-                    maxLines: lineCount,
-                    minLines: lineCount,
+                    minLines: 8,
+                    maxLines: 20,
                     onChanged: (value) {
                       GenConfig.uploadedText = value;
                     },
                     decoration: BoxDecoration(
-                      color: TDTheme.of(context).bgColorContainer,
-                      borderRadius: BorderRadius.circular(
-                        TDTheme.of(context).radiusExtraLarge,
-                      ),
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                      border: Border.all(color: Colors.transparent),
                     ),
-                    margin: EdgeInsets.only(
-                      right: TDTheme.of(context).spacer16,
-                      left: TDTheme.of(context).spacer16,
+                    textStyle: TextStyle(
+                      color: TDTheme.of(context).fontGyColor1,
+                      fontSize: 16,
                     ),
                   ),
                 ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
               ],
             ),
           ),
         );
+        tabContents.add(Expanded(child: sb));
         break;
       case 2:
         final TDUpload myTDUpload = TDUpload(
@@ -365,33 +449,42 @@ class _GeneratePageState extends State<GeneratePage>
           width: 150,
           height: 150,
         );
-        final List<Widget> stackChildren = [
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(textLocalize('gen_tip_video')),
-          ),
-          Positioned(
-            top: 100,
-            left: 20,
-            width: MediaQuery.of(context).size.width - 20,
-            child: myTDUpload,
-          ),
-        ];
-        int capacity = (MediaQuery.of(context).size.width - 9) ~/ 161;
-        capacity = capacity > 0 ? capacity : 1;
         final Widget sb = Scrollbar(
           controller: _scrollController,
           child: SingleChildScrollView(
             controller: _scrollController,
-            child: SizedBox(
-              height:
-                  120 +
-                  ((GenConfig.uploadedVideos.length + 1) / capacity).ceil() *
-                      171, // 明确高度
-              child: Stack(
-                children: stackChildren, // Positioned 放在 Stack 中
-              ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TDText(
+                  textLocalize('gen_tip_video'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: myTDUpload,
+                ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
+              ],
             ),
           ),
         );
@@ -399,26 +492,79 @@ class _GeneratePageState extends State<GeneratePage>
         break;
     }
     return Scaffold(
-      appBar: AppBar(title: Text(textLocalize('gen_top'))),
+      backgroundColor: TDTheme.of(context).grayColor1,
+      appBar: AppBar(
+        title: TDText(
+          textLocalize('gen_top'),
+          font: TDTheme.of(context).fontTitleLarge,
+          fontWeight: FontWeight.w600,
+          textColor: TDTheme.of(context).fontGyColor1,
+        ),
+        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        elevation: 0,
+        centerTitle: true,
+      ),
+      extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          Column(children: tabContents),
-          Align(
-            alignment: Alignment(0, 0.9),
-            child: TDButton(
-              onTap: () {
-                TDToast.showText(textLocalize('tip_unava'), context: context);
+          // 鍔ㄦ€佹笎鍙樿儗鏅紝鐢ㄤ簬鍑告樉鐜荤拑鏁堟灉
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _bgAnimController,
+              builder: (context, child) {
+                return Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: _topAlignment.value,
+                      end: _bottomAlignment.value,
+                      colors: [
+                        AppConfig.primaryColor.withValues(alpha: 0.3),
+                        TDTheme.of(context).brandColor4.withValues(alpha: 0.2),
+                        TDTheme.of(context).grayColor1,
+                        AppConfig.primaryColor.withValues(alpha: 0.1),
+                      ],
+                      stops: const [0.0, 0.3, 0.7, 1.0],
+                    ),
+                  ),
+                );
               },
-              activeStyle: TDButtonStyle(
-                backgroundColor: Theme.of(context).primaryColorLight,
-                textColor: Theme.of(context).shadowColor,
+            ),
+          ),
+          SafeArea(
+            child: Column(children: tabContents),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              padding: const EdgeInsets.only(bottom: 32, top: 24),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    TDTheme.of(context).grayColor1,
+                    TDTheme.of(context).grayColor1.withValues(alpha: 0.9),
+                    TDTheme.of(context).grayColor1.withValues(alpha: 0.0),
+                  ],
+                  stops: const [0.0, 0.6, 1.0],
+                ),
               ),
-              type: TDButtonType.fill,
-              shape: TDButtonShape.round,
-              theme: TDButtonTheme.primary,
-              width: 300,
-              height: 40,
-              text: textLocalize('gen_button'),
+              child: TDButton(
+                onTap: () {
+                  TDToast.showText(textLocalize('tip_unava'), context: context);
+                },
+                style: TDButtonStyle(
+                  backgroundColor: AppConfig.primaryColor,
+                  textColor: Colors.white,
+                  radius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                ),
+                type: TDButtonType.fill,
+                shape: TDButtonShape.round,
+                theme: TDButtonTheme.primary,
+                size: TDButtonSize.large,
+                width: MediaQuery.of(context).size.width * 0.85,
+                text: textLocalize('gen_button'),
+              ),
             ),
           ),
         ],
