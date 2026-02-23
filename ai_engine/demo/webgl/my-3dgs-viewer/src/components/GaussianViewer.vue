@@ -431,7 +431,7 @@ const getViewerConfig = () => {
   };
 };
 
-const initViewer = async () => {
+const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
   if (isLoading.value) return;
   isLoading.value = true;
 
@@ -454,14 +454,19 @@ const initViewer = async () => {
     window.viewer = viewer;
 
     // 加载你的模型
-    await viewer.addSplatScene('/models/scene_auto_sync_raw.ply', {
+    await viewer.addSplatScene(modelUrl, {
       'showLoadingUI': true,
       'progressiveLoad': false,
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
+    // 告诉 Flutter：模型加载完成
+    if (window.BrainDanceChannel) {
+      window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
+    }
+
     // 加载相机位姿
-    fetch('/models/webgl_poses_with_tags.json')
+    fetch('./models/webgl_poses_with_tags.json')
       .then(res => res.json())
       .then(data => {
         // 数据适配
@@ -569,8 +574,7 @@ const initViewer = async () => {
 
   } catch (error) {
     console.error("error:", error);
-  } finally {
-    isLoading.value = false;
+      loadError.value = (error && (error.message || String(error))) || '模型加载失败，请检查模型 URL 是否正确可访问';
   }
 };
 
@@ -665,19 +669,34 @@ const onMouseMove = (e) => {
 const onMouseUp = () => { isDragging.value = false; };
 
 onMounted(() => { 
-  if (containerRef.value) { 
-    checkProtocol(); 
-    initViewer(); 
-    
+  // 1. 将加载函数挂载到全局 window 上，供 Flutter 调用
+  window.loadModelFromFlutter = (modelUrl) => {
+    console.log("准备加载模型: ", modelUrl);
+    initViewer(modelUrl);
+  };
+
+  if (containerRef.value) {
+    checkProtocol();
+
+    if (window.BrainDanceChannel) {
+      // Flutter 嵌入模式：发送 ready 信号，等 Flutter 调用 loadModelFromFlutter
+      window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
+    } else {
+      // 浏览器独立运行模式：直接加载默认模型
+      initViewer();
+    }
+
     // 绑定原生事件用于调试拖拽
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  } 
+  }
 });
 
 onBeforeUnmount(async () => {
-  window.removeEventListener('mousedown', onMouseDown);
+  // 清理全局变量
+  delete window.loadModelFromFlutter;
+
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
   
@@ -695,7 +714,13 @@ onBeforeUnmount(async () => {
     @mouseup="onMouseUp" 
     @mouseleave="onMouseUp">
     <div ref="containerRef" class="viewer-container"></div>
-    <div v-if="isLoading" class="loading-overlay">正在处理...</div>
+    <div v-if="isLoading" class="loading-overlay">正在加载模型...</div>
+    <div v-if="loadError" class="error-overlay">
+      <div class="error-icon">⚠️</div>
+      <div class="error-title">模型加载失败</div>
+      <div class="error-msg">{{ loadError }}</div>
+      <button class="error-retry" @click="loadError = ''">关闭</button>
+    </div>
     <div class="controls-ui">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
@@ -792,8 +817,12 @@ onBeforeUnmount(async () => {
 .app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
 .viewer-container { width: 100%; height: 100%; }
 .controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
-.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
-button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
+.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }  .error-overlay { position: absolute; inset: 0; background: rgba(10,10,10,0.92); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 210; padding: 24px; text-align: center; }
+  .error-icon { font-size: 48px; margin-bottom: 12px; }
+  .error-title { font-size: 20px; font-weight: bold; margin-bottom: 8px; color: #ff6b6b; }
+  .error-msg { font-size: 13px; color: #ccc; max-width: 320px; word-break: break-all; margin-bottom: 20px; }
+  .error-retry { background: #333; color: white; border: 1px solid #555; padding: 8px 24px; border-radius: 20px; cursor: pointer; font-size: 14px; }
+  .error-retry:hover { background: #555; }button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
 button.active { background: #22c55e; border-color: #22c55e; }
 
 /* 镜头轨道样式 */

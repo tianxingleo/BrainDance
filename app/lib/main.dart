@@ -12,6 +12,7 @@ import 'pages/recall.dart';
 import 'pages/record.dart';
 import 'pages/generate.dart';
 import 'pages/settings.dart';
+import 'pages/login.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
@@ -108,6 +109,10 @@ class Home extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
+    
+    // 启动时检查是否有会话
+    final hasSession = Supabase.instance.client.auth.currentSession != null;
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
@@ -122,13 +127,14 @@ class Home extends ConsumerWidget {
         ),
       ),
       themeMode: themeModeAsync,
-      initialRoute: '/', // 初始路由路径
+      initialRoute: hasSession ? '/' : '/login', // 初始路由路径，根据是否有Session判断
       routes: {
         // 路由表：路径 -> 页面构建器
         '/': (context) {
           loadSettings(ref);
           return MainScreen();
         }, // 根路径对应主屏幕
+        '/login': (context) => const LoginPage(), // 登录页
         '/example': (context) => RecallPage(), // "/example"路径对应....
       },
     );

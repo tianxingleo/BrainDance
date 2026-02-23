@@ -85,6 +85,8 @@ flutter:
     - .env
     - assets/fonts/
     - assets/sprites/
+    - assets/webgl/
+    - assets/webgl/assets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:
