@@ -95,6 +95,11 @@ git clone https://github.com/tianxingleo/BrainDance.git
 cd BrainDance/ai_engine/3dgs
 ```
 
+<<<<<<< HEAD
+=======
+> ⚠️ **重要**：所有后续命令都在 `ai_engine/3dgs` 目录下执行
+
+>>>>>>> origin/tianxingleo-da3
 2. **创建conda环境**
 ```bash
 conda create -n braindance python=3.10
@@ -145,13 +150,21 @@ cp .env.example .env
 
 ### 本地视频处理模式
 ```bash
+<<<<<<< HEAD
 # 直接处理本地视频文件
+=======
+# 在 ai_engine/3dgs 目录下执行
+>>>>>>> origin/tianxingleo-da3
 python main.py /path/to/your/video.mp4
 ```
 
 ### 单图本地测试模式
 ```bash
+<<<<<<< HEAD
 # 使用 SAM3D 处理单张图片
+=======
+# 在 ai_engine/3dgs 目录下执行
+>>>>>>> origin/tianxingleo-da3
 python tests/test_local_single_image.py
 
 # 或指定图片路径
@@ -160,13 +173,21 @@ python tests/test_local_single_image.py --file /path/to/image.png
 
 ### 云端监听模式
 ```bash
+<<<<<<< HEAD
 # 监听Supabase任务队列
+=======
+# 在 ai_engine/3dgs 目录下执行
+>>>>>>> origin/tianxingleo-da3
 python main.py
 ```
 
 ### 批处理模式
 ```bash
+<<<<<<< HEAD
 # 处理多个视频文件
+=======
+# 在 ai_engine/3dgs 目录下执行
+>>>>>>> origin/tianxingleo-da3
 python main.py --batch-mode
 ```
 
@@ -470,9 +491,17 @@ ai_engine/
 ## 📞 社区与支持
 
 ### 文档资源
+<<<<<<< HEAD
 - [技术文档](docs/)
 - [API参考](docs/API_DOC.md)  
 - [部署指南](docs/deployment_guide.md)
+=======
+- [快速开始指南](docs/快速开始指南.md) - 30 分钟上手教程
+- [API 参考文档](docs/API_DOC.md) - 完整接口说明
+- [本地部署指南](docs/LOCAL_DEPLOYMENT.md) - 开发环境配置
+- [SAM3D 模型设置](docs/SAM3D_MODEL_SETUP.md) - 模型下载配置
+- [开发环境配置](docs/开发环境配置.md) - 详细环境搭建
+>>>>>>> origin/tianxingleo-da3
 
 ### 交流渠道
 - GitHub Issues: bug报告与功能建议

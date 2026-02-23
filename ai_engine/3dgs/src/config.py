@@ -67,6 +67,13 @@ class PipelineConfig:
     # [新增] SHARP 相关配置
     sharp_repo_path: Path = field(default_factory=lambda: BASE_DIR / "src/libs/ml-sharp")
 
+<<<<<<< HEAD
+=======
+    # [新增] DA3 相关配置
+    mapper_type: str = field(default_factory=lambda: os.getenv("MAPPER_TYPE", "glomap"))
+    da3_repo_path: Path = field(default_factory=lambda: BASE_DIR / "src/libs/Depth-Anything-3")
+
+>>>>>>> origin/tianxingleo-da3
     @property
     def project_dir(self) -> Path:
         return self.work_root

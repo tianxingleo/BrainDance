@@ -430,6 +430,7 @@ app/android/gradle/wrapper/gradle-wrapper.properties
 app/android/settings.gradle.kts
 app/assets/fonts/HarmonyOS_Sans_SC_Regular.ttf
 app/assets/sprites/video-camera.png
+app/devtools_options.yaml
 app/ios/.gitignore
 app/ios/Flutter/AppFrameworkInfo.plist
 app/ios/Flutter/Debug.xcconfig
@@ -476,6 +477,7 @@ app/lib/configs/set_config.dart
 app/lib/extra_func_v2/file_stream.dart
 app/lib/extra_func_v2/video_thumbnail.dart
 app/lib/extra_func/dir_and_file.dart
+app/lib/extra_func/dynamic_background.dart
 app/lib/extra_func/language.dart
 app/lib/extra_func/locale_provider.dart
 app/lib/extra_func/supabase.dart
@@ -133238,6 +133240,12 @@ plugins {
 include(":app")
 </file>
 
+<file path="app/devtools_options.yaml">
+description: This file stores settings for Dart & Flutter DevTools.
+documentation: https://docs.flutter.dev/tools/devtools/extensions#configure-extension-enablement-states
+extensions:
+</file>
+
 <file path="app/ios/.gitignore">
 **/dgph
 *.mode1v3
@@ -134913,6 +134921,110 @@ class FileSystem {
 }
 </file>
 
+<file path="app/lib/extra_func/dynamic_background.dart">
+import 'package:flutter/material.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import '../configs/app_config.dart';
+
+class DynamicGradientBackground extends StatefulWidget {
+  final Widget child;
+  const DynamicGradientBackground({super.key, required this.child});
+
+  @override
+  State<DynamicGradientBackground> createState() => _DynamicGradientBackgroundState();
+}
+
+class _DynamicGradientBackgroundState extends State<DynamicGradientBackground> with SingleTickerProviderStateMixin {
+  late final AnimationController _bgAnimController;
+  late final Animation<Alignment> _topAlignment;
+  late final Animation<Alignment> _bottomAlignment;
+
+  @override
+  void initState() {
+    super.initState();
+    _bgAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 40),
+    )..repeat(reverse: true);
+
+    _topAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+        weight: 1,
+      ),
+    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
+
+    _bottomAlignment = TweenSequence<Alignment>([
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
+        weight: 1,
+      ),
+    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _bgAnimController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _bgAnimController,
+            builder: (context, child) {
+              return Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: _topAlignment.value,
+                    end: _bottomAlignment.value,
+                    colors: [
+                      TDTheme.of(context).brandColor4.withValues(alpha: 0.2),
+                      AppConfig.primaryColor.withValues(alpha: 0.1),
+                      TDTheme.of(context).grayColor1,
+                      AppConfig.primaryColor.withValues(alpha: 0.05),
+                    ],
+                    stops: const [0.0, 0.4, 0.8, 1.0],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        widget.child,
+      ],
+    );
+  }
+}
+</file>
+
 <file path="app/lib/extra_func/language.dart">
 enum Language {
   zh(
@@ -135098,1004 +135210,6 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
   (ref) => ThemeModeNotifier(),
 );
-</file>
-
-<file path="app/lib/main.dart">
-import 'package:camera/camera.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_riverpod/legacy.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:braindance/configs/reco_config.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/extra_func/theme_provider.dart';
-import 'package:braindance/extra_func/locale_provider.dart';
-import 'pages/recall.dart';
-import 'pages/record.dart';
-import 'pages/generate.dart';
-import 'pages/settings.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/configs/gen_config.dart';
-import 'package:braindance/configs/set_config.dart';
-
-//App Data
-final themeData = TDTheme.defaultData();
-//MainScreen
-final pageIndexProvider = StateProvider((ref) => 0);
-final loadingProvider = StateProvider((ref) => true);
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  TDTheme.needMultiTheme(true);
-
-  /// 开启多套主题功能
-  AppConfig.initializeAppConfig(); //加载默认数据
-  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
-  //Camera
-  try {
-    final List<CameraDescription> camsTemp = await availableCameras();
-    //摄像机分类。
-    for (var cam in camsTemp) {
-      switch (cam.lensDirection) {
-        case CameraLensDirection.front:
-          RecoConfig.frontCameras.add(cam);
-          break;
-        case CameraLensDirection.back:
-          RecoConfig.backCameras.add(cam);
-          break;
-        case CameraLensDirection.external:
-          RecoConfig.externalCameras.add(cam);
-          break;
-      }
-    }
-    RecoConfig.cameras = camsTemp;
-    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
-  } catch (e) {
-    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
-    RecoConfig.cameras = [];
-    RecoConfig.frontCameras = [];
-    RecoConfig.backCameras = [];
-    RecoConfig.externalCameras = [];
-    RecoConfig.cameraEnabled = false;
-  }
-  //
-  runApp(const ProviderScope(child: MyApp()));
-}
-
-//App定义
-class MyApp extends StatelessWidget with WidgetsBindingObserver {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    WidgetsBinding.instance.addObserver(this); // 注册观察者
-    return const Home();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.inactive:
-        RecoConfig.disposeCamera();
-        break;
-      case AppLifecycleState.resumed:
-        RecoConfig.refreshCamera();
-        break;
-      case AppLifecycleState.paused: // 应用进入后台（例如用户按了Home键、切换到其他应用）
-        GenConfig.saveUploadedAssets();
-        break;
-      default:
-    }
-  }
-}
-
-class Home extends ConsumerWidget {
-  const Home({super.key});
-  void loadSettings(WidgetRef ref) async {
-    if (!ref.read(loadingProvider)) {
-      return;
-    }
-    final bool suc = await SetConfig.loadMsgFromFile();
-    if (suc) {
-      SetConfig.loadSettingsFromMsg(ref);
-    }
-    ref.read(loadingProvider.notifier).state = false;
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(localeProvider);
-    final themeModeAsync = ref.watch(themeModeProvider);
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: "Brain Dance",
-      theme: themeData.systemThemeDataLight?.copyWith(
-        textTheme: themeData.systemThemeDataLight?.textTheme.apply(
-          fontFamily: AppConfig.fontFamily,
-        ),
-      ),
-      darkTheme: themeData.systemThemeDataDark?.copyWith(
-        textTheme: themeData.systemThemeDataDark?.textTheme.apply(
-          fontFamily: AppConfig.fontFamily,
-        ),
-      ),
-      themeMode: themeModeAsync,
-      initialRoute: '/', // 初始路由路径
-      routes: {
-        // 路由表：路径 -> 页面构建器
-        '/': (context) {
-          loadSettings(ref);
-          return MainScreen();
-        }, // 根路径对应主屏幕
-        '/example': (context) => RecallPage(), // "/example"路径对应....
-      },
-    );
-  }
-}
-
-//主屏幕
-class MainScreen extends ConsumerWidget {
-  const MainScreen({super.key});
-  static const TextStyle selectedTextStyle = TextStyle(fontSize: 10);
-  static const double unselectedSize = 32;
-  static const double selectedSize = 36;
-  Widget getPage(int pageIndex, WidgetRef ref) {
-    switch (pageIndex) {
-      case 0:
-        return RecallPage(); // 页面0: 主页：过往回忆
-      case 1:
-        return RecordPage(); // 页面1: 相机记录
-      case 2:
-        return GeneratePage(); // 页面2: 图文生成
-      case 3:
-        return SettingsPage(homeRef: ref); // 页面3: 设置
-    }
-    return RecallPage();
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bool isLoading = ref.watch(loadingProvider); //加载状态
-    final int pageIndex = ref.watch(pageIndexProvider);
-    return Scaffold(
-      body: isLoading
-          ? Scaffold(body: Center(child: Text('Now Loading...')))
-          : getPage(pageIndex, ref),
-      bottomNavigationBar: TDBottomTabBar(
-        // 底部导航栏
-        TDBottomTabBarBasicType.iconText,
-        componentType: TDBottomTabBarComponentType.normal,
-        useVerticalDivider: false,
-        centerDistance: 4,
-        navigationTabs: [
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("recall"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("record"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("generate"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("settings"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
-          ),
-        ],
-        //backgroundColor: AppConfig.primaryColor,
-        currentIndex: pageIndex, // 当前选中索引
-        barHeight: 74,
-      ),
-    );
-  }
-}
-</file>
-
-<file path="app/lib/pages/generate.dart">
-import 'package:braindance/extra_func/dir_and_file.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'dart:io';
-import 'package:braindance/extra_func_v2/video_thumbnail.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:photo_manager/photo_manager.dart';
-import 'package:braindance/configs/gen_config.dart';
-
-class GeneratePage extends StatefulWidget {
-  const GeneratePage({super.key});
-
-  @override
-  State<GeneratePage> createState() => _GeneratePageState();
-}
-
-class _GeneratePageState extends State<GeneratePage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
-  late final ScrollController _scrollController;
-  late final TextEditingController _textEditingController;
-  final ImagePicker _picker = ImagePicker();
-  static Key _uploadKey = UniqueKey();
-  static Key _uploadKey2 = UniqueKey();
-  static const TextStyle tabTextStyle = TextStyle(
-    fontSize: 16,
-    fontFamily: AppConfig.fontFamily,
-  );
-  static const int maxImageCount = 3;
-  static const int sizeLimit = 4096; //文件大小限制(kb)
-  static bool firstCheck = false; //检测用户是否不是第一次打开该界面
-  void loadCache() async {
-    //Image
-    final List<String> paths = await GenConfig.loadImagePathsFile();
-    for (String path in paths) {
-      GenConfig.uploadedImages.add(
-        TDUploadFile(key: 1, assetPath: path, file: File(path)),
-      );
-    }
-    //Text
-    final String text = await GenConfig.loadTextFile();
-    if (text.isNotEmpty) {
-      GenConfig.uploadedText = text;
-    }
-    //Video
-    final List<String> paths2 = await GenConfig.loadVideoPathsFile();
-    for (String path in paths2) {
-      GenConfig.uploadedVideos.add(
-        TDUploadFile(
-          key: 1,
-          assetPath: path,
-          file: File(await VThumb.ensureThumb(path)),
-        ),
-      );
-    }
-    setState(() {});
-  }
-
-  Future<String> _uploadImages(List<XFile> images) async {
-    String msg = "";
-    final capacity = maxImageCount - GenConfig.uploadedImages.length;
-    if (images.length > capacity) {
-      msg = textLocalize("tip_overquan");
-    }
-    final minLength = (capacity > images.length) ? images.length : capacity;
-    for (int i = 0; i < minLength; i++) {
-      var image = images[i];
-      if (await image.length() ~/ 1024 > sizeLimit) {
-        msg = textLocalize("tip_oversize");
-        continue;
-      }
-      GenConfig.uploadedImages.add(
-        TDUploadFile(key: 1, assetPath: image.path, file: File(image.path)),
-      );
-    }
-    return msg;
-  }
-
-  Future<String> _uploadVideo(XFile? video) async {
-    if (video == null) {
-      return textLocalize("tip_fail");
-    }
-
-    GenConfig.uploadedVideos.add(
-      TDUploadFile(
-        key: 1,
-        assetPath: video.path,
-        file: File(await VThumb.ensureThumb(video.path)),
-      ),
-    );
-    return "";
-  }
-
-  void _showActionSheet(BuildContext context, bool isImage) {
-    TDActionSheet(
-      context,
-      items: [
-        TDActionSheetItem(label: textLocalize("gen_shot")),
-        TDActionSheetItem(label: textLocalize("gen_gallery")),
-      ],
-      cancelText: textLocalize("gen_cancel"),
-      onSelected: (item, index) async {
-        if (index == 0) {
-          final XFile? file;
-          late final AssetEntity newAsset;
-          final PermissionState ps =
-              await PhotoManager.requestPermissionExtend();
-          if (!ps.isAuth) {
-            if (context.mounted) {
-              TDToast.showText(
-                textLocalize("tip_no_permission"),
-                context: context,
-              );
-            }
-            return;
-          }
-          if (isImage) {
-            file = await _picker.pickImage(source: ImageSource.camera);
-            if (file == null) {
-              return;
-            }
-            newAsset = await PhotoManager.editor.saveImageWithPath(
-              file.path,
-              title: file.name,
-            );
-          } else {
-            file = await _picker.pickVideo(
-              source: ImageSource.camera,
-              maxDuration: const Duration(minutes: 3),
-            );
-            if (file == null) {
-              return;
-            }
-            newAsset = await PhotoManager.editor.saveVideo(
-              File(file.path),
-              title: file.name,
-            );
-          }
-          try {
-            await FileSystem.deleteFile(file.path);
-            File? f = await newAsset.originFile;
-            if (f == null) {
-              throw ();
-            }
-            XFile fileSaved = XFile(f.path);
-            late final String msg;
-            if (isImage) {
-              msg = await _uploadImages(List.filled(1, fileSaved));
-            } else {
-              msg = await _uploadVideo(fileSaved);
-            }
-            if (msg.isNotEmpty && context.mounted) {
-              TDToast.showText(msg, context: context);
-            }
-          } catch (e) {
-            if (context.mounted) {
-              TDToast.showText(textLocalize("tip_fail"), context: context);
-            }
-          }
-        } else {
-          late final String msg;
-          if (isImage) {
-            msg = await _uploadImages(await _picker.pickMultiImage());
-          } else {
-            msg = await _uploadVideo(
-              await _picker.pickVideo(source: ImageSource.gallery),
-            );
-          }
-          if (msg.isNotEmpty && context.mounted) {
-            TDToast.showText(msg, context: context);
-          }
-        }
-        setState(() {});
-      },
-    ).show();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(
-      length: 3,
-      vsync: this,
-      animationDuration: Duration(milliseconds: 200),
-    );
-    _scrollController = ScrollController();
-    _textEditingController = TextEditingController();
-    if (firstCheck) {
-      return;
-    }
-    firstCheck = true;
-    //以下代码只会执行一次
-    //在此处执行加载缓存数据操作
-    loadCache();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _scrollController.dispose();
-    _textEditingController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final List<Widget> tabContents = [
-      TDTabBar(
-        outlineType: TDTabBarOutlineType.card,
-        tabs: [
-          TDTab(text: textLocalize('gen_pic')),
-          TDTab(text: textLocalize('gen_text')),
-          TDTab(text: textLocalize('gen_video')),
-        ],
-        controller: _tabController,
-        showIndicator: true,
-        indicatorPadding: EdgeInsets.all(4.0),
-        indicatorWidth: 60,
-        onTap: (index) {
-          setState(() {});
-        },
-        labelStyle: tabTextStyle,
-        unselectedLabelStyle: tabTextStyle,
-      ),
-    ];
-    switch (_tabController.index) {
-      case 0:
-        final TDUpload myTDUpload = TDUpload(
-          key: _uploadKey,
-          files: GenConfig.uploadedImages,
-          multiple: true,
-          max: maxImageCount,
-          onUploadTap: () {
-            _showActionSheet(context, true);
-          },
-          onChange: (files, type) {
-            switch (type) {
-              case TDUploadType.add:
-                GenConfig.uploadedImages = [
-                  ...GenConfig.uploadedImages,
-                  ...files,
-                ];
-                break;
-              case TDUploadType.remove:
-                for (var f in files) {
-                  GenConfig.uploadedImages.remove(f);
-                }
-                break;
-              case TDUploadType.replace:
-                break;
-            }
-            setState(() {
-              _uploadKey = UniqueKey();
-            });
-          },
-          mediaType: [TDUploadMediaType.image],
-          width: 150,
-          height: 150,
-        );
-        final List<Widget> stackChildren = [
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(textLocalize('gen_tip_pic')),
-          ),
-          Positioned(
-            top: 60,
-            left: 20,
-            width: MediaQuery.of(context).size.width - 20,
-            child: myTDUpload,
-          ),
-        ];
-        int capacity = (MediaQuery.of(context).size.width - 9) ~/ 161;
-        capacity = capacity > 0 ? capacity : 1;
-        final Widget sb = Scrollbar(
-          controller: _scrollController,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            child: SizedBox(
-              height:
-                  80 +
-                  ((GenConfig.uploadedImages.length + 1) / capacity).ceil() *
-                      171, // 明确高度
-              child: Stack(
-                children: stackChildren, // Positioned 放在 Stack 中
-              ),
-            ),
-          ),
-        );
-        tabContents.add(Expanded(child: sb));
-        break;
-      case 1:
-        var lineCount = (MediaQuery.of(context).size.height - 350) ~/ 25;
-        lineCount = (lineCount > 0) ? lineCount : 1;
-        _textEditingController.text = GenConfig.uploadedText;
-        tabContents.add(
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned(
-                  top: 20,
-                  left: 20,
-                  child: Text(textLocalize('gen_tip_text')),
-                ),
-                Positioned(
-                  width: MediaQuery.of(context).size.width - 20,
-                  top: 60,
-                  left: 10,
-                  child: TDTextarea(
-                    controller: _textEditingController,
-                    hintText: textLocalize("gen_tip_textbox"),
-                    maxLines: lineCount,
-                    minLines: lineCount,
-                    onChanged: (value) {
-                      GenConfig.uploadedText = value;
-                    },
-                    decoration: BoxDecoration(
-                      color: TDTheme.of(context).bgColorContainer,
-                      borderRadius: BorderRadius.circular(
-                        TDTheme.of(context).radiusExtraLarge,
-                      ),
-                    ),
-                    margin: EdgeInsets.only(
-                      right: TDTheme.of(context).spacer16,
-                      left: TDTheme.of(context).spacer16,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        break;
-      case 2:
-        final TDUpload myTDUpload = TDUpload(
-          type: TDUploadBoxType.circle,
-          key: _uploadKey2,
-          files: GenConfig.uploadedVideos,
-          multiple: false,
-          onUploadTap: () {
-            _showActionSheet(context, false);
-          },
-          onChange: (files, type) {
-            switch (type) {
-              case TDUploadType.add:
-                GenConfig.uploadedVideos = [
-                  ...GenConfig.uploadedVideos,
-                  ...files,
-                ];
-                break;
-              case TDUploadType.remove:
-                for (var f in files) {
-                  GenConfig.uploadedVideos.remove(f);
-                }
-                break;
-              case TDUploadType.replace:
-                break;
-            }
-            setState(() {
-              _uploadKey2 = UniqueKey();
-            });
-          },
-          mediaType: [TDUploadMediaType.video],
-          width: 150,
-          height: 150,
-        );
-        final List<Widget> stackChildren = [
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(textLocalize('gen_tip_video')),
-          ),
-          Positioned(
-            top: 100,
-            left: 20,
-            width: MediaQuery.of(context).size.width - 20,
-            child: myTDUpload,
-          ),
-        ];
-        int capacity = (MediaQuery.of(context).size.width - 9) ~/ 161;
-        capacity = capacity > 0 ? capacity : 1;
-        final Widget sb = Scrollbar(
-          controller: _scrollController,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            child: SizedBox(
-              height:
-                  120 +
-                  ((GenConfig.uploadedVideos.length + 1) / capacity).ceil() *
-                      171, // 明确高度
-              child: Stack(
-                children: stackChildren, // Positioned 放在 Stack 中
-              ),
-            ),
-          ),
-        );
-        tabContents.add(Expanded(child: sb));
-        break;
-    }
-    return Scaffold(
-      appBar: AppBar(title: Text(textLocalize('gen_top'))),
-      body: Stack(
-        children: [
-          Column(children: tabContents),
-          Align(
-            alignment: Alignment(0, 0.9),
-            child: TDButton(
-              onTap: () {
-                TDToast.showText(textLocalize('tip_unava'), context: context);
-              },
-              activeStyle: TDButtonStyle(
-                backgroundColor: Theme.of(context).primaryColorLight,
-                textColor: Theme.of(context).shadowColor,
-              ),
-              type: TDButtonType.fill,
-              shape: TDButtonShape.round,
-              theme: TDButtonTheme.primary,
-              width: 300,
-              height: 40,
-              text: textLocalize('gen_button'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-</file>
-
-<file path="app/lib/pages/recall.dart">
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import '../configs/app_config.dart';
-
-class RecallPage extends StatefulWidget {
-  const RecallPage({super.key});
-
-  @override
-  State<RecallPage> createState() => _RecallPageState();
-}
-
-class _RecallPageState extends State<RecallPage> {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppConfig.accentColor,
-      appBar: AppBar(
-        backgroundColor: AppConfig
-            .primaryColor, //Theme.of(context).colorScheme.inversePrimary
-        title: Container(
-          alignment: Alignment.centerLeft, // 关键：顶部对齐
-          child: Text(
-            textLocalize("home_page"),
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-        toolbarHeight: 60,
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: .start,
-          children: [Text(''), Text('')],
-        ),
-      ),
-      /*floatingActionButton: Stack(
-        children: [
-          
-        ],
-      ),*/
-    );
-  }
-}
-</file>
-
-<file path="app/lib/pages/record.dart">
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/reco_config.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:camera/camera.dart';
-
-class RecordPage extends StatefulWidget {
-  const RecordPage({super.key});
-
-  @override
-  State<RecordPage> createState() => _RecordPageState();
-}
-class _RecordPageState extends State<RecordPage> {
- @override
-  void initState() {
-    super.initState();
-    //相机初始化
-    if (!RecoConfig.cameraEnabled) {
-      return;
-    }
-    RecoConfig.onUpdate = () {setState(() {
-      
-    });};
-    RecoConfig.cameraInitialize();
-  }
-  
-@override
-void dispose() {
-  RecoConfig.cameraController?.dispose();
-  RecoConfig.cameraController = null;  // 防止内存泄漏和误用
-  RecoConfig.onUpdate = () {};
-  super.dispose();
-}
-  @override
-  Widget build(BuildContext context) {
-    late final Widget cameraView;
-    if (!RecoConfig.cameraEnabled) {
-      cameraView = Center(child: Text(textLocalize("reco_camun")));
-    } else if (!RecoConfig.cameraController!.value.isInitialized) {
-      cameraView = Center(child: Text(textLocalize("reco_wait")));
-    } else {
-      cameraView = CameraPreview(RecoConfig.cameraController!);
-    }
-    return Scaffold(
-      body: cameraView,
-      floatingActionButton: Align(
-        alignment: Alignment(0, 0.9),
-        child: TDButton(text: 'Current Camera: ${RecoConfig.camNum}', onTap: () {
-          if (RecoConfig.cameraEnabled) {
-            RecoConfig.cameraSwitch();
-          }
-        })
-      ),
-    );
-  }
-}
-</file>
-
-<file path="app/lib/pages/settabs/settab1.dart">
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/configs/set_config.dart';
-
-Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
-  void onChangeLanguage() {
-    if (AppConfig.langMap['locale'] == 'en_US') {
-      SetConfig.setLanguage('zh_CN', homeRef);
-    } else {
-      SetConfig.setLanguage('en_US', homeRef);
-    }
-    SetConfig.saveMsgToFile();
-    onUpdate();
-  }
-
-  return TDCellGroup(
-    cells: [
-      TDCell(
-        //语言切换单元格
-        arrow: false,
-        title: textLocalize('set_lang'),
-        note: textLocalize('lang'),
-        onClick: (cell) {
-          onChangeLanguage();
-        },
-      ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_night'),
-        rightIconWidget: TDSwitch(
-          isOn: AppConfig.isNightMode,
-          onChanged: (cell) {
-            SetConfig.setNightMode(!AppConfig.isNightMode, homeRef);
-            SetConfig.saveMsgToFile();
-            return false;
-          },
-        ),
-      ),
-    ],
-  );
-}
-</file>
-
-<file path="app/lib/pages/settabs/settab2.dart">
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-
-Widget setTab2(VoidCallback onUpdate, BuildContext context) {
-  return TDCellGroup(
-    cells: [
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest1',
-        pickerIndex: 0,
-      ),
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest2',
-        pickerIndex: 1,
-      ),
-    ],
-  );
-}
-
-class Picker {
-  static final List<int> pickerSelectedIndex = List.filled(2, -1);
-  static TDCell buildPicker(
-    BuildContext context, {
-    VoidCallback? onUpdate,
-    String pickerTitle = '',
-    int pickerIndex = 0,
-    List<String> pickerData = const ['Option 1', 'Option 2', 'Option 3'],
-  }) {
-    final int selectedIndex = pickerSelectedIndex[pickerIndex];
-    return TDCell(
-      //版本信息
-      arrow: true,
-      title: pickerTitle,
-      note: (selectedIndex == -1)
-          ? textLocalize("pick_null")
-          : pickerData[selectedIndex],
-      onClick: (click) {
-        TDPicker.showMultiPicker(
-          context,
-          titleHeight: 40,
-          pickerHeight: 200,
-          title: pickerTitle,
-          onConfirm: (selected) {
-            pickerSelectedIndex[pickerIndex] = selected[0];
-            Navigator.of(context).pop();
-            onUpdate?.call();
-          },
-          data: [pickerData],
-          initialIndexes: (selectedIndex == -1) ? [0] : [selectedIndex],
-        );
-      },
-    );
-  }
-}
-</file>
-
-<file path="app/lib/pages/settabs/settab3.dart">
-import 'package:braindance/extra_func/dir_and_file.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-
-Widget setTab3(BuildContext context) {
-  return TDCellGroup(
-    cells: [
-      TDCell(
-        //版本信息
-        arrow: false,
-        title: textLocalize('set_ver'),
-        note: AppConfig.version,
-      ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_pub'),
-        note: AppConfig.publishDate,
-      ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_cache'),
-        onClick: (cell) async {
-          TDToast.showText(textLocalize("tip_cache"), context: context);
-          await DirSystem.deleteDir(await DirFinder.cacheDir());
-        },
-      ),
-    ],
-  );
-}
-</file>
-
-<file path="app/lib/pages/settabs/settab4.dart">
-import 'package:flutter/material.dart';
-
-Widget setTab4(ScrollController scrollController) {
-  return Scrollbar(
-    controller: scrollController,
-    child: ListView.builder(
-      controller: scrollController,
-      itemCount: 50,
-      itemBuilder: (context, index) => ListTile(title: Text('Item $index')),
-    ),
-  );
-}
-</file>
-
-<file path="app/lib/pages/settings.dart">
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/pages/settabs/settab1.dart';
-import 'package:braindance/pages/settabs/settab2.dart';
-import 'package:braindance/pages/settabs/settab3.dart';
-import 'package:braindance/pages/settabs/settab4.dart';
-
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.homeRef});
-  final WidgetRef homeRef;
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState(); // 创建状态
-}
-
-class _SettingsPageState extends State<SettingsPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController tabController;
-  late final ScrollController scrollController;
-  static const TextStyle tabTextStyle = TextStyle(
-    fontSize: 16,
-    fontFamily: AppConfig.fontFamily,
-  );
-  // 选择器选中项索引;
-  @override
-  void initState() {
-    //若 tab 数量有变，需同步修改 length
-    super.initState();
-    tabController = TabController(
-      length: 4,
-      vsync: this,
-      animationDuration: Duration(milliseconds: 200),
-    ); // 正确初始化
-    scrollController = ScrollController();
-  }
-
-  @override
-  void dispose() {
-    tabController.dispose(); // 在 dispose 中释放资源
-    scrollController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final TDTabBar myTabBar = TDTabBar(
-      tabs: [
-        TDTab(text: textLocalize('set_tab1')),
-        TDTab(text: textLocalize('set_tab2')),
-        TDTab(text: textLocalize('set_tab3')),
-        TDTab(text: textLocalize('set_tab4')),
-      ],
-      controller: tabController,
-      showIndicator: true,
-      indicatorPadding: EdgeInsets.all(4.0),
-      indicatorWidth: 60,
-      labelStyle: tabTextStyle,
-      unselectedLabelStyle: tabTextStyle,
-    );
-    return Scaffold(
-      appBar: AppBar(title: Text(textLocalize("settings"))),
-      body: Column(
-        children: [
-          myTabBar,
-          Expanded(
-            child: TDTabBarView(
-              controller: tabController,
-              children: [
-                setTab1(onUpdate, widget.homeRef),
-                setTab2(onUpdate, context),
-                setTab3(context),
-                setTab4(scrollController),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void onUpdate() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-}
 </file>
 
 <file path="app/linux/.gitignore">
@@ -138065,1171 +137179,6 @@ class RunnerTests: XCTestCase {
   }
 
 }
-</file>
-
-<file path="app/pubspec.lock">
-# Generated by pub
-# See https://dart.dev/tools/pub/glossary#lockfile
-packages:
-  _fe_analyzer_shared:
-    dependency: transitive
-    description:
-      name: _fe_analyzer_shared
-      sha256: c209688d9f5a5f26b2fb47a188131a6fb9e876ae9e47af3737c0b4f58a93470d
-      url: "https://pub.dev"
-    source: hosted
-    version: "91.0.0"
-  adaptive_number:
-    dependency: transitive
-    description:
-      name: adaptive_number
-      sha256: "3a567544e9b5c9c803006f51140ad544aedc79604fd4f3f2c1380003f97c1d77"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.0"
-  analyzer:
-    dependency: transitive
-    description:
-      name: analyzer
-      sha256: f51c8499b35f9b26820cfe914828a6a98a94efd5cc78b37bb7d03debae3a1d08
-      url: "https://pub.dev"
-    source: hosted
-    version: "8.4.1"
-  app_links:
-    dependency: transitive
-    description:
-      name: app_links
-      sha256: "5f88447519add627fe1cbcab4fd1da3d4fed15b9baf29f28b22535c95ecee3e8"
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.4.1"
-  app_links_linux:
-    dependency: transitive
-    description:
-      name: app_links_linux
-      sha256: f5f7173a78609f3dfd4c2ff2c95bd559ab43c80a87dc6a095921d96c05688c81
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.3"
-  app_links_platform_interface:
-    dependency: transitive
-    description:
-      name: app_links_platform_interface
-      sha256: "05f5379577c513b534a29ddea68176a4d4802c46180ee8e2e966257158772a3f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.2"
-  app_links_web:
-    dependency: transitive
-    description:
-      name: app_links_web
-      sha256: af060ed76183f9e2b87510a9480e56a5352b6c249778d07bd2c95fc35632a555
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.4"
-  args:
-    dependency: transitive
-    description:
-      name: args
-      sha256: d0481093c50b1da8910eb0bb301626d4d8eb7284aa739614d2b394ee09e3ea04
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.7.0"
-  async:
-    dependency: transitive
-    description:
-      name: async
-      sha256: "758e6d74e971c3e5aceb4110bfd6698efc7f501675bcfe0c775459a8140750eb"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.13.0"
-  boolean_selector:
-    dependency: transitive
-    description:
-      name: boolean_selector
-      sha256: "8aab1771e1243a5063b8b0ff68042d67334e3feab9e95b9490f9a6ebf73b42ea"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.2"
-  camera:
-    dependency: "direct main"
-    description:
-      name: camera
-      sha256: eefad89f262a873f38d21e5eec853461737ea074d7c9ede39f3ceb135d201cab
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.11.3"
-  camera_android_camerax:
-    dependency: transitive
-    description:
-      name: camera_android_camerax
-      sha256: bc7a96998258adddd0b653dd693b0874537707d58b0489708f2a646e4f124246
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.6.27"
-  camera_avfoundation:
-    dependency: transitive
-    description:
-      name: camera_avfoundation
-      sha256: "087a9fadef20325cb246b4c13344a3ce8e408acfc3e0c665ebff0ec3144d7163"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.9.22+8"
-  camera_platform_interface:
-    dependency: transitive
-    description:
-      name: camera_platform_interface
-      sha256: "98cfc9357e04bad617671b4c1f78a597f25f08003089dd94050709ae54effc63"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.12.0"
-  camera_web:
-    dependency: transitive
-    description:
-      name: camera_web
-      sha256: "57f49a635c8bf249d07fb95eb693d7e4dda6796dedb3777f9127fb54847beba7"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.5+3"
-  characters:
-    dependency: transitive
-    description:
-      name: characters
-      sha256: f71061c654a3380576a52b451dd5532377954cf9dbd272a78fc8479606670803
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.0"
-  cli_config:
-    dependency: transitive
-    description:
-      name: cli_config
-      sha256: ac20a183a07002b700f0c25e61b7ee46b23c309d76ab7b7640a028f18e4d99ec
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.0"
-  clock:
-    dependency: transitive
-    description:
-      name: clock
-      sha256: fddb70d9b5277016c77a80201021d40a2247104d9f4aa7bab7157b7e3f05b84b
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.2"
-  collection:
-    dependency: transitive
-    description:
-      name: collection
-      sha256: "2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.19.1"
-  convert:
-    dependency: transitive
-    description:
-      name: convert
-      sha256: b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.2"
-  coverage:
-    dependency: transitive
-    description:
-      name: coverage
-      sha256: "5da775aa218eaf2151c721b16c01c7676fbfdd99cebba2bf64e8b807a28ff94d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.15.0"
-  cross_file:
-    dependency: transitive
-    description:
-      name: cross_file
-      sha256: "701dcfc06da0882883a2657c445103380e53e647060ad8d9dfb710c100996608"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.5+1"
-  crypto:
-    dependency: transitive
-    description:
-      name: crypto
-      sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.7"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: ba631d1c7f7bef6b729a622b7b752645a2d076dba9976925b8f25725a30e1ee6
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.8"
-  dart_jsonwebtoken:
-    dependency: transitive
-    description:
-      name: dart_jsonwebtoken
-      sha256: "0de65691c1d736e9459f22f654ddd6fd8368a271d4e41aa07e53e6301eff5075"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.3.1"
-  easy_refresh:
-    dependency: transitive
-    description:
-      name: easy_refresh
-      sha256: "486e30abfcaae66c0f2c2798a10de2298eb9dc5e0bb7e1dba9328308968cae0c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.4.0"
-  ed25519_edwards:
-    dependency: transitive
-    description:
-      name: ed25519_edwards
-      sha256: "6ce0112d131327ec6d42beede1e5dfd526069b18ad45dcf654f15074ad9276cd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.1"
-  fake_async:
-    dependency: transitive
-    description:
-      name: fake_async
-      sha256: "5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.3.3"
-  ffi:
-    dependency: transitive
-    description:
-      name: ffi
-      sha256: "289279317b4b16eb2bb7e271abccd4bf84ec9bdcbe999e278a94b804f5630418"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.4"
-  file:
-    dependency: transitive
-    description:
-      name: file
-      sha256: a3b4f84adafef897088c160faf7dfffb7696046cb13ae90b508c2cbc95d3b8d4
-      url: "https://pub.dev"
-    source: hosted
-    version: "7.0.1"
-  file_selector_linux:
-    dependency: transitive
-    description:
-      name: file_selector_linux
-      sha256: "2567f398e06ac72dcf2e98a0c95df2a9edd03c2c2e0cacd4780f20cdf56263a0"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.9.4"
-  file_selector_macos:
-    dependency: transitive
-    description:
-      name: file_selector_macos
-      sha256: "5e0bbe9c312416f1787a68259ea1505b52f258c587f12920422671807c4d618a"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.9.5"
-  file_selector_platform_interface:
-    dependency: transitive
-    description:
-      name: file_selector_platform_interface
-      sha256: "35e0bd61ebcdb91a3505813b055b09b79dfdc7d0aee9c09a7ba59ae4bb13dc85"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.7.0"
-  file_selector_windows:
-    dependency: transitive
-    description:
-      name: file_selector_windows
-      sha256: "62197474ae75893a62df75939c777763d39c2bc5f73ce5b88497208bc269abfd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.9.3+5"
-  fixnum:
-    dependency: transitive
-    description:
-      name: fixnum
-      sha256: b6dc7065e46c974bc7c5f143080a6764ec7a4be6da1285ececdc37be96de53be
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.1"
-  flutter:
-    dependency: "direct main"
-    description: flutter
-    source: sdk
-    version: "0.0.0"
-  flutter_lints:
-    dependency: "direct dev"
-    description:
-      name: flutter_lints
-      sha256: "3105dc8492f6183fb076ccf1f351ac3d60564bff92e20bfc4af9cc1651f4e7e1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.0.0"
-  flutter_plugin_android_lifecycle:
-    dependency: transitive
-    description:
-      name: flutter_plugin_android_lifecycle
-      sha256: ee8068e0e1cd16c4a82714119918efdeed33b3ba7772c54b5d094ab53f9b7fd1
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.33"
-  flutter_riverpod:
-    dependency: "direct main"
-    description:
-      name: flutter_riverpod
-      sha256: a3cd0547353c1990bf5ad64f73143e5ce7a780409639559ad83a743ff3b945e4
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.0"
-  flutter_slidable:
-    dependency: transitive
-    description:
-      name: flutter_slidable
-      sha256: a857de7ea701f276fd6a6c4c67ae885b60729a3449e42766bb0e655171042801
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.2"
-  flutter_swiper_null_safety:
-    dependency: transitive
-    description:
-      name: flutter_swiper_null_safety
-      sha256: "5a855e0080d035c08e82f8b7fd2f106344943a30c9ab483b2584860a2f22eaaf"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.2"
-  flutter_test:
-    dependency: "direct dev"
-    description: flutter
-    source: sdk
-    version: "0.0.0"
-  flutter_web_plugins:
-    dependency: transitive
-    description: flutter
-    source: sdk
-    version: "0.0.0"
-  frontend_server_client:
-    dependency: transitive
-    description:
-      name: frontend_server_client
-      sha256: f64a0333a82f30b0cca061bc3d143813a486dc086b574bfb233b7c1372427694
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.0.0"
-  functions_client:
-    dependency: transitive
-    description:
-      name: functions_client
-      sha256: "94074d62167ae634127ef6095f536835063a7dc80f2b1aa306d2346ff9023996"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.5.0"
-  glob:
-    dependency: transitive
-    description:
-      name: glob
-      sha256: c3f1ee72c96f8f78935e18aa8cecced9ab132419e8625dc187e1c2408efc20de
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.3"
-  gotrue:
-    dependency: transitive
-    description:
-      name: gotrue
-      sha256: f7b52008311941a7c3e99f9590c4ee32dfc102a5442e43abf1b287d9f8cc39b2
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.18.0"
-  gtk:
-    dependency: transitive
-    description:
-      name: gtk
-      sha256: e8ce9ca4b1df106e4d72dad201d345ea1a036cc12c360f1a7d5a758f78ffa42c
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
-  http:
-    dependency: transitive
-    description:
-      name: http
-      sha256: "5895291c13fa8a3bd82e76d5627f69e0d85ca6a30dcac95c4ea19a5d555879c2"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.13.6"
-  http_multi_server:
-    dependency: transitive
-    description:
-      name: http_multi_server
-      sha256: aa6199f908078bb1c5efb8d8638d4ae191aac11b311132c3ef48ce352fb52ef8
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.2"
-  http_parser:
-    dependency: transitive
-    description:
-      name: http_parser
-      sha256: "178d74305e7866013777bab2c3d8726205dc5a4dd935297175b19a23a2e66571"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.1.2"
-  image_picker:
-    dependency: "direct main"
-    description:
-      name: image_picker
-      sha256: "021834d9c0c3de46bf0fe40341fa07168407f694d9b2bb18d532dc1261867f7a"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.2"
-  image_picker_android:
-    dependency: transitive
-    description:
-      name: image_picker_android
-      sha256: "317a5d961cec5b34e777b9252393f2afbd23084aa6e60fcf601dcf6341b9ebeb"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.8.12+23"
-  image_picker_for_web:
-    dependency: transitive
-    description:
-      name: image_picker_for_web
-      sha256: "66257a3191ab360d23a55c8241c91a6e329d31e94efa7be9cf7a212e65850214"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.1"
-  image_picker_ios:
-    dependency: transitive
-    description:
-      name: image_picker_ios
-      sha256: "956c16a42c0c708f914021666ffcd8265dde36e673c9fa68c81f7d085d9774ad"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.8.13+3"
-  image_picker_linux:
-    dependency: transitive
-    description:
-      name: image_picker_linux
-      sha256: "1f81c5f2046b9ab724f85523e4af65be1d47b038160a8c8deed909762c308ed4"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.2"
-  image_picker_macos:
-    dependency: transitive
-    description:
-      name: image_picker_macos
-      sha256: "86f0f15a309de7e1a552c12df9ce5b59fe927e71385329355aec4776c6a8ec91"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.2+1"
-  image_picker_platform_interface:
-    dependency: transitive
-    description:
-      name: image_picker_platform_interface
-      sha256: "567e056716333a1647c64bb6bd873cff7622233a5c3f694be28a583d4715690c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.11.1"
-  image_picker_windows:
-    dependency: transitive
-    description:
-      name: image_picker_windows
-      sha256: d248c86554a72b5495a31c56f060cf73a41c7ff541689327b1a7dbccc33adfae
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.2"
-  io:
-    dependency: transitive
-    description:
-      name: io
-      sha256: dfd5a80599cf0165756e3181807ed3e77daf6dd4137caaad72d0b7931597650b
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.5"
-  js:
-    dependency: transitive
-    description:
-      name: js
-      sha256: "53385261521cc4a0c4658fd0ad07a7d14591cf8fc33abbceae306ddb974888dc"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.7.2"
-  jwt_decode:
-    dependency: transitive
-    description:
-      name: jwt_decode
-      sha256: d2e9f68c052b2225130977429d30f187aa1981d789c76ad104a32243cfdebfbb
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.1"
-  leak_tracker:
-    dependency: transitive
-    description:
-      name: leak_tracker
-      sha256: "33e2e26bdd85a0112ec15400c8cbffea70d0f9c3407491f672a2fad47915e2de"
-      url: "https://pub.dev"
-    source: hosted
-    version: "11.0.2"
-  leak_tracker_flutter_testing:
-    dependency: transitive
-    description:
-      name: leak_tracker_flutter_testing
-      sha256: "1dbc140bb5a23c75ea9c4811222756104fbcd1a27173f0c34ca01e16bea473c1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.10"
-  leak_tracker_testing:
-    dependency: transitive
-    description:
-      name: leak_tracker_testing
-      sha256: "8d5a2d49f4a66b49744b23b018848400d23e54caf9463f4eb20df3eb8acb2eb1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.2"
-  lints:
-    dependency: transitive
-    description:
-      name: lints
-      sha256: a5e2b223cb7c9c8efdc663ef484fdd95bb243bff242ef5b13e26883547fce9a0
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.0.0"
-  logging:
-    dependency: transitive
-    description:
-      name: logging
-      sha256: c8245ada5f1717ed44271ed1c26b8ce85ca3228fd2ffdb75468ab01979309d61
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.3.0"
-  matcher:
-    dependency: transitive
-    description:
-      name: matcher
-      sha256: dc58c723c3c24bf8d3e2d3ad3f2f9d7bd9cf43ec6feaa64181775e60190153f2
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.12.17"
-  material_color_utilities:
-    dependency: transitive
-    description:
-      name: material_color_utilities
-      sha256: f7142bb1154231d7ea5f96bc7bde4bda2a0945d2806bb11670e30b850d56bdec
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.11.1"
-  meta:
-    dependency: transitive
-    description:
-      name: meta
-      sha256: "23f08335362185a5ea2ad3a4e597f1375e78bce8a040df5c600c8d3552ef2394"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.17.0"
-  mime:
-    dependency: transitive
-    description:
-      name: mime
-      sha256: "41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.0"
-  node_preamble:
-    dependency: transitive
-    description:
-      name: node_preamble
-      sha256: "6e7eac89047ab8a8d26cf16127b5ed26de65209847630400f9aefd7cd5c730db"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.2"
-  package_config:
-    dependency: transitive
-    description:
-      name: package_config
-      sha256: f096c55ebb7deb7e384101542bfba8c52696c1b56fca2eb62827989ef2353bbc
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.0"
-  path:
-    dependency: "direct main"
-    description:
-      name: path
-      sha256: "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.9.1"
-  path_drawing:
-    dependency: transitive
-    description:
-      name: path_drawing
-      sha256: bbb1934c0cbb03091af082a6389ca2080345291ef07a5fa6d6e078ba8682f977
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.1"
-  path_parsing:
-    dependency: transitive
-    description:
-      name: path_parsing
-      sha256: "883402936929eac138ee0a45da5b0f2c80f89913e6dc3bf77eb65b84b409c6ca"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.0"
-  path_provider:
-    dependency: "direct main"
-    description:
-      name: path_provider
-      sha256: "50c5dd5b6e1aaf6fb3a78b33f6aa3afca52bf903a8a5298f53101fdaee55bbcd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.5"
-  path_provider_android:
-    dependency: transitive
-    description:
-      name: path_provider_android
-      sha256: f2c65e21139ce2c3dad46922be8272bb5963516045659e71bb16e151c93b580e
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.22"
-  path_provider_foundation:
-    dependency: transitive
-    description:
-      name: path_provider_foundation
-      sha256: "6d13aece7b3f5c5a9731eaf553ff9dcbc2eff41087fd2df587fd0fed9a3eb0c4"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.5.1"
-  path_provider_linux:
-    dependency: transitive
-    description:
-      name: path_provider_linux
-      sha256: f7a1fe3a634fe7734c8d3f2766ad746ae2a2884abe22e241a8b301bf5cac3279
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.1"
-  path_provider_platform_interface:
-    dependency: transitive
-    description:
-      name: path_provider_platform_interface
-      sha256: "88f5779f72ba699763fa3a3b06aa4bf6de76c8e5de842cf6f29e2e06476c2334"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.2"
-  path_provider_windows:
-    dependency: transitive
-    description:
-      name: path_provider_windows
-      sha256: bd6f00dbd873bfb70d0761682da2b3a2c2fccc2b9e84c495821639601d81afe7
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.3.0"
-  photo_manager:
-    dependency: "direct main"
-    description:
-      name: photo_manager
-      sha256: "807688e3221e90fb02a4466746edd9cb9a0de025f8754c819f96604c00f6f1f5"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.8.3"
-  platform:
-    dependency: transitive
-    description:
-      name: platform
-      sha256: "5d6b1b0036a5f331ebc77c850ebc8506cbc1e9416c27e59b439f917a902a4984"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.6"
-  plugin_platform_interface:
-    dependency: transitive
-    description:
-      name: plugin_platform_interface
-      sha256: "4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.8"
-  pointycastle:
-    dependency: transitive
-    description:
-      name: pointycastle
-      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.0.0"
-  pool:
-    dependency: transitive
-    description:
-      name: pool
-      sha256: "978783255c543aa3586a1b3c21f6e9d720eb315376a915872c61ef8b5c20177d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.5.2"
-  postgrest:
-    dependency: transitive
-    description:
-      name: postgrest
-      sha256: f4b6bb24b465c47649243ef0140475de8a0ec311dc9c75ebe573b2dcabb10460
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.6.0"
-  pub_semver:
-    dependency: transitive
-    description:
-      name: pub_semver
-      sha256: "5bfcf68ca79ef689f8990d1160781b4bad40a3bd5e5218ad4076ddb7f4081585"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.0"
-  realtime_client:
-    dependency: transitive
-    description:
-      name: realtime_client
-      sha256: "5268afc208d02fb9109854d262c1ebf6ece224cd285199ae1d2f92d2ff49dbf1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.7.0"
-  retry:
-    dependency: transitive
-    description:
-      name: retry
-      sha256: "822e118d5b3aafed083109c72d5f484c6dc66707885e07c0fbcb8b986bba7efc"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.2"
-  riverpod:
-    dependency: transitive
-    description:
-      name: riverpod
-      sha256: "9026676260f31bb5279cc5e59ca292145d8bab4aabede9aa2555c2a626ec66f1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.0"
-  rxdart:
-    dependency: transitive
-    description:
-      name: rxdart
-      sha256: "5c3004a4a8dbb94bd4bf5412a4def4acdaa12e12f269737a5751369e12d1a962"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.28.0"
-  shared_preferences:
-    dependency: transitive
-    description:
-      name: shared_preferences
-      sha256: "2939ae520c9024cb197fc20dee269cd8cdbf564c8b5746374ec6cacdc5169e64"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.5.4"
-  shared_preferences_android:
-    dependency: transitive
-    description:
-      name: shared_preferences_android
-      sha256: "83af5c682796c0f7719c2bbf74792d113e40ae97981b8f266fa84574573556bc"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.18"
-  shared_preferences_foundation:
-    dependency: transitive
-    description:
-      name: shared_preferences_foundation
-      sha256: "4e7eaffc2b17ba398759f1151415869a34771ba11ebbccd1b0145472a619a64f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.5.6"
-  shared_preferences_linux:
-    dependency: transitive
-    description:
-      name: shared_preferences_linux
-      sha256: "580abfd40f415611503cae30adf626e6656dfb2f0cee8f465ece7b6defb40f2f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.1"
-  shared_preferences_platform_interface:
-    dependency: transitive
-    description:
-      name: shared_preferences_platform_interface
-      sha256: "57cbf196c486bc2cf1f02b85784932c6094376284b3ad5779d1b1c6c6a816b80"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.1"
-  shared_preferences_web:
-    dependency: transitive
-    description:
-      name: shared_preferences_web
-      sha256: c49bd060261c9a3f0ff445892695d6212ff603ef3115edbb448509d407600019
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.3"
-  shared_preferences_windows:
-    dependency: transitive
-    description:
-      name: shared_preferences_windows
-      sha256: "94ef0f72b2d71bc3e700e025db3710911bd51a71cefb65cc609dd0d9a982e3c1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.1"
-  shelf:
-    dependency: transitive
-    description:
-      name: shelf
-      sha256: e7dd780a7ffb623c57850b33f43309312fc863fb6aa3d276a754bb299839ef12
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.2"
-  shelf_packages_handler:
-    dependency: transitive
-    description:
-      name: shelf_packages_handler
-      sha256: "89f967eca29607c933ba9571d838be31d67f53f6e4ee15147d5dc2934fee1b1e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.2"
-  shelf_static:
-    dependency: transitive
-    description:
-      name: shelf_static
-      sha256: c87c3875f91262785dade62d135760c2c69cb217ac759485334c5857ad89f6e3
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.3"
-  shelf_web_socket:
-    dependency: transitive
-    description:
-      name: shelf_web_socket
-      sha256: "3632775c8e90d6c9712f883e633716432a27758216dfb61bd86a8321c0580925"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.0"
-  sky_engine:
-    dependency: transitive
-    description: flutter
-    source: sdk
-    version: "0.0.0"
-  source_map_stack_trace:
-    dependency: transitive
-    description:
-      name: source_map_stack_trace
-      sha256: c0713a43e323c3302c2abe2a1cc89aa057a387101ebd280371d6a6c9fa68516b
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.2"
-  source_maps:
-    dependency: transitive
-    description:
-      name: source_maps
-      sha256: "190222579a448b03896e0ca6eca5998fa810fda630c1d65e2f78b3f638f54812"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.10.13"
-  source_span:
-    dependency: transitive
-    description:
-      name: source_span
-      sha256: "254ee5351d6cb365c859e20ee823c3bb479bf4a293c22d17a9f1bf144ce86f7c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.10.1"
-  stack_trace:
-    dependency: transitive
-    description:
-      name: stack_trace
-      sha256: "8b27215b45d22309b5cddda1aa2b19bdfec9df0e765f2de506401c071d38d1b1"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.12.1"
-  state_notifier:
-    dependency: transitive
-    description:
-      name: state_notifier
-      sha256: b8677376aa54f2d7c58280d5a007f9e8774f1968d1fb1c096adcb4792fba29bb
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.0"
-  storage_client:
-    dependency: transitive
-    description:
-      name: storage_client
-      sha256: "1c61b19ed9e78f37fdd1ca8b729ab8484e6c8fe82e15c87e070b861951183657"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.1"
-  stream_channel:
-    dependency: transitive
-    description:
-      name: stream_channel
-      sha256: "969e04c80b8bcdf826f8f16579c7b14d780458bd97f56d107d3950fdbeef059d"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.4"
-  stream_transform:
-    dependency: transitive
-    description:
-      name: stream_transform
-      sha256: ad47125e588cfd37a9a7f86c7d6356dde8dfe89d071d293f80ca9e9273a33871
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.1"
-  string_scanner:
-    dependency: transitive
-    description:
-      name: string_scanner
-      sha256: "921cd31725b72fe181906c6a94d987c78e3b98c2e205b397ea399d4054872b43"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.1"
-  supabase:
-    dependency: transitive
-    description:
-      name: supabase
-      sha256: cc039f63a3168386b3a4f338f3bff342c860d415a3578f3fbe854024aee6f911
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.10.2"
-  supabase_flutter:
-    dependency: "direct main"
-    description:
-      name: supabase_flutter
-      sha256: "92b2416ecb6a5c3ed34cf6e382b35ce6cc8921b64f2a9299d5d28968d42b09bb"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.12.0"
-  tdesign_flutter:
-    dependency: "direct main"
-    description:
-      name: tdesign_flutter
-      sha256: "79c1ed3fc67836426a8a93e5e0dcd764befa1341eae13a904bcf9e7de996f05c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.7"
-  tdesign_flutter_adaptation:
-    dependency: transitive
-    description:
-      name: tdesign_flutter_adaptation
-      sha256: "707bbc52ec8b5872ea808500200f402007acf24c03a1cc823a3be2113c1d813a"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.32.0"
-  term_glyph:
-    dependency: transitive
-    description:
-      name: term_glyph
-      sha256: "7f554798625ea768a7518313e58f83891c7f5024f88e46e7182a4558850a4b8e"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.2"
-  test:
-    dependency: transitive
-    description:
-      name: test
-      sha256: "75906bf273541b676716d1ca7627a17e4c4070a3a16272b7a3dc7da3b9f3f6b7"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.26.3"
-  test_api:
-    dependency: transitive
-    description:
-      name: test_api
-      sha256: ab2726c1a94d3176a45960b6234466ec367179b87dd74f1611adb1f3b5fb9d55
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.7.7"
-  test_core:
-    dependency: transitive
-    description:
-      name: test_core
-      sha256: "0cc24b5ff94b38d2ae73e1eb43cc302b77964fbf67abad1e296025b78deb53d0"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.6.12"
-  typed_data:
-    dependency: transitive
-    description:
-      name: typed_data
-      sha256: f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.4.0"
-  url_launcher:
-    dependency: transitive
-    description:
-      name: url_launcher
-      sha256: f6a7e5c4835bb4e3026a04793a4199ca2d14c739ec378fdfe23fc8075d0439f8
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.3.2"
-  url_launcher_android:
-    dependency: transitive
-    description:
-      name: url_launcher_android
-      sha256: "767344bf3063897b5cf0db830e94f904528e6dd50a6dfaf839f0abf509009611"
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.3.28"
-  url_launcher_ios:
-    dependency: transitive
-    description:
-      name: url_launcher_ios
-      sha256: cfde38aa257dae62ffe79c87fab20165dfdf6988c1d31b58ebf59b9106062aad
-      url: "https://pub.dev"
-    source: hosted
-    version: "6.3.6"
-  url_launcher_linux:
-    dependency: transitive
-    description:
-      name: url_launcher_linux
-      sha256: d5e14138b3bc193a0f63c10a53c94b91d399df0512b1f29b94a043db7482384a
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.2"
-  url_launcher_macos:
-    dependency: transitive
-    description:
-      name: url_launcher_macos
-      sha256: "368adf46f71ad3c21b8f06614adb38346f193f3a59ba8fe9a2fd74133070ba18"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.5"
-  url_launcher_platform_interface:
-    dependency: transitive
-    description:
-      name: url_launcher_platform_interface
-      sha256: "552f8a1e663569be95a8190206a38187b531910283c3e982193e4f2733f01029"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.3.2"
-  url_launcher_web:
-    dependency: transitive
-    description:
-      name: url_launcher_web
-      sha256: d0412fcf4c6b31ecfdb7762359b7206ffba3bbffd396c6d9f9c4616ece476c1f
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.2"
-  url_launcher_windows:
-    dependency: transitive
-    description:
-      name: url_launcher_windows
-      sha256: "712c70ab1b99744ff066053cbe3e80c73332b38d46e5e945c98689b2e66fc15f"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.5"
-  vector_math:
-    dependency: transitive
-    description:
-      name: vector_math
-      sha256: d530bd74fea330e6e364cda7a85019c434070188383e1cd8d9777ee586914c5b
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.2.0"
-  video_thumbnail_pro:
-    dependency: "direct main"
-    description:
-      name: video_thumbnail_pro
-      sha256: ce057ca703a0cbcff4ea75daed14b76426e789877b03e874aa3db8c3cdb7ce7c
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.7.3"
-  vm_service:
-    dependency: transitive
-    description:
-      name: vm_service
-      sha256: "45caa6c5917fa127b5dbcfbd1fa60b14e583afdc08bfc96dda38886ca252eb60"
-      url: "https://pub.dev"
-    source: hosted
-    version: "15.0.2"
-  watcher:
-    dependency: transitive
-    description:
-      name: watcher
-      sha256: "1398c9f081a753f9226febe8900fce8f7d0a67163334e1c94a2438339d79d635"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.1"
-  web:
-    dependency: transitive
-    description:
-      name: web
-      sha256: "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.1"
-  web_socket:
-    dependency: transitive
-    description:
-      name: web_socket
-      sha256: "34d64019aa8e36bf9842ac014bb5d2f5586ca73df5e4d9bf5c936975cae6982c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.1"
-  web_socket_channel:
-    dependency: transitive
-    description:
-      name: web_socket_channel
-      sha256: d645757fb0f4773d602444000a8131ff5d48c9e47adfe9772652dd1a4f2d45c8
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.3"
-  webkit_inspection_protocol:
-    dependency: transitive
-    description:
-      name: webkit_inspection_protocol
-      sha256: "87d3f2333bb240704cd3f1c6b5b7acd8a10e7f0bc28c28dcf14e782014f4a572"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.1"
-  webview_flutter:
-    dependency: "direct main"
-    description:
-      name: webview_flutter
-      sha256: a3da219916aba44947d3a5478b1927876a09781174b5a2b67fa5be0555154bf9
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.13.1"
-  webview_flutter_android:
-    dependency: transitive
-    description:
-      name: webview_flutter_android
-      sha256: eeeb3fcd5f0ff9f8446c9f4bbc18a99b809e40297528a3395597d03aafb9f510
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.10.11"
-  webview_flutter_platform_interface:
-    dependency: transitive
-    description:
-      name: webview_flutter_platform_interface
-      sha256: "63d26ee3aca7256a83ccb576a50272edd7cfc80573a4305caa98985feb493ee0"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.14.0"
-  webview_flutter_wkwebview:
-    dependency: transitive
-    description:
-      name: webview_flutter_wkwebview
-      sha256: e49f378ed066efb13fc36186bbe0bd2425630d4ea0dbc71a18fdd0e4d8ed8ebc
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.23.5"
-  xdg_directories:
-    dependency: transitive
-    description:
-      name: xdg_directories
-      sha256: "7a3f37b05d989967cdddcbb571f1ea834867ae2faa29725fd085180e0883aa15"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.1.0"
-  yaml:
-    dependency: transitive
-    description:
-      name: yaml
-      sha256: b9da305ac7c39faa3f030eccd175340f968459dae4af175130b3fc47e40d76ce
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.1.3"
-  yet_another_json_isolate:
-    dependency: transitive
-    description:
-      name: yet_another_json_isolate
-      sha256: fe45897501fa156ccefbfb9359c9462ce5dec092f05e8a56109db30be864f01e
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
-sdks:
-  dart: ">=3.10.7 <4.0.0"
-  flutter: ">=3.38.0"
 </file>
 
 <file path="app/pubspec.yaml">
@@ -190638,6 +188587,1400 @@ if __name__ == "__main__":
     "types": ["node"]
   }
 }
+</file>
+
+<file path="app/lib/pages/settabs/settab1.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/set_config.dart';
+
+Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
+  void onChangeLanguage() {
+    if (AppConfig.langMap['locale'] == 'en_US') {
+      SetConfig.setLanguage('zh_CN', homeRef);
+    } else {
+      SetConfig.setLanguage('en_US', homeRef);
+    }
+    SetConfig.saveMsgToFile();
+    onUpdate();
+  }
+
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(homeRef.context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(homeRef.context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(homeRef.context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            TDCell(
+              //语言切换单元格
+              arrow: false,
+              title: textLocalize('set_lang'),
+              note: textLocalize('lang'),
+              onClick: (cell) {
+                onChangeLanguage();
+              },
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_night'),
+              rightIconWidget: TDSwitch(
+                isOn: AppConfig.isNightMode,
+                onChanged: (cell) {
+                  SetConfig.setNightMode(!AppConfig.isNightMode, homeRef);
+                  SetConfig.saveMsgToFile();
+                  return false;
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+</file>
+
+<file path="app/lib/pages/settabs/settab2.dart">
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
+
+Widget setTab2(VoidCallback onUpdate, BuildContext context) {
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            Picker.buildPicker(
+              onUpdate: onUpdate,
+              context,
+              pickerTitle: 'PickerTest1',
+              pickerIndex: 0,
+            ),
+            Picker.buildPicker(
+              onUpdate: onUpdate,
+              context,
+              pickerTitle: 'PickerTest2',
+              pickerIndex: 1,
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class Picker {
+  static final List<int> pickerSelectedIndex = List.filled(2, -1);
+  static TDCell buildPicker(
+    BuildContext context, {
+    VoidCallback? onUpdate,
+    String pickerTitle = '',
+    int pickerIndex = 0,
+    List<String> pickerData = const ['Option 1', 'Option 2', 'Option 3'],
+  }) {
+    final int selectedIndex = pickerSelectedIndex[pickerIndex];
+    return TDCell(
+      //版本信息
+      arrow: true,
+      title: pickerTitle,
+      note: (selectedIndex == -1)
+          ? textLocalize("pick_null")
+          : pickerData[selectedIndex],
+      onClick: (click) {
+        TDPicker.showMultiPicker(
+          context,
+          titleHeight: 40,
+          pickerHeight: 200,
+          title: pickerTitle,
+          onConfirm: (selected) {
+            pickerSelectedIndex[pickerIndex] = selected[0];
+            Navigator.of(context).pop();
+            onUpdate?.call();
+          },
+          data: [pickerData],
+          initialIndexes: (selectedIndex == -1) ? [0] : [selectedIndex],
+        );
+      },
+    );
+  }
+}
+</file>
+
+<file path="app/lib/pages/settabs/settab3.dart">
+import 'package:braindance/extra_func/dir_and_file.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
+
+Widget setTab3(BuildContext context) {
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            TDCell(
+              //版本信息
+              arrow: false,
+              title: textLocalize('set_ver'),
+              note: AppConfig.version,
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_pub'),
+              note: AppConfig.publishDate,
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_cache'),
+              onClick: (cell) async {
+                TDToast.showText(textLocalize("tip_cache"), context: context);
+                await DirSystem.deleteDir(await DirFinder.cacheDir());
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+</file>
+
+<file path="app/lib/pages/settabs/settab4.dart">
+import 'package:flutter/material.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+Widget setTab4(ScrollController scrollController) {
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Scrollbar(
+          controller: scrollController,
+          child: ListView.separated(
+            controller: scrollController,
+            itemCount: 50,
+            separatorBuilder: (context, index) => const Divider(height: 1, color: Color(0xFFF3F3F3)),
+            itemBuilder: (context, index) => ListTile(
+              title: Text('Item $index', style: const TextStyle(fontSize: 16)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+              onTap: () {},
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+</file>
+
+<file path="app/pubspec.lock">
+# Generated by pub
+# See https://dart.dev/tools/pub/glossary#lockfile
+packages:
+  _fe_analyzer_shared:
+    dependency: transitive
+    description:
+      name: _fe_analyzer_shared
+      sha256: c209688d9f5a5f26b2fb47a188131a6fb9e876ae9e47af3737c0b4f58a93470d
+      url: "https://pub.dev"
+    source: hosted
+    version: "91.0.0"
+  adaptive_number:
+    dependency: transitive
+    description:
+      name: adaptive_number
+      sha256: "3a567544e9b5c9c803006f51140ad544aedc79604fd4f3f2c1380003f97c1d77"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  analyzer:
+    dependency: transitive
+    description:
+      name: analyzer
+      sha256: f51c8499b35f9b26820cfe914828a6a98a94efd5cc78b37bb7d03debae3a1d08
+      url: "https://pub.dev"
+    source: hosted
+    version: "8.4.1"
+  app_links:
+    dependency: transitive
+    description:
+      name: app_links
+      sha256: "5f88447519add627fe1cbcab4fd1da3d4fed15b9baf29f28b22535c95ecee3e8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.4.1"
+  app_links_linux:
+    dependency: transitive
+    description:
+      name: app_links_linux
+      sha256: f5f7173a78609f3dfd4c2ff2c95bd559ab43c80a87dc6a095921d96c05688c81
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.3"
+  app_links_platform_interface:
+    dependency: transitive
+    description:
+      name: app_links_platform_interface
+      sha256: "05f5379577c513b534a29ddea68176a4d4802c46180ee8e2e966257158772a3f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.2"
+  app_links_web:
+    dependency: transitive
+    description:
+      name: app_links_web
+      sha256: af060ed76183f9e2b87510a9480e56a5352b6c249778d07bd2c95fc35632a555
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.4"
+  args:
+    dependency: transitive
+    description:
+      name: args
+      sha256: d0481093c50b1da8910eb0bb301626d4d8eb7284aa739614d2b394ee09e3ea04
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.7.0"
+  async:
+    dependency: transitive
+    description:
+      name: async
+      sha256: "758e6d74e971c3e5aceb4110bfd6698efc7f501675bcfe0c775459a8140750eb"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.13.0"
+  boolean_selector:
+    dependency: transitive
+    description:
+      name: boolean_selector
+      sha256: "8aab1771e1243a5063b8b0ff68042d67334e3feab9e95b9490f9a6ebf73b42ea"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
+  camera:
+    dependency: "direct main"
+    description:
+      name: camera
+      sha256: eefad89f262a873f38d21e5eec853461737ea074d7c9ede39f3ceb135d201cab
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.11.3"
+  camera_android_camerax:
+    dependency: transitive
+    description:
+      name: camera_android_camerax
+      sha256: bc7a96998258adddd0b653dd693b0874537707d58b0489708f2a646e4f124246
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.27"
+  camera_avfoundation:
+    dependency: transitive
+    description:
+      name: camera_avfoundation
+      sha256: "087a9fadef20325cb246b4c13344a3ce8e408acfc3e0c665ebff0ec3144d7163"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.22+8"
+  camera_platform_interface:
+    dependency: transitive
+    description:
+      name: camera_platform_interface
+      sha256: "98cfc9357e04bad617671b4c1f78a597f25f08003089dd94050709ae54effc63"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.12.0"
+  camera_web:
+    dependency: transitive
+    description:
+      name: camera_web
+      sha256: "57f49a635c8bf249d07fb95eb693d7e4dda6796dedb3777f9127fb54847beba7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.5+3"
+  characters:
+    dependency: transitive
+    description:
+      name: characters
+      sha256: faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.1"
+  cli_config:
+    dependency: transitive
+    description:
+      name: cli_config
+      sha256: ac20a183a07002b700f0c25e61b7ee46b23c309d76ab7b7640a028f18e4d99ec
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
+  clock:
+    dependency: transitive
+    description:
+      name: clock
+      sha256: fddb70d9b5277016c77a80201021d40a2247104d9f4aa7bab7157b7e3f05b84b
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.2"
+  collection:
+    dependency: transitive
+    description:
+      name: collection
+      sha256: "2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.19.1"
+  convert:
+    dependency: transitive
+    description:
+      name: convert
+      sha256: b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.2"
+  coverage:
+    dependency: transitive
+    description:
+      name: coverage
+      sha256: "5da775aa218eaf2151c721b16c01c7676fbfdd99cebba2bf64e8b807a28ff94d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.15.0"
+  cross_file:
+    dependency: transitive
+    description:
+      name: cross_file
+      sha256: "701dcfc06da0882883a2657c445103380e53e647060ad8d9dfb710c100996608"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.5+1"
+  crypto:
+    dependency: transitive
+    description:
+      name: crypto
+      sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.7"
+  cupertino_icons:
+    dependency: "direct main"
+    description:
+      name: cupertino_icons
+      sha256: ba631d1c7f7bef6b729a622b7b752645a2d076dba9976925b8f25725a30e1ee6
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.8"
+  dart_jsonwebtoken:
+    dependency: transitive
+    description:
+      name: dart_jsonwebtoken
+      sha256: "0de65691c1d736e9459f22f654ddd6fd8368a271d4e41aa07e53e6301eff5075"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.3.1"
+  easy_refresh:
+    dependency: transitive
+    description:
+      name: easy_refresh
+      sha256: "486e30abfcaae66c0f2c2798a10de2298eb9dc5e0bb7e1dba9328308968cae0c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.4.0"
+  ed25519_edwards:
+    dependency: transitive
+    description:
+      name: ed25519_edwards
+      sha256: "6ce0112d131327ec6d42beede1e5dfd526069b18ad45dcf654f15074ad9276cd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
+  fake_async:
+    dependency: transitive
+    description:
+      name: fake_async
+      sha256: "5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.3.3"
+  ffi:
+    dependency: transitive
+    description:
+      name: ffi
+      sha256: "289279317b4b16eb2bb7e271abccd4bf84ec9bdcbe999e278a94b804f5630418"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.4"
+  file:
+    dependency: transitive
+    description:
+      name: file
+      sha256: a3b4f84adafef897088c160faf7dfffb7696046cb13ae90b508c2cbc95d3b8d4
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.0.1"
+  file_selector_linux:
+    dependency: transitive
+    description:
+      name: file_selector_linux
+      sha256: "2567f398e06ac72dcf2e98a0c95df2a9edd03c2c2e0cacd4780f20cdf56263a0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.4"
+  file_selector_macos:
+    dependency: transitive
+    description:
+      name: file_selector_macos
+      sha256: "5e0bbe9c312416f1787a68259ea1505b52f258c587f12920422671807c4d618a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.5"
+  file_selector_platform_interface:
+    dependency: transitive
+    description:
+      name: file_selector_platform_interface
+      sha256: "35e0bd61ebcdb91a3505813b055b09b79dfdc7d0aee9c09a7ba59ae4bb13dc85"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.7.0"
+  file_selector_windows:
+    dependency: transitive
+    description:
+      name: file_selector_windows
+      sha256: "62197474ae75893a62df75939c777763d39c2bc5f73ce5b88497208bc269abfd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.9.3+5"
+  fixnum:
+    dependency: transitive
+    description:
+      name: fixnum
+      sha256: b6dc7065e46c974bc7c5f143080a6764ec7a4be6da1285ececdc37be96de53be
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
+  flutter:
+    dependency: "direct main"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+  flutter_lints:
+    dependency: "direct dev"
+    description:
+      name: flutter_lints
+      sha256: "3105dc8492f6183fb076ccf1f351ac3d60564bff92e20bfc4af9cc1651f4e7e1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.0.0"
+  flutter_plugin_android_lifecycle:
+    dependency: transitive
+    description:
+      name: flutter_plugin_android_lifecycle
+      sha256: ee8068e0e1cd16c4a82714119918efdeed33b3ba7772c54b5d094ab53f9b7fd1
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.33"
+  flutter_riverpod:
+    dependency: "direct main"
+    description:
+      name: flutter_riverpod
+      sha256: a3cd0547353c1990bf5ad64f73143e5ce7a780409639559ad83a743ff3b945e4
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.0"
+  flutter_slidable:
+    dependency: transitive
+    description:
+      name: flutter_slidable
+      sha256: a857de7ea701f276fd6a6c4c67ae885b60729a3449e42766bb0e655171042801
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.2"
+  flutter_swiper_null_safety:
+    dependency: transitive
+    description:
+      name: flutter_swiper_null_safety
+      sha256: "5a855e0080d035c08e82f8b7fd2f106344943a30c9ab483b2584860a2f22eaaf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
+  flutter_test:
+    dependency: "direct dev"
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+  flutter_web_plugins:
+    dependency: transitive
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+  frontend_server_client:
+    dependency: transitive
+    description:
+      name: frontend_server_client
+      sha256: f64a0333a82f30b0cca061bc3d143813a486dc086b574bfb233b7c1372427694
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
+  functions_client:
+    dependency: transitive
+    description:
+      name: functions_client
+      sha256: "94074d62167ae634127ef6095f536835063a7dc80f2b1aa306d2346ff9023996"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.0"
+  glob:
+    dependency: transitive
+    description:
+      name: glob
+      sha256: c3f1ee72c96f8f78935e18aa8cecced9ab132419e8625dc187e1c2408efc20de
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.3"
+  gotrue:
+    dependency: transitive
+    description:
+      name: gotrue
+      sha256: f7b52008311941a7c3e99f9590c4ee32dfc102a5442e43abf1b287d9f8cc39b2
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.18.0"
+  gtk:
+    dependency: transitive
+    description:
+      name: gtk
+      sha256: e8ce9ca4b1df106e4d72dad201d345ea1a036cc12c360f1a7d5a758f78ffa42c
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  http:
+    dependency: transitive
+    description:
+      name: http
+      sha256: "5895291c13fa8a3bd82e76d5627f69e0d85ca6a30dcac95c4ea19a5d555879c2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.13.6"
+  http_multi_server:
+    dependency: transitive
+    description:
+      name: http_multi_server
+      sha256: aa6199f908078bb1c5efb8d8638d4ae191aac11b311132c3ef48ce352fb52ef8
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.2"
+  http_parser:
+    dependency: transitive
+    description:
+      name: http_parser
+      sha256: "178d74305e7866013777bab2c3d8726205dc5a4dd935297175b19a23a2e66571"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.2"
+  image_picker:
+    dependency: "direct main"
+    description:
+      name: image_picker
+      sha256: "021834d9c0c3de46bf0fe40341fa07168407f694d9b2bb18d532dc1261867f7a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.2"
+  image_picker_android:
+    dependency: transitive
+    description:
+      name: image_picker_android
+      sha256: "317a5d961cec5b34e777b9252393f2afbd23084aa6e60fcf601dcf6341b9ebeb"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.8.12+23"
+  image_picker_for_web:
+    dependency: transitive
+    description:
+      name: image_picker_for_web
+      sha256: "66257a3191ab360d23a55c8241c91a6e329d31e94efa7be9cf7a212e65850214"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.1"
+  image_picker_ios:
+    dependency: transitive
+    description:
+      name: image_picker_ios
+      sha256: "956c16a42c0c708f914021666ffcd8265dde36e673c9fa68c81f7d085d9774ad"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.8.13+3"
+  image_picker_linux:
+    dependency: transitive
+    description:
+      name: image_picker_linux
+      sha256: "1f81c5f2046b9ab724f85523e4af65be1d47b038160a8c8deed909762c308ed4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2"
+  image_picker_macos:
+    dependency: transitive
+    description:
+      name: image_picker_macos
+      sha256: "86f0f15a309de7e1a552c12df9ce5b59fe927e71385329355aec4776c6a8ec91"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2+1"
+  image_picker_platform_interface:
+    dependency: transitive
+    description:
+      name: image_picker_platform_interface
+      sha256: "567e056716333a1647c64bb6bd873cff7622233a5c3f694be28a583d4715690c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.11.1"
+  image_picker_windows:
+    dependency: transitive
+    description:
+      name: image_picker_windows
+      sha256: d248c86554a72b5495a31c56f060cf73a41c7ff541689327b1a7dbccc33adfae
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.2"
+  io:
+    dependency: transitive
+    description:
+      name: io
+      sha256: dfd5a80599cf0165756e3181807ed3e77daf6dd4137caaad72d0b7931597650b
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.5"
+  jwt_decode:
+    dependency: transitive
+    description:
+      name: jwt_decode
+      sha256: d2e9f68c052b2225130977429d30f187aa1981d789c76ad104a32243cfdebfbb
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
+  leak_tracker:
+    dependency: transitive
+    description:
+      name: leak_tracker
+      sha256: "33e2e26bdd85a0112ec15400c8cbffea70d0f9c3407491f672a2fad47915e2de"
+      url: "https://pub.dev"
+    source: hosted
+    version: "11.0.2"
+  leak_tracker_flutter_testing:
+    dependency: transitive
+    description:
+      name: leak_tracker_flutter_testing
+      sha256: "1dbc140bb5a23c75ea9c4811222756104fbcd1a27173f0c34ca01e16bea473c1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.10"
+  leak_tracker_testing:
+    dependency: transitive
+    description:
+      name: leak_tracker_testing
+      sha256: "8d5a2d49f4a66b49744b23b018848400d23e54caf9463f4eb20df3eb8acb2eb1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.2"
+  lints:
+    dependency: transitive
+    description:
+      name: lints
+      sha256: a5e2b223cb7c9c8efdc663ef484fdd95bb243bff242ef5b13e26883547fce9a0
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.0.0"
+  logging:
+    dependency: transitive
+    description:
+      name: logging
+      sha256: c8245ada5f1717ed44271ed1c26b8ce85ca3228fd2ffdb75468ab01979309d61
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.3.0"
+  matcher:
+    dependency: transitive
+    description:
+      name: matcher
+      sha256: "12956d0ad8390bbcc63ca2e1469c0619946ccb52809807067a7020d57e647aa6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.12.18"
+  material_color_utilities:
+    dependency: transitive
+    description:
+      name: material_color_utilities
+      sha256: "9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.13.0"
+  meta:
+    dependency: transitive
+    description:
+      name: meta
+      sha256: "23f08335362185a5ea2ad3a4e597f1375e78bce8a040df5c600c8d3552ef2394"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.17.0"
+  mime:
+    dependency: transitive
+    description:
+      name: mime
+      sha256: "41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.0"
+  node_preamble:
+    dependency: transitive
+    description:
+      name: node_preamble
+      sha256: "6e7eac89047ab8a8d26cf16127b5ed26de65209847630400f9aefd7cd5c730db"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.2"
+  package_config:
+    dependency: transitive
+    description:
+      name: package_config
+      sha256: f096c55ebb7deb7e384101542bfba8c52696c1b56fca2eb62827989ef2353bbc
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  path:
+    dependency: "direct main"
+    description:
+      name: path
+      sha256: "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.9.1"
+  path_drawing:
+    dependency: transitive
+    description:
+      name: path_drawing
+      sha256: bbb1934c0cbb03091af082a6389ca2080345291ef07a5fa6d6e078ba8682f977
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
+  path_parsing:
+    dependency: transitive
+    description:
+      name: path_parsing
+      sha256: "883402936929eac138ee0a45da5b0f2c80f89913e6dc3bf77eb65b84b409c6ca"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
+  path_provider:
+    dependency: "direct main"
+    description:
+      name: path_provider
+      sha256: "50c5dd5b6e1aaf6fb3a78b33f6aa3afca52bf903a8a5298f53101fdaee55bbcd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.5"
+  path_provider_android:
+    dependency: transitive
+    description:
+      name: path_provider_android
+      sha256: f2c65e21139ce2c3dad46922be8272bb5963516045659e71bb16e151c93b580e
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.22"
+  path_provider_foundation:
+    dependency: transitive
+    description:
+      name: path_provider_foundation
+      sha256: "6d13aece7b3f5c5a9731eaf553ff9dcbc2eff41087fd2df587fd0fed9a3eb0c4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.1"
+  path_provider_linux:
+    dependency: transitive
+    description:
+      name: path_provider_linux
+      sha256: f7a1fe3a634fe7734c8d3f2766ad746ae2a2884abe22e241a8b301bf5cac3279
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.1"
+  path_provider_platform_interface:
+    dependency: transitive
+    description:
+      name: path_provider_platform_interface
+      sha256: "88f5779f72ba699763fa3a3b06aa4bf6de76c8e5de842cf6f29e2e06476c2334"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
+  path_provider_windows:
+    dependency: transitive
+    description:
+      name: path_provider_windows
+      sha256: bd6f00dbd873bfb70d0761682da2b3a2c2fccc2b9e84c495821639601d81afe7
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.0"
+  photo_manager:
+    dependency: "direct main"
+    description:
+      name: photo_manager
+      sha256: "807688e3221e90fb02a4466746edd9cb9a0de025f8754c819f96604c00f6f1f5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.8.3"
+  platform:
+    dependency: transitive
+    description:
+      name: platform
+      sha256: "5d6b1b0036a5f331ebc77c850ebc8506cbc1e9416c27e59b439f917a902a4984"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.6"
+  plugin_platform_interface:
+    dependency: transitive
+    description:
+      name: plugin_platform_interface
+      sha256: "4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
+  pool:
+    dependency: transitive
+    description:
+      name: pool
+      sha256: "978783255c543aa3586a1b3c21f6e9d720eb315376a915872c61ef8b5c20177d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.2"
+  postgrest:
+    dependency: transitive
+    description:
+      name: postgrest
+      sha256: f4b6bb24b465c47649243ef0140475de8a0ec311dc9c75ebe573b2dcabb10460
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.6.0"
+  pub_semver:
+    dependency: transitive
+    description:
+      name: pub_semver
+      sha256: "5bfcf68ca79ef689f8990d1160781b4bad40a3bd5e5218ad4076ddb7f4081585"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  realtime_client:
+    dependency: transitive
+    description:
+      name: realtime_client
+      sha256: "5268afc208d02fb9109854d262c1ebf6ece224cd285199ae1d2f92d2ff49dbf1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.7.0"
+  retry:
+    dependency: transitive
+    description:
+      name: retry
+      sha256: "822e118d5b3aafed083109c72d5f484c6dc66707885e07c0fbcb8b986bba7efc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.2"
+  riverpod:
+    dependency: transitive
+    description:
+      name: riverpod
+      sha256: "9026676260f31bb5279cc5e59ca292145d8bab4aabede9aa2555c2a626ec66f1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.0"
+  rxdart:
+    dependency: transitive
+    description:
+      name: rxdart
+      sha256: "5c3004a4a8dbb94bd4bf5412a4def4acdaa12e12f269737a5751369e12d1a962"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.28.0"
+  shared_preferences:
+    dependency: transitive
+    description:
+      name: shared_preferences
+      sha256: "2939ae520c9024cb197fc20dee269cd8cdbf564c8b5746374ec6cacdc5169e64"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.4"
+  shared_preferences_android:
+    dependency: transitive
+    description:
+      name: shared_preferences_android
+      sha256: "83af5c682796c0f7719c2bbf74792d113e40ae97981b8f266fa84574573556bc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.18"
+  shared_preferences_foundation:
+    dependency: transitive
+    description:
+      name: shared_preferences_foundation
+      sha256: "4e7eaffc2b17ba398759f1151415869a34771ba11ebbccd1b0145472a619a64f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.5.6"
+  shared_preferences_linux:
+    dependency: transitive
+    description:
+      name: shared_preferences_linux
+      sha256: "580abfd40f415611503cae30adf626e6656dfb2f0cee8f465ece7b6defb40f2f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.1"
+  shared_preferences_platform_interface:
+    dependency: transitive
+    description:
+      name: shared_preferences_platform_interface
+      sha256: "57cbf196c486bc2cf1f02b85784932c6094376284b3ad5779d1b1c6c6a816b80"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.1"
+  shared_preferences_web:
+    dependency: transitive
+    description:
+      name: shared_preferences_web
+      sha256: c49bd060261c9a3f0ff445892695d6212ff603ef3115edbb448509d407600019
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.3"
+  shared_preferences_windows:
+    dependency: transitive
+    description:
+      name: shared_preferences_windows
+      sha256: "94ef0f72b2d71bc3e700e025db3710911bd51a71cefb65cc609dd0d9a982e3c1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.1"
+  shelf:
+    dependency: transitive
+    description:
+      name: shelf
+      sha256: e7dd780a7ffb623c57850b33f43309312fc863fb6aa3d276a754bb299839ef12
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.2"
+  shelf_packages_handler:
+    dependency: transitive
+    description:
+      name: shelf_packages_handler
+      sha256: "89f967eca29607c933ba9571d838be31d67f53f6e4ee15147d5dc2934fee1b1e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.2"
+  shelf_static:
+    dependency: transitive
+    description:
+      name: shelf_static
+      sha256: c87c3875f91262785dade62d135760c2c69cb217ac759485334c5857ad89f6e3
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.3"
+  shelf_web_socket:
+    dependency: transitive
+    description:
+      name: shelf_web_socket
+      sha256: "3632775c8e90d6c9712f883e633716432a27758216dfb61bd86a8321c0580925"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.0"
+  sky_engine:
+    dependency: transitive
+    description: flutter
+    source: sdk
+    version: "0.0.0"
+  source_map_stack_trace:
+    dependency: transitive
+    description:
+      name: source_map_stack_trace
+      sha256: c0713a43e323c3302c2abe2a1cc89aa057a387101ebd280371d6a6c9fa68516b
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
+  source_maps:
+    dependency: transitive
+    description:
+      name: source_maps
+      sha256: "190222579a448b03896e0ca6eca5998fa810fda630c1d65e2f78b3f638f54812"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.10.13"
+  source_span:
+    dependency: transitive
+    description:
+      name: source_span
+      sha256: "254ee5351d6cb365c859e20ee823c3bb479bf4a293c22d17a9f1bf144ce86f7c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.10.1"
+  stack_trace:
+    dependency: transitive
+    description:
+      name: stack_trace
+      sha256: "8b27215b45d22309b5cddda1aa2b19bdfec9df0e765f2de506401c071d38d1b1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.1"
+  state_notifier:
+    dependency: transitive
+    description:
+      name: state_notifier
+      sha256: b8677376aa54f2d7c58280d5a007f9e8774f1968d1fb1c096adcb4792fba29bb
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  storage_client:
+    dependency: transitive
+    description:
+      name: storage_client
+      sha256: "1c61b19ed9e78f37fdd1ca8b729ab8484e6c8fe82e15c87e070b861951183657"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.1"
+  stream_channel:
+    dependency: transitive
+    description:
+      name: stream_channel
+      sha256: "969e04c80b8bcdf826f8f16579c7b14d780458bd97f56d107d3950fdbeef059d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.4"
+  stream_transform:
+    dependency: transitive
+    description:
+      name: stream_transform
+      sha256: ad47125e588cfd37a9a7f86c7d6356dde8dfe89d071d293f80ca9e9273a33871
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.1"
+  string_scanner:
+    dependency: transitive
+    description:
+      name: string_scanner
+      sha256: "921cd31725b72fe181906c6a94d987c78e3b98c2e205b397ea399d4054872b43"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.1"
+  supabase:
+    dependency: transitive
+    description:
+      name: supabase
+      sha256: cc039f63a3168386b3a4f338f3bff342c860d415a3578f3fbe854024aee6f911
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.10.2"
+  supabase_flutter:
+    dependency: "direct main"
+    description:
+      name: supabase_flutter
+      sha256: "92b2416ecb6a5c3ed34cf6e382b35ce6cc8921b64f2a9299d5d28968d42b09bb"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.12.0"
+  tdesign_flutter:
+    dependency: "direct main"
+    description:
+      name: tdesign_flutter
+      sha256: "79c1ed3fc67836426a8a93e5e0dcd764befa1341eae13a904bcf9e7de996f05c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.7"
+  tdesign_flutter_adaptation:
+    dependency: transitive
+    description:
+      name: tdesign_flutter_adaptation
+      sha256: "707bbc52ec8b5872ea808500200f402007acf24c03a1cc823a3be2113c1d813a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.32.0"
+  term_glyph:
+    dependency: transitive
+    description:
+      name: term_glyph
+      sha256: "7f554798625ea768a7518313e58f83891c7f5024f88e46e7182a4558850a4b8e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.2"
+  test:
+    dependency: transitive
+    description:
+      name: test
+      sha256: "54c516bbb7cee2754d327ad4fca637f78abfc3cbcc5ace83b3eda117e42cd71a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.29.0"
+  test_api:
+    dependency: transitive
+    description:
+      name: test_api
+      sha256: "93167629bfc610f71560ab9312acdda4959de4df6fac7492c89ff0d3886f6636"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.9"
+  test_core:
+    dependency: transitive
+    description:
+      name: test_core
+      sha256: "394f07d21f0f2255ec9e3989f21e54d3c7dc0e6e9dbce160e5a9c1a6be0e2943"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.15"
+  typed_data:
+    dependency: transitive
+    description:
+      name: typed_data
+      sha256: f9049c039ebfeb4cf7a7104a675823cd72dba8297f264b6637062516699fa006
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.4.0"
+  url_launcher:
+    dependency: transitive
+    description:
+      name: url_launcher
+      sha256: f6a7e5c4835bb4e3026a04793a4199ca2d14c739ec378fdfe23fc8075d0439f8
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.3.2"
+  url_launcher_android:
+    dependency: transitive
+    description:
+      name: url_launcher_android
+      sha256: "767344bf3063897b5cf0db830e94f904528e6dd50a6dfaf839f0abf509009611"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.3.28"
+  url_launcher_ios:
+    dependency: transitive
+    description:
+      name: url_launcher_ios
+      sha256: cfde38aa257dae62ffe79c87fab20165dfdf6988c1d31b58ebf59b9106062aad
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.3.6"
+  url_launcher_linux:
+    dependency: transitive
+    description:
+      name: url_launcher_linux
+      sha256: d5e14138b3bc193a0f63c10a53c94b91d399df0512b1f29b94a043db7482384a
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.2"
+  url_launcher_macos:
+    dependency: transitive
+    description:
+      name: url_launcher_macos
+      sha256: "368adf46f71ad3c21b8f06614adb38346f193f3a59ba8fe9a2fd74133070ba18"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.5"
+  url_launcher_platform_interface:
+    dependency: transitive
+    description:
+      name: url_launcher_platform_interface
+      sha256: "552f8a1e663569be95a8190206a38187b531910283c3e982193e4f2733f01029"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.2"
+  url_launcher_web:
+    dependency: transitive
+    description:
+      name: url_launcher_web
+      sha256: d0412fcf4c6b31ecfdb7762359b7206ffba3bbffd396c6d9f9c4616ece476c1f
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.2"
+  url_launcher_windows:
+    dependency: transitive
+    description:
+      name: url_launcher_windows
+      sha256: "712c70ab1b99744ff066053cbe3e80c73332b38d46e5e945c98689b2e66fc15f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.5"
+  vector_math:
+    dependency: transitive
+    description:
+      name: vector_math
+      sha256: d530bd74fea330e6e364cda7a85019c434070188383e1cd8d9777ee586914c5b
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  video_thumbnail_pro:
+    dependency: "direct main"
+    description:
+      name: video_thumbnail_pro
+      sha256: ce057ca703a0cbcff4ea75daed14b76426e789877b03e874aa3db8c3cdb7ce7c
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.3"
+  vm_service:
+    dependency: transitive
+    description:
+      name: vm_service
+      sha256: "45caa6c5917fa127b5dbcfbd1fa60b14e583afdc08bfc96dda38886ca252eb60"
+      url: "https://pub.dev"
+    source: hosted
+    version: "15.0.2"
+  watcher:
+    dependency: transitive
+    description:
+      name: watcher
+      sha256: "1398c9f081a753f9226febe8900fce8f7d0a67163334e1c94a2438339d79d635"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.1"
+  web:
+    dependency: transitive
+    description:
+      name: web
+      sha256: "868d88a33d8a87b18ffc05f9f030ba328ffefba92d6c127917a2ba740f9cfe4a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
+  web_socket:
+    dependency: transitive
+    description:
+      name: web_socket
+      sha256: "34d64019aa8e36bf9842ac014bb5d2f5586ca73df5e4d9bf5c936975cae6982c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.1"
+  web_socket_channel:
+    dependency: transitive
+    description:
+      name: web_socket_channel
+      sha256: d645757fb0f4773d602444000a8131ff5d48c9e47adfe9772652dd1a4f2d45c8
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.3"
+  webkit_inspection_protocol:
+    dependency: transitive
+    description:
+      name: webkit_inspection_protocol
+      sha256: "87d3f2333bb240704cd3f1c6b5b7acd8a10e7f0bc28c28dcf14e782014f4a572"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.1"
+  webview_flutter:
+    dependency: "direct main"
+    description:
+      name: webview_flutter
+      sha256: a3da219916aba44947d3a5478b1927876a09781174b5a2b67fa5be0555154bf9
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.13.1"
+  webview_flutter_android:
+    dependency: transitive
+    description:
+      name: webview_flutter_android
+      sha256: eeeb3fcd5f0ff9f8446c9f4bbc18a99b809e40297528a3395597d03aafb9f510
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.10.11"
+  webview_flutter_platform_interface:
+    dependency: transitive
+    description:
+      name: webview_flutter_platform_interface
+      sha256: "63d26ee3aca7256a83ccb576a50272edd7cfc80573a4305caa98985feb493ee0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.14.0"
+  webview_flutter_wkwebview:
+    dependency: transitive
+    description:
+      name: webview_flutter_wkwebview
+      sha256: e49f378ed066efb13fc36186bbe0bd2425630d4ea0dbc71a18fdd0e4d8ed8ebc
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.23.5"
+  xdg_directories:
+    dependency: transitive
+    description:
+      name: xdg_directories
+      sha256: "7a3f37b05d989967cdddcbb571f1ea834867ae2faa29725fd085180e0883aa15"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
+  yaml:
+    dependency: transitive
+    description:
+      name: yaml
+      sha256: b9da305ac7c39faa3f030eccd175340f968459dae4af175130b3fc47e40d76ce
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.3"
+  yet_another_json_isolate:
+    dependency: transitive
+    description:
+      name: yet_another_json_isolate
+      sha256: fe45897501fa156ccefbfb9359c9462ce5dec092f05e8a56109db30be864f01e
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+sdks:
+  dart: ">=3.10.7 <4.0.0"
+  flutter: ">=3.38.0"
 </file>
 
 <file path="supabase/backups/20260120-165149/config/config.toml">
@@ -245676,6 +245019,1138 @@ import App from './App.vue'
 createApp(App).mount('#app')
 </file>
 
+<file path="app/lib/main.dart">
+import 'package:camera/camera.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:braindance/configs/reco_config.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/extra_func/theme_provider.dart';
+import 'package:braindance/extra_func/locale_provider.dart';
+import 'pages/recall.dart';
+import 'pages/record.dart';
+import 'pages/generate.dart';
+import 'pages/settings.dart';
+import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/gen_config.dart';
+import 'package:braindance/configs/set_config.dart';
+
+//App Data
+final themeData = TDTheme.defaultData();
+//MainScreen
+final pageIndexProvider = StateProvider((ref) => 0);
+final loadingProvider = StateProvider((ref) => true);
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  TDTheme.needMultiTheme(true);
+
+  /// 开启多套主题功能
+  AppConfig.initializeAppConfig(); //加载默认数据
+  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
+  //Camera
+  try {
+    final List<CameraDescription> camsTemp = await availableCameras();
+    //摄像机分类。
+    for (var cam in camsTemp) {
+      switch (cam.lensDirection) {
+        case CameraLensDirection.front:
+          RecoConfig.frontCameras.add(cam);
+          break;
+        case CameraLensDirection.back:
+          RecoConfig.backCameras.add(cam);
+          break;
+        case CameraLensDirection.external:
+          RecoConfig.externalCameras.add(cam);
+          break;
+      }
+    }
+    RecoConfig.cameras = camsTemp;
+    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
+  } catch (e) {
+    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
+    RecoConfig.cameras = [];
+    RecoConfig.frontCameras = [];
+    RecoConfig.backCameras = [];
+    RecoConfig.externalCameras = [];
+    RecoConfig.cameraEnabled = false;
+  }
+  //
+  runApp(const ProviderScope(child: MyApp()));
+}
+
+//App定义
+class MyApp extends StatelessWidget with WidgetsBindingObserver {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addObserver(this); // 注册观察者
+    return const Home();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.inactive:
+        RecoConfig.disposeCamera();
+        break;
+      case AppLifecycleState.resumed:
+        RecoConfig.refreshCamera();
+        break;
+      case AppLifecycleState.paused: // 应用进入后台（例如用户按了Home键、切换到其他应用）
+        GenConfig.saveUploadedAssets();
+        break;
+      default:
+    }
+  }
+}
+
+class Home extends ConsumerWidget {
+  const Home({super.key});
+  void loadSettings(WidgetRef ref) async {
+    if (!ref.read(loadingProvider)) {
+      return;
+    }
+    final bool suc = await SetConfig.loadMsgFromFile();
+    if (suc) {
+      SetConfig.loadSettingsFromMsg(ref);
+    }
+    ref.read(loadingProvider.notifier).state = false;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(localeProvider);
+    final themeModeAsync = ref.watch(themeModeProvider);
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: "Brain Dance",
+      theme: themeData.systemThemeDataLight?.copyWith(
+        textTheme: themeData.systemThemeDataLight?.textTheme.apply(
+          fontFamily: AppConfig.fontFamily,
+        ),
+      ),
+      darkTheme: themeData.systemThemeDataDark?.copyWith(
+        textTheme: themeData.systemThemeDataDark?.textTheme.apply(
+          fontFamily: AppConfig.fontFamily,
+        ),
+      ),
+      themeMode: themeModeAsync,
+      initialRoute: '/', // 初始路由路径
+      routes: {
+        // 路由表：路径 -> 页面构建器
+        '/': (context) {
+          loadSettings(ref);
+          return MainScreen();
+        }, // 根路径对应主屏幕
+        '/example': (context) => RecallPage(), // "/example"路径对应....
+      },
+    );
+  }
+}
+
+//主屏幕
+class MainScreen extends ConsumerWidget {
+  const MainScreen({super.key});
+  static const TextStyle selectedTextStyle = TextStyle(fontSize: 10);
+  static const double unselectedSize = 32;
+  static const double selectedSize = 36;
+  Widget getPage(int pageIndex, WidgetRef ref) {
+    switch (pageIndex) {
+      case 0:
+        return RecallPage(); // 页面0: 主页：过往回忆
+      case 1:
+        return RecordPage(); // 页面1: 相机记录
+      case 2:
+        return GeneratePage(); // 页面2: 图文生成
+      case 3:
+        return SettingsPage(homeRef: ref); // 页面3: 设置
+    }
+    return RecallPage();
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool isLoading = ref.watch(loadingProvider); //加载状态
+    final int pageIndex = ref.watch(pageIndexProvider);
+    return Scaffold(
+      body: isLoading
+          ? Scaffold(body: Center(child: Text('Now Loading...')))
+          : AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.02, 0.0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: Container(
+                key: ValueKey<int>(pageIndex),
+                child: getPage(pageIndex, ref),
+              ),
+            ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: TDBottomTabBar(
+          // 底部导航栏
+          TDBottomTabBarBasicType.iconText,
+          componentType: TDBottomTabBarComponentType.normal,
+          useVerticalDivider: false,
+          centerDistance: 4,
+          navigationTabs: [
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("recall"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("record"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("generate"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("settings"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
+            ),
+          ],
+          //backgroundColor: AppConfig.primaryColor,
+          currentIndex: pageIndex, // 当前选中索引
+          barHeight: 74,
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="app/lib/pages/generate.dart">
+import 'package:braindance/extra_func/dir_and_file.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
+import 'dart:io';
+import 'package:braindance/extra_func_v2/video_thumbnail.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:braindance/configs/gen_config.dart';
+import '../extra_func/dynamic_background.dart';
+
+class GeneratePage extends StatefulWidget {
+  const GeneratePage({super.key});
+
+  @override
+  State<GeneratePage> createState() => _GeneratePageState();
+}
+
+class _GeneratePageState extends State<GeneratePage>
+    with TickerProviderStateMixin {
+  late final TabController _tabController;
+  late final ScrollController _scrollController;
+  late final TextEditingController _textEditingController;
+  final ImagePicker _picker = ImagePicker();
+  static Key _uploadKey = UniqueKey();
+  static Key _uploadKey2 = UniqueKey();
+  static const TextStyle tabTextStyle = TextStyle(
+    fontSize: 16,
+    fontFamily: AppConfig.fontFamily,
+  );
+  static const int maxImageCount = 3;
+  static const int sizeLimit = 4096; //鏂囦欢澶у皬闄愬埗(kb)
+  static bool firstCheck = false; //妫€娴嬬敤鎴锋槸鍚︿笉鏄涓€娆℃墦寮€璇ョ晫闈?
+  void loadCache() async {
+    //Image
+    final List<String> paths = await GenConfig.loadImagePathsFile();
+    for (String path in paths) {
+      GenConfig.uploadedImages.add(
+        TDUploadFile(key: 1, assetPath: path, file: File(path)),
+      );
+    }
+    //Text
+    final String text = await GenConfig.loadTextFile();
+    if (text.isNotEmpty) {
+      GenConfig.uploadedText = text;
+    }
+    //Video
+    final List<String> paths2 = await GenConfig.loadVideoPathsFile();
+    for (String path in paths2) {
+      GenConfig.uploadedVideos.add(
+        TDUploadFile(
+          key: 1,
+          assetPath: path,
+          file: File(await VThumb.ensureThumb(path)),
+        ),
+      );
+    }
+    setState(() {});
+  }
+
+  Future<String> _uploadImages(List<XFile> images) async {
+    String msg = "";
+    final capacity = maxImageCount - GenConfig.uploadedImages.length;
+    if (images.length > capacity) {
+      msg = textLocalize("tip_overquan");
+    }
+    final minLength = (capacity > images.length) ? images.length : capacity;
+    for (int i = 0; i < minLength; i++) {
+      var image = images[i];
+      if (await image.length() ~/ 1024 > sizeLimit) {
+        msg = textLocalize("tip_oversize");
+        continue;
+      }
+      GenConfig.uploadedImages.add(
+        TDUploadFile(key: 1, assetPath: image.path, file: File(image.path)),
+      );
+    }
+    return msg;
+  }
+
+  Future<String> _uploadVideo(XFile? video) async {
+    if (video == null) {
+      return textLocalize("tip_fail");
+    }
+
+    GenConfig.uploadedVideos.add(
+      TDUploadFile(
+        key: 1,
+        assetPath: video.path,
+        file: File(await VThumb.ensureThumb(video.path)),
+      ),
+    );
+    return "";
+  }
+
+  void _showActionSheet(BuildContext context, bool isImage) {
+    TDActionSheet(
+      context,
+      items: [
+        TDActionSheetItem(label: textLocalize("gen_shot")),
+        TDActionSheetItem(label: textLocalize("gen_gallery")),
+      ],
+      cancelText: textLocalize("gen_cancel"),
+      onSelected: (item, index) async {
+        if (index == 0) {
+          final XFile? file;
+          late final AssetEntity newAsset;
+          final PermissionState ps =
+              await PhotoManager.requestPermissionExtend();
+          if (!ps.isAuth) {
+            if (context.mounted) {
+              TDToast.showText(
+                textLocalize("tip_no_permission"),
+                context: context,
+              );
+            }
+            return;
+          }
+          if (isImage) {
+            file = await _picker.pickImage(source: ImageSource.camera);
+            if (file == null) {
+              return;
+            }
+            newAsset = await PhotoManager.editor.saveImageWithPath(
+              file.path,
+              title: file.name,
+            );
+          } else {
+            file = await _picker.pickVideo(
+              source: ImageSource.camera,
+              maxDuration: const Duration(minutes: 3),
+            );
+            if (file == null) {
+              return;
+            }
+            newAsset = await PhotoManager.editor.saveVideo(
+              File(file.path),
+              title: file.name,
+            );
+          }
+          try {
+            await FileSystem.deleteFile(file.path);
+            File? f = await newAsset.originFile;
+            if (f == null) {
+              throw ();
+            }
+            XFile fileSaved = XFile(f.path);
+            late final String msg;
+            if (isImage) {
+              msg = await _uploadImages(List.filled(1, fileSaved));
+            } else {
+              msg = await _uploadVideo(fileSaved);
+            }
+            if (msg.isNotEmpty && context.mounted) {
+              TDToast.showText(msg, context: context);
+            }
+          } catch (e) {
+            if (context.mounted) {
+              TDToast.showText(textLocalize("tip_fail"), context: context);
+            }
+          }
+        } else {
+          late final String msg;
+          if (isImage) {
+            msg = await _uploadImages(await _picker.pickMultiImage());
+          } else {
+            msg = await _uploadVideo(
+              await _picker.pickVideo(source: ImageSource.gallery),
+            );
+          }
+          if (msg.isNotEmpty && context.mounted) {
+            TDToast.showText(msg, context: context);
+          }
+        }
+        setState(() {});
+      },
+    ).show();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(
+      length: 3,
+      vsync: this,
+      animationDuration: Duration(milliseconds: 200),
+    );
+    _scrollController = ScrollController();
+    _textEditingController = TextEditingController();
+
+    if (firstCheck) {
+      return;
+    }
+    firstCheck = true;
+    //浠ヤ笅浠ｇ爜鍙細鎵ц涓€娆?
+    //鍦ㄦ澶勬墽琛屽姞杞界紦瀛樻暟鎹搷浣?
+    loadCache();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _scrollController.dispose();
+    _textEditingController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> tabContents = [
+      Container(
+        color: TDTheme.of(context).whiteColor1,
+        child: TDTabBar(
+          tabs: [
+            TDTab(text: textLocalize('gen_pic')),
+            TDTab(text: textLocalize('gen_text')),
+            TDTab(text: textLocalize('gen_video')),
+          ],
+          controller: _tabController,
+          showIndicator: true,
+          indicatorPadding: const EdgeInsets.all(4.0),
+          indicatorWidth: 24, // 鏇寸煭鐨勬寚绀哄櫒鏄惧緱鏇寸簿鑷?
+          indicatorHeight: 3,
+          indicatorColor: AppConfig.primaryColor,
+          onTap: (index) {
+            setState(() {});
+          },
+          labelStyle: tabTextStyle.copyWith(
+            fontWeight: FontWeight.w600,
+            color: AppConfig.primaryColor,
+          ),
+          unselectedLabelStyle: tabTextStyle.copyWith(
+            fontWeight: FontWeight.w400,
+            color: TDTheme.of(context).fontGyColor3,
+          ),
+        ),
+      ),
+    ];
+    switch (_tabController.index) {
+      case 0:
+        final TDUpload myTDUpload = TDUpload(
+          key: _uploadKey,
+          files: GenConfig.uploadedImages,
+          multiple: true,
+          max: maxImageCount,
+          onUploadTap: () {
+            _showActionSheet(context, true);
+          },
+          onChange: (files, type) {
+            switch (type) {
+              case TDUploadType.add:
+                GenConfig.uploadedImages = [
+                  ...GenConfig.uploadedImages,
+                  ...files,
+                ];
+                break;
+              case TDUploadType.remove:
+                for (var f in files) {
+                  GenConfig.uploadedImages.remove(f);
+                }
+                break;
+              case TDUploadType.replace:
+                break;
+            }
+            setState(() {
+              _uploadKey = UniqueKey();
+            });
+          },
+          mediaType: [TDUploadMediaType.image],
+          width: 150,
+          height: 150,
+        );
+        final Widget sb = Scrollbar(
+          controller: _scrollController,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TDText(
+                  textLocalize('gen_tip_pic'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: myTDUpload,
+                ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
+              ],
+            ),
+          ),
+        );
+        tabContents.add(Expanded(child: sb));
+        break;
+      case 1:
+        _textEditingController.text = GenConfig.uploadedText;
+        final Widget sb = Scrollbar(
+          controller: _scrollController,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TDText(
+                  textLocalize('gen_tip_text'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: TDTextarea(
+                    controller: _textEditingController,
+                    hintText: textLocalize("gen_tip_textbox"),
+                    minLines: 8,
+                    maxLines: 20,
+                    onChanged: (value) {
+                      GenConfig.uploadedText = value;
+                    },
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                      border: Border.all(color: Colors.transparent),
+                    ),
+                    textStyle: TextStyle(
+                      color: TDTheme.of(context).fontGyColor1,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
+              ],
+            ),
+          ),
+        );
+        tabContents.add(Expanded(child: sb));
+        break;
+      case 2:
+        final TDUpload myTDUpload = TDUpload(
+          type: TDUploadBoxType.circle,
+          key: _uploadKey2,
+          files: GenConfig.uploadedVideos,
+          multiple: false,
+          onUploadTap: () {
+            _showActionSheet(context, false);
+          },
+          onChange: (files, type) {
+            switch (type) {
+              case TDUploadType.add:
+                GenConfig.uploadedVideos = [
+                  ...GenConfig.uploadedVideos,
+                  ...files,
+                ];
+                break;
+              case TDUploadType.remove:
+                for (var f in files) {
+                  GenConfig.uploadedVideos.remove(f);
+                }
+                break;
+              case TDUploadType.replace:
+                break;
+            }
+            setState(() {
+              _uploadKey2 = UniqueKey();
+            });
+          },
+          mediaType: [TDUploadMediaType.video],
+          width: 150,
+          height: 150,
+        );
+        final Widget sb = Scrollbar(
+          controller: _scrollController,
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TDText(
+                  textLocalize('gen_tip_video'),
+                  font: TDTheme.of(context).fontTitleMedium,
+                  fontWeight: FontWeight.w600,
+                  textColor: TDTheme.of(context).fontGyColor1,
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    border: Border.all(
+                      color: TDTheme.of(context).whiteColor1,
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      )
+                    ],
+                  ),
+                  child: myTDUpload,
+                ),
+                const SizedBox(height: 100), // 涓哄簳閮ㄦ寜閽暀鍑虹┖闂?
+              ],
+            ),
+          ),
+        );
+        tabContents.add(Expanded(child: sb));
+        break;
+    }
+    return Scaffold(
+      backgroundColor: TDTheme.of(context).grayColor1,
+      appBar: AppBar(
+        title: TDText(
+          textLocalize('gen_top'),
+          font: TDTheme.of(context).fontTitleLarge,
+          fontWeight: FontWeight.w600,
+          textColor: TDTheme.of(context).fontGyColor1,
+        ),
+        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        elevation: 0,
+        centerTitle: true,
+      ),
+      extendBodyBehindAppBar: true,
+      body: DynamicGradientBackground(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(children: tabContents),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                padding: const EdgeInsets.only(bottom: 32, top: 24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      TDTheme.of(context).grayColor1,
+                      TDTheme.of(context).grayColor1.withValues(alpha: 0.9),
+                      TDTheme.of(context).grayColor1.withValues(alpha: 0.0),
+                    ],
+                    stops: const [0.0, 0.6, 1.0],
+                  ),
+                ),
+                child: TDButton(
+                  onTap: () {
+                    TDToast.showText(textLocalize('tip_unava'), context: context);
+                  },
+                  style: TDButtonStyle(
+                    backgroundColor: AppConfig.primaryColor,
+                    textColor: Colors.white,
+                    radius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                  ),
+                  type: TDButtonType.fill,
+                  shape: TDButtonShape.round,
+                  theme: TDButtonTheme.primary,
+                  size: TDButtonSize.large,
+                  width: MediaQuery.of(context).size.width * 0.85,
+                  text: textLocalize('gen_button'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="app/lib/pages/recall.dart">
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import '../configs/app_config.dart';
+import '../extra_func/dynamic_background.dart';
+
+class RecallPage extends StatefulWidget {
+  const RecallPage({super.key});
+
+  @override
+  State<RecallPage> createState() => _RecallPageState();
+}
+
+class _RecallPageState extends State<RecallPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: TDTheme.of(context).grayColor1,
+      appBar: AppBar(
+        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        title: Container(
+          alignment: Alignment.centerLeft,
+          child: TDText(
+            textLocalize("home_page"),
+            font: TDTheme.of(context).fontHeadlineSmall,
+            fontWeight: FontWeight.w600,
+            textColor: TDTheme.of(context).fontGyColor1,
+          ),
+        ),
+        toolbarHeight: 60,
+        elevation: 0,
+      ),
+      extendBodyBehindAppBar: true,
+      body: DynamicGradientBackground(
+        child: Center(
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+            decoration: BoxDecoration(
+              color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+              border: Border.all(
+                color: TDTheme.of(context).whiteColor1,
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                )
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                  TDImage(
+                    assetUrl: 'assets/sprites/empty_state.png',
+                    width: 120,
+                    height: 120,
+                    errorWidget: Icon(
+                      TDIcons.time_filled,
+                      size: 80,
+                      color: TDTheme.of(context).brandColor4,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  TDText(
+                    textLocalize("home_page"),
+                    font: TDTheme.of(context).fontTitleLarge,
+                    textColor: TDTheme.of(context).fontGyColor1,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  const SizedBox(height: 8),
+                  TDText(
+                    "暂无回忆，去记录一些美好瞬间吧",
+                    font: TDTheme.of(context).fontBodyMedium,
+                    textColor: TDTheme.of(context).fontGyColor3,
+                  ),
+                  const SizedBox(height: 40),
+                  TDButton(
+                    text: "开始记录",
+                    iconWidget: const Icon(TDIcons.camera, color: Colors.white, size: 20),
+                    type: TDButtonType.fill,
+                    theme: TDButtonTheme.primary,
+                    shape: TDButtonShape.round,
+                    size: TDButtonSize.large,
+                    onTap: () {
+                      // 预留跳转到记录页面的逻辑
+                    },
+                  ),
+                ],
+              ),
+            ),
+        ),
+      ),
+    );
+  }
+}
+</file>
+
+<file path="app/lib/pages/record.dart">
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/reco_config.dart';
+import 'package:braindance/configs/app_config.dart';
+import 'package:camera/camera.dart';
+
+class RecordPage extends StatefulWidget {
+  const RecordPage({super.key});
+
+  @override
+  State<RecordPage> createState() => _RecordPageState();
+}
+class _RecordPageState extends State<RecordPage> with SingleTickerProviderStateMixin {
+  late AnimationController _buttonAnimController;
+  late Animation<double> _buttonScaleAnimation;
+
+ @override
+  void initState() {
+    super.initState();
+    _buttonAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
+      CurvedAnimation(parent: _buttonAnimController, curve: Curves.easeInOut),
+    );
+
+    //相机初始化
+    if (!RecoConfig.cameraEnabled) {
+      return;
+    }
+    RecoConfig.onUpdate = () {setState(() {
+      
+    });};
+    RecoConfig.cameraInitialize();
+  }
+  
+@override
+void dispose() {
+  _buttonAnimController.dispose();
+  RecoConfig.cameraController?.dispose();
+  RecoConfig.cameraController = null;  // 防止内存泄漏和误用
+  RecoConfig.onUpdate = () {};
+  super.dispose();
+}
+  @override
+  Widget build(BuildContext context) {
+    late final Widget cameraView;
+    if (!RecoConfig.cameraEnabled) {
+      cameraView = Center(child: Text(textLocalize("reco_camun")));
+    } else if (!RecoConfig.cameraController!.value.isInitialized) {
+      cameraView = Center(child: Text(textLocalize("reco_wait")));
+    } else {
+      cameraView = CameraPreview(RecoConfig.cameraController!);
+    }
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          Positioned.fill(child: cameraView),
+          // 顶部控制栏
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 16,
+            right: 24,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+              ),
+              child: IconButton(
+                icon: Icon(TDIcons.refresh, color: Colors.white, size: 24),
+                padding: const EdgeInsets.all(12),
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  if (RecoConfig.cameraEnabled) {
+                    RecoConfig.cameraSwitch();
+                  }
+                },
+              ),
+            ),
+          ),
+          // 底部控制栏
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: 140,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.9),
+                    Colors.black.withValues(alpha: 0.5),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.6, 1.0],
+                ),
+              ),
+              child: Center(
+                child: GestureDetector(
+                  onTapDown: (_) => _buttonAnimController.forward(),
+                  onTapUp: (_) {
+                    _buttonAnimController.reverse();
+                    // 预留拍照/录像功能
+                    TDToast.showText('Recording...', context: context);
+                  },
+                  onTapCancel: () => _buttonAnimController.reverse(),
+                  child: ScaleTransition(
+                    scale: _buttonScaleAnimation,
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          )
+                        ],
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.1),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              )
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+</file>
+
+<file path="app/lib/pages/settings.dart">
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/pages/settabs/settab1.dart';
+import 'package:braindance/pages/settabs/settab2.dart';
+import 'package:braindance/pages/settabs/settab3.dart';
+import 'package:braindance/pages/settabs/settab4.dart';
+import '../extra_func/dynamic_background.dart';
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key, required this.homeRef});
+  final WidgetRef homeRef;
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState(); // 创建状态
+}
+
+class _SettingsPageState extends State<SettingsPage>
+    with TickerProviderStateMixin {
+  late final TabController tabController;
+  late final ScrollController scrollController;
+  static const TextStyle tabTextStyle = TextStyle(
+    fontSize: 16,
+    fontFamily: AppConfig.fontFamily,
+  );
+  // 选择器选中项索引;
+  @override
+  void initState() {
+    //若 tab 数量有变，需同步修改 length
+    super.initState();
+    tabController = TabController(
+      length: 4,
+      vsync: this,
+      animationDuration: Duration(milliseconds: 200),
+    ); // 正确初始化
+    scrollController = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    tabController.dispose(); // 在 dispose 中释放资源
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final TDTabBar myTabBar = TDTabBar(
+      tabs: [
+        TDTab(text: textLocalize('set_tab1')),
+        TDTab(text: textLocalize('set_tab2')),
+        TDTab(text: textLocalize('set_tab3')),
+        TDTab(text: textLocalize('set_tab4')),
+      ],
+      controller: tabController,
+      showIndicator: true,
+      indicatorPadding: const EdgeInsets.all(4.0),
+      indicatorWidth: 24,
+      indicatorHeight: 3,
+      indicatorColor: AppConfig.primaryColor,
+      labelStyle: tabTextStyle.copyWith(
+        fontWeight: FontWeight.w600,
+        color: AppConfig.primaryColor,
+      ),
+      unselectedLabelStyle: tabTextStyle.copyWith(
+        fontWeight: FontWeight.w400,
+        color: TDTheme.of(context).fontGyColor3,
+      ),
+    );
+    return Scaffold(
+      backgroundColor: TDTheme.of(context).grayColor1,
+      appBar: AppBar(
+        title: TDText(
+          textLocalize("settings"),
+          font: TDTheme.of(context).fontTitleLarge,
+          fontWeight: FontWeight.w600,
+          textColor: TDTheme.of(context).fontGyColor1,
+        ),
+        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        elevation: 0,
+        centerTitle: true,
+      ),
+      extendBodyBehindAppBar: true,
+      body: DynamicGradientBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.6),
+                child: myTabBar,
+              ),
+              Expanded(
+                child: TDTabBarView(
+                  controller: tabController,
+                  children: [
+                    setTab1(onUpdate, widget.homeRef),
+                    setTab2(onUpdate, context),
+                    setTab3(context),
+                    setTab4(scrollController),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void onUpdate() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+}
+</file>
+
 <file path="patches/0001_pipeline_base.patch">
 *** Begin Patch
 *** Add File: ai_engine/3dgs/src/core/pipeline_base.py
@@ -254159,364 +254634,72 @@ if __name__ == "__main__":
         print(f"❌ 找不到视频: {video_file}")
 </file>
 
-<file path="ai_engine/3dgs/src/core/worker.py">
-# src/core/worker.py
-# 功能：实现云端工作者逻辑，监听任务队列并处理3D重建任务
-# 实现：通过Supabase轮询任务，下载资源，执行pipeline，上传结果
-# 逻辑：1. 轮询Supabase任务 2. 锁定任务 3. 下载资源 4. 执行pipeline 5. 上传结果 6. 清理资源
-# 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
+<file path="ai_engine/demo/SAM3d/sam3d.py">
 import time
-import os
+import datetime
 from pathlib import Path
+from sam3d_engine import SAM3DEngine
 
-# 引入 Supabase 客户端库，用于连接云数据库和存储
-from supabase import create_client, Client
-# 引入 python-dotenv 库，用于加载本地 .env 文件中的环境变量（保护密钥安全）
-from dotenv import load_dotenv
+# ================= 🔧 配置区域 =================
+INPUT_IMAGE_NAME = "input.jpg"  # 脚本会自动优先查找 input.png
+LINUX_WORK_ROOT = Path.home() / "sam3d_workspace"
+SAM3D_REPO_PATH = Path.home() / "workspace/ai/sam-3d-objects"
 
-# 引入项目内部配置类和核心管线函数
-from src.core.factory import PipelineFactory  # 🟢 引入工厂
-from src.modules.rag_memory import RagMemory # 🟢 引入新模块
-from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
+def format_duration(seconds):
+    return str(datetime.timedelta(seconds=int(seconds)))
 
-# [初始化] 加载当前目录下的 .env 文件
-# 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
-load_dotenv()
-
-class CloudWorker:
-    """
-    ☁️ CloudWorker (云端工人)
+def run_pipeline():
+    global_start_time = time.time()
     
-    职责：
-    1. 持续监听 Supabase 数据库中的任务表。
-    2. 抢单：发现状态为 'pending' 的任务并锁定。
-    3. 执行：下载视频 -> 调用 3DGS 核心引擎 -> 生成模型。
-    4. 汇报：实时同步日志到数据库，并将最终结果上传回云存储。
-    """
+    current_dir = Path(__file__).resolve().parent
+    source_png_path = current_dir / "input.png"
+    source_jpg_path = current_dir / INPUT_IMAGE_NAME
+    
+    if source_png_path.exists():
+        print(f"✨ 发现 input.png，将优先使用")
+        source_img_path = source_png_path
+    elif source_jpg_path.exists():
+        source_img_path = source_jpg_path
+    else:
+        print(f"❌ 错误: 找不到输入图片 (input.png 或 {INPUT_IMAGE_NAME})")
+        return
 
-    def __init__(self):
-        """
-        初始化 Worker：连接 Supabase，准备本地缓存目录。
-        """
-        # --- 1. 读取环境变量配置 ---
-        # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
-        self.SUPABASE_URL = os.getenv("SUPABASE_URL")
-        self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-        self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
-        self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
+    project_name = source_img_path.stem 
+    work_dir = LINUX_WORK_ROOT / project_name
+    
+    print(f"\n🚀 [SAM3D Modular] 启动任务: {source_img_path.name}")
+    
+    # 初始化引擎
+    try:
+        engine = SAM3DEngine(str(SAM3D_REPO_PATH))
+    except Exception as e:
+        print(f"❌ 引擎初始化失败: {e}")
+        return
+
+    # 执行推理
+    try:
+        ply_path = engine.run(
+            image_path=str(source_img_path),
+            output_dir=str(work_dir)
+        )
         
-        # --- 2. 防御性检查 ---
-        # 如果关键配置缺失，直接报错停止，避免后续出现莫名其妙的连接错误
-        if not self.SUPABASE_URL or not self.SUPABASE_KEY:
-            raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
-
-        # --- 3. 建立连接 ---
-        # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
-        self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
-        
-        # 🟢 初始化记忆模块
-        self.memory = RagMemory(self.supabase)
-        self.kb = KnowledgeBase(self.supabase) # 🟢 实例化知识库
-
-        # --- 4. 准备本地工作区 ---
-        # 🟢 [修改后] 找回原来的 "braindance_workspace"，实现路径归一化
-        # 这样所有的任务数据和模型都会存放在 /home/ltx/braindance_workspace
-        self.CACHE_DIR = Path.home() / "braindance_workspace"
-        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        
-        # 🟢 [新增] 定义一个公共模型目录，用于存放 SAM 权重等，实现多任务共享
-        self.MODELS_DIR = self.CACHE_DIR / "models"
-        self.MODELS_DIR.mkdir(exist_ok=True)
-        
-        # --- 5. 初始化日志缓冲区 ---
-        # [关键设计] 用于解决“读写冲突”问题。
-        # 我们不再每次 Select 数据库，而是将当前任务的所有日志保存在这个内存列表里。
-        # 每次有新日志，append 进这里，然后把整个列表覆盖上传到云端。
-        self.current_task_logs = []
-
-    def _sync_log(self, task_id):
-        """
-        🔄 [内部方法] 日志同步器
-        
-        功能：将内存中的日志缓冲区 (self.current_task_logs) 全量推送到 Supabase。
-        设计哲学：采用“内存为王，覆盖更新”策略，避免多线程下的数据覆盖问题。
-        """
-        try:
-            # 直接调用 Update 接口，将 logs 字段更新为当前的内存列表
-            self.supabase.table(self.TABLE_NAME).update({
-                "logs": self.current_task_logs
-            }).eq("id", task_id).execute()
-        except Exception as e:
-            # ⚠️ 注意：日志同步失败属于“非致命错误”。
-            # 如果网络抖动导致日志没发出去，不应该中断核心训练任务，所以这里只打印不抛出异常。
-            print(f"⚠️ [网络抖动] 日志同步跳过: {e}")
-
-    def start(self):
-        """
-        🚀 [主入口] 启动监听循环
-        这是外部调用的唯一入口，启动后会进入死循环，直到被手动停止。
-        """
-        print(f"🚀 [CloudWorker] 启动成功! 正在监听任务表: [{self.TABLE_NAME}]")
-        try:
-            while True:
-                # 执行一次“心跳”检测
-                self._tick()
-        except KeyboardInterrupt:
-            # 捕获 Ctrl+C 中断信号，优雅退出
-            print("\n🛑 [CloudWorker] 接收到停止信号，服务已关闭。")
-
-    def _tick(self):
-        """
-        💓 [心跳函数] 单次轮询逻辑
-        """
-        try:
-            # --- 1. 轮询数据库 ---
-            # 查询条件：状态(status)必须是 'pending' (待处理)
-            # limit(1)：每次只取 1 个任务，避免贪多嚼不烂
-            response = self.supabase.table(self.TABLE_NAME)\
-                .select("*").eq("status", "pending").limit(1).execute()
+        if ply_path and Path(ply_path).exists():
+            final_output_path = current_dir / f"{project_name}_3dgs.ply"
+            import shutil
+            shutil.copy2(ply_path, str(final_output_path))
+            print(f"\n🎉 成功！模型已保存: {final_output_path}")
+        else:
+            print("    ❌ 失败: 未生成 PLY 文件")
             
-            # --- 2. 判断是否有任务 ---
-            if response.data:
-                # 🎯 发现任务！立即处理
-                # response.data 是一个列表，我们取第一个元素
-                self._process_task(response.data[0])
-            else:
-                # 💤 没有任务，休眠 3 秒
-                # 避免死循环空转导致 CPU 占用率过高，同时也减少数据库压力
-                time.sleep(3)
-                # 打印一个小点，证明程序还活着 (心跳显示)
-                print(".", end="", flush=True)
-                
-        except Exception as e:
-            # 🛡️ 容错处理
-            # 比如数据库断连、查询超时等，打印错误并强制休息 5 秒，防止错误刷屏
-            print(f"\n⚠️ 轮询错误: {e}")
-            time.sleep(5)
+    except Exception as e:
+        print(f"\n❌ 运行出错: {e}")
+        import traceback
+        traceback.print_exc()
 
-    def _process_task(self, task):
-        """
-        ⚙️ [核心逻辑] 处理单个任务
-        """
-        # --- 1. 解包任务信息 ---
-        task_id = task['id']            # 任务唯一ID
-        scene_id = task['scene_id']     # 场景/项目ID (作为文件名)
-        # 获取用户ID，如果数据库里没存 user_id 字段，就用默认值 'default_user'
-        user_id = task.get('user_id', 'default_user') 
-        
-        print(f"\n📥 [接收任务] 场景ID: {scene_id} | 任务ID: {task_id}")
+    print(f"\n📊 总耗时: {format_duration(time.time() - global_start_time)}")
 
-        # --- 2. 重置日志缓冲区 ---
-        # [重要] 开始新任务前，必须清空上一条任务的残留日志，防止串台
-        self.current_task_logs = []
-
-        # --- 3. 定义回调函数 (闭包) ---
-        # 这个函数会传给 pipeline.py，让核心引擎在深层代码里也能发日志
-        def on_pipeline_log(message):
-            # A. 构造标准日志对象 (时间戳 + 消息)
-            log_entry = {
-                "ts": int(time.time()), # 当前秒级时间戳
-                "msg": message
-            }
-            # B. 写入本地内存 (操作极快，绝对不丢数据)
-            self.current_task_logs.append(log_entry)
-            
-            # C. 触发云端同步
-            self._sync_log(task_id)
-
-        try:
-            # =================== 阶段 A: 锁定任务 ===================
-            # 将状态改为 'processing'，告诉其他 Worker 这个任务我接了，别抢
-            # 同时清空 logs 字段，准备开始新纪录
-            self.supabase.table(self.TABLE_NAME).update({
-                "status": "processing",
-                "logs": []
-            }).eq("id", task_id).execute()
-
-            # =================== 阶段 B: 下载资源 ===================
-            on_pipeline_log("正在从云端下载资源...")
-            
-            # 获取任务类型：直接使用 task_type 字段，默认 video_3dgs
-            task_type = task.get('task_type', 'video_3dgs')
-            print(f"🔧 检测到任务类型: {task_type}")
-            
-            # 根据任务类型确定下载路径
-            if task_type in ('single_image_sam3d', 'single_image_sharp'):
-                input_path = self.CACHE_DIR / f"{scene_id}.png"
-                storage_path = f"{user_id}/{scene_id}/raw/image.png"
-                on_pipeline_log("下载单张图片...")
-            else:
-                # video_3dgs 默认路径
-                input_path = self.CACHE_DIR / f"{scene_id}.mp4"
-                storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
-                on_pipeline_log("下载视频...")
-            
-            # 下载文件流并写入本地
-            try:
-                with open(input_path, 'wb') as f:
-                    res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
-                    f.write(res)
-            except Exception as e:
-                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}")
-
-            # =================== 阶段 C: 执行引擎 ===================
-            # 1. 获取任务类型和参数
-            task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
-            
-            # task_params 可能是 JSON 字符串，需要解析
-            task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
-            try:
-                import json
-                if isinstance(task_params_raw, str):
-                    task_params = json.loads(task_params_raw) if task_params_raw else {}
-                else:
-                    task_params = task_params_raw
-            except Exception:
-                task_params = {}
-            
-            # 准备输出目录
-            task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
-            
-            # 2. 准备上下文 (把通用的东西打包)
-            context = {
-                "task_id": task_id,
-                "scene_id": scene_id,
-                "work_root": task_output_dir,
-                "log_callback": on_pipeline_log,
-                "shared_model_dir": self.MODELS_DIR
-            }
-
-            # 3. [核心修改] 通过工厂实例化 Pipeline
-            on_pipeline_log(f"正在加载流水线: {task_type}")
-            pipeline = PipelineFactory.get_pipeline(task_type, context)
-            
-            # 4. [核心修改] 执行多态的 run 方法
-            # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
-            
-            final_ply_path, metadata = pipeline.run(str(input_path), task_params)
-
-            # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
-            # 不管训练是否成功，只要有分析结果，都应该存下来
-            if metadata:
-                update_data = {}
-                
-                # 1. 同步分数
-                if "ai_score" in metadata:
-                    update_data["quality_score"] = metadata["ai_score"]
-                
-                # 2. 同步标签
-                if "ai_tags" in metadata:
-                    update_data["tags"] = metadata["ai_tags"]
-                
-                # 3. 同步评价原因 (新!)
-                if "ai_reason" in metadata:
-                    update_data["quality_reason"] = metadata["ai_reason"]
-                
-                # 执行更新
-                if update_data:
-                    self.supabase.table(self.TABLE_NAME)\
-                        .update(update_data)\
-                        .eq("id", task_id)\
-                        .execute()
-                    on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
-                
-                # 🟢 2. [新增] 存入 RAG 向量库 (只有当包含描述信息时才存)
-                if "ai_description" in metadata:
-                    on_pipeline_log("🧠 正在生成场景记忆 (Embedding)...")
-                    self.memory.save_to_knowledge_base(
-                        task_data=task,
-                        description=metadata["ai_description"],
-                        objects=metadata.get("ai_objects", [])
-                    )
-
-            # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
-            if not final_ply_path or not Path(final_ply_path).exists():
-                raise RuntimeError("Pipeline 执行结束，但未生成有效的 PLY 文件，请检查训练日志。")
-
-            # =================== 阶段 D: 上传结果 ===================
-            on_pipeline_log("训练完成，正在上传结果到云端...")
-            
-            # 1. 上传 PLY 模型文件
-            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud.ply"
-            with open(final_ply_path, 'rb') as f:
-                self.supabase.storage.from_(self.BUCKET_NAME).upload(
-                    path=upload_ply_key, 
-                    file=f, 
-                    # x-upsert=true 表示如果文件已存在则覆盖
-                    file_options={"content-type": "application/octet-stream", "x-upsert": "true"}
-                )
-
-            # 2. 上传 transforms.json (用于网页预览)
-            # 假设该文件在 PLY 同级目录或配置指定的目录
-            transforms_file = task_output_dir / "data" / "transforms.json"
-            if transforms_file.exists():
-                upload_json_key = f"{user_id}/{scene_id}/output/transforms.json"
-                with open(transforms_file, 'rb') as f:
-                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
-                        path=upload_json_key,
-                        file=f,
-                        file_options={"content-type": "application/json", "x-upsert": "true"}
-                    )
-                on_pipeline_log("上传 transforms.json 成功")
-
-            # =================== 🟢 [RAG 集成] 资产入库 ===================
-            # 只有当 AI 成功生成了描述，才存入知识库
-            if metadata and "ai_description" in metadata:
-                on_pipeline_log("📚 正在将资产存入知识库...")
-                self.kb.add_asset(
-                    task_data=task,
-                    metadata=metadata,
-                    ply_path=upload_ply_key  # 记录云端路径
-                )
-            # =============================================================
-
-            # =================== 阶段 E: 完结撒花 ===================
-            # 更新状态为 'completed'
-            self.supabase.table(self.TABLE_NAME).update({
-                "status": "completed"
-            }).eq("id", task_id).execute()
-            
-            on_pipeline_log("✅ 任务全部完成")
-            print("✅ 任务完成")
-
-        except Exception as e:
-            # =================== 异常处理 ===================
-            print(f"❌ 任务处理失败: {e}")
-            
-            # 1. 尝试将错误信息记录到云端日志，让用户知道死在哪一步了
-            try:
-                self.current_task_logs.append({"ts": int(time.time()), "msg": f"❌ 严重错误: {str(e)}"})
-                self._sync_log(task_id)
-            except:
-                pass # 如果这时候连网都断了，就放弃写日志
-            
-            # 2. 将任务状态标记为 'failed'，避免死循环重试
-            self.supabase.table(self.TABLE_NAME).update({"status": "failed"}).eq("id", task_id).execute()
-        
-        finally:
-            # =================== 🧹 清理工作 (新增逻辑) ===================
-            import shutil # 确保引入 shutil
-
-            # 1. 删除源文件 (视频或图片)
-            if 'input_path' in locals() and input_path.exists():
-                try:
-                    os.remove(input_path)
-                    print(f"🗑️ 已删除临时文件: {input_path.name}")
-                except Exception as e:
-                    print(f"⚠️ 删除文件失败: {e}")
-            
-            # 2. 删除任务输出目录 (包含图片、COLMAP数据、PLY等所有中间产物)
-            # ⚠️ 警告：如果你还没有修改 ai_segmentor.py 让模型下载到公共目录，
-            # 这里的删除操作会把下载在里面的 AI 模型也删掉！请务必先做"模型搬家"。
-            if 'task_output_dir' in locals() and task_output_dir.exists():
-                try:
-                    shutil.rmtree(task_output_dir)
-                    print(f"🗑️ 已清空任务工作区: {task_output_dir.name}")
-                except Exception as e:
-                    print(f"⚠️ 清理工作区失败: {e}")
-
-            # 3. 重置日志
-            self.current_task_logs = []
+if __name__ == "__main__":
+    run_pipeline()
 </file>
 
 <file path="ai_engine/demo/process_3dgs_cut.py">
@@ -255500,72 +255683,364 @@ if __name__ == "__main__":
         print(f"❌ 找不到视频: {video_file}")
 </file>
 
-<file path="ai_engine/demo/SAM3d/sam3d.py">
+<file path="ai_engine/3dgs/src/core/worker.py">
+# src/core/worker.py
+# 功能：实现云端工作者逻辑，监听任务队列并处理3D重建任务
+# 实现：通过Supabase轮询任务，下载资源，执行pipeline，上传结果
+# 逻辑：1. 轮询Supabase任务 2. 锁定任务 3. 下载资源 4. 执行pipeline 5. 上传结果 6. 清理资源
+# 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
 import time
-import datetime
+import os
 from pathlib import Path
-from sam3d_engine import SAM3DEngine
 
-# ================= 🔧 配置区域 =================
-INPUT_IMAGE_NAME = "input.jpg"  # 脚本会自动优先查找 input.png
-LINUX_WORK_ROOT = Path.home() / "sam3d_workspace"
-SAM3D_REPO_PATH = Path.home() / "workspace/ai/sam-3d-objects"
+# 引入 Supabase 客户端库，用于连接云数据库和存储
+from supabase import create_client, Client
+# 引入 python-dotenv 库，用于加载本地 .env 文件中的环境变量（保护密钥安全）
+from dotenv import load_dotenv
 
-def format_duration(seconds):
-    return str(datetime.timedelta(seconds=int(seconds)))
+# 引入项目内部配置类和核心管线函数
+from src.core.factory import PipelineFactory  # 🟢 引入工厂
+from src.modules.rag_memory import RagMemory # 🟢 引入新模块
+from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
 
-def run_pipeline():
-    global_start_time = time.time()
+# [初始化] 加载当前目录下的 .env 文件
+# 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
+load_dotenv()
+
+class CloudWorker:
+    """
+    ☁️ CloudWorker (云端工人)
     
-    current_dir = Path(__file__).resolve().parent
-    source_png_path = current_dir / "input.png"
-    source_jpg_path = current_dir / INPUT_IMAGE_NAME
-    
-    if source_png_path.exists():
-        print(f"✨ 发现 input.png，将优先使用")
-        source_img_path = source_png_path
-    elif source_jpg_path.exists():
-        source_img_path = source_jpg_path
-    else:
-        print(f"❌ 错误: 找不到输入图片 (input.png 或 {INPUT_IMAGE_NAME})")
-        return
+    职责：
+    1. 持续监听 Supabase 数据库中的任务表。
+    2. 抢单：发现状态为 'pending' 的任务并锁定。
+    3. 执行：下载视频 -> 调用 3DGS 核心引擎 -> 生成模型。
+    4. 汇报：实时同步日志到数据库，并将最终结果上传回云存储。
+    """
 
-    project_name = source_img_path.stem 
-    work_dir = LINUX_WORK_ROOT / project_name
-    
-    print(f"\n🚀 [SAM3D Modular] 启动任务: {source_img_path.name}")
-    
-    # 初始化引擎
-    try:
-        engine = SAM3DEngine(str(SAM3D_REPO_PATH))
-    except Exception as e:
-        print(f"❌ 引擎初始化失败: {e}")
-        return
-
-    # 执行推理
-    try:
-        ply_path = engine.run(
-            image_path=str(source_img_path),
-            output_dir=str(work_dir)
-        )
+    def __init__(self):
+        """
+        初始化 Worker：连接 Supabase，准备本地缓存目录。
+        """
+        # --- 1. 读取环境变量配置 ---
+        # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
+        self.SUPABASE_URL = os.getenv("SUPABASE_URL")
+        self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+        self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
+        self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
         
-        if ply_path and Path(ply_path).exists():
-            final_output_path = current_dir / f"{project_name}_3dgs.ply"
-            import shutil
-            shutil.copy2(ply_path, str(final_output_path))
-            print(f"\n🎉 成功！模型已保存: {final_output_path}")
-        else:
-            print("    ❌ 失败: 未生成 PLY 文件")
+        # --- 2. 防御性检查 ---
+        # 如果关键配置缺失，直接报错停止，避免后续出现莫名其妙的连接错误
+        if not self.SUPABASE_URL or not self.SUPABASE_KEY:
+            raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
+
+        # --- 3. 建立连接 ---
+        # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
+        self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
+        
+        # 🟢 初始化记忆模块
+        self.memory = RagMemory(self.supabase)
+        self.kb = KnowledgeBase(self.supabase) # 🟢 实例化知识库
+
+        # --- 4. 准备本地工作区 ---
+        # 🟢 [修改后] 找回原来的 "braindance_workspace"，实现路径归一化
+        # 这样所有的任务数据和模型都会存放在 /home/ltx/braindance_workspace
+        self.CACHE_DIR = Path.home() / "braindance_workspace"
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # 🟢 [新增] 定义一个公共模型目录，用于存放 SAM 权重等，实现多任务共享
+        self.MODELS_DIR = self.CACHE_DIR / "models"
+        self.MODELS_DIR.mkdir(exist_ok=True)
+        
+        # --- 5. 初始化日志缓冲区 ---
+        # [关键设计] 用于解决“读写冲突”问题。
+        # 我们不再每次 Select 数据库，而是将当前任务的所有日志保存在这个内存列表里。
+        # 每次有新日志，append 进这里，然后把整个列表覆盖上传到云端。
+        self.current_task_logs = []
+
+    def _sync_log(self, task_id):
+        """
+        🔄 [内部方法] 日志同步器
+        
+        功能：将内存中的日志缓冲区 (self.current_task_logs) 全量推送到 Supabase。
+        设计哲学：采用“内存为王，覆盖更新”策略，避免多线程下的数据覆盖问题。
+        """
+        try:
+            # 直接调用 Update 接口，将 logs 字段更新为当前的内存列表
+            self.supabase.table(self.TABLE_NAME).update({
+                "logs": self.current_task_logs
+            }).eq("id", task_id).execute()
+        except Exception as e:
+            # ⚠️ 注意：日志同步失败属于“非致命错误”。
+            # 如果网络抖动导致日志没发出去，不应该中断核心训练任务，所以这里只打印不抛出异常。
+            print(f"⚠️ [网络抖动] 日志同步跳过: {e}")
+
+    def start(self):
+        """
+        🚀 [主入口] 启动监听循环
+        这是外部调用的唯一入口，启动后会进入死循环，直到被手动停止。
+        """
+        print(f"🚀 [CloudWorker] 启动成功! 正在监听任务表: [{self.TABLE_NAME}]")
+        try:
+            while True:
+                # 执行一次“心跳”检测
+                self._tick()
+        except KeyboardInterrupt:
+            # 捕获 Ctrl+C 中断信号，优雅退出
+            print("\n🛑 [CloudWorker] 接收到停止信号，服务已关闭。")
+
+    def _tick(self):
+        """
+        💓 [心跳函数] 单次轮询逻辑
+        """
+        try:
+            # --- 1. 轮询数据库 ---
+            # 查询条件：状态(status)必须是 'pending' (待处理)
+            # limit(1)：每次只取 1 个任务，避免贪多嚼不烂
+            response = self.supabase.table(self.TABLE_NAME)\
+                .select("*").eq("status", "pending").limit(1).execute()
             
-    except Exception as e:
-        print(f"\n❌ 运行出错: {e}")
-        import traceback
-        traceback.print_exc()
+            # --- 2. 判断是否有任务 ---
+            if response.data:
+                # 🎯 发现任务！立即处理
+                # response.data 是一个列表，我们取第一个元素
+                self._process_task(response.data[0])
+            else:
+                # 💤 没有任务，休眠 3 秒
+                # 避免死循环空转导致 CPU 占用率过高，同时也减少数据库压力
+                time.sleep(3)
+                # 打印一个小点，证明程序还活着 (心跳显示)
+                print(".", end="", flush=True)
+                
+        except Exception as e:
+            # 🛡️ 容错处理
+            # 比如数据库断连、查询超时等，打印错误并强制休息 5 秒，防止错误刷屏
+            print(f"\n⚠️ 轮询错误: {e}")
+            time.sleep(5)
 
-    print(f"\n📊 总耗时: {format_duration(time.time() - global_start_time)}")
+    def _process_task(self, task):
+        """
+        ⚙️ [核心逻辑] 处理单个任务
+        """
+        # --- 1. 解包任务信息 ---
+        task_id = task['id']            # 任务唯一ID
+        scene_id = task['scene_id']     # 场景/项目ID (作为文件名)
+        # 获取用户ID，如果数据库里没存 user_id 字段，就用默认值 'default_user'
+        user_id = task.get('user_id', 'default_user') 
+        
+        print(f"\n📥 [接收任务] 场景ID: {scene_id} | 任务ID: {task_id}")
 
-if __name__ == "__main__":
-    run_pipeline()
+        # --- 2. 重置日志缓冲区 ---
+        # [重要] 开始新任务前，必须清空上一条任务的残留日志，防止串台
+        self.current_task_logs = []
+
+        # --- 3. 定义回调函数 (闭包) ---
+        # 这个函数会传给 pipeline.py，让核心引擎在深层代码里也能发日志
+        def on_pipeline_log(message):
+            # A. 构造标准日志对象 (时间戳 + 消息)
+            log_entry = {
+                "ts": int(time.time()), # 当前秒级时间戳
+                "msg": message
+            }
+            # B. 写入本地内存 (操作极快，绝对不丢数据)
+            self.current_task_logs.append(log_entry)
+            
+            # C. 触发云端同步
+            self._sync_log(task_id)
+
+        try:
+            # =================== 阶段 A: 锁定任务 ===================
+            # 将状态改为 'processing'，告诉其他 Worker 这个任务我接了，别抢
+            # 同时清空 logs 字段，准备开始新纪录
+            self.supabase.table(self.TABLE_NAME).update({
+                "status": "processing",
+                "logs": []
+            }).eq("id", task_id).execute()
+
+            # =================== 阶段 B: 下载资源 ===================
+            on_pipeline_log("正在从云端下载资源...")
+            
+            # 获取任务类型：直接使用 task_type 字段，默认 video_3dgs
+            task_type = task.get('task_type', 'video_3dgs')
+            print(f"🔧 检测到任务类型: {task_type}")
+            
+            # 根据任务类型确定下载路径
+            if task_type in ('single_image_sam3d', 'single_image_sharp'):
+                input_path = self.CACHE_DIR / f"{scene_id}.png"
+                storage_path = f"{user_id}/{scene_id}/raw/image.png"
+                on_pipeline_log("下载单张图片...")
+            else:
+                # video_3dgs 默认路径
+                input_path = self.CACHE_DIR / f"{scene_id}.mp4"
+                storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
+                on_pipeline_log("下载视频...")
+            
+            # 下载文件流并写入本地
+            try:
+                with open(input_path, 'wb') as f:
+                    res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
+                    f.write(res)
+            except Exception as e:
+                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}")
+
+            # =================== 阶段 C: 执行引擎 ===================
+            # 1. 获取任务类型和参数
+            task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
+            
+            # task_params 可能是 JSON 字符串，需要解析
+            task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
+            try:
+                import json
+                if isinstance(task_params_raw, str):
+                    task_params = json.loads(task_params_raw) if task_params_raw else {}
+                else:
+                    task_params = task_params_raw
+            except Exception:
+                task_params = {}
+            
+            # 准备输出目录
+            task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
+            
+            # 2. 准备上下文 (把通用的东西打包)
+            context = {
+                "task_id": task_id,
+                "scene_id": scene_id,
+                "work_root": task_output_dir,
+                "log_callback": on_pipeline_log,
+                "shared_model_dir": self.MODELS_DIR
+            }
+
+            # 3. [核心修改] 通过工厂实例化 Pipeline
+            on_pipeline_log(f"正在加载流水线: {task_type}")
+            pipeline = PipelineFactory.get_pipeline(task_type, context)
+            
+            # 4. [核心修改] 执行多态的 run 方法
+            # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
+            
+            final_ply_path, metadata = pipeline.run(str(input_path), task_params)
+
+            # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
+            # 不管训练是否成功，只要有分析结果，都应该存下来
+            if metadata:
+                update_data = {}
+                
+                # 1. 同步分数
+                if "ai_score" in metadata:
+                    update_data["quality_score"] = metadata["ai_score"]
+                
+                # 2. 同步标签
+                if "ai_tags" in metadata:
+                    update_data["tags"] = metadata["ai_tags"]
+                
+                # 3. 同步评价原因 (新!)
+                if "ai_reason" in metadata:
+                    update_data["quality_reason"] = metadata["ai_reason"]
+                
+                # 执行更新
+                if update_data:
+                    self.supabase.table(self.TABLE_NAME)\
+                        .update(update_data)\
+                        .eq("id", task_id)\
+                        .execute()
+                    on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
+                
+                # 🟢 2. [新增] 存入 RAG 向量库 (只有当包含描述信息时才存)
+                if "ai_description" in metadata:
+                    on_pipeline_log("🧠 正在生成场景记忆 (Embedding)...")
+                    self.memory.save_to_knowledge_base(
+                        task_data=task,
+                        description=metadata["ai_description"],
+                        objects=metadata.get("ai_objects", [])
+                    )
+
+            # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
+            if not final_ply_path or not Path(final_ply_path).exists():
+                raise RuntimeError("Pipeline 执行结束，但未生成有效的 PLY 文件，请检查训练日志。")
+
+            # =================== 阶段 D: 上传结果 ===================
+            on_pipeline_log("训练完成，正在上传结果到云端...")
+            
+            # 1. 上传 PLY 模型文件
+            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud.ply"
+            with open(final_ply_path, 'rb') as f:
+                self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                    path=upload_ply_key, 
+                    file=f, 
+                    # x-upsert=true 表示如果文件已存在则覆盖
+                    file_options={"content-type": "application/octet-stream", "x-upsert": "true"}
+                )
+
+            # 2. 上传 transforms.json (用于网页预览)
+            # 假设该文件在 PLY 同级目录或配置指定的目录
+            transforms_file = task_output_dir / "data" / "transforms.json"
+            if transforms_file.exists():
+                upload_json_key = f"{user_id}/{scene_id}/output/transforms.json"
+                with open(transforms_file, 'rb') as f:
+                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                        path=upload_json_key,
+                        file=f,
+                        file_options={"content-type": "application/json", "x-upsert": "true"}
+                    )
+                on_pipeline_log("上传 transforms.json 成功")
+
+            # =================== 🟢 [RAG 集成] 资产入库 ===================
+            # 只有当 AI 成功生成了描述，才存入知识库
+            if metadata and "ai_description" in metadata:
+                on_pipeline_log("📚 正在将资产存入知识库...")
+                self.kb.add_asset(
+                    task_data=task,
+                    metadata=metadata,
+                    ply_path=upload_ply_key  # 记录云端路径
+                )
+            # =============================================================
+
+            # =================== 阶段 E: 完结撒花 ===================
+            # 更新状态为 'completed'
+            self.supabase.table(self.TABLE_NAME).update({
+                "status": "completed"
+            }).eq("id", task_id).execute()
+            
+            on_pipeline_log("✅ 任务全部完成")
+            print("✅ 任务完成")
+
+        except Exception as e:
+            # =================== 异常处理 ===================
+            print(f"❌ 任务处理失败: {e}")
+            
+            # 1. 尝试将错误信息记录到云端日志，让用户知道死在哪一步了
+            try:
+                self.current_task_logs.append({"ts": int(time.time()), "msg": f"❌ 严重错误: {str(e)}"})
+                self._sync_log(task_id)
+            except:
+                pass # 如果这时候连网都断了，就放弃写日志
+            
+            # 2. 将任务状态标记为 'failed'，避免死循环重试
+            self.supabase.table(self.TABLE_NAME).update({"status": "failed"}).eq("id", task_id).execute()
+        
+        finally:
+            # =================== 🧹 清理工作 (新增逻辑) ===================
+            import shutil # 确保引入 shutil
+
+            # 1. 删除源文件 (视频或图片)
+            if 'input_path' in locals() and input_path.exists():
+                try:
+                    os.remove(input_path)
+                    print(f"🗑️ 已删除临时文件: {input_path.name}")
+                except Exception as e:
+                    print(f"⚠️ 删除文件失败: {e}")
+            
+            # 2. 删除任务输出目录 (包含图片、COLMAP数据、PLY等所有中间产物)
+            # ⚠️ 警告：如果你还没有修改 ai_segmentor.py 让模型下载到公共目录，
+            # 这里的删除操作会把下载在里面的 AI 模型也删掉！请务必先做"模型搬家"。
+            if 'task_output_dir' in locals() and task_output_dir.exists():
+                try:
+                    shutil.rmtree(task_output_dir)
+                    print(f"🗑️ 已清空任务工作区: {task_output_dir.name}")
+                except Exception as e:
+                    print(f"⚠️ 清理工作区失败: {e}")
+
+            # 3. 重置日志
+            self.current_task_logs = []
 </file>
 
 <file path="ai_engine/demo/webgl/my-3dgs-viewer/src/components/GaussianViewer.vue">

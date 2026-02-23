@@ -1,4 +1,5 @@
 import 'package:camera/camera.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,7 @@ import 'pages/generate.dart';
 import 'pages/settings.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
+import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
 
 //App Data
@@ -26,7 +28,11 @@ void main() async {
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
-  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
+  await dotenv.load(fileName: ".env");
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.anonKey,
+  ); //Supabase
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();

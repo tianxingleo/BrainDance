@@ -39,6 +39,12 @@ class CloudWorker:
         # --- 1. 读取环境变量配置 ---
         # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
         self.SUPABASE_URL = os.getenv("SUPABASE_URL")
+<<<<<<< HEAD
+=======
+        if self.SUPABASE_URL and not self.SUPABASE_URL.endswith('/'):
+            self.SUPABASE_URL += '/'
+            
+>>>>>>> origin/tianxingleo-da3
         self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
         self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
         self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
@@ -202,6 +208,7 @@ class CloudWorker:
             task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
             
             # task_params 可能是 JSON 字符串，需要解析
+<<<<<<< HEAD
             task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
             try:
                 import json
@@ -212,6 +219,29 @@ class CloudWorker:
             except Exception:
                 task_params = {}
             
+=======
+            task_params_raw = task.get('task_params') if isinstance(task, dict) else None
+            
+            try:
+                import json
+                if isinstance(task_params_raw, str) and task_params_raw:
+                    task_params = json.loads(task_params_raw)
+                elif isinstance(task_params_raw, dict):
+                    task_params = task_params_raw
+                else:
+                    task_params = {}
+            except Exception:
+                task_params = {}
+            
+            # 确保 task_params 始终是一个字典，不是 None
+            if task_params is None:
+                task_params = {}
+
+            # 🟢 [新增] 支持从 Supabase 任务表顶层字段直接读取 mapper_type
+            if isinstance(task, dict) and task.get('mapper_type'):
+                task_params['mapper_type'] = task['mapper_type']
+            
+>>>>>>> origin/tianxingleo-da3
             # 准备输出目录
             task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
             
