@@ -148,7 +148,11 @@ class BasePipeline(ABC):
             with open(ply_path, "rb") as f:
                 remote_path = f"{scene_id}/{Path(ply_path).name}"
                 try:
-                    res = sb.storage.from_(bucket).upload(remote_path, f)
+                    res = sb.storage.from_(bucket).upload(
+                        path=remote_path,
+                        file=f,
+                        file_options={"x-upsert": "true", "upsert": "true"}
+                    )
                 except Exception as e:
                     self.log(f"    -> ⚠️ Supabase 上传失败: {e}", level="WARN")
                     return None

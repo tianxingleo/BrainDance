@@ -164,6 +164,9 @@ class CloudWorker:
             
             # C. 触发云端同步
             self._sync_log(task_id)
+            
+            # D. 输出到终端，方便本地排查问题
+            print(f"[{scene_id}] {message}")
 
         try:
             # =================== 阶段 A: 锁定任务 ===================
@@ -294,8 +297,8 @@ class CloudWorker:
                 self.supabase.storage.from_(self.BUCKET_NAME).upload(
                     path=upload_ply_key, 
                     file=f, 
-                    # x-upsert=true 表示如果文件已存在则覆盖
-                    file_options={"content-type": "application/octet-stream", "x-upsert": "true"}
+                    # x-upsert=true 和 upsert=true 表示如果文件已存在则覆盖
+                    file_options={"content-type": "application/octet-stream", "x-upsert": "true", "upsert": "true"}
                 )
 
             # 2. 上传 transforms.json (用于网页预览)
@@ -307,7 +310,7 @@ class CloudWorker:
                     self.supabase.storage.from_(self.BUCKET_NAME).upload(
                         path=upload_json_key,
                         file=f,
-                        file_options={"content-type": "application/json", "x-upsert": "true"}
+                        file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
                     )
                 on_pipeline_log("上传 transforms.json 成功")
 

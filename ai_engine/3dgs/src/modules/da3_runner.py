@@ -72,7 +72,8 @@ class DA3Runner:
             self._run_cmd([
                 "python", str(self.da3_convert_cmd),
                 "--base_dir", str(da3_output_dir),
-                "--output_dir", str(colmap_output_dir)
+                "--output_dir", str(colmap_output_dir),
+                "--image_dir", str(dest_images_dir)
             ], "Step 2: 转换为 COLMAP 文本格式")
 
             # Step 3: 转换为 COLMAP 二进制格式

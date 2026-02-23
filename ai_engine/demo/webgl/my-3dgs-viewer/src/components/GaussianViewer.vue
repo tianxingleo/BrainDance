@@ -16,6 +16,7 @@ const activeImage = ref(''); // 当前激活的参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
+const currentFps = ref(0); // 实时帧数
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -454,7 +455,7 @@ const initViewer = async () => {
     window.viewer = viewer;
 
     // 加载你的模型
-    await viewer.addSplatScene('/models/scene_auto_sync_raw.ply', {
+    await viewer.addSplatScene('/models/scene_auto_sync.ply', {
       'showLoadingUI': true,
       'progressiveLoad': false,
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
@@ -502,10 +503,32 @@ const initViewer = async () => {
       }
     }, 200);
     
-    // --- 5. 动画循环 ---
+    // --- 5. 动画循环 (120 FPS 上限) ---
+    let lastDrawTime = performance.now();
+    const fpsInterval = 1000 / 120; // 目标 120 帧
+    let framesThisSecond = 0;
+    let lastFpsTime = performance.now();
+
     viewer.renderer.setAnimationLoop(() => {
+      const nowPerf = performance.now();
+      const elapsedSinceDraw = nowPerf - lastDrawTime;
+
+      // 帧率限制：如果离上一帧不足 1/120 秒，放弃当前帧渲染
+      if (elapsedSinceDraw < fpsInterval) return;
+      
+      // 更新上一帧时间，这会保留超出的那一点时间以防长期的漂移
+      lastDrawTime = nowPerf - (elapsedSinceDraw % fpsInterval);
+
       viewer.update();
       viewer.render();
+
+      // FPS 计算：累加帧数，如果过了1秒，就更新显示并清零
+      framesThisSecond++;
+      if (nowPerf - lastFpsTime >= 1000) {
+        currentFps.value = framesThisSecond;
+        framesThisSecond = 0;
+        lastFpsTime = nowPerf;
+      }
 
       if (!animationState.isLoaded || animationState.phase === PHASE.FINISHED) return;
 
@@ -696,6 +719,7 @@ onBeforeUnmount(async () => {
     @mouseleave="onMouseUp">
     <div ref="containerRef" class="viewer-container"></div>
     <div v-if="isLoading" class="loading-overlay">正在处理...</div>
+    <div class="fps-counter" v-if="currentFps > 0">FPS: {{ currentFps }}</div>
     <div class="controls-ui">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
@@ -925,5 +949,23 @@ button.active { background: #22c55e; border-color: #22c55e; }
 .debug-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .mini-btn { padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; cursor: pointer; }
 .mini-btn:hover { background: #444; }
+
+/* FPS 计数器 */
+.fps-counter {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #22c55e;
+  padding: 8px 15px;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: bold;
+  z-index: 1000;
+  pointer-events: none;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
 
 </style>
