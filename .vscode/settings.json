@@ -3,5 +3,6 @@
         "tuple": "cpp",
         "utility": "cpp",
         "xutility": "cpp"
-    }
+    },
+    "commentTranslate.hover.enabled": true
 }

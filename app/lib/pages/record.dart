@@ -10,10 +10,21 @@ class RecordPage extends StatefulWidget {
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
-class _RecordPageState extends State<RecordPage> {
+class _RecordPageState extends State<RecordPage> with SingleTickerProviderStateMixin {
+  late AnimationController _buttonAnimController;
+  late Animation<double> _buttonScaleAnimation;
+
  @override
   void initState() {
     super.initState();
+    _buttonAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _buttonScaleAnimation = Tween<double>(begin: 1.0, end: 0.9).animate(
+      CurvedAnimation(parent: _buttonAnimController, curve: Curves.easeInOut),
+    );
+
     //相机初始化
     if (!RecoConfig.cameraEnabled) {
       return;
@@ -26,6 +37,7 @@ class _RecordPageState extends State<RecordPage> {
   
 @override
 void dispose() {
+  _buttonAnimController.dispose();
   RecoConfig.cameraController?.dispose();
   RecoConfig.cameraController = null;  // 防止内存泄漏和误用
   RecoConfig.onUpdate = () {};
@@ -89,38 +101,44 @@ void dispose() {
               ),
               child: Center(
                 child: GestureDetector(
-                  onTap: () {
+                  onTapDown: (_) => _buttonAnimController.forward(),
+                  onTapUp: (_) {
+                    _buttonAnimController.reverse();
                     // 预留拍照/录像功能
                     TDToast.showText('Recording...', context: context);
                   },
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 4),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          spreadRadius: 2,
-                        )
-                      ],
-                    ),
-                    child: Center(
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 4,
-                              spreadRadius: 1,
-                            )
-                          ],
+                  onTapCancel: () => _buttonAnimController.reverse(),
+                  child: ScaleTransition(
+                    scale: _buttonScaleAnimation,
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          )
+                        ],
+                      ),
+                      child: Center(
+                        child: Container(
+                          width: 64,
+                          height: 64,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.1),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              )
+                            ],
+                          ),
                         ),
                       ),
                     ),

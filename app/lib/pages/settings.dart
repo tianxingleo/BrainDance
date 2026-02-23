@@ -6,6 +6,7 @@ import 'package:braindance/pages/settabs/settab1.dart';
 import 'package:braindance/pages/settabs/settab2.dart';
 import 'package:braindance/pages/settabs/settab3.dart';
 import 'package:braindance/pages/settabs/settab4.dart';
+import '../extra_func/dynamic_background.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.homeRef});
@@ -19,9 +20,6 @@ class _SettingsPageState extends State<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
   late final ScrollController scrollController;
-  late final AnimationController _bgAnimController;
-  late final Animation<Alignment> _topAlignment;
-  late final Animation<Alignment> _bottomAlignment;
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
     fontFamily: AppConfig.fontFamily,
@@ -37,54 +35,10 @@ class _SettingsPageState extends State<SettingsPage>
       animationDuration: Duration(milliseconds: 200),
     ); // 正确初始化
     scrollController = ScrollController();
-
-    _bgAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 40),
-    )..repeat(reverse: true);
-
-    _topAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
-        weight: 1,
-      ),
-    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
-
-    _bottomAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
-        weight: 1,
-      ),
-    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
   }
 
   @override
   void dispose() {
-    _bgAnimController.dispose();
     tabController.dispose(); // 在 dispose 中释放资源
     scrollController.dispose();
     super.dispose();
@@ -128,53 +82,28 @@ class _SettingsPageState extends State<SettingsPage>
         centerTitle: true,
       ),
       extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          // 动态渐变背景
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _bgAnimController,
-              builder: (context, child) {
-                return Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: _topAlignment.value,
-                      end: _bottomAlignment.value,
-                      colors: [
-                        TDTheme.of(context).brandColor4.withValues(alpha: 0.15),
-                        AppConfig.primaryColor.withValues(alpha: 0.05),
-                        TDTheme.of(context).grayColor1,
-                        TDTheme.of(context).brandColor4.withValues(alpha: 0.05),
-                      ],
-                      stops: const [0.0, 0.4, 0.8, 1.0],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Container(
-                  color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.6),
-                  child: myTabBar,
+      body: DynamicGradientBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.6),
+                child: myTabBar,
+              ),
+              Expanded(
+                child: TDTabBarView(
+                  controller: tabController,
+                  children: [
+                    setTab1(onUpdate, widget.homeRef),
+                    setTab2(onUpdate, context),
+                    setTab3(context),
+                    setTab4(scrollController),
+                  ],
                 ),
-                Expanded(
-                  child: TDTabBarView(
-                    controller: tabController,
-                    children: [
-                      setTab1(onUpdate, widget.homeRef),
-                      setTab2(onUpdate, context),
-                      setTab3(context),
-                      setTab4(scrollController),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

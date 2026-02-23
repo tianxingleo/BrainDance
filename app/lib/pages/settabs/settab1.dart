@@ -15,29 +15,48 @@ Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
     onUpdate();
   }
 
-  return TDCellGroup(
-    cells: [
-      TDCell(
-        //语言切换单元格
-        arrow: false,
-        title: textLocalize('set_lang'),
-        note: textLocalize('lang'),
-        onClick: (cell) {
-          onChangeLanguage();
-        },
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(homeRef.context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(homeRef.context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_night'),
-        rightIconWidget: TDSwitch(
-          isOn: AppConfig.isNightMode,
-          onChanged: (cell) {
-            SetConfig.setNightMode(!AppConfig.isNightMode, homeRef);
-            SetConfig.saveMsgToFile();
-            return false;
-          },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(homeRef.context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            TDCell(
+              //语言切换单元格
+              arrow: false,
+              title: textLocalize('set_lang'),
+              note: textLocalize('lang'),
+              onClick: (cell) {
+                onChangeLanguage();
+              },
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_night'),
+              rightIconWidget: TDSwitch(
+                isOn: AppConfig.isNightMode,
+                onChanged: (cell) {
+                  SetConfig.setNightMode(!AppConfig.isNightMode, homeRef);
+                  SetConfig.saveMsgToFile();
+                  return false;
+                },
+              ),
+            ),
+          ],
         ),
       ),
-    ],
+    ),
   );
 }

@@ -157,18 +157,17 @@ class MainScreen extends ConsumerWidget {
       body: isLoading
           ? Scaffold(body: Center(child: Text('Now Loading...')))
           : AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 400),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
               transitionBuilder: (Widget child, Animation<double> animation) {
                 return FadeTransition(
                   opacity: animation,
                   child: SlideTransition(
                     position: Tween<Offset>(
-                      begin: const Offset(0.05, 0.0),
+                      begin: const Offset(0.02, 0.0),
                       end: Offset.zero,
-                    ).animate(CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    )),
+                    ).animate(animation),
                     child: child,
                   ),
                 );
@@ -178,53 +177,64 @@ class MainScreen extends ConsumerWidget {
                 child: getPage(pageIndex, ref),
               ),
             ),
-      bottomNavigationBar: TDBottomTabBar(
-        // 底部导航栏
-        TDBottomTabBarBasicType.iconText,
-        componentType: TDBottomTabBarComponentType.normal,
-        useVerticalDivider: false,
-        centerDistance: 4,
-        navigationTabs: [
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("recall"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("record"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("generate"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("settings"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
-          ),
-        ],
-        //backgroundColor: AppConfig.primaryColor,
-        currentIndex: pageIndex, // 当前选中索引
-        barHeight: 74,
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: TDBottomTabBar(
+          // 底部导航栏
+          TDBottomTabBarBasicType.iconText,
+          componentType: TDBottomTabBarComponentType.normal,
+          useVerticalDivider: false,
+          centerDistance: 4,
+          navigationTabs: [
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("recall"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("record"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("generate"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
+            ),
+            TDBottomTabBarTabConfig(
+              tabText: textLocalize("settings"),
+              selectTabTextStyle: selectedTextStyle,
+              unselectTabTextStyle: selectedTextStyle,
+              selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
+              unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
+              onTap: () =>
+                  ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
+            ),
+          ],
+          //backgroundColor: AppConfig.primaryColor,
+          currentIndex: pageIndex, // 当前选中索引
+          barHeight: 74,
+        ),
       ),
     );
   }

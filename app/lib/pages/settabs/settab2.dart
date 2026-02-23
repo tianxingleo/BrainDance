@@ -3,21 +3,40 @@ import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
 
 Widget setTab2(VoidCallback onUpdate, BuildContext context) {
-  return TDCellGroup(
-    cells: [
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest1',
-        pickerIndex: 0,
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest2',
-        pickerIndex: 1,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            Picker.buildPicker(
+              onUpdate: onUpdate,
+              context,
+              pickerTitle: 'PickerTest1',
+              pickerIndex: 0,
+            ),
+            Picker.buildPicker(
+              onUpdate: onUpdate,
+              context,
+              pickerTitle: 'PickerTest2',
+              pickerIndex: 1,
+            ),
+          ],
+        ),
       ),
-    ],
+    ),
   );
 }
 

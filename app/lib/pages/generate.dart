@@ -7,6 +7,7 @@ import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:braindance/configs/gen_config.dart';
+import '../extra_func/dynamic_background.dart';
 
 class GeneratePage extends StatefulWidget {
   const GeneratePage({super.key});
@@ -20,9 +21,6 @@ class _GeneratePageState extends State<GeneratePage>
   late final TabController _tabController;
   late final ScrollController _scrollController;
   late final TextEditingController _textEditingController;
-  late final AnimationController _bgAnimController;
-  late final Animation<Alignment> _topAlignment;
-  late final Animation<Alignment> _bottomAlignment;
   final ImagePicker _picker = ImagePicker();
   static Key _uploadKey = UniqueKey();
   static Key _uploadKey2 = UniqueKey();
@@ -190,49 +188,6 @@ class _GeneratePageState extends State<GeneratePage>
     _scrollController = ScrollController();
     _textEditingController = TextEditingController();
 
-    _bgAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 40),
-    )..repeat(reverse: true);
-
-    _topAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
-        weight: 1,
-      ),
-    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
-
-    _bottomAlignment = TweenSequence<Alignment>([
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomRight, end: Alignment.bottomLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.bottomLeft, end: Alignment.topLeft),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topLeft, end: Alignment.topRight),
-        weight: 1,
-      ),
-      TweenSequenceItem(
-        tween: AlignmentTween(begin: Alignment.topRight, end: Alignment.bottomRight),
-        weight: 1,
-      ),
-    ]).animate(CurvedAnimation(parent: _bgAnimController, curve: Curves.easeInOut));
-
     if (firstCheck) {
       return;
     }
@@ -244,7 +199,6 @@ class _GeneratePageState extends State<GeneratePage>
 
   @override
   void dispose() {
-    _bgAnimController.dispose();
     _tabController.dispose();
     _scrollController.dispose();
     _textEditingController.dispose();
@@ -505,69 +459,48 @@ class _GeneratePageState extends State<GeneratePage>
         centerTitle: true,
       ),
       extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          // 鍔ㄦ€佹笎鍙樿儗鏅紝鐢ㄤ簬鍑告樉鐜荤拑鏁堟灉
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _bgAnimController,
-              builder: (context, child) {
-                return Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: _topAlignment.value,
-                      end: _bottomAlignment.value,
-                      colors: [
-                        AppConfig.primaryColor.withValues(alpha: 0.3),
-                        TDTheme.of(context).brandColor4.withValues(alpha: 0.2),
-                        TDTheme.of(context).grayColor1,
-                        AppConfig.primaryColor.withValues(alpha: 0.1),
-                      ],
-                      stops: const [0.0, 0.3, 0.7, 1.0],
-                    ),
+      body: DynamicGradientBackground(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(children: tabContents),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                padding: const EdgeInsets.only(bottom: 32, top: 24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      TDTheme.of(context).grayColor1,
+                      TDTheme.of(context).grayColor1.withValues(alpha: 0.9),
+                      TDTheme.of(context).grayColor1.withValues(alpha: 0.0),
+                    ],
+                    stops: const [0.0, 0.6, 1.0],
                   ),
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            child: Column(children: tabContents),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              padding: const EdgeInsets.only(bottom: 32, top: 24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    TDTheme.of(context).grayColor1,
-                    TDTheme.of(context).grayColor1.withValues(alpha: 0.9),
-                    TDTheme.of(context).grayColor1.withValues(alpha: 0.0),
-                  ],
-                  stops: const [0.0, 0.6, 1.0],
+                ),
+                child: TDButton(
+                  onTap: () {
+                    TDToast.showText(textLocalize('tip_unava'), context: context);
+                  },
+                  style: TDButtonStyle(
+                    backgroundColor: AppConfig.primaryColor,
+                    textColor: Colors.white,
+                    radius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                  ),
+                  type: TDButtonType.fill,
+                  shape: TDButtonShape.round,
+                  theme: TDButtonTheme.primary,
+                  size: TDButtonSize.large,
+                  width: MediaQuery.of(context).size.width * 0.85,
+                  text: textLocalize('gen_button'),
                 ),
               ),
-              child: TDButton(
-                onTap: () {
-                  TDToast.showText(textLocalize('tip_unava'), context: context);
-                },
-                style: TDButtonStyle(
-                  backgroundColor: AppConfig.primaryColor,
-                  textColor: Colors.white,
-                  radius: BorderRadius.circular(TDTheme.of(context).radiusRound),
-                ),
-                type: TDButtonType.fill,
-                shape: TDButtonShape.round,
-                theme: TDButtonTheme.primary,
-                size: TDButtonSize.large,
-                width: MediaQuery.of(context).size.width * 0.85,
-                text: textLocalize('gen_button'),
-              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

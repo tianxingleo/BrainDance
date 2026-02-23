@@ -4,27 +4,46 @@ import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
 
 Widget setTab3(BuildContext context) {
-  return TDCellGroup(
-    cells: [
-      TDCell(
-        //版本信息
-        arrow: false,
-        title: textLocalize('set_ver'),
-        note: AppConfig.version,
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Container(
+      decoration: BoxDecoration(
+        color: TDTheme.of(context).whiteColor1,
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_pub'),
-        note: AppConfig.publishDate,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+        child: TDCellGroup(
+          cells: [
+            TDCell(
+              //版本信息
+              arrow: false,
+              title: textLocalize('set_ver'),
+              note: AppConfig.version,
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_pub'),
+              note: AppConfig.publishDate,
+            ),
+            TDCell(
+              arrow: false,
+              title: textLocalize('set_cache'),
+              onClick: (cell) async {
+                TDToast.showText(textLocalize("tip_cache"), context: context);
+                await DirSystem.deleteDir(await DirFinder.cacheDir());
+              },
+            ),
+          ],
+        ),
       ),
-      TDCell(
-        arrow: false,
-        title: textLocalize('set_cache'),
-        onClick: (cell) async {
-          TDToast.showText(textLocalize("tip_cache"), context: context);
-          await DirSystem.deleteDir(await DirFinder.cacheDir());
-        },
-      ),
-    ],
+    ),
   );
 }
