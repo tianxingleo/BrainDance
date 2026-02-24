@@ -15,11 +15,18 @@ class RecallPage extends StatefulWidget {
 class _RecallPageState extends State<RecallPage> {
   List<Map<String, dynamic>> _models = [];
   bool _isLoading = true;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _fetchModels();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   /// 将 Storage 内的相对路径转为可访问的公开 URL。
@@ -57,6 +64,50 @@ class _RecallPageState extends State<RecallPage> {
     }
   }
 
+  Future<void> _searchModels(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() {
+        _isLoading = true;
+      });
+      _fetchModels();
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'search-models',
+        body: {'query': query},
+      );
+
+      if (response.status == 200) {
+        final data = response.data;
+        if (data['success'] == true) {
+          if (mounted) {
+            setState(() {
+              _models = List<Map<String, dynamic>>.from(data['results']);
+              _isLoading = false;
+            });
+          }
+        } else {
+          throw Exception('Search failed: ${data['error']}');
+        }
+      } else {
+        throw Exception('HTTP Error: ${response.status}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        TDToast.showText('搜索失败: $e', context: context);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,11 +140,33 @@ class _RecallPageState extends State<RecallPage> {
       ),
       extendBodyBehindAppBar: true,
       body: DynamicGradientBackground(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _models.isEmpty
-                ? _buildEmptyState()
-                : _buildModelGrid(),
+        child: Column(
+          children: [
+            SizedBox(height: MediaQuery.of(context).padding.top + 60), // 为 AppBar 留出空间
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: TDSearchBar(
+                controller: _searchController,
+                placeHolder: '搜索回忆...',
+                onSubmitted: (value) {
+                  _searchModels(value);
+                },
+                onTextChanged: (value) {
+                  if (value.isEmpty) {
+                    _searchModels('');
+                  }
+                },
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _models.isEmpty
+                      ? _buildEmptyState()
+                      : _buildModelGrid(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -171,10 +244,9 @@ class _RecallPageState extends State<RecallPage> {
   }
 
   Widget _buildModelGrid() {
-    return SafeArea(
-      child: GridView.builder(
-        padding: const EdgeInsets.all(16.0),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+    return GridView.builder(
+      padding: const EdgeInsets.all(16.0),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16.0,
           mainAxisSpacing: 16.0,
@@ -185,6 +257,7 @@ class _RecallPageState extends State<RecallPage> {
           final model = _models[index];
           final sceneId = model['scene_id'] ?? 'Unknown Scene';
           final desc = model['description'] ?? '没有描述信息';
+          final similarity = model['similarity'] as double?;
 
           return GestureDetector(
             onTap: () {
@@ -218,20 +291,42 @@ class _RecallPageState extends State<RecallPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: TDTheme.of(context).grayColor3,
-                        borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(TDTheme.of(context).radiusLarge),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            color: TDTheme.of(context).grayColor3,
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(TDTheme.of(context).radiusLarge),
+                            ),
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.view_in_ar,
+                              size: 40,
+                              color: TDTheme.of(context).fontGyColor3,
+                            ),
+                          ),
                         ),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          Icons.view_in_ar,
-                          size: 40,
-                          color: TDTheme.of(context).fontGyColor3,
-                        ),
-                      ),
+                        if (similarity != null)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: TDText(
+                                '${(similarity * 100).toStringAsFixed(1)}%',
+                                font: TDTheme.of(context).fontBodyExtraSmall,
+                                textColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   Padding(
@@ -260,7 +355,6 @@ class _RecallPageState extends State<RecallPage> {
             ),
           );
         },
-      ),
-    );
+      );
   }
 }

@@ -3,7 +3,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-
+import 'dart:io';
+import 'package:flutter/services.dart';
 // ============================================================
 // 开发/生产模式切换
 // - 开发模式（kDebugMode）：连接本地 Vite dev server
@@ -29,6 +30,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
+  HttpServer? _localServer;
+  int _localPort = 0;
 
   @override
   void initState() {
@@ -41,12 +44,57 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       _isUnsupportedPlatform = true;
     } else {
       try {
-        _initWebView();
+        _startLocalServer().then((_) {
+          if (mounted) _initWebView();
+        });
       } catch (e) {
         debugPrint('WebView initialization failed: $e');
         _isUnsupportedPlatform = true;
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _localServer?.close();
+    super.dispose();
+  }
+
+  Future<void> _startLocalServer() async {
+    _localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _localPort = _localServer!.port;
+    _localServer!.listen((HttpRequest request) async {
+      String path = request.uri.path;
+      if (path == '/' || path.isEmpty) {
+        path = '/index.html';
+      }
+
+      // 将请求路径映射到 Flutter 的 assets/webgl 目录
+      String assetPath = 'assets/webgl$path';
+
+      try {
+        final ByteData data = await rootBundle.load(assetPath);
+        final List<int> bytes = data.buffer.asUint8List();
+
+        String contentType = 'text/plain';
+        if (path.endsWith('.html')) contentType = 'text/html; charset=utf-8';
+        else if (path.endsWith('.js')) contentType = 'application/javascript; charset=utf-8';
+        else if (path.endsWith('.css')) contentType = 'text/css; charset=utf-8';
+        else if (path.endsWith('.png')) contentType = 'image/png';
+        else if (path.endsWith('.ico')) contentType = 'image/x-icon';
+        else if (path.endsWith('.ply')) contentType = 'application/octet-stream';
+
+        request.response.headers.contentType = ContentType.parse(contentType);
+        // 允许跨域
+        request.response.headers.add('Access-Control-Allow-Origin', '*');
+        request.response.add(bytes);
+        await request.response.close();
+      } catch (e) {
+        request.response.statusCode = HttpStatus.notFound;
+        request.response.write('Not Found');
+        await request.response.close();
+      }
+    });
   }
 
   void _initWebView() {
@@ -69,10 +117,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (int progress) {
-            // Update loading bar.
-          },
-          onPageStarted: (String url) {},
           onPageFinished: (String url) {
             // 后备方案：页面加载完 2 秒后如果还没收到 ready 信号，则主动触发
             Future.delayed(const Duration(seconds: 2), () {
@@ -89,16 +133,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ),
       );
 
-    // Load the local HTML file
+    // Load the local HTML file matching the server port
     _loadLocalHtml();
   }
 
   Future<void> _loadLocalHtml() async {
     try {
-      // 始终从本地预编译的 assets 加载，无需 Vite dev server
-      await _controller?.loadFlutterAsset('assets/webgl/index.html');
+      final url = 'http://127.0.0.1:$_localPort/index.html';
+      await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
-      debugPrint('Error loading HTML: $e');
+      debugPrint('Error loading HTML via local server: $e');
     }
   }
 
@@ -135,7 +179,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ),
                     const SizedBox(height: 12),
                     TDText(
-                      'Flutter 官方的 webview_flutter 插件目前仅支持 Android / iOS / Web 平台。如果你正在使用 Windows / macOS 调试，不支持直接原位打开 3D 模型。\n\n请在移动端模拟器（Android Emulator/iOS Simulator）或真实手机设备上调试 3D 查看功能！',
+                      'Flutter 官方的 webview_flutter 插件目前仅支持 Android / iOS / Web 平台。\n如果你正在使用 Windows / macOS 调试，不支持直接原位打开 3D 模型。\n\n请在移动端模拟器（Android Emulator/iOS Simulator）或真实手机设备上调试 3D 查看功能！',
                       font: TDTheme.of(context).fontBodyMedium,
                       textColor: TDTheme.of(context).fontGyColor3,
                       textAlign: TextAlign.center,
