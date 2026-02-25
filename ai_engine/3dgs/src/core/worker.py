@@ -236,9 +236,11 @@ class CloudWorker:
             context = {
                 "task_id": task_id,
                 "scene_id": scene_id,
+                "user_id": user_id,
                 "work_root": task_output_dir,
                 "log_callback": on_pipeline_log,
-                "shared_model_dir": self.MODELS_DIR
+                "shared_model_dir": self.MODELS_DIR,
+                "supabase": self.supabase
             }
 
             # 3. [核心修改] 通过工厂实例化 Pipeline

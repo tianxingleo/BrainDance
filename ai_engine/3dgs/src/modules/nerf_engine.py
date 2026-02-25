@@ -78,6 +78,19 @@ class NerfstudioEngine:
             "--output-dir", str(self.cfg.project_dir)
         ], check=True, env=self.env)
 
+        # 导出相机 (用于空间语义锚点)
+        cameras_export_dir = self.cfg.project_dir / "cameras_export"
+        if cameras_export_dir.exists():
+            shutil.rmtree(str(cameras_export_dir))
+        cameras_export_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run([
+                "ns-export", "cameras", "--load-config", str(config_path), 
+                "--output-dir", str(cameras_export_dir)
+            ], check=True, env=self.env)
+        except Exception as e:
+            print(f"⚠️ 无法使用 ns-export cameras 导出相机, 可能是版本不支持: {e}")
+
         # 后处理：点云切割
         raw_ply = self.cfg.project_dir / "point_cloud.ply"
         if not raw_ply.exists(): raw_ply = self.cfg.project_dir / "splat.ply"
