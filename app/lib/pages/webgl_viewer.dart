@@ -14,11 +14,13 @@ import 'package:flutter/services.dart';
 // ============================================================
 class WebGLViewerPage extends StatefulWidget {
   final String initialModelUrl;
+  final String? posesUrl;       // 云端 webgl_poses.json 的公开 URL（可选）
   final String sceneId;
 
   const WebGLViewerPage({
     super.key,
     this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.posesUrl,
     this.sceneId = '3DGS Viewer',
   });
 
@@ -148,9 +150,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendModelToVue(String modelUrl) {
     if (_isWebReady) {
-      // 使用 jsonEncode 确保 URL 中的特殊字符被正确转义
-      final encodedUrl = jsonEncode(modelUrl);
-      _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
+        // 新版：同时传 PLY URL 和 webgl_poses.json 的公网 URL
+        final payload = jsonEncode({'ply': modelUrl, 'poses': widget.posesUrl});
+        _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+      } else {
+        // 旧版兼容：只传 PLY URL，由 WebGL 内部使用默认位姿文件
+        final encodedUrl = jsonEncode(modelUrl);
+        _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+      }
     }
   }
 

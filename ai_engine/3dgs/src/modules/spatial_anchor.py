@@ -76,11 +76,20 @@ class SpatialAnchorExtractor:
         except Exception as e:
             if log_callback: log_callback(f"⚠️ 保存 webgl_poses.json 失败: {e}")
 
-        # 3. 获取 model_id
+        # 3. 获取 model_id 和 user_id
         model_id = self._get_model_id(scene_id)
         if not model_id:
             if log_callback: log_callback(f"⚠️ 未在数据库中找到 scene_id={scene_id} 的模型，跳过锚点提取")
             return False
+            
+        bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
+        user_id = self.cfg.project_name.split('_')[0] if '_' in self.cfg.project_name else 'default_user'
+        try:
+            response = self.supabase.table("model_assets").select("user_id").eq("id", model_id).execute()
+            if response.data and len(response.data) > 0:
+                user_id = response.data[0]['user_id']
+        except Exception:
+            pass
 
         # 4. 抽样并打标
         sample_count = 10
@@ -99,6 +108,19 @@ class SpatialAnchorExtractor:
             if not img_path.exists():
                 if log_callback: log_callback(f"    -> ⚠️ 找不到图片 {image_name}，跳过")
                 continue
+                
+            # 🟢 [新增] 上传图片到 Supabase Storage
+            try:
+                remote_img_path = f"{user_id}/{scene_id}/output/images/{image_name}"
+                with open(img_path, "rb") as f:
+                    self.supabase.storage.from_(bucket).upload(
+                        path=remote_img_path,
+                        file=f,
+                        file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
+                    )
+                if log_callback: log_callback(f"    -> ⬆️ 已上传图片 {image_name}")
+            except Exception as e:
+                if log_callback: log_callback(f"    -> ⚠️ 上传图片 {image_name} 失败: {e}")
                 
             if log_callback: log_callback(f"    -> 正在分析视角 {image_name} ...")
             
@@ -128,15 +150,17 @@ class SpatialAnchorExtractor:
 
         # 6. 上传 webgl_poses.json 到 Supabase Storage
         try:
-            bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
-            user_id = self.cfg.project_name.split('_')[0] if '_' in self.cfg.project_name else 'default_user'
-            # 尝试从数据库获取真实的 user_id
-            try:
-                response = self.supabase.table("model_assets").select("user_id").eq("id", model_id).execute()
-                if response.data and len(response.data) > 0:
-                    user_id = response.data[0]['user_id']
-            except Exception:
-                pass
+            # 更新 webgl_poses.json 中的 image_url 为真实的云端路径
+            # 只有被抽样并成功上传的图片才有真实的云端路径，其他的保持原样或置空
+            # 为了简单起见，我们可以将所有图片的 image_url 都指向云端路径，
+            # 即使有些图片没有被上传（前端可以处理 404 或者我们也可以选择上传所有图片）
+            # 这里我们选择更新所有图片的 image_url
+            for frame in webgl_poses:
+                frame['image_url'] = f"{user_id}/{scene_id}/output/images/{frame['id']}"
+                
+            # 重新保存 webgl_poses.json
+            with open(webgl_poses_path, 'w') as f:
+                json.dump(output_data, f, indent=4)
 
             remote_path = f"{user_id}/{scene_id}/output/webgl_poses.json"
             with open(webgl_poses_path, "rb") as f:

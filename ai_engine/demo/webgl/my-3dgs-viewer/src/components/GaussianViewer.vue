@@ -432,9 +432,17 @@ const getViewerConfig = () => {
   };
 };
 
-const initViewer = async () => {
+// 当前加载的 PLY 和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
+let currentPlyUrl = '/models/scene_auto_sync.ply';
+let currentPosesUrl = '/models/webgl_poses_with_tags.json';
+
+const initViewer = async (plyUrl, posesUrl) => {
   if (isLoading.value) return;
   isLoading.value = true;
+
+  // 更新 URL（如果有新传入的值）
+  if (plyUrl) currentPlyUrl = plyUrl;
+  if (posesUrl) currentPosesUrl = posesUrl;
 
   try {
     if (viewer) {
@@ -454,15 +462,17 @@ const initViewer = async () => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
 
-    // 加载你的模型
-    await viewer.addSplatScene('/models/scene_auto_sync.ply', {
+    // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
+    console.log(`[Viewer] 加载 PLY: ${currentPlyUrl}`);
+    await viewer.addSplatScene(currentPlyUrl, {
       'showLoadingUI': true,
       'progressiveLoad': false,
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
-    // 加载相机位姿
-    fetch('/models/webgl_poses_with_tags.json')
+    // 加载相机位姿（支持本地路径与云端 URL）
+    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
+    fetch(currentPosesUrl)
       .then(res => res.json())
       .then(data => {
         // 数据适配
@@ -476,11 +486,11 @@ const initViewer = async () => {
           cameraPoses.value = data.frames.map(frame => ({
             id: frame.id,
             matrix: frame.matrix,
-            image_url: frame.image_url,
+            image_url: frame.image_url, // 云端图片 URL 或本地路径
             tag: frame.tag
           }));
         } else {
-          cameraPoses.value = data; // 兼容 参考.txt 格式
+          cameraPoses.value = data; // 兼容旧格式
         }
       })
       .catch(err => console.error("加载位姿失败:", err));
@@ -690,8 +700,32 @@ const onMouseUp = () => { isDragging.value = false; };
 onMounted(() => { 
   if (containerRef.value) { 
     checkProtocol(); 
-    initViewer(); 
     
+    // 注册供Flutter调用的全局函数
+    // 支持两种调用方式：
+    // 1. loadModelFromFlutter(plyUrl)              -- 只传模型URL，兼容旧版
+    // 2. loadModelFromFlutter({ply: url, poses: url}) -- 同时传模型和位姿URL
+    window.loadModelFromFlutter = (input) => {
+      console.log('[Flutter->WebGL] 收到加载请求:', input);
+      if (typeof input === 'string') {
+        // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
+        initViewer(input, null);
+      } else if (typeof input === 'object' && input !== null) {
+        // 新版：同时传 PLY URL 和 poses URL
+        initViewer(input.ply || null, input.poses || null);
+      } else {
+        initViewer(null, null);
+      }
+    };
+
+    // 通知 Flutter 页面已就绪
+    if (window.BrainDanceChannel) {
+      window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
+    } else {
+      // 非 Flutter 环境（浏览器直接打开），用默认本地文件初始化
+      initViewer(null, null);
+    }
+
     // 绑定原生事件用于调试拖拽
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
