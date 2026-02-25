@@ -1,0 +1,357 @@
+Windows PowerShell
+版权所有（C） Microsoft Corporation。保留所有权利。
+
+安装最新的 PowerShell，了解新功能和改进！https://aka.ms/PSWindows
+
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda --version
+conda 25.9.1
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda create --name brain_dance python=3.10 -y
+
+CondaToSNonInteractiveError: Terms of Service have not been accepted for the following channels. Please accept or remove them before proceeding:
+    - https://repo.anaconda.com/pkgs/main
+    - https://repo.anaconda.com/pkgs/r
+    - https://repo.anaconda.com/pkgs/msys2
+
+To accept these channels' Terms of Service, run the following commands:
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+
+For information on safely removing channels from your conda configuration,
+please see the official documentation:
+
+    https://www.anaconda.com/docs/tools/working-with-conda/channels
+
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+accepted Terms of Service for https://repo.anaconda.com/pkgs/main
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+accepted Terms of Service for https://repo.anaconda.com/pkgs/r
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/msys2
+accepted Terms of Service for https://repo.anaconda.com/pkgs/msys2
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda create --name brain_dance python=3.10 -y
+3 channel Terms of Service accepted
+Retrieving notices: done
+Channels:
+ - defaults
+Platform: win-64
+Collecting package metadata (repodata.json): done
+Solving environment: done
+
+
+==> WARNING: A newer version of conda exists. <==
+    current version: 25.9.1
+    latest version: 25.11.0
+
+Please update conda by running
+
+    $ conda update -n base -c defaults conda
+
+
+
+## Package Plan ##
+
+  environment location: C:\Users\ltx\miniconda3\envs\brain_dance
+
+  added / updated specs:
+    - python=3.10
+
+
+The following packages will be downloaded:
+
+    package                    |            build
+    ---------------------------|-----------------
+    pip-25.3                   |     pyhc872135_0         1.1 MB
+    python-3.10.19             |       h981015d_0        15.3 MB
+    setuptools-80.9.0          |  py310haa95532_0         1.4 MB
+    wheel-0.45.1               |  py310haa95532_0         145 KB
+    ------------------------------------------------------------
+                                           Total:        18.0 MB
+done
+#
+# To activate this environment, use
+#
+#     $ conda activate brain_dance
+#
+# To deactivate an active environment, use
+#
+#     $ conda deactivate
+
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> nvcc -V
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2025 NVIDIA Corporation
+Built on Wed_Aug_20_13:58:20_Pacific_Daylight_Time_2025
+Cuda compilation tools, release 13.0, V13.0.88
+Build cuda_13.0.r13.0/compiler.36424714_0
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda activate brain_dance
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+Looking in indexes: https://download.pytorch.org/whl/cu130
+Collecting torch
+  Downloading https://download.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp313-cp313-win_amd64.whl.metadata (29 kB)
+Collecting torchvision
+  Downloading https://download.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp313-cp313-win_amd64.whl.metadata (6.1 kB)
+Collecting filelock (from torch)
+  Downloading https://download.pytorch.org/whl/filelock-3.19.1-py3-none-any.whl.metadata (2.1 kB)
+Requirement already satisfied: typing-extensions>=4.10.0 in c:\users\ltx\miniconda3\lib\site-packages (from torch) (4.15.0)
+Collecting sympy>=1.13.3 (from torch)
+  Downloading https://download.pytorch.org/whl/sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting networkx>=2.5.1 (from torch)
+  Downloading https://download.pytorch.org/whl/networkx-3.5-py3-none-any.whl.metadata (6.3 kB)
+Collecting jinja2 (from torch)
+  Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting fsspec>=0.8.5 (from torch)
+  Downloading https://download.pytorch.org/whl/fsspec-2025.9.0-py3-none-any.whl.metadata (10 kB)
+Requirement already satisfied: setuptools in c:\users\ltx\miniconda3\lib\site-packages (from torch) (80.9.0)
+Collecting numpy (from torchvision)
+  Downloading https://download.pytorch.org/whl/numpy-2.3.3-cp313-cp313-win_amd64.whl.metadata (60 kB)
+Collecting pillow!=8.3.*,>=5.3.0 (from torchvision)
+  Downloading https://download.pytorch.org/whl/pillow-11.3.0-cp313-cp313-win_amd64.whl.metadata (9.2 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch)
+  Downloading https://download.pytorch.org/whl/mpmath-1.3.0-py3-none-any.whl (536 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 536.2/536.2 kB 11.5 MB/s  0:00:00
+Collecting MarkupSafe>=2.0 (from jinja2->torch)
+  Downloading https://download.pytorch.org/whl/MarkupSafe-2.1.5.tar.gz (19 kB)
+  Preparing metadata (setup.py) ... done
+Downloading https://download.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp313-cp313-win_amd64.whl (1862.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 GB 8.6 MB/s  0:03:52
+Downloading https://download.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp313-cp313-win_amd64.whl (8.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.9/8.9 MB 8.9 MB/s  0:00:00
+Downloading https://download.pytorch.org/whl/fsspec-2025.9.0-py3-none-any.whl (199 kB)
+Downloading https://download.pytorch.org/whl/networkx-3.5-py3-none-any.whl (2.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 8.6 MB/s  0:00:00
+Downloading https://download.pytorch.org/whl/pillow-11.3.0-cp313-cp313-win_amd64.whl (7.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.0/7.0 MB 9.1 MB/s  0:00:00
+Downloading https://download.pytorch.org/whl/sympy-1.14.0-py3-none-any.whl (6.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.3/6.3 MB 7.1 MB/s  0:00:00
+Downloading https://download.pytorch.org/whl/filelock-3.19.1-py3-none-any.whl (15 kB)
+Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl (134 kB)
+Downloading https://download.pytorch.org/whl/numpy-2.3.3-cp313-cp313-win_amd64.whl (12.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 10.4 MB/s  0:00:01
+Building wheels for collected packages: MarkupSafe
+  DEPRECATION: Building 'MarkupSafe' using the legacy setup.py bdist_wheel mechanism, which will be removed in a future version. pip 25.3 will enforce this behaviour change. A possible replacement is to use the standardized build interface by setting the `--use-pep517` option, (possibly combined with `--no-build-isolation`), or adding a `pyproject.toml` file to the source tree of 'MarkupSafe'. Discussion can be found at https://github.com/pypa/pip/issues/6334
+  Building wheel for MarkupSafe (setup.py) ... done
+  Created wheel for MarkupSafe: filename=markupsafe-2.1.5-cp313-cp313-win_amd64.whl size=17243 sha256=b0e3f9c2c50a9a9902ce0d755fe8ef7ae6658dccf7f156a203150e0abfa06348
+  Stored in directory: c:\users\ltx\appdata\local\pip\cache\wheels\84\b6\28\95b8e298901ee19b488797095efb5fbed28637ed83215b13b1
+Successfully built MarkupSafe
+Installing collected packages: mpmath, sympy, pillow, numpy, networkx, MarkupSafe, fsspec, filelock, jinja2, torch, torchvision
+Successfully installed MarkupSafe-2.1.5 filelock-3.19.1 fsspec-2025.9.0 jinja2-3.1.6 mpmath-1.3.0 networkx-3.5 numpy-2.3.3 pillow-11.3.0 sympy-1.14.0 torch-2.9.1+cu130 torchvision-0.24.1+cu130
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> pip install nerfstudio
+Collecting nerfstudio
+  Downloading nerfstudio-1.1.5-py3-none-any.whl.metadata (24 kB)
+Collecting appdirs>=1.4 (from nerfstudio)
+  Downloading appdirs-1.4.4-py2.py3-none-any.whl.metadata (9.0 kB)
+Collecting av>=9.2.0 (from nerfstudio)
+  Downloading av-16.0.1-cp313-cp313-win_amd64.whl.metadata (4.7 kB)
+Collecting comet-ml>=3.33.8 (from nerfstudio)
+  Downloading comet_ml-3.54.2-py3-none-any.whl.metadata (4.0 kB)
+Requirement already satisfied: cryptography>=38 in c:\users\ltx\miniconda3\lib\site-packages (from nerfstudio) (46.0.3)
+Collecting tyro>=0.6.6 (from nerfstudio)
+  Downloading tyro-0.9.35-py3-none-any.whl.metadata (12 kB)
+Collecting gdown>=4.6.0 (from nerfstudio)
+  Downloading gdown-5.2.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting ninja>=1.10 (from nerfstudio)
+  Downloading ninja-1.13.0-py3-none-win_amd64.whl.metadata (5.1 kB)
+Collecting h5py>=2.9.0 (from nerfstudio)
+  Downloading h5py-3.15.1-cp313-cp313-win_amd64.whl.metadata (3.1 kB)
+Collecting imageio>=2.21.1 (from nerfstudio)
+  Downloading imageio-2.37.2-py3-none-any.whl.metadata (9.7 kB)
+Collecting ipywidgets>=7.6 (from nerfstudio)
+  Downloading ipywidgets-8.1.8-py3-none-any.whl.metadata (2.4 kB)
+Collecting jaxtyping>=0.2.15 (from nerfstudio)
+  Downloading jaxtyping-0.3.3-py3-none-any.whl.metadata (7.8 kB)
+Collecting jupyterlab>=3.3.4 (from nerfstudio)
+  Downloading jupyterlab-4.5.0-py3-none-any.whl.metadata (16 kB)
+Collecting matplotlib>=3.6.0 (from nerfstudio)
+  Downloading matplotlib-3.10.7-cp313-cp313-win_amd64.whl.metadata (11 kB)
+Collecting mediapy>=1.1.0 (from nerfstudio)
+  Downloading mediapy-1.2.4-py3-none-any.whl.metadata (4.8 kB)
+Collecting msgpack>=1.0.4 (from nerfstudio)
+  Downloading msgpack-1.1.2-cp313-cp313-win_amd64.whl.metadata (8.4 kB)
+Collecting msgpack-numpy>=0.4.8 (from nerfstudio)
+  Downloading msgpack_numpy-0.4.8-py2.py3-none-any.whl.metadata (5.0 kB)
+Collecting nerfacc==0.5.2 (from nerfstudio)
+  Downloading nerfacc-0.5.2-py3-none-any.whl.metadata (877 bytes)
+INFO: pip is looking at multiple versions of nerfstudio to determine which version is compatible with other requirements. This could take a while.
+Collecting nerfstudio
+  Downloading nerfstudio-1.1.4-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.1.3-py3-none-any.whl.metadata (23 kB)
+Collecting awscli>=1.31.10 (from nerfstudio)
+  Downloading awscli-1.43.6-py3-none-any.whl.metadata (11 kB)
+Collecting nerfstudio
+  Downloading nerfstudio-1.1.2-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.1.1-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.1.0-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.0.3-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.0.2-py3-none-any.whl.metadata (23 kB)
+INFO: pip is still looking at multiple versions of nerfstudio to determine which version is compatible with other requirements. This could take a while.
+  Downloading nerfstudio-1.0.1-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-1.0.0-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-0.3.4-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-0.3.3-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-0.3.2-py3-none-any.whl.metadata (22 kB)
+INFO: This is taking longer than usual. You might need to provide the dependency resolver with stricter constraints to reduce runtime. See https://pip.pypa.io/warnings/backtracking for guidance. If you want to abort this run, press Ctrl + C.
+  Downloading nerfstudio-0.3.1-py3-none-any.whl.metadata (22 kB)
+  Downloading nerfstudio-0.3.0-py3-none-any.whl.metadata (23 kB)
+  Downloading nerfstudio-0.2.2-py3-none-any.whl.metadata (22 kB)
+Collecting functorch>=0.2.1 (from nerfstudio)
+  Downloading functorch-2.0.0-py2.py3-none-any.whl.metadata (346 bytes)
+Collecting nerfstudio
+  Downloading nerfstudio-0.2.1-py3-none-any.whl.metadata (21 kB)
+Collecting nerfacc==0.3.5 (from nerfstudio)
+  Downloading nerfacc-0.3.5-py3-none-any.whl.metadata (819 bytes)
+Collecting nerfstudio
+  Downloading nerfstudio-0.2.0-py3-none-any.whl.metadata (21 kB)
+  Downloading nerfstudio-0.1.19-py3-none-any.whl.metadata (20 kB)
+  Downloading nerfstudio-0.1.18-py3-none-any.whl.metadata (20 kB)
+Collecting aiohttp>=3.8.1 (from nerfstudio)
+  Downloading aiohttp-3.13.2-cp313-cp313-win_amd64.whl.metadata (8.4 kB)
+Collecting aiortc>=1.3.2 (from nerfstudio)
+  Downloading aiortc-1.14.0-py3-none-any.whl.metadata (4.9 kB)
+Collecting cryptography<39,>=38 (from nerfstudio)
+  Downloading cryptography-38.0.4-cp36-abi3-win_amd64.whl.metadata (5.4 kB)
+Collecting nerfacc==0.3.3 (from nerfstudio)
+  Downloading nerfacc-0.3.3-py3-none-any.whl.metadata (7.4 kB)
+Collecting nerfstudio
+  Downloading nerfstudio-0.1.17-py3-none-any.whl.metadata (20 kB)
+  Downloading nerfstudio-0.1.16-py3-none-any.whl.metadata (20 kB)
+WARNING: Ignoring version 0.1.16 of nerfstudio since it has invalid metadata:
+Requested nerfstudio from https://files.pythonhosted.org/packages/bf/23/424b9e9d6ab8d3a6c1559fefc3cc39bc586157f4600d39b5a17b4fcfc2a2/nerfstudio-0.1.16-py3-none-any.whl has invalid metadata: .* suffix can only be used with `==` or `!=` operators
+    protobuf (!=3.20.0,<=3.20.3.*)
+                       ~~~~~~~~~^
+Please use pip<24.1 if you need to use this version.
+  Downloading nerfstudio-0.1.15-py3-none-any.whl.metadata (19 kB)
+Collecting aiohttp==3.8.1 (from nerfstudio)
+  Downloading aiohttp-3.8.1.tar.gz (7.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.3/7.3 MB 4.3 MB/s  0:00:01
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Collecting aiortc==1.3.2 (from nerfstudio)
+  Downloading aiortc-1.3.2.tar.gz (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 7.0 MB/s  0:00:00
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Collecting av==9.2.0 (from nerfstudio)
+  Downloading av-9.2.0.tar.gz (2.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 9.6 MB/s  0:00:00
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... error
+  error: subprocess-exited-with-error
+
+  × Getting requirements to build wheel did not run successfully.
+  │ exit code: 1
+  ╰─> [77 lines of output]
+      Compiling av\buffer.pyx because it changed.
+      [1/1] Cythonizing av\buffer.pyx
+      Compiling av\bytesource.pyx because it changed.
+      [1/1] Cythonizing av\bytesource.pyx
+      Compiling av\descriptor.pyx because it changed.
+      [1/1] Cythonizing av\descriptor.pyx
+      Compiling av\dictionary.pyx because it changed.
+      [1/1] Cythonizing av\dictionary.pyx
+      warning: av\enum.pyx:321:4: __nonzero__ was removed in Python 3; use __bool__ instead
+      Compiling av\enum.pyx because it changed.
+      [1/1] Cythonizing av\enum.pyx
+      Compiling av\error.pyx because it changed.
+      [1/1] Cythonizing av\error.pyx
+      Compiling av\format.pyx because it changed.
+      [1/1] Cythonizing av\format.pyx
+      Compiling av\frame.pyx because it changed.
+      [1/1] Cythonizing av\frame.pyx
+      performance hint: av\logging.pyx:232:0: Exception check on 'log_callback' will always require the GIL to be acquired.
+      Possible solutions:
+          1. Declare 'log_callback' as 'noexcept' if you control the definition and you're sure you don't want the function to raise exceptions.
+          2. Use an 'int' return type on 'log_callback' to allow an error code to be returned.
+
+      Error compiling Cython file:
+      ------------------------------------------------------------
+      ...
+      cdef const char *log_context_name(void *ptr) nogil:
+          cdef log_context *obj = <log_context*>ptr
+          return obj.name
+
+      cdef lib.AVClass log_class
+      log_class.item_name = log_context_name
+                            ^
+      ------------------------------------------------------------
+      av\logging.pyx:216:22: Cannot assign type 'const char *(void *) except? NULL nogil' to 'const char *(*)(void *) noexcept nogil'. Exception values are incompatible. Suggest adding 'noexcept' to the type of 'log_context_name'.
+
+      Error compiling Cython file:
+      ------------------------------------------------------------
+      ...
+
+      # Start the magic!
+      # We allow the user to fully disable the logging system as it will not play
+      # nicely with subinterpreters due to FFmpeg-created threads.
+      if os.environ.get('PYAV_LOGGING') != 'off':
+          lib.av_log_set_callback(log_callback)
+                                  ^
+      ------------------------------------------------------------
+      av\logging.pyx:351:28: Cannot assign type 'void (void *, int, const char *, va_list) except * nogil' to 'av_log_callback' (alias of 'void (*)(void *, int, const char *, va_list) noexcept nogil'). Exception values are incompatible. Suggest adding 'noexcept' to the type of 'log_callback'.
+      Compiling av\logging.pyx because it changed.
+      [1/1] Cythonizing av\logging.pyx
+      Traceback (most recent call last):
+        File "C:\Users\ltx\miniconda3\Lib\site-packages\pip\_vendor\pyproject_hooks\_in_process\_in_process.py", line 389, in <module>
+          main()
+          ~~~~^^
+        File "C:\Users\ltx\miniconda3\Lib\site-packages\pip\_vendor\pyproject_hooks\_in_process\_in_process.py", line 373, in main
+          json_out["return_val"] = hook(**hook_input["kwargs"])
+                                   ~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+        File "C:\Users\ltx\miniconda3\Lib\site-packages\pip\_vendor\pyproject_hooks\_in_process\_in_process.py", line 143, in get_requires_for_build_wheel
+          return hook(config_settings)
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\setuptools\build_meta.py", line 331, in get_requires_for_build_wheel
+          return self._get_build_requires(config_settings, requirements=[])
+                 ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\setuptools\build_meta.py", line 301, in _get_build_requires
+          self.run_setup()
+          ~~~~~~~~~~~~~~^^
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\setuptools\build_meta.py", line 512, in run_setup
+          super().run_setup(setup_script=setup_script)
+          ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\setuptools\build_meta.py", line 317, in run_setup
+          exec(code, locals())
+          ~~~~^^^^^^^^^^^^^^^^
+        File "<string>", line 157, in <module>
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\Cython\Build\Dependencies.py", line 1153, in cythonize
+          cythonize_one(*args)
+          ~~~~~~~~~~~~~^^^^^^^
+        File "C:\Users\ltx\AppData\Local\Temp\pip-build-env-a64ji4wq\overlay\Lib\site-packages\Cython\Build\Dependencies.py", line 1297, in cythonize_one
+          raise CompileError(None, pyx_file)
+      Cython.Compiler.Errors.CompileError: av\logging.pyx
+      [end of output]
+
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+error: subprocess-exited-with-error
+
+× Getting requirements to build wheel did not run successfully.
+│ exit code: 1
+╰─> See above for output.
+
+note: This error originates from a subprocess, and is likely not a problem with pip.
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine> conda init powershell
+no change     C:\Users\ltx\miniconda3\Scripts\conda.exe
+no change     C:\Users\ltx\miniconda3\Scripts\conda-env.exe
+no change     C:\Users\ltx\miniconda3\Scripts\conda-script.py
+no change     C:\Users\ltx\miniconda3\Scripts\conda-env-script.py
+no change     C:\Users\ltx\miniconda3\condabin\conda.bat
+no change     C:\Users\ltx\miniconda3\Library\bin\conda.bat
+no change     C:\Users\ltx\miniconda3\condabin\_conda_activate.bat
+no change     C:\Users\ltx\miniconda3\condabin\rename_tmp.bat
+no change     C:\Users\ltx\miniconda3\condabin\conda_auto_activate.bat
+no change     C:\Users\ltx\miniconda3\condabin\conda_hook.bat
+no change     C:\Users\ltx\miniconda3\Scripts\activate.bat
+no change     C:\Users\ltx\miniconda3\condabin\activate.bat
+no change     C:\Users\ltx\miniconda3\condabin\deactivate.bat
+modified      C:\Users\ltx\miniconda3\Scripts\activate
+modified      C:\Users\ltx\miniconda3\Scripts\deactivate
+modified      C:\Users\ltx\miniconda3\etc\profile.d\conda.sh
+modified      C:\Users\ltx\miniconda3\etc\fish\conf.d\conda.fish
+no change     C:\Users\ltx\miniconda3\shell\condabin\Conda.psm1
+modified      C:\Users\ltx\miniconda3\shell\condabin\conda-hook.ps1
+no change     C:\Users\ltx\miniconda3\Lib\site-packages\xontrib\conda.xsh
+modified      C:\Users\ltx\miniconda3\etc\profile.d\conda.csh
+modified      C:\Users\ltx\Documents\WindowsPowerShell\profile.ps1
+
+==> For changes to take effect, close and re-open your current shell. <==
+
+PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine>
