@@ -18,10 +18,7 @@ from src.modules.glomap_runner import GlomapRunner
 from src.modules.ai_segmentor import AISegmentor
 from src.modules.nerf_engine import NerfstudioEngine
 from src.modules.scene_analyzer import SceneAnalyzer # 🟢 引入新模块
-<<<<<<< HEAD
-=======
 from src.modules.da3_runner import DA3Runner
->>>>>>> origin/tianxingleo-da3
 
 # 3. 引入辅助工具
 from src.utils.common import format_duration
@@ -47,12 +44,6 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     pipeline_metadata = {} 
     
     # 1. 实例化所有模块
-<<<<<<< HEAD
-    img_processor = ImageProcessor(cfg)
-    scene_analyzer = SceneAnalyzer(cfg) # 🟢 实例化
-    # colmap_runner = ColmapRunner(cfg)
-    glomap_runner = GlomapRunner(cfg) 
-=======
     img_processor = ImageProcessor(cfg, log_callback=log)
     scene_analyzer = SceneAnalyzer(cfg) # 🟢 实例化
     
@@ -63,7 +54,6 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     else:
         mapper_runner = GlomapRunner(cfg)
         
->>>>>>> origin/tianxingleo-da3
     ai_segmentor = AISegmentor(cfg)
     nerf_engine = NerfstudioEngine(cfg)
 
@@ -127,16 +117,6 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
             raise RuntimeError(err_msg)
 
     # ==========================================
-<<<<<<< HEAD
-    # Step 2: GLOMAP
-    # ==========================================
-    log(f"⚙️ [2/4] 正在进行位姿解算 (GLOMAP)...")
-    if log_callback: 
-        log_callback("提示: 解算过程可能较慢，请耐心等待...")
-    
-    if not glomap_runner.run():
-        log("❌ Pipeline 中断：GLOMAP 失败")
-=======
     # Step 2: 位姿解算
     # ==========================================
     log(f"⚙️ [2/4] 正在进行位姿解算 ({mapper_type.upper()})...")
@@ -145,7 +125,6 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     
     if not mapper_runner.run():
         log(f"❌ Pipeline 中断：{mapper_type.upper()} 失败")
->>>>>>> origin/tianxingleo-da3
         return None, pipeline_metadata
     log(f"    -> 位姿解算完成")
 

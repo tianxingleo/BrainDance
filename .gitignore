@@ -193,8 +193,6 @@ PR_BODY.md
 create_pr.sh
 CLAUDE.md
 docs/old/idea.pdf
-<<<<<<< HEAD
-=======
 
 # =========================
 # 10. Document Files (文档文件)
@@ -202,4 +200,8 @@ docs/old/idea.pdf
 *.doc
 *.docx
 *.docs
->>>>>>> origin/tianxingleo-da3
+# 备份文件超过100MB不应提交
+*.ply.bak
+*.mp4.bak
+ai_engine/demo/webgl/test.mp4.bak
+ai_engine/demo/webgl/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak

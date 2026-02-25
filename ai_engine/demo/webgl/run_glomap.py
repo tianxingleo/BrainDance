@@ -597,7 +597,7 @@ def run_pipeline(video_path, project_name):
             "--pipeline.model.random-init", "False", 
             "--pipeline.model.cull-alpha-thresh", "0.005", 
             *collider_args,
-            "--max-num-iterations", "5000", 
+            "--max-num-iterations", "15000", 
             "--vis", "viewer+tensorboard", 
             "--viewer.quit-on-train-completion", "True", 
             
@@ -625,6 +625,8 @@ def run_pipeline(video_path, project_name):
     
     # 导出相机
     cameras_export_dir = work_dir / "cameras_export"
+    if cameras_export_dir.exists():
+        shutil.rmtree(str(cameras_export_dir))
     cameras_export_dir.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.run([

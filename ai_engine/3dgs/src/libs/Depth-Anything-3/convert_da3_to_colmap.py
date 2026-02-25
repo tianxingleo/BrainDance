@@ -93,19 +93,20 @@ def read_binary_ply(ply_path):
     return np.array(vertices), np.array(colors)
 
 
-def convert_to_colmap(base_dir, output_dir):
+def convert_to_colmap(base_dir, output_dir, image_dir=None):
     """
     将Depth Anything 3的输出转换为COLMAP格式
 
     Args:
         base_dir: DA3输出目录
         output_dir: COLMAP输出目录
+        image_dir: 可选的图像目录，如果为None则使用 base_dir/extracted
     """
     # 输入文件路径
     intrinsic_file = os.path.join(base_dir, "intrinsic.txt")
     pose_file = os.path.join(base_dir, "camera_poses.txt")
     ply_file = os.path.join(base_dir, "pcd/combined_pcd.ply")
-    img_dir = os.path.join(base_dir, "extracted")
+    img_dir = image_dir if image_dir else os.path.join(base_dir, "extracted")
 
     # 检查输入文件
     if not os.path.exists(intrinsic_file):
@@ -137,7 +138,8 @@ def convert_to_colmap(base_dir, output_dir):
     # 1. 加载数据
     all_intrinsics = np.loadtxt(intrinsic_file)  # N x 4 (fx, fy, cx, cy)
     all_poses_c2w = np.loadtxt(pose_file).reshape(-1, 4, 4)
-    img_names = sorted(os.listdir(img_dir))
+    valid_extensions = ('.jpg', '.jpeg', '.png')
+    img_names = sorted([f for f in os.listdir(img_dir) if f.lower().endswith(valid_extensions)])
 
     num_frames = len(all_poses_c2w)
 
@@ -263,7 +265,15 @@ if __name__ == "__main__":
         help="COLMAP输出目录"
     )
 
+    parser.add_argument(
+        "--image_dir",
+        type=str,
+        required=False,
+        default=None,
+        help="原始图像目录（如果未提供，默认使用 base_dir/extracted）"
+    )
+
     args = parser.parse_args()
 
-    success = convert_to_colmap(args.base_dir, args.output_dir)
+    success = convert_to_colmap(args.base_dir, args.output_dir, args.image_dir)
     sys.exit(0 if success else 1)

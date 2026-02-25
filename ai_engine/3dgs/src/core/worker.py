@@ -39,12 +39,9 @@ class CloudWorker:
         # --- 1. 读取环境变量配置 ---
         # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
         self.SUPABASE_URL = os.getenv("SUPABASE_URL")
-<<<<<<< HEAD
-=======
         if self.SUPABASE_URL and not self.SUPABASE_URL.endswith('/'):
             self.SUPABASE_URL += '/'
             
->>>>>>> origin/tianxingleo-da3
         self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
         self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
         self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
@@ -167,6 +164,9 @@ class CloudWorker:
             
             # C. 触发云端同步
             self._sync_log(task_id)
+            
+            # D. 输出到终端，方便本地排查问题
+            print(f"[{scene_id}] {message}")
 
         try:
             # =================== 阶段 A: 锁定任务 ===================
@@ -208,18 +208,6 @@ class CloudWorker:
             task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
             
             # task_params 可能是 JSON 字符串，需要解析
-<<<<<<< HEAD
-            task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
-            try:
-                import json
-                if isinstance(task_params_raw, str):
-                    task_params = json.loads(task_params_raw) if task_params_raw else {}
-                else:
-                    task_params = task_params_raw
-            except Exception:
-                task_params = {}
-            
-=======
             task_params_raw = task.get('task_params') if isinstance(task, dict) else None
             
             try:
@@ -241,7 +229,6 @@ class CloudWorker:
             if isinstance(task, dict) and task.get('mapper_type'):
                 task_params['mapper_type'] = task['mapper_type']
             
->>>>>>> origin/tianxingleo-da3
             # 准备输出目录
             task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
             
@@ -249,9 +236,11 @@ class CloudWorker:
             context = {
                 "task_id": task_id,
                 "scene_id": scene_id,
+                "user_id": user_id,
                 "work_root": task_output_dir,
                 "log_callback": on_pipeline_log,
-                "shared_model_dir": self.MODELS_DIR
+                "shared_model_dir": self.MODELS_DIR,
+                "supabase": self.supabase
             }
 
             # 3. [核心修改] 通过工厂实例化 Pipeline
@@ -310,8 +299,8 @@ class CloudWorker:
                 self.supabase.storage.from_(self.BUCKET_NAME).upload(
                     path=upload_ply_key, 
                     file=f, 
-                    # x-upsert=true 表示如果文件已存在则覆盖
-                    file_options={"content-type": "application/octet-stream", "x-upsert": "true"}
+                    # x-upsert=true 和 upsert=true 表示如果文件已存在则覆盖
+                    file_options={"content-type": "application/octet-stream", "x-upsert": "true", "upsert": "true"}
                 )
 
             # 2. 上传 transforms.json (用于网页预览)
@@ -323,7 +312,7 @@ class CloudWorker:
                     self.supabase.storage.from_(self.BUCKET_NAME).upload(
                         path=upload_json_key,
                         file=f,
-                        file_options={"content-type": "application/json", "x-upsert": "true"}
+                        file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
                     )
                 on_pipeline_log("上传 transforms.json 成功")
 

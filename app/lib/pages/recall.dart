@@ -41,6 +41,23 @@ class _RecallPageState extends State<RecallPage> {
     }
   }
 
+  /// 根据 PLY 路径推导同场景的 webgl_poses.json 公开 URL。
+  /// ply_path 格式：{user_id}/{scene_id}/output/point_cloud.ply
+  /// poses 路径：{user_id}/{scene_id}/output/webgl_poses.json
+  String? _toPosesUrl(String? plyPath) {
+    if (plyPath == null || plyPath.isEmpty) return null;
+    try {
+      // 将 point_cloud.ply 替换为 webgl_poses.json
+      final posesPath = plyPath.replaceAll(RegExp(r'point_cloud\.ply$'), 'webgl_poses.json');
+      if (posesPath == plyPath) return null; // 替换失败，路径格式不符
+      return Supabase.instance.client.storage
+          .from('braindance-assets')
+          .getPublicUrl(posesPath);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _fetchModels() async {
     try {
       final response = await Supabase.instance.client
@@ -302,8 +319,10 @@ class _RecallPageState extends State<RecallPage> {
               final modelUrl = plyPath.isNotEmpty
                   ? _toPublicUrl(plyPath)
                   : './models/scene_auto_sync_raw.ply';
+              final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
               Navigator.push(
                 context,
+<<<<<<< HEAD
                 PageRouteBuilder(
                   pageBuilder: (context, animation, secondaryAnimation) =>
                       WebGLViewerPage(
@@ -325,6 +344,14 @@ class _RecallPageState extends State<RecallPage> {
                           ),
                         );
                       },
+=======
+                MaterialPageRoute(
+                  builder: (context) => WebGLViewerPage(
+                    initialModelUrl: modelUrl,
+                    posesUrl: posesUrl,
+                    sceneId: sceneId,
+                  ),
+>>>>>>> origin/tianxingleo-da3
                 ),
               );
             },

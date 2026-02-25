@@ -16,7 +16,11 @@ const activeImage = ref(''); // 当前激活的参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
+<<<<<<< HEAD
 const loadError = ref(''); // 添加错误状态
+=======
+const currentFps = ref(0); // 实时帧数
+>>>>>>> origin/tianxingleo-da3
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -432,9 +436,17 @@ const getViewerConfig = () => {
   };
 };
 
-const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
+// 当前加载的 PLY 和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
+let currentPlyUrl = '/models/scene_auto_sync.ply';
+let currentPosesUrl = '/models/webgl_poses_with_tags.json';
+
+const initViewer = async (plyUrl, posesUrl) => {
   if (isLoading.value) return;
   isLoading.value = true;
+
+  // 更新 URL（如果有新传入的值）
+  if (plyUrl) currentPlyUrl = plyUrl;
+  if (posesUrl) currentPosesUrl = posesUrl;
 
   try {
     if (viewer) {
@@ -454,13 +466,15 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
 
-    // 加载你的模型
-    await viewer.addSplatScene(modelUrl, {
+    // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
+    console.log(`[Viewer] 加载 PLY: ${currentPlyUrl}`);
+    await viewer.addSplatScene(currentPlyUrl, {
       'showLoadingUI': true,
       'progressiveLoad': false,
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
+<<<<<<< HEAD
     // 告诉 Flutter：模型加载完成
     isLoading.value = false;
     if (window.BrainDanceChannel) {
@@ -469,6 +483,11 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
 
     // 加载相机位姿
     fetch('./models/webgl_poses_with_tags.json')
+=======
+    // 加载相机位姿（支持本地路径与云端 URL）
+    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
+    fetch(currentPosesUrl)
+>>>>>>> origin/tianxingleo-da3
       .then(res => res.json())
       .then(data => {
         // 数据适配
@@ -482,11 +501,11 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
           cameraPoses.value = data.frames.map(frame => ({
             id: frame.id,
             matrix: frame.matrix,
-            image_url: frame.image_url,
+            image_url: frame.image_url, // 云端图片 URL 或本地路径
             tag: frame.tag
           }));
         } else {
-          cameraPoses.value = data; // 兼容 参考.txt 格式
+          cameraPoses.value = data; // 兼容旧格式
         }
       })
       .catch(err => console.error("加载位姿失败:", err));
@@ -508,11 +527,38 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
         animationState.isLoaded = true;
       }
     }, 200);
+<<<<<<< HEAD
 
     // --- 5. 动画循环 ---
+=======
+    
+    // --- 5. 动画循环 (120 FPS 上限) ---
+    let lastDrawTime = performance.now();
+    const fpsInterval = 1000 / 120; // 目标 120 帧
+    let framesThisSecond = 0;
+    let lastFpsTime = performance.now();
+
+>>>>>>> origin/tianxingleo-da3
     viewer.renderer.setAnimationLoop(() => {
+      const nowPerf = performance.now();
+      const elapsedSinceDraw = nowPerf - lastDrawTime;
+
+      // 帧率限制：如果离上一帧不足 1/120 秒，放弃当前帧渲染
+      if (elapsedSinceDraw < fpsInterval) return;
+      
+      // 更新上一帧时间，这会保留超出的那一点时间以防长期的漂移
+      lastDrawTime = nowPerf - (elapsedSinceDraw % fpsInterval);
+
       viewer.update();
       viewer.render();
+
+      // FPS 计算：累加帧数，如果过了1秒，就更新显示并清零
+      framesThisSecond++;
+      if (nowPerf - lastFpsTime >= 1000) {
+        currentFps.value = framesThisSecond;
+        framesThisSecond = 0;
+        lastFpsTime = nowPerf;
+      }
 
       if (!animationState.isLoaded || animationState.phase === PHASE.FINISHED) return;
 
@@ -576,8 +622,13 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
 
   } catch (error) {
     console.error("error:", error);
+<<<<<<< HEAD
     isLoading.value = false;
     loadError.value = (error && (error.message || String(error))) || '模型加载失败，请检查模型 URL 是否正确可访问';
+=======
+  } finally {
+    isLoading.value = false;
+>>>>>>> origin/tianxingleo-da3
   }
 };
 
@@ -669,6 +720,7 @@ const onMouseMove = (e) => {
 
 const onMouseUp = () => { isDragging.value = false; };
 
+<<<<<<< HEAD
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
   if (e.touches.length > 0) {
@@ -712,26 +764,46 @@ onMounted(() => {
 
   if (containerRef.value) {
     checkProtocol();
+=======
+onMounted(() => { 
+  if (containerRef.value) { 
+    checkProtocol(); 
+    
+    // 注册供Flutter调用的全局函数
+    // 支持两种调用方式：
+    // 1. loadModelFromFlutter(plyUrl)              -- 只传模型URL，兼容旧版
+    // 2. loadModelFromFlutter({ply: url, poses: url}) -- 同时传模型和位姿URL
+    window.loadModelFromFlutter = (input) => {
+      console.log('[Flutter->WebGL] 收到加载请求:', input);
+      if (typeof input === 'string') {
+        // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
+        initViewer(input, null);
+      } else if (typeof input === 'object' && input !== null) {
+        // 新版：同时传 PLY URL 和 poses URL
+        initViewer(input.ply || null, input.poses || null);
+      } else {
+        initViewer(null, null);
+      }
+    };
+>>>>>>> origin/tianxingleo-da3
 
+    // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
-      // Flutter 嵌入模式：发送 ready 信号，等 Flutter 调用 loadModelFromFlutter
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
     } else {
-      // 浏览器独立运行模式：直接加载默认模型
-      initViewer();
+      // 非 Flutter 环境（浏览器直接打开），用默认本地文件初始化
+      initViewer(null, null);
     }
 
     // 绑定原生事件用于调试拖拽
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  }
+  } 
 });
 
 onBeforeUnmount(async () => {
-  // 清理全局变量
-  delete window.loadModelFromFlutter;
-
+  window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
 
@@ -747,13 +819,8 @@ onBeforeUnmount(async () => {
     @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
     @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>
-    <div v-if="isLoading" class="loading-overlay">正在加载模型...</div>
-    <div v-if="loadError" class="error-overlay">
-      <div class="error-icon">⚠️</div>
-      <div class="error-title">模型加载失败</div>
-      <div class="error-msg">{{ loadError }}</div>
-      <button class="error-retry" @click="loadError = ''">关闭</button>
-    </div>
+    <div v-if="isLoading" class="loading-overlay">正在处理...</div>
+    <div class="fps-counter" v-if="currentFps > 0">FPS: {{ currentFps }}</div>
     <div class="controls-ui">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
@@ -839,6 +906,7 @@ onBeforeUnmount(async () => {
 </template>
 
 <style scoped>
+<<<<<<< HEAD
 .app-container {
   position: relative;
   width: 100vw;
@@ -936,6 +1004,14 @@ button.active {
   background: #22c55e;
   border-color: #22c55e;
 }
+=======
+.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
+.viewer-container { width: 100%; height: 100%; }
+.controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
+.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
+button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
+button.active { background: #22c55e; border-color: #22c55e; }
+>>>>>>> origin/tianxingleo-da3
 
 /* 镜头轨道样式 */
 .camera-track {
@@ -1125,6 +1201,7 @@ button.active {
   border: 1px solid #33cc33;
 }
 
+<<<<<<< HEAD
 .debug-title {
   margin-bottom: 5px;
   color: #fff;
@@ -1156,4 +1233,24 @@ button.active {
 .mini-btn:hover {
   background: #444;
 }
+=======
+/* FPS 计数器 */
+.fps-counter {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #22c55e;
+  padding: 8px 15px;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: bold;
+  z-index: 1000;
+  pointer-events: none;
+  backdrop-filter: blur(5px);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+>>>>>>> origin/tianxingleo-da3
 </style>

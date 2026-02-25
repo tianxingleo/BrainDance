@@ -7,8 +7,6 @@
 
 本项目是 BrainDance 的核心 AI 算力节点，负责监听云端任务、自动下载用户上传的视频、执行全自动 3D 重建流程（COLMAP/GLOMAP + Splatfacto），并将最终的 3D 模型（PLY）与日志实时回传至云端。
 
-<<<<<<< HEAD
-=======
 ## 📑 文档导航
 
 本文档分为两个部分：
@@ -31,7 +29,6 @@
 
 ---
 
->>>>>>> origin/tianxingleo-da3
 ## ✨ 核心特性
 
 * **☁️ 云原生架构**：通过 Supabase 实现完全解耦的“生产者-消费者”模式，前端只管发任务，后端自动排队处理。
@@ -168,9 +165,6 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-<<<<<<< HEAD
-*BrainDance Team © 2026*
-=======
 # 📚 第二部分：RAG 系统设计文档
 
 > **语义检索增强生成架构的完整设计说明**
@@ -178,7 +172,6 @@ python main.py /path/to/your/video.mp4
 本部分详细说明 BrainDance 的"语义+元数据"混合检索系统设计，将 3D 模型从"死文件"变成"活知识"。
 
 ---
->>>>>>> origin/tianxingleo-da3
 
 这就是你现在的 **BrainDance 智能资产库 (RAG System)** 的完整设计文档。
 
@@ -186,11 +179,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-<<<<<<< HEAD
-### 1. 设计核心逻辑 (Design Philosophy)
-=======
 ## 1. 设计核心逻辑 (Design Philosophy)
->>>>>>> origin/tianxingleo-da3
 
 目前的架构设计遵循以下 4 个核心原则：
 
@@ -215,11 +204,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-<<<<<<< HEAD
-### 2. 数据库结构 (Schema Structure)
-=======
 ## 2. 数据库结构 (Schema Structure)
->>>>>>> origin/tianxingleo-da3
 
 这是目前 Supabase 中 `model_assets` 表的物理结构：
 
@@ -239,11 +224,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-<<<<<<< HEAD
-### 3. 内容生成策略 (Content Strategy)
-=======
 ## 3. 内容生成策略 (Content Strategy)
->>>>>>> origin/tianxingleo-da3
 
 当 `Worker` 调用 `knowledge_base.py` 入库时，它不仅仅是存数据，还在做**数据清洗和加权**。
 
@@ -276,11 +257,7 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-<<<<<<< HEAD
-### 4. 搜索与交互流程 (Search Workflow)
-=======
 ## 4. 搜索与交互流程 (Search Workflow)
->>>>>>> origin/tianxingleo-da3
 
 当用户发起搜索时，系统经历以下步骤：
 
@@ -309,11 +286,6 @@ python main.py /path/to/your/video.mp4
 
 
 
-<<<<<<< HEAD
-### 总结
-
-你现在拥有的不仅仅是一个文件存储系统，而是一个**具备“理解能力”的 3D 资产管理平台**。它知道你每个模型长什么样、包含什么东西、是什么时候做的，并且能通过自然语言瞬间找到它。
-=======
 
 ### 总结
 
@@ -337,5 +309,4 @@ python main.py /path/to/your/video.mp4
 ---
 
 **BrainDance Team © 2026**
->>>>>>> origin/tianxingleo-da3
 

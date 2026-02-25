@@ -17,8 +17,10 @@ from src.config import PipelineConfig
 
 class SceneAnalyzer:
     def __init__(self, cfg: PipelineConfig):
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
         self.cfg = cfg
-        self.api_key = self.cfg.dashscope_api_key
+        self.api_key = self.cfg.dashscope_api_key or os.getenv("DASHSCOPE_API_KEY")
         self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         self.model = "qwen-vl-max"
 

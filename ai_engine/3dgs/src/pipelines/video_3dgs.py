@@ -2,10 +2,7 @@
 # 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
 # 逻辑：1. 视频抽帧与预处理 2. AI质检 3. 位姿解算 4. AI语义分割 5. 3DGS训练与导出
 # 包含：run主函数、各模块实例化、流程控制逻辑、日志回调机制
-<<<<<<< HEAD
-=======
 import os
->>>>>>> origin/tianxingleo-da3
 import time
 import shutil
 import subprocess
@@ -25,10 +22,8 @@ from src.modules.glomap_runner import GlomapRunner
 from src.modules.ai_segmentor import AISegmentor
 from src.modules.nerf_engine import NerfstudioEngine
 from src.modules.scene_analyzer import SceneAnalyzer
-<<<<<<< HEAD
-=======
 from src.modules.da3_runner import DA3Runner
->>>>>>> origin/tianxingleo-da3
+from src.modules.spatial_anchor import SpatialAnchorExtractor
 
 # 引入辅助工具
 from src.utils.common import format_duration
@@ -55,12 +50,8 @@ class Video3DGSPipeline(BasePipeline):
         # 直接在括号里传参初始化
         cfg = PipelineConfig(
             project_name=self.scene_id,  # 传入场景名
-<<<<<<< HEAD
-            video_path=video_path_obj    # 传入视频路径
-=======
             video_path=video_path_obj,   # 传入视频路径
             mapper_type=params.get('mapper_type', os.getenv("MAPPER_TYPE", "glomap"))
->>>>>>> origin/tianxingleo-da3
         )
         
         # 单独设置工作目录 (因为 PipelineConfig 可能默认计算的是别的路径)
@@ -100,11 +91,6 @@ class Video3DGSPipeline(BasePipeline):
         # ==========================================
         # 1. 实例化所有业务模块
         # ==========================================
-<<<<<<< HEAD
-        img_processor = ImageProcessor(cfg)
-        scene_analyzer = SceneAnalyzer(cfg)
-        glomap_runner = GlomapRunner(cfg)
-=======
         img_processor = ImageProcessor(cfg, log_callback=self.log)
         scene_analyzer = SceneAnalyzer(cfg)
         
@@ -117,7 +103,6 @@ class Video3DGSPipeline(BasePipeline):
             mapper_runner = GlomapRunner(cfg)
             self.log("    -> 使用引擎: GLOMAP")
             
->>>>>>> origin/tianxingleo-da3
         ai_segmentor = AISegmentor(cfg)
         nerf_engine = NerfstudioEngine(cfg)
 
@@ -206,21 +191,12 @@ class Video3DGSPipeline(BasePipeline):
                 raise RuntimeError(err_msg)
 
         # ==========================================
-<<<<<<< HEAD
-        # Step 2: GLOMAP 位姿解算
-        # ==========================================
-        self.log(f"⚙️ [2/4] 正在进行位姿解算 (GLOMAP)...")
-        # 传递日志回调给 GlomapRunner (如果它支持的话)
-        if not glomap_runner.run():
-            err_msg = "❌ Pipeline 中断：GLOMAP 解算失败"
-=======
         # Step 2: 位姿解算
         # ==========================================
         self.log(f"⚙️ [2/4] 正在进行位姿解算 ({mapper_type.upper()})...")
         # 传递日志回调给 Runner (如果它支持的话)
         if not mapper_runner.run():
             err_msg = f"❌ Pipeline 中断：{mapper_type.upper()} 解算失败"
->>>>>>> origin/tianxingleo-da3
             self.log(err_msg, level="ERROR")
             raise RuntimeError(err_msg)
         self.log(f"    -> 位姿解算完成")
@@ -249,7 +225,6 @@ class Video3DGSPipeline(BasePipeline):
             final_ply_path = nerf_engine.export()
             
             self.log(f"💾 导出 PLY 完成: {final_ply_path}")
-            self.log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
             
             # 上传 PLY 并在 model_assets 中写入记录（非强制，内部容错）
             try:
@@ -257,6 +232,18 @@ class Video3DGSPipeline(BasePipeline):
             except Exception:
                 # upload_and_record 内部已捕获异常，这里保证不抛出
                 pass
+
+            # ==========================================
+            # Step 5: 空间语义锚点提取
+            # ==========================================
+            supabase_client = self.context.get('supabase')
+            if supabase_client:
+                anchor_extractor = SpatialAnchorExtractor(cfg, supabase_client)
+                anchor_extractor.extract_and_save(self.scene_id, log_callback=self.log)
+            else:
+                self.log("⚠️ 未找到 Supabase 客户端，跳过空间语义锚点提取")
+
+            self.log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
 
             # 返回最终结果
             return str(final_ply_path), pipeline_metadata
