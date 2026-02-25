@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 // ============================================================
 // 开发/生产模式切换
 // - 开发模式（kDebugMode）：连接本地 Vite dev server
@@ -32,6 +33,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isUnsupportedPlatform = false;
   HttpServer? _localServer;
   int _localPort = 0;
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  String? _localModelPath;
 
   @override
   void initState() {
@@ -45,7 +49,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     } else {
       try {
         _startLocalServer().then((_) {
-          if (mounted) _initWebView();
+          if (mounted) _prepareModelAndLoad();
         });
       } catch (e) {
         debugPrint('WebView initialization failed: $e');
@@ -65,6 +69,49 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _localPort = _localServer!.port;
     _localServer!.listen((HttpRequest request) async {
       String path = request.uri.path;
+      
+      // ---- /proxy/ : Dart 端代理 HTTPS 请求，绕过 WebView 的 SSL 证书限制 ----
+      if (path.startsWith('/proxy/')) {
+        final encodedTarget = path.substring('/proxy/'.length);
+        final targetUrl = Uri.decodeComponent(encodedTarget);
+        try {
+          final proxyClient = HttpClient()
+            ..badCertificateCallback =
+                (cert, host, port) => true;
+          final proxyUri = Uri.parse(targetUrl);
+          final proxyReq = await proxyClient.getUrl(proxyUri);
+          proxyReq.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          final proxyResp = await proxyReq.close();
+          request.response.statusCode = proxyResp.statusCode;
+          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          final ct = proxyResp.headers.contentType;
+          if (ct != null) request.response.headers.contentType = ct;
+          await request.response.addStream(proxyResp);
+        } catch (e) {
+          request.response.statusCode = HttpStatus.badGateway;
+          request.response.write('Proxy error: $e');
+        }
+        await request.response.close();
+        return;
+      }
+
+      // ---- /local_models/ : 本地已下载文件 ----
+      if (path.startsWith('/local_models/')) {
+        final filePath = Uri.decodeComponent(path.substring('/local_models/'.length));
+        final file = File(filePath);
+        if (await file.exists()) {
+          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          if (filePath.endsWith('.ply')) request.response.headers.contentType = ContentType('application', 'octet-stream');
+          await request.response.addStream(file.openRead());
+          await request.response.close();
+          return;
+        } else {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+      }
+
       if (path == '/' || path.isEmpty) {
         path = '/index.html';
       }
@@ -97,6 +144,76 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     });
   }
 
+  Future<void> _prepareModelAndLoad() async {
+    final originalUrl = widget.initialModelUrl;
+    
+    if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
+      try {
+        // Fix string containing spaces or unencoded characters causing 400 Bad Request
+        final encodedUrl = Uri.encodeFull(Uri.decodeFull(originalUrl));
+        final uri = Uri.parse(encodedUrl);
+        final requestPath = uri.path;
+        final sanitizedFileName = requestPath.replaceAll('/', '_').replaceAll('\\', '_');
+        
+        final dir = await getApplicationDocumentsDirectory();
+        final localFile = File('${dir.path}/$sanitizedFileName');
+        
+        if (await localFile.exists()) {
+          debugPrint('Using cached offline model: ${localFile.path}');
+          _localModelPath = localFile.path;
+          if (mounted) _initWebView();
+        } else {
+          debugPrint('Starting download from: $originalUrl');
+          setState(() { _isDownloading = true; _downloadProgress = 0.0; });
+          
+          // 允许自托管 Supabase 的自签名或不被 Android 信任的证书
+          final client = HttpClient()
+            ..badCertificateCallback =
+                (cert, host, port) => true;
+          final request = await client.getUrl(uri);
+          request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          final response = await request.close();
+          
+          if (response.statusCode != 200) {
+            String errorBody = '';
+            try {
+              errorBody = await response.transform(utf8.decoder).join();
+            } catch (_) {}
+            throw Exception('HTTP Error ${response.statusCode}: $errorBody');
+          }
+          
+          final totalBytes = response.contentLength;
+          int receivedBytes = 0;
+          
+          final sink = localFile.openWrite();
+          await response.map((chunk) {
+            receivedBytes += chunk.length;
+            if (totalBytes > 0 && mounted) {
+              setState(() { _downloadProgress = receivedBytes / totalBytes; });
+            }
+            return chunk;
+          }).pipe(sink);
+          
+          debugPrint('Download complete: ${localFile.path}');
+          _localModelPath = localFile.path;
+          if (mounted) {
+            setState(() { _isDownloading = false; });
+            _initWebView();
+          }
+        }
+      } catch (e) {
+        debugPrint('Download error: $e');
+        if (mounted) {
+          setState(() { _isDownloading = false; });
+          TDToast.showText('下载模型失败: $e', context: context);
+          _initWebView();
+        }
+      }
+    } else {
+      if (mounted) _initWebView();
+    }
+  }
+
   void _initWebView() {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -107,7 +224,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           final data = jsonDecode(message.message);
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            _sendModelToVue(widget.initialModelUrl);
+            // 优先使用本地路径或代理 URL，避免 WebView JS 直接访问 HTTPS
+            _sendModelToVue();
           } else if (data['status'] == 'success') {
             if (mounted) {
               TDToast.showText(data['msg'], context: context);
@@ -117,13 +235,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (String url) {
+                onPageFinished: (String url) {
             // 后备方案：页面加载完 2 秒后如果还没收到 ready 信号，则主动触发
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint('WebView: no ready signal received, triggering manually');
                 setState(() => _isWebReady = true);
-                _sendModelToVue(widget.initialModelUrl);
+                _sendModelToVue();
               }
             });
           },
@@ -146,12 +264,28 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
   }
 
-  void _sendModelToVue(String modelUrl) {
-    if (_isWebReady) {
-      // 使用 jsonEncode 确保 URL 中的特殊字符被正确转义
-      final encodedUrl = jsonEncode(modelUrl);
-      _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+  /// 统一入口：决定传给 WebView 的模型 URL
+  /// - 如果已下载到本地 -> 使用本地 HTTP /local_models/ 路由
+  /// - 如果是远程 HTTPS URL  -> 转成本地 HTTP /proxy/ 路由，由 Dart 代理
+  /// - 如果是相对路径（本地 demo） -> 直接传递
+  void _sendModelToVue() {
+    if (!_isWebReady) return;
+    String targetUrl;
+    if (_localModelPath != null) {
+      // 已下载到本地：通过本地 HTTP 服务提供
+      targetUrl = 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+    } else if (widget.initialModelUrl.startsWith('http://') ||
+        widget.initialModelUrl.startsWith('https://')) {
+      // 远程 URL：通过本地代理，避免 WebView 直接访问 HTTPS
+      targetUrl =
+          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
+    } else {
+      // 相对路径（本地 demo 模型）
+      targetUrl = widget.initialModelUrl;
     }
+    debugPrint('Sending model URL to WebView: $targetUrl');
+    final encodedUrl = jsonEncode(targetUrl);
+    _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
   }
 
   @override
@@ -190,8 +324,29 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             )
           : Stack(
               children: [
-                if (_controller != null) WebViewWidget(controller: _controller!),
-                if (!_isWebReady)
+                if (_controller != null && !_isDownloading)
+                  AnimatedOpacity(
+                    opacity: _isWebReady ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 500),
+                    child: WebViewWidget(controller: _controller!),
+                  ),
+                if (_isDownloading)
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        TDText(
+                          '正在下载云端模型...\n这只需下载一次，之后可离线查看。\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                          textAlign: TextAlign.center,
+                          font: TDTheme.of(context).fontBodyMedium,
+                          textColor: TDTheme.of(context).fontGyColor2,
+                        ),
+                      ],
+                    ),
+                  )
+                else if (!_isWebReady && _controller != null)
                   const Center(
                     child: CircularProgressIndicator(),
                   ),

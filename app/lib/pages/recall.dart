@@ -45,21 +45,39 @@ class _RecallPageState extends State<RecallPage> {
     try {
       final response = await Supabase.instance.client
           .from('model_assets')
-          .select('id, scene_id, description, ply_path, preview_img_path, created_at')
+          .select(
+            'id, scene_id, description, ply_path, preview_img_path, created_at',
+          )
           .order('created_at', ascending: false);
 
       if (mounted) {
         setState(() {
           _models = List<Map<String, dynamic>>.from(response);
+          if (_models.isEmpty) {
+            _models.add({
+              'id': 'local_demo',
+              'scene_id': '本地 Demo 模型 (离线可用)',
+              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'ply_path': '',
+            });
+          }
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
+          _models = [
+            {
+              'id': 'local_demo',
+              'scene_id': '本地 Demo 模型 (离线可用)',
+              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'ply_path': '',
+            },
+          ];
           _isLoading = false;
         });
-        TDToast.showText('加载模型失败: $e', context: context);
+        TDToast.showText('加载模型失败，已切换至离线模式', context: context);
       }
     }
   }
@@ -113,7 +131,9 @@ class _RecallPageState extends State<RecallPage> {
     return Scaffold(
       backgroundColor: TDTheme.of(context).grayColor1,
       appBar: AppBar(
-        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        backgroundColor: TDTheme.of(
+          context,
+        ).whiteColor1.withValues(alpha: 0.95),
         title: Container(
           alignment: Alignment.centerLeft,
           child: TDText(
@@ -133,7 +153,7 @@ class _RecallPageState extends State<RecallPage> {
               });
               _fetchModels();
             },
-          )
+          ),
         ],
         toolbarHeight: 60,
         elevation: 0,
@@ -142,9 +162,14 @@ class _RecallPageState extends State<RecallPage> {
       body: DynamicGradientBackground(
         child: Column(
           children: [
-            SizedBox(height: MediaQuery.of(context).padding.top + 60), // 为 AppBar 留出空间
+            SizedBox(
+              height: MediaQuery.of(context).padding.top + 60,
+            ), // 为 AppBar 留出空间
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 8.0,
+              ),
               child: TDSearchBar(
                 controller: _searchController,
                 placeHolder: '搜索回忆...',
@@ -162,8 +187,8 @@ class _RecallPageState extends State<RecallPage> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : _models.isEmpty
-                      ? _buildEmptyState()
-                      : _buildModelGrid(),
+                  ? _buildEmptyState()
+                  : _buildModelGrid(),
             ),
           ],
         ),
@@ -178,17 +203,16 @@ class _RecallPageState extends State<RecallPage> {
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         decoration: BoxDecoration(
           color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-          borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
-          border: Border.all(
-            color: TDTheme.of(context).whiteColor1,
-            width: 1,
+          borderRadius: BorderRadius.circular(
+            TDTheme.of(context).radiusExtraLarge,
           ),
+          border: Border.all(color: TDTheme.of(context).whiteColor1, width: 1),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 20,
               spreadRadius: 5,
-            )
+            ),
           ],
         ),
         child: Column(
@@ -220,8 +244,12 @@ class _RecallPageState extends State<RecallPage> {
             ),
             const SizedBox(height: 40),
             TDButton(
-              text: "打开 3D 查看器",
-              iconWidget: const Icon(TDIcons.view_module, color: Colors.white, size: 20),
+              text: "打开本地离线 Demo 模型",
+              iconWidget: const Icon(
+                TDIcons.view_module,
+                color: Colors.white,
+                size: 20,
+              ),
               type: TDButtonType.fill,
               theme: TDButtonTheme.primary,
               shape: TDButtonShape.round,
@@ -230,9 +258,8 @@ class _RecallPageState extends State<RecallPage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const WebGLViewerPage(
-                      sceneId: 'Demo 场景',
-                    ),
+                    builder: (context) =>
+                        const WebGLViewerPage(sceneId: '本地 Demo 模型 (离线可用)'),
                   ),
                 );
               },
@@ -247,19 +274,29 @@ class _RecallPageState extends State<RecallPage> {
     return GridView.builder(
       padding: const EdgeInsets.all(16.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 16.0,
-          mainAxisSpacing: 16.0,
-          childAspectRatio: 0.85,
-        ),
-        itemCount: _models.length,
-        itemBuilder: (context, index) {
-          final model = _models[index];
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
-          final similarity = model['similarity'] as double?;
+        crossAxisCount: 2,
+        crossAxisSpacing: 16.0,
+        mainAxisSpacing: 16.0,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: _models.length,
+      itemBuilder: (context, index) {
+        final model = _models[index];
+        final sceneId = model['scene_id'] ?? 'Unknown Scene';
+        final desc = model['description'] ?? '没有描述信息';
+        final similarity = model['similarity'] as double?;
 
-          return GestureDetector(
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: Duration(milliseconds: 400 + (index * 100).clamp(0, 600)),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            return Transform.translate(
+              offset: Offset(0, 50 * (1 - value)),
+              child: Opacity(opacity: value, child: child),
+            );
+          },
+          child: GestureDetector(
             onTap: () {
               final plyPath = model['ply_path'] as String? ?? '';
               final modelUrl = plyPath.isNotEmpty
@@ -267,24 +304,42 @@ class _RecallPageState extends State<RecallPage> {
                   : './models/scene_auto_sync_raw.ply';
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => WebGLViewerPage(
-                    initialModelUrl: modelUrl,
-                    sceneId: sceneId,
-                  ),
+                PageRouteBuilder(
+                  pageBuilder: (context, animation, secondaryAnimation) =>
+                      WebGLViewerPage(
+                        initialModelUrl: modelUrl,
+                        sceneId: sceneId,
+                      ),
+                  transitionsBuilder:
+                      (context, animation, secondaryAnimation, child) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+                              CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutCubic,
+                              ),
+                            ),
+                            child: child,
+                          ),
+                        );
+                      },
                 ),
               );
             },
             child: Container(
               decoration: BoxDecoration(
                 color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+                borderRadius: BorderRadius.circular(
+                  TDTheme.of(context).radiusLarge,
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
-                  )
+                  ),
                 ],
               ),
               child: Column(
@@ -298,7 +353,9 @@ class _RecallPageState extends State<RecallPage> {
                           decoration: BoxDecoration(
                             color: TDTheme.of(context).grayColor3,
                             borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(TDTheme.of(context).radiusLarge),
+                              top: Radius.circular(
+                                TDTheme.of(context).radiusLarge,
+                              ),
                             ),
                           ),
                           child: Center(
@@ -314,9 +371,14 @@ class _RecallPageState extends State<RecallPage> {
                             top: 8,
                             right: 8,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9),
+                                color: TDTheme.of(
+                                  context,
+                                ).brandColor4.withValues(alpha: 0.9),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: TDText(
@@ -353,8 +415,9 @@ class _RecallPageState extends State<RecallPage> {
                 ],
               ),
             ),
-          );
-        },
-      );
+          ),
+        );
+      },
+    );
   }
 }

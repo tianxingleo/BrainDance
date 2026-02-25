@@ -99,47 +99,63 @@ class _LoginPageState extends State<LoginPage> {
                 )
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TDInput(
-                  controller: _emailController,
-                  type: TDInputType.normal,
-                  leftLabel: '邮箱',
-                  hintText: '请输入验证邮箱',
-                ),
-                const SizedBox(height: 16),
-                TDInput(
-                  controller: _passwordController,
-                  type: TDInputType.normal,
-                  obscureText: true,
-                  leftLabel: '密码',
-                  hintText: '请输入密码(至少6位)',
-                ),
-                const SizedBox(height: 32),
-                _isLoading
-                    ? const CircularProgressIndicator()
-                    : TDButton(
-                        text: _isSignUp ? '注册新账号' : '登录',
-                        type: TDButtonType.fill,
-                        theme: TDButtonTheme.primary,
-                        shape: TDButtonShape.round,
-                        size: TDButtonSize.large,
-                        isBlock: true,
-                        onTap: _handleAuth,
-                      ),
-                const SizedBox(height: 16),
-                TDButton(
-                  text: _isSignUp ? '已有账号？去登录' : '没有账号？去注册',
-                  type: TDButtonType.text,
-                  theme: TDButtonTheme.primary,
-                  onTap: () {
-                    setState(() {
-                      _isSignUp = !_isSignUp;
-                    });
-                  },
-                ),
-              ],
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (Widget child, Animation<double> animation) {
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.0, 0.05),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              },
+              child: Column(
+                key: ValueKey<bool>(_isSignUp),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TDInput(
+                    controller: _emailController,
+                    type: TDInputType.normal,
+                    leftLabel: '邮箱',
+                    hintText: '请输入验证邮箱',
+                  ),
+                  const SizedBox(height: 16),
+                  TDInput(
+                    controller: _passwordController,
+                    type: TDInputType.normal,
+                    obscureText: true,
+                    leftLabel: '密码',
+                    hintText: '请输入密码(至少6位)',
+                  ),
+                  const SizedBox(height: 32),
+                  _isLoading
+                      ? const CircularProgressIndicator()
+                      : TDButton(
+                          text: _isSignUp ? '注册新账号' : '登录',
+                          type: TDButtonType.fill,
+                          theme: TDButtonTheme.primary,
+                          shape: TDButtonShape.round,
+                          size: TDButtonSize.large,
+                          isBlock: true,
+                          onTap: _handleAuth,
+                        ),
+                  const SizedBox(height: 16),
+                  TDButton(
+                    text: _isSignUp ? '已有账号？去登录' : '没有账号？去注册',
+                    type: TDButtonType.text,
+                    theme: TDButtonTheme.primary,
+                    onTap: () {
+                      setState(() {
+                        _isSignUp = !_isSignUp;
+                      });
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),

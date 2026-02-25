@@ -87,6 +87,7 @@ flutter:
     - assets/sprites/
     - assets/webgl/
     - assets/webgl/assets/
+    - assets/webgl/models/
   fonts:
     - family: HarmonyOS_Sans
       fonts:

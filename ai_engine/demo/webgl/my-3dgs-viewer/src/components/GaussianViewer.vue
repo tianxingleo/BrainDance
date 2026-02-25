@@ -6,16 +6,17 @@ import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import gsap from 'gsap';
 
 const containerRef = ref(null);
-const isVRMode = ref(false); 
+const isVRMode = ref(false);
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
-const cameraPoses = ref([]); 
+const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
+const loadError = ref(''); // 添加错误状态
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -24,7 +25,7 @@ const filteredPoses = computed(() => {
   }
   // 如果输入了搜索词，执行基于标签的文本包含匹配
   const query = searchQuery.value.trim().toLowerCase();
-  return cameraPoses.value.filter(pose => 
+  return cameraPoses.value.filter(pose =>
     pose.tag && pose.tag.toLowerCase().includes(query)
   );
 });
@@ -71,21 +72,21 @@ const copyMatrixToClipboard = () => {
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
   if (viewer.controls) viewer.controls.enabled = false;
-  
+
   if (axis === 'x') viewer.camera.translateX(dist);
   if (axis === 'y') viewer.camera.translateY(dist);
   if (axis === 'z') viewer.camera.translateZ(dist);
-  
+
   viewer.camera.updateProjectionMatrix();
 };
 
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
-  
+
   if (viewer.controls) viewer.controls.enabled = false;
 
   const angle = angleDeg * Math.PI / 180;
-  
+
   if (axis === 'x') {
     viewer.camera.rotateX(angle);
     rotationDelta.value.x += angleDeg;
@@ -97,36 +98,36 @@ const manualRotate = (axis, angleDeg) => {
   if (axis === 'z') {
     viewer.camera.rotateZ(angle);
   }
-  
+
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
 };
 
 // --- 1. 状态管理 ---
 const PHASE = {
-  FLY_IN: 0,    
-  DIFFUSION: 1, 
-  COLORING: 2,  
-  FINISHED: 3   
+  FLY_IN: 0,
+  DIFFUSION: 1,
+  COLORING: 2,
+  FINISHED: 3
 };
 
 const animationState = {
   isLoaded: false,
   lastFrameTime: 0,
-  phase: PHASE.FLY_IN, 
-  
-  flyDuration: 1.5,      
-  diffusionDuration: 1.0, 
-  colorDuration: 4.0,    
+  phase: PHASE.FLY_IN,
+
+  flyDuration: 1.5,
+  diffusionDuration: 1.0,
+  colorDuration: 4.0,
 };
 
 const globalUniforms = {
   uTime: { value: 0 },
   uCenter: { value: new THREE.Vector3(0, 0, 0) },
-  uGeoRadius: { value: 0 },   
-  uColorRadius: { value: 0 }, 
+  uGeoRadius: { value: 0 },
+  uColorRadius: { value: 0 },
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
-  uParticleProgress: { value: 0 }, 
+  uParticleProgress: { value: 0 },
 };
 
 // --- 2. 自适应粒子系统 (核心修改) ---
@@ -140,10 +141,10 @@ const createParticleSystem = (splatMesh) => {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   const tempVec = new THREE.Vector3();
-  
+
   // 为了性能，不需要遍历所有点，每隔 100 个点采样一次即可估算包围盒
   const boundSampleStep = Math.max(1, Math.floor(splatCount / 1000));
-  
+
   for (let i = 0; i < splatCount; i += boundSampleStep) {
     splatMesh.getSplatCenter(i, tempVec);
     tempVec.applyMatrix4(splatMesh.matrixWorld); // 转为世界坐标
@@ -163,14 +164,14 @@ const createParticleSystem = (splatMesh) => {
   globalUniforms.uMaxRadius.value = maxDim * 0.7; // 扩散半径覆盖大部分模型
 
   // === B. 自适应参数计算 ===
-  
+
   // 1. 自适应粒子数量
   // 逻辑：至少显示 1万个点，最多显示 40万个点。
   // 如果模型本身小于 4万点，则全部显示。
-  let targetParticleCount = 60000; 
+  let targetParticleCount = 60000;
   if (splatCount < 40000) targetParticleCount = splatCount; // 小模型全显
   else if (splatCount > 1000000) targetParticleCount = 400000; // 大模型上限
-  
+
   const step = Math.ceil(splatCount / targetParticleCount);
 
   // 2. 自适应粒子大小
@@ -182,9 +183,9 @@ const createParticleSystem = (splatMesh) => {
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
-  const flyRadiusBase = maxDim * 1.0; 
+  const flyRadiusBase = maxDim * 1.0;
 
-  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${Math.floor(splatCount/step)}, Size: ${adaptiveSize.toFixed(2)}`);
+  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${Math.floor(splatCount / step)}, Size: ${adaptiveSize.toFixed(2)}`);
 
   // === C. 生成几何体 ===
   const geometry = new THREE.BufferGeometry();
@@ -195,14 +196,14 @@ const createParticleSystem = (splatMesh) => {
   for (let i = 0; i < splatCount; i += step) {
     splatMesh.getSplatCenter(i, tempVec);
     tempVec.applyMatrix4(splatMesh.matrixWorld);
-    
+
     targetPositions.push(tempVec.x, tempVec.y, tempVec.z);
 
     // 随机分布在远处 (基于自适应的 maxDim)
-    const r = flyRadiusBase + Math.random() * (maxDim * 0.5); 
+    const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    
+
     // 从中心点向外偏移
     const startX = centerX + r * Math.sin(phi) * Math.cos(theta);
     const startY = centerY + r * Math.sin(phi) * Math.sin(theta);
@@ -254,7 +255,7 @@ const createParticleSystem = (splatMesh) => {
     transparent: true,
     opacity: 1.0,
     depthTest: true,
-    depthWrite: false, 
+    depthWrite: false,
   });
 
   particleSystem = new THREE.Points(geometry, material);
@@ -266,7 +267,7 @@ const createParticleSystem = (splatMesh) => {
 const applyAdvancedShader = (mesh) => {
   if (!mesh || !mesh.material) return;
   const material = mesh.material;
-  
+
   material.uniforms = material.uniforms || {};
   material.uniforms.uGeoRadius = globalUniforms.uGeoRadius;
   material.uniforms.uColorRadius = globalUniforms.uColorRadius;
@@ -329,7 +330,7 @@ const flyToImage = (poseData) => {
   // 我们先尝试直接移除这个转换，保持原始矩阵方向。
   // const cvToGl = new THREE.Matrix4().makeScale(1, -1, -1);
   // rawMatrix.multiply(cvToGl); 
-  
+
   // 如果移除后反了，说明 export_poses.py 也没转，那就需要取消注释下面这行来手动修正：
   // const manualFix = new THREE.Matrix4().makeRotationX(Math.PI);
   // rawMatrix.multiply(manualFix);
@@ -364,16 +365,16 @@ const flyToImage = (poseData) => {
       onUpdate: () => cam.updateProjectionMatrix() // 必须更新投影矩阵才生效
     });
   }
-  
+
   // 强行减小近剪裁面，防止“穿模”或由于贴太近导致不显示
   if (cam.near > 0.001) {
-    cam.near = 0.001; 
+    cam.near = 0.001;
     cam.updateProjectionMatrix();
   }
 
   // 计算控制器焦点：看向相机正前方 5 个单位处
   const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
-  const targetLookAt = targetPosition.clone().add(forwardVector.multiplyScalar(5.0)); 
+  const targetLookAt = targetPosition.clone().add(forwardVector.multiplyScalar(5.0));
 
   // 停用当前控制
   isAutoRotate.value = false;
@@ -406,7 +407,7 @@ const flyToImage = (poseData) => {
       };
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
       updateDebugInfo();
-      
+
       if (viewer.controls) {
         viewer.controls.target.copy(targetLookAt);
         viewer.controls.update();
@@ -423,8 +424,8 @@ const getViewerConfig = () => {
     'cameraUp': [0, 1, 0],
     'initialCameraPosition': [0, 0, 5],
     'initialCameraLookAt': [0, 0, 0],
-    'useBuiltInControls': false, 
-    'gpuAcceleratedSort': false, 
+    'useBuiltInControls': false,
+    'gpuAcceleratedSort': false,
     'webXRMode': isSecureContext.value ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
     'sharedMemoryForWorkers': false,
     'antialiased': !isMobile,
@@ -438,15 +439,15 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
   try {
     if (viewer) {
       viewer.renderer.setAnimationLoop(null);
-      if(viewer.dispose) await viewer.dispose();
+      if (viewer.dispose) await viewer.dispose();
       viewer = null;
     }
     if (containerRef.value) containerRef.value.innerHTML = '';
-    
+
     animationState.isLoaded = false;
     animationState.phase = PHASE.FLY_IN;
     globalUniforms.uParticleProgress.value = 0;
-    globalUniforms.uGeoRadius.value = 0; 
+    globalUniforms.uGeoRadius.value = 0;
     globalUniforms.uColorRadius.value = 0;
 
     const config = getViewerConfig();
@@ -461,6 +462,7 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
     });
 
     // 告诉 Flutter：模型加载完成
+    isLoading.value = false;
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
     }
@@ -488,11 +490,11 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
         }
       })
       .catch(err => console.error("加载位姿失败:", err));
-    
-    const splatMesh = viewer.getSplatMesh();
-    splatMesh.visible = false; 
 
-    setTimeout(() => { 
+    const splatMesh = viewer.getSplatMesh();
+    splatMesh.visible = false;
+
+    setTimeout(() => {
       if (splatMesh) {
         // 先生成粒子系统，这会计算出 uCenter 和 uMaxRadius
         createParticleSystem(splatMesh);
@@ -500,13 +502,13 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
         applyAdvancedShader(splatMesh);
         // 最后调整相机，因为现在我们已经有了准确的 Center 和 Radius
         adjustControlsToModel();
-        
+
         animationState.lastFrameTime = Date.now();
-        animationState.startTime = Date.now(); 
+        animationState.startTime = Date.now();
         animationState.isLoaded = true;
       }
     }, 200);
-    
+
     // --- 5. 动画循环 ---
     viewer.renderer.setAnimationLoop(() => {
       viewer.update();
@@ -522,45 +524,45 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
       if (animationState.phase === PHASE.FLY_IN) {
         const speed = 1.0 / animationState.flyDuration;
         let p = globalUniforms.uParticleProgress.value + (dt * speed);
-        
+
         if (p >= 1.2) { // 稍微给点余量保证完全到达
-          p = 1.2; 
+          p = 1.2;
           const splatMesh = viewer.getSplatMesh();
           if (splatMesh) splatMesh.visible = true;
-          
+
           animationState.phase = PHASE.DIFFUSION;
-          animationState.diffuseTime = 0; 
+          animationState.diffuseTime = 0;
         }
         globalUniforms.uParticleProgress.value = p;
-      } 
-      
+      }
+
       // 2. 扩散切换
       else if (animationState.phase === PHASE.DIFFUSION) {
         animationState.diffuseTime += dt;
         const progress = Math.min(animationState.diffuseTime / animationState.diffusionDuration, 1.0);
-        
+
         const maxR = globalUniforms.uMaxRadius.value;
         globalUniforms.uGeoRadius.value = progress * (maxR * 1.5); // 确保覆盖角落
-        
+
         if (particleSystem && particleSystem.material) {
-           particleSystem.material.opacity = 1.0 - progress;
+          particleSystem.material.opacity = 1.0 - progress;
         }
 
         if (progress >= 1.0) {
-          if(particleSystem) particleSystem.visible = false;
+          if (particleSystem) particleSystem.visible = false;
           globalUniforms.uGeoRadius.value = 99999.0;
-          
+
           animationState.phase = PHASE.COLORING;
           animationState.colorStartTime = now;
         }
       }
-      
+
       // 3. 上色
       else if (animationState.phase === PHASE.COLORING) {
         const colorTime = (now - animationState.colorStartTime) / 1000;
         const maxR = globalUniforms.uMaxRadius.value;
         const progress = colorTime / animationState.colorDuration;
-        
+
         globalUniforms.uColorRadius.value = progress * (maxR * 1.5);
 
         if (progress >= 1.0) {
@@ -574,7 +576,8 @@ const initViewer = async (modelUrl = './models/scene_auto_sync_raw.ply') => {
 
   } catch (error) {
     console.error("error:", error);
-      loadError.value = (error && (error.message || String(error))) || '模型加载失败，请检查模型 URL 是否正确可访问';
+    isLoading.value = false;
+    loadError.value = (error && (error.message || String(error))) || '模型加载失败，请检查模型 URL 是否正确可访问';
   }
 };
 
@@ -582,7 +585,7 @@ const setupDesktopControls = () => {
   if (!viewer) return;
   // 清理现有控制器
   if (viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
-  
+
   // [DEBUG] 暂时禁用控制器
   /*
   const controls = new ArcballControls(viewer.camera, viewer.renderer.domElement, viewer.threeScene);
@@ -596,7 +599,7 @@ const setupDesktopControls = () => {
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
 const adjustControlsToModel = () => {
   if (isVRMode.value) return;
-  
+
   // createParticleSystem 已经计算了最准确的 uCenter 和 uMaxRadius，直接用
   const worldCenter = globalUniforms.uCenter.value;
   const maxDim = globalUniforms.uMaxRadius.value / 0.7; // 还原回实际尺寸估计
@@ -606,7 +609,7 @@ const adjustControlsToModel = () => {
     viewer.controls.target.copy(worldCenter);
     viewer.controls.update();
   }
-  
+
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
   viewer.camera.lookAt(worldCenter);
 };
@@ -617,13 +620,13 @@ const onSessionStarted = (session) => {
   session.addEventListener('end', onSessionEnded);
 };
 const onSessionEnded = () => { isVRMode.value = false; setupDesktopControls(); };
-const toggleVRMode = async () => { 
+const toggleVRMode = async () => {
   if (!isSecureContext.value) { alert("需HTTPS"); return; }
-  if (isVRMode.value) { if(viewer.xr) viewer.xr.exitVR(); isVRMode.value = false; }
-  else { if(viewer.xr) viewer.xr.enterVR(); isVRMode.value = true; }
+  if (isVRMode.value) { if (viewer.xr) viewer.xr.exitVR(); isVRMode.value = false; }
+  else { if (viewer.xr) viewer.xr.enterVR(); isVRMode.value = true; }
 };
 const toggleAutoRotate = () => { isAutoRotate.value = !isAutoRotate.value; };
-const checkProtocol = () => { 
+const checkProtocol = () => {
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const isHttps = window.location.protocol === 'https:';
   isSecureContext.value = isLocal || isHttps;
@@ -642,33 +645,65 @@ const onMouseDown = (e) => {
 
 const onMouseMove = (e) => {
   if (!isDragging.value || !viewer || !viewer.camera) return;
-  
+
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
   const sensitivity = 0.2;
-  
-  // 计算增量 (度)
-  const deltaYaw = -dx * sensitivity;
-  const deltaPitch = -dy * sensitivity;
-  
-  rotationDelta.value.x += deltaPitch; // Pitch (X轴)
-  rotationDelta.value.y += deltaYaw;   // Yaw (Y轴)
-  
+
+  // 计算增量
+  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
+  const panSensitivity = 0.01; // 平移灵敏度，根据模型大小可能需要调整
+
   // X轴旋转 (俯仰) - 本地轴
   viewer.camera.rotateX(deltaPitch * Math.PI / 180);
-  // Y轴旋转 (偏航) - 世界轴 (更符合直觉)
-  viewer.camera.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), deltaYaw * Math.PI / 180);
-  
+
+  // 左右平移 (移动视角左右而不是旋转)
+  viewer.camera.translateX(-dx * panSensitivity);
+
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
-  
+
   lastMouse.x = e.clientX;
   lastMouse.y = e.clientY;
 };
 
 const onMouseUp = () => { isDragging.value = false; };
 
-onMounted(() => { 
+// --- 移动端 Touch 事件支持 ---
+const onTouchStart = (e) => {
+  if (e.touches.length > 0) {
+    isDragging.value = true;
+    lastMouse.x = e.touches[0].clientX;
+    lastMouse.y = e.touches[0].clientY;
+  }
+};
+
+const onTouchMove = (e) => {
+  if (!isDragging.value || !viewer || !viewer.camera || e.touches.length === 0) return;
+
+  const dx = e.touches[0].clientX - lastMouse.x;
+  const dy = e.touches[0].clientY - lastMouse.y;
+  const sensitivity = 0.2;
+
+  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
+  const panSensitivity = 0.01; // 平移灵敏度
+
+  rotationDelta.value.x += deltaPitch;
+
+  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
+  // 左右平移 (移动视角左右而不是旋转)
+  viewer.camera.translateX(-dx * panSensitivity);
+
+  viewer.camera.updateProjectionMatrix();
+  updateDebugInfo();
+
+  lastMouse.x = e.touches[0].clientX;
+  lastMouse.y = e.touches[0].clientY;
+};
+
+const onTouchEnd = () => { isDragging.value = false; };
+
+onMounted(() => {
   // 1. 将加载函数挂载到全局 window 上，供 Flutter 调用
   window.loadModelFromFlutter = (modelUrl) => {
     console.log("准备加载模型: ", modelUrl);
@@ -699,20 +734,18 @@ onBeforeUnmount(async () => {
 
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
-  
+
   if (viewer) {
-      viewer.renderer.setAnimationLoop(null);
-      await viewer.dispose();
+    viewer.renderer.setAnimationLoop(null);
+    await viewer.dispose();
   }
 });
 </script>
 
 <template>
-  <div class="app-container" 
-    @mousedown="onMouseDown" 
-    @mousemove="onMouseMove" 
-    @mouseup="onMouseUp" 
-    @mouseleave="onMouseUp">
+  <div class="app-container" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
+    @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
+    @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>
     <div v-if="isLoading" class="loading-overlay">正在加载模型...</div>
     <div v-if="loadError" class="error-overlay">
@@ -732,13 +765,8 @@ onBeforeUnmount(async () => {
 
     <!-- 搜索功能 -->
     <div class="search-panel">
-      <input 
-        type="text"
-        v-model="searchQuery" 
-        @keyup.enter="searchAndFly"
-        placeholder="搜索想要的视角 (如: 正面特写...)" 
-        class="search-input"
-      />
+      <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="搜索想要的视角 (如: 正面特写...)"
+        class="search-input" />
       <button @click="searchAndFly" class="search-btn">🔍 搜索视角</button>
     </div>
 
@@ -782,14 +810,10 @@ onBeforeUnmount(async () => {
     -->
 
     <!-- 镜头轨道小功能 -->
-    <div class="camera-track" v-if="filteredPoses.length > 0">
-      <div 
-        v-for="(pose, index) in filteredPoses" 
-        :key="pose.id" 
-        class="camera-btn"
-        :class="{ active: activeImage === pose.image_url }"
-        @click="flyToImage(pose)"
-      >
+    <div class="camera-track" v-if="filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
+      @touchend.stop>
+      <div v-for="(pose, index) in filteredPoses" :key="pose.id" class="camera-btn"
+        :class="{ active: activeImage === pose.image_url }" @click.stop="flyToImage(pose)">
         <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
         <div v-if="pose.tag" class="camera-tag-overlay">
           <div class="camera-title-mini">镜 {{ pose.id.split('.')[0].replace('frame_', '') }}</div>
@@ -804,9 +828,10 @@ onBeforeUnmount(async () => {
       <div class="ref-title">参考原图</div>
       <img :src="activeImage" class="ref-img" />
       <div class="ref-info" v-if="sceneMetadata.fl_y">
-         <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
-         <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 / Math.PI)).toFixed(1) }}°</span>
-         <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
+        <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
+        <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
+          Math.PI)).toFixed(1) }}°</span>
+        <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
       </div>
       <div class="ref-hint">点击关闭对比</div>
     </div>
@@ -814,16 +839,103 @@ onBeforeUnmount(async () => {
 </template>
 
 <style scoped>
-.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
-.viewer-container { width: 100%; height: 100%; }
-.controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
-.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }  .error-overlay { position: absolute; inset: 0; background: rgba(10,10,10,0.92); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 210; padding: 24px; text-align: center; }
-  .error-icon { font-size: 48px; margin-bottom: 12px; }
-  .error-title { font-size: 20px; font-weight: bold; margin-bottom: 8px; color: #ff6b6b; }
-  .error-msg { font-size: 13px; color: #ccc; max-width: 320px; word-break: break-all; margin-bottom: 20px; }
-  .error-retry { background: #333; color: white; border: 1px solid #555; padding: 8px 24px; border-radius: 20px; cursor: pointer; font-size: 14px; }
-  .error-retry:hover { background: #555; }button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
-button.active { background: #22c55e; border-color: #22c55e; }
+.app-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background-color: #000000;
+  overflow: hidden;
+}
+
+.viewer-container {
+  width: 100%;
+  height: 100%;
+}
+
+.controls-ui {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 15px;
+  z-index: 100;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 200;
+  font-size: 20px;
+}
+
+.error-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.92);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 210;
+  padding: 24px;
+  text-align: center;
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.error-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 8px;
+  color: #ff6b6b;
+}
+
+.error-msg {
+  font-size: 13px;
+  color: #ccc;
+  max-width: 320px;
+  word-break: break-all;
+  margin-bottom: 20px;
+}
+
+.error-retry {
+  background: #333;
+  color: white;
+  border: 1px solid #555;
+  padding: 8px 24px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.error-retry:hover {
+  background: #555;
+}
+
+button {
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 10px 20px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+button.active {
+  background: #22c55e;
+  border-color: #22c55e;
+}
 
 /* 镜头轨道样式 */
 .camera-track {
@@ -836,12 +948,13 @@ button.active { background: #22c55e; border-color: #22c55e; }
   overflow-x: auto;
   max-width: 90vw;
   padding: 12px 18px;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(10px);
   border-radius: 16px;
   z-index: 100;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
+
 .camera-btn {
   width: 100px;
   height: 70px;
@@ -858,10 +971,25 @@ button.active { background: #22c55e; border-color: #22c55e; }
   color: #888;
   position: relative;
 }
-.camera-btn.active { border-color: #22c55e; }
-.btn-thumb { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
-.camera-btn:hover .btn-thumb { opacity: 0.9; }
-.camera-btn.active .btn-thumb { opacity: 0.9; }
+
+.camera-btn.active {
+  border-color: #22c55e;
+}
+
+.btn-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.6;
+}
+
+.camera-btn:hover .btn-thumb {
+  opacity: 0.9;
+}
+
+.camera-btn.active .btn-thumb {
+  opacity: 0.9;
+}
 
 /* 悬浮标签文字 */
 .camera-tag-overlay {
@@ -877,8 +1005,20 @@ button.active { background: #22c55e; border-color: #22c55e; }
   align-items: center;
   pointer-events: none;
 }
-.camera-title-mini { font-size: 10px; opacity: 0.8; }
-.camera-tag-text { font-size: 12px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
+
+.camera-title-mini {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.camera-tag-text {
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+}
 
 /* 搜索栏样式 */
 .search-panel {
@@ -900,7 +1040,7 @@ button.active { background: #22c55e; border-color: #22c55e; }
   padding: 10px 15px;
   border: none;
   border-radius: 6px;
-  background: rgba(255,255,255,0.9);
+  background: rgba(255, 255, 255, 0.9);
   outline: none;
   font-size: 14px;
 }
@@ -914,7 +1054,10 @@ button.active { background: #22c55e; border-color: #22c55e; }
   cursor: pointer;
   font-weight: bold;
 }
-.search-btn:hover { background: #1fae51; }
+
+.search-btn:hover {
+  background: #1fae51;
+}
 
 /* 参考图浮窗 */
 .reference-overlay {
@@ -922,25 +1065,57 @@ button.active { background: #22c55e; border-color: #22c55e; }
   top: 100px;
   right: 20px;
   width: 280px;
-  background: rgba(0,0,0,0.7);
+  background: rgba(0, 0, 0, 0.7);
   padding: 10px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   z-index: 150;
   cursor: pointer;
 }
-.ref-title { font-size: 12px; color: #aaa; margin-bottom: 8px; text-align: center; }
-.ref-img { width: 100%; border-radius: 6px; border: 1px solid #444; margin-bottom: 8px; }
-.ref-info { font-size: 11px; color: #ddd; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 5px; }
-.info-tag { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; }
-.ref-hint { font-size: 10px; color: #666; text-align: center; margin-top: 5px; }
+
+.ref-title {
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.ref-img {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #444;
+  margin-bottom: 8px;
+}
+
+.ref-info {
+  font-size: 11px;
+  color: #ddd;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 5px;
+}
+
+.info-tag {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ref-hint {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  margin-top: 5px;
+}
 
 /* 调试面板 */
 .debug-panel {
   position: absolute;
   top: 100px;
   right: 320px;
-  background: rgba(0,0,0,0.8);
+  background: rgba(0, 0, 0, 0.8);
   padding: 10px;
   border-radius: 8px;
   color: #0f0;
@@ -949,10 +1124,36 @@ button.active { background: #22c55e; border-color: #22c55e; }
   z-index: 150;
   border: 1px solid #33cc33;
 }
-.debug-title { margin-bottom: 5px; color: #fff; font-weight: bold; font-size: 13px; }
-.debug-row { margin-bottom: 4px; color: #0f0; }
-.debug-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-.mini-btn { padding: 4px; font-size: 10px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; cursor: pointer; }
-.mini-btn:hover { background: #444; }
 
+.debug-title {
+  margin-bottom: 5px;
+  color: #fff;
+  font-weight: bold;
+  font-size: 13px;
+}
+
+.debug-row {
+  margin-bottom: 4px;
+  color: #0f0;
+}
+
+.debug-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.mini-btn {
+  padding: 4px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #222;
+  color: white;
+  cursor: pointer;
+}
+
+.mini-btn:hover {
+  background: #444;
+}
 </style>

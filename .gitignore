@@ -120,6 +120,13 @@ ai_engine/**/*.obj
 ai_engine/**/*.glb
 ai_engine/**/*.gltf
 
+# 忽略 app/assets/webgl/models 下的模型文件
+app/assets/webgl/models/*.ply
+app/assets/webgl/models/*.splat
+app/assets/webgl/models/*.obj
+app/assets/webgl/models/*.glb
+app/assets/webgl/models/*.gltf
+
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
 ai_engine/exports/

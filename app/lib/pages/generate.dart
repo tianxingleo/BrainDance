@@ -236,6 +236,7 @@ class _GeneratePageState extends State<GeneratePage>
         ),
       ),
     ];
+    Widget? currentTabContent;
     switch (_tabController.index) {
       case 0:
         final TDUpload myTDUpload = TDUpload(
@@ -270,7 +271,8 @@ class _GeneratePageState extends State<GeneratePage>
           width: 150,
           height: 150,
         );
-        final Widget sb = Scrollbar(
+        currentTabContent = Scrollbar(
+          key: const ValueKey<int>(0),
           controller: _scrollController,
           child: SingleChildScrollView(
             controller: _scrollController,
@@ -309,11 +311,11 @@ class _GeneratePageState extends State<GeneratePage>
             ),
           ),
         );
-        tabContents.add(Expanded(child: sb));
         break;
       case 1:
         _textEditingController.text = GenConfig.uploadedText;
-        final Widget sb = Scrollbar(
+        currentTabContent = Scrollbar(
+          key: const ValueKey<int>(1),
           controller: _scrollController,
           child: SingleChildScrollView(
             controller: _scrollController,
@@ -368,7 +370,6 @@ class _GeneratePageState extends State<GeneratePage>
             ),
           ),
         );
-        tabContents.add(Expanded(child: sb));
         break;
       case 2:
         final TDUpload myTDUpload = TDUpload(
@@ -403,7 +404,8 @@ class _GeneratePageState extends State<GeneratePage>
           width: 150,
           height: 150,
         );
-        final Widget sb = Scrollbar(
+        currentTabContent = Scrollbar(
+          key: const ValueKey<int>(2),
           controller: _scrollController,
           child: SingleChildScrollView(
             controller: _scrollController,
@@ -442,8 +444,32 @@ class _GeneratePageState extends State<GeneratePage>
             ),
           ),
         );
-        tabContents.add(Expanded(child: sb));
         break;
+    }
+    
+    if (currentTabContent != null) {
+      tabContents.add(
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.05, 0.0),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: currentTabContent,
+          ),
+        ),
+      );
     }
     return Scaffold(
       backgroundColor: TDTheme.of(context).grayColor1,
