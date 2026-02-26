@@ -61,24 +61,25 @@ class GlomapRunner:
             sparse_dir.mkdir(parents=True, exist_ok=True)
             if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
 
-            # Step 1: 特征提取
-            # 注意：--FeatureExtraction.use_gpu 0 强制 CPU 模式，规避 CUDA 断言崩溃
+            # Step 1: 特征提取（GPU 加速）
+            # 注意：确保 LD_LIBRARY_PATH 已在 _run_cmd 中清除以避免 Conda CUDA 库冲突
             self._run_cmd([
                 self.colmap_exe, "feature_extractor",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
                 "--ImageReader.camera_model", "OPENCV",
                 "--ImageReader.single_camera", "1",
-                "--FeatureExtraction.use_gpu", "0"
-            ], "Step 1: 特征提取 (COLMAP)")
+                "--FeatureExtraction.use_gpu", "1"
+            ], "Step 1: 特征提取 (COLMAP GPU)")
 
-            # Step 2: 顺序匹配
+            # Step 2: 顺序匹配（GPU 加速）
+            # COLMAP 3.13.0 中匹配 GPU 开关为 --FeatureMatching.use_gpu（非 SiftMatching）
             self._run_cmd([
                 self.colmap_exe, "sequential_matcher",
                 "--database_path", str(database_path),
                 "--SequentialMatching.overlap", "25",
-                "--SiftMatching.use_gpu", "0"
-            ], "Step 2: 顺序匹配 (COLMAP)")
+                "--FeatureMatching.use_gpu", "1"
+            ], "Step 2: 顺序匹配 (COLMAP GPU)")
 
             # Step 3: 全局重建
             print(f"    -> 🚀 启动 GLOMAP 引擎...")
