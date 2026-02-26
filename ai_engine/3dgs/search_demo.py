@@ -51,7 +51,7 @@ class ModelSearcher:
         """
         
         resp = self.ai_client.chat.completions.create(
-            model="qwen-plus", # 建议用稍微聪明点的模型处理逻辑
+            model="qwen3.5-plus", # Qwen3.5-Plus：最新顶级模型，效果媲美 qwen3-max，成本更低
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}

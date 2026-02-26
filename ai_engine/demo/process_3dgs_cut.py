@@ -58,14 +58,14 @@ except ImportError:
 
 def get_central_object_prompt(images_dir: Path, sample_count=3):
     """
-    [Step 1.1] 使用 Qwen-VL-Plus 多图分析，提取中心物体的文本描述
+    [Step 1.1] 使用 Qwen3.5-Plus 多图分析，提取中心物体的文本描述
     """
     api_key = os.environ.get("DASHSCOPE_API_KEY")
     if not api_key:
         print("❌ 未设置 DASHSCOPE_API_KEY，无法调用大模型。")
         return None
 
-    print(f"\n🧠 [AI 分析] 正在调用 Qwen-VL-Plus 分析场景...")
+    print(f"\n🧠 [AI 分析] 正在调用 Qwen3.5-Plus 分析场景...")
     
     # 随机采样 3 张图片
     image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
@@ -93,7 +93,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
 
     try:
         response = dashscope.MultiModalConversation.call(
-            model='qwen-vl-plus', 
+            model='qwen3.5-plus', 
             messages=messages
         )
         
