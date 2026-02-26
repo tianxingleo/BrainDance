@@ -42,6 +42,7 @@ dependencies:
   webview_flutter: ^4.13.1
   flutter_riverpod: ^3.2.0
   flutter_dotenv: ^5.1.0
+  sensors_plus: ^6.1.1
 
 dev_dependencies:
   flutter_test:
