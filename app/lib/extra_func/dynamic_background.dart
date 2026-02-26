@@ -76,17 +76,25 @@ class _DynamicGradientBackgroundState extends State<DynamicGradientBackground> w
           child: AnimatedBuilder(
             animation: _bgAnimController,
             builder: (context, child) {
+              final isDark = Theme.of(context).brightness == Brightness.dark;
               return Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: _topAlignment.value,
                     end: _bottomAlignment.value,
-                    colors: [
-                      TDTheme.of(context).brandColor4.withValues(alpha: 0.2),
-                      AppConfig.primaryColor.withValues(alpha: 0.1),
-                      TDTheme.of(context).grayColor1,
-                      AppConfig.primaryColor.withValues(alpha: 0.05),
-                    ],
+                    colors: isDark
+                        ? [
+                            AppConfig.primaryColor.withValues(alpha: 0.25),
+                            TDTheme.of(context).brandColor8.withValues(alpha: 0.15),
+                            TDTheme.of(context).grayColor14,
+                            AppConfig.primaryColor.withValues(alpha: 0.08),
+                          ]
+                        : [
+                            TDTheme.of(context).brandColor4.withValues(alpha: 0.2),
+                            AppConfig.primaryColor.withValues(alpha: 0.1),
+                            TDTheme.of(context).grayColor1,
+                            AppConfig.primaryColor.withValues(alpha: 0.05),
+                          ],
                     stops: const [0.0, 0.4, 0.8, 1.0],
                   ),
                 ),

@@ -266,7 +266,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
   }
 
-<<<<<<< HEAD
   /// 统一入口：决定传给 WebView 的模型 URL
   /// - 如果已下载到本地 -> 使用本地 HTTP /local_models/ 路由
   /// - 如果是远程 HTTPS URL  -> 转成本地 HTTP /proxy/ 路由，由 Dart 代理
@@ -285,23 +284,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     } else {
       // 相对路径（本地 demo 模型）
       targetUrl = widget.initialModelUrl;
-=======
-  void _sendModelToVue(String modelUrl) {
-    if (_isWebReady) {
-      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
-        // 新版：同时传 PLY URL 和 webgl_poses.json 的公网 URL
-        final payload = jsonEncode({'ply': modelUrl, 'poses': widget.posesUrl});
-        _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
-      } else {
-        // 旧版兼容：只传 PLY URL，由 WebGL 内部使用默认位姿文件
-        final encodedUrl = jsonEncode(modelUrl);
-        _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
-      }
->>>>>>> origin/tianxingleo-da3
     }
+
     debugPrint('Sending model URL to WebView: $targetUrl');
-    final encodedUrl = jsonEncode(targetUrl);
-    _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+    
+    if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
+      // 新版：同时传 PLY URL 和 webgl_poses.json 的公网 URL
+      final payload = jsonEncode({'ply': targetUrl, 'poses': widget.posesUrl});
+      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+    } else {
+      // 旧版兼容：只传 PLY URL，由 WebGL 内部使用默认位姿文件
+      final encodedUrl = jsonEncode(targetUrl);
+      _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+    }
   }
 
   @override
@@ -309,8 +304,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.sceneId),
-        backgroundColor: TDTheme.of(context).whiteColor1,
-        foregroundColor: TDTheme.of(context).fontGyColor1,
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         elevation: 0,
       ),
       body: _isUnsupportedPlatform

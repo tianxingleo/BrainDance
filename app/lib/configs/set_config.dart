@@ -34,7 +34,13 @@ class SetConfig {
           setLanguage(settingsMsg[0], ref);
           break;
         case 1:
-          setNightMode(settingsMsg[1] == 'true', ref);
+          // '' = system, 'true' = dark, 'false' = light
+          final val = settingsMsg[1];
+          if (val.isEmpty) {
+            ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.system);
+          } else {
+            setNightMode(val == 'true', ref);
+          }
           break;
       }
     }

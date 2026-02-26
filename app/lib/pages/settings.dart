@@ -97,7 +97,7 @@ class _SettingsPageState extends State<SettingsPage>
                     setTab1(onUpdate, widget.homeRef),
                     setTab2(onUpdate, context),
                     setTab3(context),
-                    setTab4(scrollController),
+                    setTab4(context, scrollController),
                   ],
                 ),
               ),

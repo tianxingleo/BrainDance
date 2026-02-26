@@ -145,6 +145,7 @@ class SpatialAnchorExtractor:
                 
                 self.supabase.table("memory_poses").insert(row).execute()
                 success_count += 1
+                frame['tag'] = tag
             except Exception as e:
                 if log_callback: log_callback(f"⚠️ 保存锚点失败: {e}")
 

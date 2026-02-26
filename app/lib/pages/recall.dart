@@ -322,11 +322,11 @@ class _RecallPageState extends State<RecallPage> {
               final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
               Navigator.push(
                 context,
-<<<<<<< HEAD
                 PageRouteBuilder(
                   pageBuilder: (context, animation, secondaryAnimation) =>
                       WebGLViewerPage(
                         initialModelUrl: modelUrl,
+                        posesUrl: posesUrl,
                         sceneId: sceneId,
                       ),
                   transitionsBuilder:
@@ -344,14 +344,6 @@ class _RecallPageState extends State<RecallPage> {
                           ),
                         );
                       },
-=======
-                MaterialPageRoute(
-                  builder: (context) => WebGLViewerPage(
-                    initialModelUrl: modelUrl,
-                    posesUrl: posesUrl,
-                    sceneId: sceneId,
-                  ),
->>>>>>> origin/tianxingleo-da3
                 ),
               );
             },

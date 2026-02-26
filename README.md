@@ -176,6 +176,20 @@ BrainDance/
 - **Infrastructure**: [Docker Desktop](https://www.docker.com/), [Supabase CLI](https://supabase.com/docs/guides/cli)
 - **Client**: Flutter SDK (3.10+), Android Studio / Xcode
 
+### 测试环境 (Testing Environment)
+
+#### 移动端测试设备 (Mobile Test Devices)
+
+- **OPPO Find X8**
+- **HUAWEI Mate 30 Pro**
+
+#### 服务器配置 (Server Configuration)
+
+- **CPU**: Intel Core i7-12600KF
+- **内存**: 64GB RAM
+- **显卡**: NVIDIA RTX 5070 12GB (Blackwell)
+- **操作系统**: Ubuntu on WSL2 (Windows 11)
+
 ### 部署步骤 (Deployment)
 
 本项目支持 **全本地化部署**，无需云端账号即可完整运行。

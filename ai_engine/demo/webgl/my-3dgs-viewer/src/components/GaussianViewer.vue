@@ -13,19 +13,20 @@ const isSecureContext = ref(false);
 const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
+const activeTag = ref(''); // 当前激活的标签
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
-<<<<<<< HEAD
 const loadError = ref(''); // 添加错误状态
-=======
 const currentFps = ref(0); // 实时帧数
->>>>>>> origin/tianxingleo-da3
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
-    // 没搜索时，只展示有打标结果的镜头
-    return cameraPoses.value.filter(pose => pose.tag);
+    // 没搜索时，优先展示有打标的镜头。如果全都没打标，则展示全部
+    const withTags = cameraPoses.value.filter(pose => pose.tag);
+    if (withTags.length > 0) return withTags;
+    // 如果都无标签，最多展示 60 个，避免缩略图过多卡顿
+    return cameraPoses.value.slice(0, 60);
   }
   // 如果输入了搜索词，执行基于标签的文本包含匹配
   const query = searchQuery.value.trim().toLowerCase();
@@ -323,6 +324,7 @@ const flyToImage = (poseData) => {
 
   // 更新参考图
   activeImage.value = poseData.image_url;
+  activeTag.value = poseData.tag || '';
 
   // 1. 读取原始矩阵 (假设后端传来的是按列优先的 16 位数组)
   const rawMatrix = new THREE.Matrix4().fromArray(poseData.matrix);
@@ -430,7 +432,7 @@ const getViewerConfig = () => {
     'initialCameraLookAt': [0, 0, 0],
     'useBuiltInControls': false,
     'gpuAcceleratedSort': false,
-    'webXRMode': isSecureContext.value ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
+    'webXRMode': GaussianSplats3D.WebXRMode.None,
     'sharedMemoryForWorkers': false,
     'antialiased': !isMobile,
   };
@@ -474,20 +476,15 @@ const initViewer = async (plyUrl, posesUrl) => {
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
-<<<<<<< HEAD
     // 告诉 Flutter：模型加载完成
     isLoading.value = false;
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
     }
 
-    // 加载相机位姿
-    fetch('./models/webgl_poses_with_tags.json')
-=======
     // 加载相机位姿（支持本地路径与云端 URL）
     console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
     fetch(currentPosesUrl)
->>>>>>> origin/tianxingleo-da3
       .then(res => res.json())
       .then(data => {
         // 数据适配
@@ -498,12 +495,31 @@ const initViewer = async (plyUrl, posesUrl) => {
             fl_x: data.fl_x,
             fl_y: data.fl_y
           };
-          cameraPoses.value = data.frames.map(frame => ({
-            id: frame.id,
-            matrix: frame.matrix,
-            image_url: frame.image_url, // 云端图片 URL 或本地路径
-            tag: frame.tag
-          }));
+          cameraPoses.value = data.frames.map(frame => {
+            let imgUrl = frame.image_url;
+            if (imgUrl && !imgUrl.startsWith('http')) {
+              if (currentPosesUrl.startsWith('http')) {
+                // Determine base path from currentPosesUrl
+                const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
+                let relPath = imgUrl;
+                const imagesIndex = relPath.indexOf('images/');
+                if (imagesIndex !== -1) {
+                  relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
+                } else if (relPath.startsWith('/models/')) {
+                  relPath = relPath.substring('/models/'.length);
+                } else if (relPath.startsWith('/')) {
+                  relPath = relPath.substring(1);
+                }
+                imgUrl = `${baseUrl}/${relPath}`;
+              }
+            }
+            return {
+              id: frame.id,
+              matrix: frame.matrix,
+              image_url: imgUrl,
+              tag: frame.tag
+            };
+          });
         } else {
           cameraPoses.value = data; // 兼容旧格式
         }
@@ -527,25 +543,18 @@ const initViewer = async (plyUrl, posesUrl) => {
         animationState.isLoaded = true;
       }
     }, 200);
-<<<<<<< HEAD
-
-    // --- 5. 动画循环 ---
-=======
-    
     // --- 5. 动画循环 (120 FPS 上限) ---
     let lastDrawTime = performance.now();
     const fpsInterval = 1000 / 120; // 目标 120 帧
     let framesThisSecond = 0;
     let lastFpsTime = performance.now();
-
->>>>>>> origin/tianxingleo-da3
     viewer.renderer.setAnimationLoop(() => {
       const nowPerf = performance.now();
       const elapsedSinceDraw = nowPerf - lastDrawTime;
 
       // 帧率限制：如果离上一帧不足 1/120 秒，放弃当前帧渲染
       if (elapsedSinceDraw < fpsInterval) return;
-      
+
       // 更新上一帧时间，这会保留超出的那一点时间以防长期的漂移
       lastDrawTime = nowPerf - (elapsedSinceDraw % fpsInterval);
 
@@ -622,13 +631,9 @@ const initViewer = async (plyUrl, posesUrl) => {
 
   } catch (error) {
     console.error("error:", error);
-<<<<<<< HEAD
-    isLoading.value = false;
     loadError.value = (error && (error.message || String(error))) || '模型加载失败，请检查模型 URL 是否正确可访问';
-=======
   } finally {
     isLoading.value = false;
->>>>>>> origin/tianxingleo-da3
   }
 };
 
@@ -720,7 +725,6 @@ const onMouseMove = (e) => {
 
 const onMouseUp = () => { isDragging.value = false; };
 
-<<<<<<< HEAD
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
   if (e.touches.length > 0) {
@@ -756,19 +760,9 @@ const onTouchMove = (e) => {
 const onTouchEnd = () => { isDragging.value = false; };
 
 onMounted(() => {
-  // 1. 将加载函数挂载到全局 window 上，供 Flutter 调用
-  window.loadModelFromFlutter = (modelUrl) => {
-    console.log("准备加载模型: ", modelUrl);
-    initViewer(modelUrl);
-  };
-
   if (containerRef.value) {
     checkProtocol();
-=======
-onMounted(() => { 
-  if (containerRef.value) { 
-    checkProtocol(); 
-    
+
     // 注册供Flutter调用的全局函数
     // 支持两种调用方式：
     // 1. loadModelFromFlutter(plyUrl)              -- 只传模型URL，兼容旧版
@@ -785,7 +779,6 @@ onMounted(() => {
         initViewer(null, null);
       }
     };
->>>>>>> origin/tianxingleo-da3
 
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
@@ -799,7 +792,7 @@ onMounted(() => {
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
-  } 
+  }
 });
 
 onBeforeUnmount(async () => {
@@ -821,7 +814,7 @@ onBeforeUnmount(async () => {
     <div ref="containerRef" class="viewer-container"></div>
     <div v-if="isLoading" class="loading-overlay">正在处理...</div>
     <div class="fps-counter" v-if="currentFps > 0">FPS: {{ currentFps }}</div>
-    <div class="controls-ui">
+    <div class="controls-ui" v-if="false">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
       </button>
@@ -891,9 +884,12 @@ onBeforeUnmount(async () => {
     </div>
 
     <!-- 参考图对比悬浮窗 -->
-    <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''">
+    <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
       <div class="ref-title">参考原图</div>
       <img :src="activeImage" class="ref-img" />
+      <div class="ref-info" v-if="activeTag">
+        <span class="info-tag" style="color: #4CAF50;">{{ activeTag }}</span>
+      </div>
       <div class="ref-info" v-if="sceneMetadata.fl_y">
         <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
         <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
@@ -906,7 +902,6 @@ onBeforeUnmount(async () => {
 </template>
 
 <style scoped>
-<<<<<<< HEAD
 .app-container {
   position: relative;
   width: 100vw;
@@ -1001,17 +996,9 @@ button {
 }
 
 button.active {
-  background: #22c55e;
-  border-color: #22c55e;
+  background: #71838F;
+  border-color: #71838F;
 }
-=======
-.app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; overflow: hidden; }
-.viewer-container { width: 100%; height: 100%; }
-.controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
-.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
-button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
-button.active { background: #22c55e; border-color: #22c55e; }
->>>>>>> origin/tianxingleo-da3
 
 /* 镜头轨道样式 */
 .camera-track {
@@ -1020,51 +1007,55 @@ button.active { background: #22c55e; border-color: #22c55e; }
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 12px;
+  gap: 16px;
   overflow-x: auto;
   max-width: 90vw;
-  padding: 12px 18px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(10px);
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
   border-radius: 16px;
   z-index: 100;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .camera-btn {
   width: 100px;
   height: 70px;
-  background: #222;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
   cursor: pointer;
   overflow: hidden;
   border: 2px solid transparent;
-  transition: 0.2s;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888;
+  color: #333;
   position: relative;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
 }
 
 .camera-btn.active {
-  border-color: #22c55e;
+  border-color: #71838F;
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(113, 131, 143, 0.25);
 }
 
 .btn-thumb {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.6;
+  opacity: 0.85;
 }
 
 .camera-btn:hover .btn-thumb {
-  opacity: 0.9;
+  opacity: 1;
 }
 
 .camera-btn.active .btn-thumb {
-  opacity: 0.9;
+  opacity: 1;
 }
 
 /* 悬浮标签文字 */
@@ -1073,7 +1064,8 @@ button.active { background: #22c55e; border-color: #22c55e; }
   bottom: 0;
   left: 0;
   width: 100%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -1125,65 +1117,69 @@ button.active { background: #22c55e; border-color: #22c55e; }
   padding: 10px 20px;
   border: none;
   border-radius: 6px;
-  background: #22c55e;
+  background: #71838F;
   color: white;
   cursor: pointer;
   font-weight: bold;
 }
 
 .search-btn:hover {
-  background: #1fae51;
+  background: #5A6A74;
 }
 
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: 100px;
-  right: 20px;
-  width: 280px;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 16px;
+  width: 28vw;
+  min-width: 110px;
+  max-width: 180px;
   background: rgba(0, 0, 0, 0.7);
-  padding: 10px;
+  padding: 8px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   z-index: 150;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .ref-title {
-  font-size: 12px;
+  font-size: 10px;
   color: #aaa;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   text-align: center;
 }
 
 .ref-img {
   width: 100%;
-  border-radius: 6px;
+  border-radius: 4px;
   border: 1px solid #444;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .ref-info {
-  font-size: 11px;
+  font-size: 9px;
   color: #ddd;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   justify-content: center;
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
 .info-tag {
   background: rgba(255, 255, 255, 0.1);
-  padding: 2px 6px;
+  padding: 2px 4px;
   border-radius: 4px;
 }
 
 .ref-hint {
-  font-size: 10px;
+  font-size: 8px;
   color: #666;
   text-align: center;
-  margin-top: 5px;
+  margin-top: 4px;
 }
 
 /* 调试面板 */
@@ -1201,7 +1197,6 @@ button.active { background: #22c55e; border-color: #22c55e; }
   border: 1px solid #33cc33;
 }
 
-<<<<<<< HEAD
 .debug-title {
   margin-bottom: 5px;
   color: #fff;
@@ -1233,24 +1228,17 @@ button.active { background: #22c55e; border-color: #22c55e; }
 .mini-btn:hover {
   background: #444;
 }
-=======
+
 /* FPS 计数器 */
 .fps-counter {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #22c55e;
-  padding: 8px 15px;
-  border-radius: 8px;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(113, 131, 143, 0.8);
   font-family: monospace;
-  font-size: 16px;
-  font-weight: bold;
+  font-size: 10px;
   z-index: 1000;
   pointer-events: none;
-  backdrop-filter: blur(5px);
-  border: 1px solid rgba(34, 197, 94, 0.3);
 }
-
->>>>>>> origin/tianxingleo-da3
 </style>

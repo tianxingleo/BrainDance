@@ -53,6 +53,42 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+
+flutter_native_splash:
+  color: "#ffffff"
+  color_dark: "#121212"
+  image: "assets/icon_square_opaque.png"
+  image_dark: "assets/icon_square_dark.png"
+  android: true
+  ios: true
+  web: false
+  android_12:
+    image: "assets/icon_square_opaque.png"
+    icon_background_color: "#ffffff"
+    image_dark: "assets/icon_square_dark.png"
+    icon_background_color_dark: "#121212"
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon_square_transparent.png"
+  min_sdk_android: 21 # android min sdk min:16, default 21
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon_square_transparent.png"
+  web:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
+    icon_size: 48 # min:48, max:256, default 48
+  macos:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -83,6 +119,10 @@ flutter:
   # example:
   assets:
     - .env
+    - assets/icon.png
+    - assets/icon_square_transparent.png
+    - assets/icon_square_opaque.png
+    - assets/icon_square_dark.png
     - assets/fonts/
     - assets/sprites/
     - assets/webgl/
