@@ -62,19 +62,22 @@ class GlomapRunner:
             if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
 
             # Step 1: 特征提取
+            # 注意：--FeatureExtraction.use_gpu 0 强制 CPU 模式，规避 CUDA 断言崩溃
             self._run_cmd([
                 self.colmap_exe, "feature_extractor",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
                 "--ImageReader.camera_model", "OPENCV",
-                "--ImageReader.single_camera", "1"
+                "--ImageReader.single_camera", "1",
+                "--FeatureExtraction.use_gpu", "0"
             ], "Step 1: 特征提取 (COLMAP)")
 
             # Step 2: 顺序匹配
             self._run_cmd([
                 self.colmap_exe, "sequential_matcher",
                 "--database_path", str(database_path),
-                "--SequentialMatching.overlap", "25"
+                "--SequentialMatching.overlap", "25",
+                "--SiftMatching.use_gpu", "0"
             ], "Step 2: 顺序匹配 (COLMAP)")
 
             # Step 3: 全局重建
@@ -116,8 +119,11 @@ class GlomapRunner:
         # 🔥 环境隔离逻辑 🔥
         cmd_env = self.env.copy()
         exe_path = cmd[0]
-        # 如果是系统程序 (/usr/local/bin/glomap)，清除 LD_LIBRARY_PATH 防止 Conda 干扰
-        if exe_path.startswith("/usr") or exe_path.startswith("/bin"):
+        # 清除 LD_LIBRARY_PATH 防止 Conda 库与系统 CUDA 库冲突导致 SIGABRT
+        # 同时覆盖系统程序和 Conda 环境内的程序（colmap/glomap）
+        colmap_or_glomap = any(name in exe_path for name in ["colmap", "glomap"])
+        system_bin = exe_path.startswith("/usr") or exe_path.startswith("/bin")
+        if system_bin or colmap_or_glomap:
             if "LD_LIBRARY_PATH" in cmd_env:
                 del cmd_env["LD_LIBRARY_PATH"]
 
