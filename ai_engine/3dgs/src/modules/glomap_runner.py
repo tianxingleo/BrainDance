@@ -15,27 +15,45 @@ from src.config import PipelineConfig
 class GlomapRunner:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        
-        # 1. 查找 COLMAP (优先使用 Conda 环境自带的！)
-        self.colmap_exe = shutil.which("colmap")
-        if not self.colmap_exe:
-            if os.path.exists("/usr/local/bin/colmap"):
-                self.colmap_exe = "/usr/local/bin/colmap"
-        
-        # 2. 查找 GLOMAP
-        self.glomap_exe = shutil.which("glomap")
-        if not self.glomap_exe:
-            if os.path.exists("/usr/local/bin/glomap"):
-                self.glomap_exe = "/usr/local/bin/glomap"
+        self.colmap_use_gpu = os.getenv("COLMAP_USE_GPU", "1").strip().lower() not in {"0", "false", "no", "off"}
+        self.colmap_exe = self._resolve_executable("colmap", "COLMAP_BIN")
+        self.glomap_exe = self._resolve_executable("glomap", "GLOMAP_BIN")
 
-        if not self.colmap_exe or not self.glomap_exe:
-            raise FileNotFoundError("❌ 缺少 colmap 或 glomap 可执行文件")
+        missing = []
+        if not self.colmap_exe:
+            missing.append("colmap")
+        if not self.glomap_exe:
+            missing.append("glomap")
+        if missing:
+            missing_text = ", ".join(missing)
+            raise FileNotFoundError(
+                f"❌ 缺少可执行文件: {missing_text}。"
+                f"请安装后重试，或在 .env 中设置 COLMAP_BIN/GLOMAP_BIN 为绝对路径。"
+            )
 
         print(f"    -> 🎯 锁定引擎: COLMAP={self.colmap_exe}")
         print(f"    -> 🎯 锁定引擎: GLOMAP={self.glomap_exe}")
+        print(f"    -> ⚙️ COLMAP GPU 开关: {'开启' if self.colmap_use_gpu else '关闭'}")
         
         self.env = os.environ.copy()
         self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+
+    def _resolve_executable(self, cmd_name: str, env_key: str):
+        env_path = os.getenv(env_key, "").strip()
+        if env_path:
+            p = Path(env_path)
+            if p.exists() and os.access(str(p), os.X_OK):
+                return str(p)
+
+        by_path = shutil.which(cmd_name)
+        if by_path:
+            return by_path
+
+        common_path = Path("/usr/local/bin") / cmd_name
+        if common_path.exists() and os.access(str(common_path), os.X_OK):
+            return str(common_path)
+
+        return None
 
     def run(self):
         """执行 GLOMAP 完整流程"""
@@ -61,25 +79,29 @@ class GlomapRunner:
             sparse_dir.mkdir(parents=True, exist_ok=True)
             if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
 
-            # Step 1: 特征提取（GPU 加速）
-            # 注意：确保 LD_LIBRARY_PATH 已在 _run_cmd 中清除以避免 Conda CUDA 库冲突
+            # Step 1: 特征提取
+            # 注意：启用 retry_cpu=True 以便在 CUDA runtime 不匹配时自动切换到 CPU
+            use_gpu_str = "GPU" if self.colmap_use_gpu else "CPU"
             self._run_cmd([
                 self.colmap_exe, "feature_extractor",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
                 "--ImageReader.camera_model", "OPENCV",
                 "--ImageReader.single_camera", "1",
-                "--FeatureExtraction.use_gpu", "1"
-            ], "Step 1: 特征提取 (COLMAP GPU)")
+                "--FeatureExtraction.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--FeatureExtraction.gpu_index", "0" if self.colmap_use_gpu else "-1"
+            ], f"Step 1: 特征提取 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
-            # Step 2: 顺序匹配（GPU 加速）
-            # COLMAP 3.13.0 中匹配 GPU 开关为 --FeatureMatching.use_gpu（非 SiftMatching）
+            # Step 2: 顺序匹配
+            # COLMAP 3.13.0+ 中匹配 GPU 开关为 --FeatureMatching.use_gpu
+            use_gpu_str = "GPU" if self.colmap_use_gpu else "CPU"
             self._run_cmd([
                 self.colmap_exe, "sequential_matcher",
                 "--database_path", str(database_path),
                 "--SequentialMatching.overlap", "25",
-                "--FeatureMatching.use_gpu", "1"
-            ], "Step 2: 顺序匹配 (COLMAP GPU)")
+                "--FeatureMatching.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--FeatureMatching.gpu_index", "0" if self.colmap_use_gpu else "-1"
+            ], f"Step 2: 顺序匹配 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
             # Step 3: 全局重建
             print(f"    -> 🚀 启动 GLOMAP 引擎...")
@@ -87,8 +109,12 @@ class GlomapRunner:
                 self.glomap_exe, "mapper",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
-                "--output_path", str(sparse_dir)
-            ], "Step 3: 全局映射 (GLOMAP)")
+                "--output_path", str(sparse_dir),
+                "--GlobalPositioning.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--BundleAdjustment.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--GlobalPositioning.gpu_index", "0" if self.colmap_use_gpu else "-1",
+                "--BundleAdjustment.gpu_index", "0" if self.colmap_use_gpu else "-1",
+            ], "Step 3: 全局映射 (GLOMAP)", retry_cpu=self.colmap_use_gpu)
 
             # Step 4: 目录修正
             self._fix_directory_structure(sparse_dir)
@@ -113,7 +139,7 @@ class GlomapRunner:
             return False
         return False
 
-    def _run_cmd(self, cmd, desc):
+    def _run_cmd(self, cmd, desc, retry_cpu=False):
         """内部工具：执行命令 (含环境隔离逻辑)"""
         print(f"🚀 {desc}...")
         
@@ -125,18 +151,50 @@ class GlomapRunner:
         colmap_or_glomap = any(name in exe_path for name in ["colmap", "glomap"])
         system_bin = exe_path.startswith("/usr") or exe_path.startswith("/bin")
         if system_bin or colmap_or_glomap:
-            if "LD_LIBRARY_PATH" in cmd_env:
-                del cmd_env["LD_LIBRARY_PATH"]
+            # 🟢 [修复] 解决 GLOMAP SIGABRT (-6) 崩溃问题
+            # 根本原因：Conda 环境中的 libgomp.so.1 或 libstdc++.so.6 与系统库冲突。
+            # 方案：执行 GLOMAP 时，强制屏蔽 Conda 相关库路径，只允许使用系统库。
+            for env_var in ["LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONPATH"]:
+                if env_var in cmd_env:
+                    del cmd_env[env_var]
+            
+            # 移除 PATH 中的 Conda 路径，防止 subprocess 内部逻辑意外加载
+            current_path = cmd_env.get("PATH", "")
+            clean_paths = [p for p in current_path.split(os.pathsep) if "miniconda" not in p]
+            cmd_env["PATH"] = os.pathsep.join(clean_paths)
+            
+            # 显式禁止加载任何非系统库
+            cmd_env["LD_LIBRARY_PATH"] = "/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:/usr/lib"
 
         try:
             process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=cmd_env
             )
             for line in process.stdout:
-                if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs"]):
+                if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs", "CUDA error"]):
                     print(f"    | {line.strip()}")
             process.wait()
+
             if process.returncode != 0:
+                # 🟢 [优化] 如果是 GPU 模式执行失败且允许重试，则自动切换 CPU 模式
+                if retry_cpu:
+                    print(f"    ⚠️ GPU 执行失败，尝试自动切换至 CPU 模式重试...")
+                    self.colmap_use_gpu = False
+                    new_cmd = list(cmd)
+                    # 查找是否存在 use_gpu 参数并将其设为 0
+                    found_gpu_flag = False
+                    for i, arg in enumerate(new_cmd):
+                        if "use_gpu" in arg:
+                            if i + 1 < len(new_cmd):
+                                new_cmd[i+1] = "0"
+                                found_gpu_flag = True
+                        if "gpu_index" in arg:
+                            if i + 1 < len(new_cmd):
+                                new_cmd[i+1] = "-1"
+                    
+                    if found_gpu_flag:
+                        return self._run_cmd(new_cmd, f"{desc} (CPU 降级模式)", retry_cpu=False)
+                
                 raise subprocess.CalledProcessError(process.returncode, cmd)
         except subprocess.CalledProcessError as e:
             print(f"❌ 命令执行崩溃: {cmd[0]} (代码 {e.returncode})")

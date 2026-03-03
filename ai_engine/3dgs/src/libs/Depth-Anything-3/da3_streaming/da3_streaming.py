@@ -625,6 +625,34 @@ class DA3_Streaming:
 
         print("Apply alignment")
         self.sim3_list = accumulate_sim3_transforms(self.sim3_list)
+        
+        # 特殊处理：如果只有一个 chunk，手动保存 0_pcd.ply
+        if len(self.chunk_indices) == 1:
+            print("Only one chunk detected, saving its point cloud directly.")
+            chunk_data_first = np.load(
+                os.path.join(self.result_unaligned_dir, "chunk_0.npy"), allow_pickle=True
+            ).item()
+            np.save(os.path.join(self.result_aligned_dir, "chunk_0.npy"), chunk_data_first)
+            points_first = depth_to_point_cloud_vectorized(
+                chunk_data_first.depth,
+                chunk_data_first.intrinsics,
+                chunk_data_first.extrinsics,
+            )
+            colors_first = chunk_data_first.processed_images
+            confs_first = chunk_data_first.conf
+            ply_path_first = os.path.join(self.pcd_dir, "0_pcd.ply")
+            save_confident_pointcloud_batch(
+                points=points_first,
+                colors=colors_first,
+                confs=confs_first,
+                output_path=ply_path_first,
+                conf_threshold=np.mean(confs_first)
+                * self.config["Model"]["Pointcloud_Save"]["conf_threshold_coef"],
+                sample_ratio=self.config["Model"]["Pointcloud_Save"]["sample_ratio"],
+            )
+            if self.config["Model"]["save_depth_conf_result"]:
+                self.save_depth_conf_result(chunk_data_first, 0, 1, np.eye(3), np.array([0, 0, 0]))
+
         for chunk_idx in range(len(self.chunk_indices) - 1):
             print(f"Applying {chunk_idx+1} -> {chunk_idx} (Total {len(self.chunk_indices)-1})")
             s, R, t = self.sim3_list[chunk_idx]
@@ -737,8 +765,11 @@ class DA3_Streaming:
         first_chunk_range, first_chunk_extrinsics = self.all_camera_poses[0]
         _, first_chunk_intrinsics = self.all_camera_intrinsics[0]
 
+        # 如果只有一个 chunk，保存全部位姿；否则减去第一个 chunk 末尾的重叠部分
+        first_chunk_end = first_chunk_range[1] if len(self.all_camera_poses) == 1 else first_chunk_range[1] - self.overlap_e
+        
         for i, idx in enumerate(
-            range(first_chunk_range[0], first_chunk_range[1] - self.overlap_e)
+            range(first_chunk_range[0], first_chunk_end)
         ):
             w2c = np.eye(4)
             w2c[:3, :] = first_chunk_extrinsics[i]
@@ -776,7 +807,10 @@ class DA3_Streaming:
 
         poses_path = os.path.join(self.output_dir, "camera_poses.txt")
         with open(poses_path, "w") as f:
-            for pose in all_poses:
+            for i, pose in enumerate(all_poses):
+                if pose is None:
+                    print(f"Warning: Pose at index {i} is None, skipping...")
+                    continue
                 flat_pose = pose.flatten()
                 f.write(" ".join([str(x) for x in flat_pose]) + "\n")
 
@@ -784,7 +818,10 @@ class DA3_Streaming:
 
         intrinsics_path = os.path.join(self.output_dir, "intrinsic.txt")
         with open(intrinsics_path, "w") as f:
-            for intrinsic in all_intrinsics:
+            for i, intrinsic in enumerate(all_intrinsics):
+                if intrinsic is None:
+                    print(f"Warning: Intrinsic at index {i} is None, skipping...")
+                    continue
                 fx = intrinsic[0, 0]
                 fy = intrinsic[1, 1]
                 cx = intrinsic[0, 2]
@@ -794,11 +831,14 @@ class DA3_Streaming:
         print(f"Camera intrinsics saved to {intrinsics_path}")
 
         ply_path = os.path.join(self.output_dir, "camera_poses.ply")
+        # Filter out None values for PLY
+        valid_poses = [p for p in all_poses if p is not None]
+        
         with open(ply_path, "w") as f:
             # Write PLY header
             f.write("ply\n")
             f.write("format ascii 1.0\n")
-            f.write(f"element vertex {len(all_poses)}\n")
+            f.write(f"element vertex {len(valid_poses)}\n")
             f.write("property float x\n")
             f.write("property float y\n")
             f.write("property float z\n")
@@ -808,7 +848,7 @@ class DA3_Streaming:
             f.write("end_header\n")
 
             color = chunk_colors[0]
-            for pose in all_poses:
+            for pose in valid_poses:
                 position = pose[:3, 3]
                 f.write(
                     f"{position[0]} {position[1]} {position[2]} {color[0]} {color[1]} {color[2]}\n"

@@ -29,6 +29,11 @@ class NerfstudioEngine:
         """执行 splatfacto 训练"""
         print(f"\n🔥 [4/4] 开始训练 (Splatfacto)")
         
+        # 确保输出目录及其父目录存在，防止 nerfstudio 内部创建失败
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        (self.output_dir / self.cfg.project_name).mkdir(parents=True, exist_ok=True)
+        (self.output_dir / self.cfg.project_name / "splatfacto").mkdir(parents=True, exist_ok=True)
+
         # 1. 计算场景参数 (Collider) - 直接调用之前的全局函数
         collider_args, scene_type = analyze_and_calculate_adaptive_collider(
             self.cfg.transforms_file,
