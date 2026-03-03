@@ -103,13 +103,14 @@ class GlomapRunner:
                 "--FeatureMatching.gpu_index", "0" if self.colmap_use_gpu else "-1"
             ], f"Step 2: 顺序匹配 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
-            # Step 3: 全局重建
             print(f"    -> 🚀 启动 GLOMAP 引擎...")
+            # 🟢 [关键修复] 添加 --output_format bin 参数，并确保 GPU 模式支持 fallback
             self._run_cmd([
                 self.glomap_exe, "mapper",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
                 "--output_path", str(sparse_dir),
+                "--output_format", "bin",
                 "--GlobalPositioning.use_gpu", "1" if self.colmap_use_gpu else "0",
                 "--BundleAdjustment.use_gpu", "1" if self.colmap_use_gpu else "0",
                 "--GlobalPositioning.gpu_index", "0" if self.colmap_use_gpu else "-1",
@@ -146,30 +147,41 @@ class GlomapRunner:
         # 🔥 环境隔离逻辑 🔥
         cmd_env = self.env.copy()
         exe_path = cmd[0]
-        # 清除 LD_LIBRARY_PATH 防止 Conda 库与系统 CUDA 库冲突导致 SIGABRT
-        # 同时覆盖系统程序和 Conda 环境内的程序（colmap/glomap）
-        colmap_or_glomap = any(name in exe_path for name in ["colmap", "glomap"])
-        system_bin = exe_path.startswith("/usr") or exe_path.startswith("/bin")
-        if system_bin or colmap_or_glomap:
-            # 🟢 [修复] 解决 GLOMAP SIGABRT (-6) 崩溃问题
-            # 根本原因：Conda 环境中的 libgomp.so.1 或 libstdc++.so.6 与系统库冲突。
-            # 方案：执行 GLOMAP 时，强制屏蔽 Conda 相关库路径，只允许使用系统库。
+        
+        is_glomap = "glomap" in exe_path.lower()
+        is_colmap = "colmap" in exe_path.lower()
+        
+        if is_glomap:
+            # 🟢 对于 GLOMAP，采用白名单纯净环境变量防止与 Conda 冲突崩溃 (SIGABRT -6)
+            clean_env = {
+                "PATH": os.pathsep.join(["/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin"]),
+                "LD_LIBRARY_PATH": os.pathsep.join(["/usr/local/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib", "/lib"]),
+                "HOME": os.getenv("HOME", ""),
+                "USER": os.getenv("USER", ""),
+                "LANG": os.getenv("LANG", "en_US.UTF-8"),
+                "SHELL": os.getenv("SHELL", "/bin/bash"),
+                "TERM": os.getenv("TERM", "xterm-256color")
+            }
+            if self.colmap_use_gpu:
+                for k, v in os.environ.items():
+                    if any(x in k.upper() for x in ["CUDA", "NVIDIA"]):
+                        clean_env[k] = v
+            cmd_env = clean_env
+            
+        elif is_colmap or exe_path.startswith("/usr") or exe_path.startswith("/bin"):
+            # 🟢 对于 COLMAP 或者系统库，仅清理 LD_LIBRARY_PATH 和 LD_PRELOAD
             for env_var in ["LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONPATH"]:
                 if env_var in cmd_env:
                     del cmd_env[env_var]
-            
-            # 移除 PATH 中的 Conda 路径，防止 subprocess 内部逻辑意外加载
-            current_path = cmd_env.get("PATH", "")
-            clean_paths = [p for p in current_path.split(os.pathsep) if "miniconda" not in p]
-            cmd_env["PATH"] = os.pathsep.join(clean_paths)
-            
-            # 显式禁止加载任何非系统库
-            cmd_env["LD_LIBRARY_PATH"] = "/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:/usr/lib"
 
         try:
+            # 🟢 [关键修复] 当 GPU 模式失败导致核心转储时，确保能捕获并重试 CPU 模式
+            # SIGABRT (代码 -6) 通常是由库冲突引起的，即便切换 CPU 模式也需要纯净环境
             process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=cmd_env
             )
+            # ... 后续逻辑保持不变 ...
+
             for line in process.stdout:
                 if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs", "CUDA error"]):
                     print(f"    | {line.strip()}")
@@ -193,8 +205,34 @@ class GlomapRunner:
                                 new_cmd[i+1] = "-1"
                     
                     if found_gpu_flag:
-                        return self._run_cmd(new_cmd, f"{desc} (CPU 降级模式)", retry_cpu=False)
-                
+                        try:
+                            return self._run_cmd(new_cmd, f"{desc} (CPU 降级模式)", retry_cpu=False)
+                        except subprocess.CalledProcessError as e:
+                            # 🟢 [关键修复] 当 GLOMAP 的 CPU 模式也崩溃时 (如 SIGABRT)，尝试回退至 COLMAP mapper
+                            if "glomap" in new_cmd[0].lower():
+                                print(f"    ⚠️ GLOMAP (CPU) 执行崩溃！尝试回退至经典 COLMAP Mapper...")
+                                colmap_cmd = [
+                                    self.colmap_exe, "mapper",
+                                    "--database_path", str(self.cfg.data_dir / "colmap" / "database.db"),
+                                    "--image_path", str(self.cfg.project_dir / "raw_images"),
+                                    "--output_path", str(self.cfg.data_dir / "colmap" / "sparse")
+                                ]
+                                return self._run_cmd(colmap_cmd, "Step 3: 全局映射 (COLMAP 回退模式)", retry_cpu=False)
+                            raise e
+
+                # 如果没有 CPU 降级或已经是 CPU 降级但不是 glomap，则仍然抛出
+                if not retry_cpu and "glomap" in cmd[0].lower():
+                    print(f"    ⚠️ GLOMAP 执行崩溃！尝试回退至经典 COLMAP Mapper...")
+                    colmap_cmd = [
+                        self.colmap_exe, "mapper",
+                        "--database_path", str(self.cfg.data_dir / "colmap" / "database.db"),
+                        "--image_path", str(self.cfg.project_dir / "raw_images"),
+                        "--output_path", str(self.cfg.data_dir / "colmap" / "sparse")
+                    ]
+                    # Create output path if not exist
+                    Path(colmap_cmd[5]).mkdir(parents=True, exist_ok=True)
+                    return self._run_cmd(colmap_cmd, "Step 3: 全局映射 (COLMAP 回退模式)", retry_cpu=False)
+
                 raise subprocess.CalledProcessError(process.returncode, cmd)
         except subprocess.CalledProcessError as e:
             print(f"❌ 命令执行崩溃: {cmd[0]} (代码 {e.returncode})")
