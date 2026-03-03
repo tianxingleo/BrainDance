@@ -10,11 +10,13 @@ class RecordPage extends StatefulWidget {
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
-class _RecordPageState extends State<RecordPage> with SingleTickerProviderStateMixin {
+
+class _RecordPageState extends State<RecordPage>
+    with SingleTickerProviderStateMixin {
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
 
- @override
+  @override
   void initState() {
     super.initState();
     _buttonAnimController = AnimationController(
@@ -29,27 +31,38 @@ class _RecordPageState extends State<RecordPage> with SingleTickerProviderStateM
     if (!RecoConfig.cameraEnabled) {
       return;
     }
-    RecoConfig.onUpdate = () {setState(() {
-      
-    });};
+    RecoConfig.onUpdate = () {
+      setState(() {});
+    };
     RecoConfig.cameraInitialize();
   }
-  
-@override
-void dispose() {
-  _buttonAnimController.dispose();
-  RecoConfig.cameraController?.dispose();
-  RecoConfig.cameraController = null;  // 防止内存泄漏和误用
-  RecoConfig.onUpdate = () {};
-  super.dispose();
-}
+
+  @override
+  void dispose() {
+    _buttonAnimController.dispose();
+    RecoConfig.cameraController?.dispose();
+    RecoConfig.cameraController = null; // 防止内存泄漏和误用
+    RecoConfig.onUpdate = () {};
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     late final Widget cameraView;
     if (!RecoConfig.cameraEnabled) {
-      cameraView = Center(child: Text(textLocalize("reco_camun")));
+      cameraView = Center(
+        child: Text(
+          textLocalize("reco_camun"),
+          style: TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
     } else if (!RecoConfig.cameraController!.value.isInitialized) {
-      cameraView = Center(child: Text(textLocalize("reco_wait")));
+      cameraView = Center(
+        child: Text(
+          textLocalize("reco_wait"),
+          style: TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
     } else {
       cameraView = CameraPreview(RecoConfig.cameraController!);
     }
@@ -64,9 +77,19 @@ void dispose() {
             right: 24,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusRound),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withAlpha(180),
+                    Colors.white.withAlpha(30),
+                  ],
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withAlpha(40), width: 1),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withAlpha(30), blurRadius: 8),
+                ],
               ),
               child: IconButton(
                 icon: Icon(TDIcons.refresh, color: Colors.white, size: 24),
@@ -92,19 +115,19 @@ void dispose() {
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
                   colors: [
-                    Colors.black.withValues(alpha: 0.9),
-                    Colors.black.withValues(alpha: 0.5),
+                    Colors.black.withAlpha(230),
+                    Colors.black.withAlpha(120),
                     Colors.transparent,
                   ],
                   stops: const [0.0, 0.6, 1.0],
                 ),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
               ),
               child: Center(
                 child: GestureDetector(
                   onTapDown: (_) => _buttonAnimController.forward(),
                   onTapUp: (_) {
                     _buttonAnimController.reverse();
-                    // 预留拍照/录像功能
                     TDToast.showText('Recording...', context: context);
                   },
                   onTapCancel: () => _buttonAnimController.reverse(),
@@ -115,13 +138,24 @@ void dispose() {
                       height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 4),
+                        gradient: LinearGradient(
+                          colors: [
+                            TDTheme.of(context).brandColor1,
+                            TDTheme.of(context).brandColor4,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withAlpha(200),
+                          width: 4,
+                        ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            blurRadius: 8,
+                            color: Colors.black.withAlpha(40),
+                            blurRadius: 12,
                             spreadRadius: 2,
-                          )
+                          ),
                         ],
                       ),
                       child: Center(
@@ -133,10 +167,10 @@ void dispose() {
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.1),
-                                blurRadius: 4,
+                                color: Colors.black.withAlpha(20),
+                                blurRadius: 6,
                                 spreadRadius: 1,
-                              )
+                              ),
                             ],
                           ),
                         ),

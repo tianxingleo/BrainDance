@@ -109,7 +109,7 @@ class Home extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
-    
+
     // 启动时检查是否有会话
     final hasSession = Supabase.instance.client.auth.currentSession != null;
 
@@ -163,92 +163,184 @@ class MainScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bool isLoading = ref.watch(loadingProvider); //加载状态
+    final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
     return Scaffold(
+      extendBody: true,
       body: isLoading
-          ? Scaffold(body: Center(child: Text('Now Loading...')))
+          ? Center(child: CircularProgressIndicator())
           : AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(
-                    scale: Tween<double>(
-                      begin: 0.95,
-                      end: 1.0,
-                    ).animate(CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    )),
-                    child: child,
-                  ),
-                );
-              },
               child: Container(
                 key: ValueKey<int>(pageIndex),
                 child: getPage(pageIndex, ref),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(32),
+                  gradient: LinearGradient(
+                    colors: [
+                      TDTheme.of(context).brandColor1,
+                      TDTheme.of(context).brandColor4,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
               ),
             ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.only(bottom: 18, left: 18, right: 18),
+        child: PhysicalModel(
+          color: Colors.transparent,
+          elevation: 16,
+          borderRadius: BorderRadius.circular(32),
+          shadowColor: Colors.black.withOpacity(0.70),
+          clipBehavior: Clip.antiAlias,
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppConfig.isNightMode
+                  ? const Color(0xFF18181C)
+                  : const Color(0xFF23232A),
+              borderRadius: BorderRadius.circular(32),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 24,
+                  offset: Offset(16, 16),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: TDBottomTabBar(
-          // 底部导航栏
-          TDBottomTabBarBasicType.iconText,
-          componentType: TDBottomTabBarComponentType.normal,
-          useVerticalDivider: false,
-          centerDistance: 4,
-          navigationTabs: [
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("recall"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
+            child: TDBottomTabBar(
+              TDBottomTabBarBasicType.iconText,
+              componentType: TDBottomTabBarComponentType.normal,
+              useVerticalDivider: false,
+              centerDistance: 0,
+              barHeight: 90,
+              navigationTabs: [
+                TDBottomTabBarTabConfig(
+                  tabText: textLocalize("recall"),
+                  selectTabTextStyle: selectedTextStyle,
+                  unselectTabTextStyle: selectedTextStyle,
+                  selectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).brandColor1.withAlpha(50),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.home_filled,
+                      size: selectedSize,
+                      color: TDTheme.of(context).brandColor10,
+                    ),
+                  ),
+                  unselectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).fontGyColor3.withAlpha(18),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.home,
+                      size: unselectedSize,
+                      color: TDTheme.of(context).fontGyColor3,
+                    ),
+                  ),
+                  onTap: () => ref.read(pageIndexProvider.notifier).state = 0,
+                ),
+                TDBottomTabBarTabConfig(
+                  tabText: textLocalize("record"),
+                  selectTabTextStyle: selectedTextStyle,
+                  unselectTabTextStyle: selectedTextStyle,
+                  selectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).brandColor1.withAlpha(60),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.camera_filled,
+                      size: selectedSize,
+                      color: TDTheme.of(context).brandColor1,
+                    ),
+                  ),
+                  unselectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).fontGyColor3.withAlpha(18),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.camera,
+                      size: unselectedSize,
+                      color: TDTheme.of(context).fontGyColor3,
+                    ),
+                  ),
+                  onTap: () => ref.read(pageIndexProvider.notifier).state = 1,
+                ),
+                TDBottomTabBarTabConfig(
+                  tabText: textLocalize("generate"),
+                  selectTabTextStyle: selectedTextStyle,
+                  unselectTabTextStyle: selectedTextStyle,
+                  selectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).brandColor1.withAlpha(60),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.file_word_filled,
+                      size: selectedSize,
+                      color: TDTheme.of(context).brandColor1,
+                    ),
+                  ),
+                  unselectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).fontGyColor3.withAlpha(18),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.file_word,
+                      size: unselectedSize,
+                      color: TDTheme.of(context).fontGyColor3,
+                    ),
+                  ),
+                  onTap: () => ref.read(pageIndexProvider.notifier).state = 2,
+                ),
+                TDBottomTabBarTabConfig(
+                  tabText: textLocalize("settings"),
+                  selectTabTextStyle: selectedTextStyle,
+                  unselectTabTextStyle: selectedTextStyle,
+                  selectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).brandColor1.withAlpha(60),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.setting_1_filled,
+                      size: selectedSize,
+                      color: TDTheme.of(context).brandColor1,
+                    ),
+                  ),
+                  unselectedIcon: Container(
+                    decoration: BoxDecoration(
+                      color: TDTheme.of(context).fontGyColor3.withAlpha(18),
+                      borderRadius: BorderRadius.circular(32),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                      TDIcons.setting_1,
+                      size: unselectedSize,
+                      color: TDTheme.of(context).fontGyColor3,
+                    ),
+                  ),
+                  onTap: () => ref.read(pageIndexProvider.notifier).state = 3,
+                ),
+              ],
             ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("record"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
-            ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("generate"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
-            ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("settings"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
-            ),
-          ],
-          //backgroundColor: AppConfig.primaryColor,
-          currentIndex: pageIndex, // 当前选中索引
-          barHeight: 74,
+          ),
         ),
       ),
     );
