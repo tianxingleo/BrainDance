@@ -69,11 +69,11 @@ class DA3FeedForwardPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
 
-        self.log("    -> 正在进行 FFmpeg 抽帧 (1 FPS, 最长边限制 1200px, Lanczos 超采样)...")
+        self.log("    -> 正在进行 FFmpeg 抽帧 (1 FPS, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=1,scale=1000:1000:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
                 "-q:v", "2",
                 str(temp_dir / "frame_%05d.jpg")
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
