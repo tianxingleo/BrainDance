@@ -138,6 +138,7 @@ class BasePipeline(ABC):
 
                 try:
                     from supabase import create_client as _create_client
+                    from supabase import ClientOptions
                 except Exception:
                     _create_client = None
 
@@ -145,7 +146,11 @@ class BasePipeline(ABC):
                     self.log("    -> ℹ️ Supabase 客户端不可用，跳过上传与入库")
                     return None
 
-                sb = _create_client(supabase_url, supabase_key)
+                sb = _create_client(
+                    supabase_url, 
+                    supabase_key, 
+                    options=ClientOptions(postgrest_client_timeout=120, storage_client_timeout=600)
+                )
 
             with open(ply_path, "rb") as f:
                 remote_path = f"{scene_id}/{Path(ply_path).name}"
@@ -153,7 +158,7 @@ class BasePipeline(ABC):
                     res = sb.storage.from_(bucket).upload(
                         path=remote_path,
                         file=f,
-                        file_options={"x-upsert": "true", "upsert": "true"}
+                        file_options={"upsert": "true", "contentType": "application/octet-stream"}
                     )
                 except Exception as e:
                     self.log(f"    -> ⚠️ Supabase 上传失败: {e}", level="WARN")

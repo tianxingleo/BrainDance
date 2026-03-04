@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import timm
+import timm.models.vision_transformer
 import torch
 
 from sharp.models.presets.vit import VIT_CONFIG_DICT, ViTConfig, ViTPreset
@@ -16,13 +17,13 @@ from sharp.models.presets.vit import VIT_CONFIG_DICT, ViTConfig, ViTPreset
 LOGGER = logging.getLogger(__name__)
 
 
-class TimmViT(timm.models.VisionTransformer):
+class TimmViT(timm.models.vision_transformer.VisionTransformer):
     """Contains TIMM implementation for Vanilla ViT."""
 
     def __init__(self, config: ViTConfig):
         """Initialize ViT from TIMM implementation."""
         # Handle mlp layers.
-        mlp_layer = timm.layers.GluMlp if config.mlp_mode == "glu" else timm.layers.Mlp
+        mlp_layer = timm.models.layers.GluMlp if config.mlp_mode == "glu" else timm.models.layers.Mlp
 
         super().__init__(
             in_chans=config.in_chans,
@@ -36,7 +37,6 @@ class TimmViT(timm.models.VisionTransformer):
             mlp_ratio=config.mlp_ratio,
             qkv_bias=config.qkv_bias,
             global_pool=config.global_pool,
-            mlp_layer=mlp_layer,
         )
 
         # Required for extracting intermediate features.
@@ -71,8 +71,10 @@ class TimmViT(timm.models.VisionTransformer):
         batch_size, seq_len, _ = x.shape
 
         x = self._pos_embed(x)
-        x = self.patch_drop(x)
-        x = self.norm_pre(x)
+        if hasattr(self, 'patch_drop'):
+            x = self.patch_drop(x)
+        if hasattr(self, 'norm_pre'):
+            x = self.norm_pre(x)
 
         for idx, block in enumerate(self.blocks):
             x = block(x)
