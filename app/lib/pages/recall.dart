@@ -111,6 +111,13 @@ class _RecallPageState extends State<RecallPage> {
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
     final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Scaffold(
       backgroundColor: isDark ? darkBg : theme.grayColor1,
       appBar: AppBar(
@@ -121,14 +128,14 @@ class _RecallPageState extends State<RecallPage> {
           textLocalize("home_page"),
           font: theme.fontHeadlineSmall,
           fontWeight: FontWeight.w600,
-          textColor: theme.fontGyColor1,
+          textColor: textColor,
         ),
         actions: [
           IconButton(
             icon: AnimatedRotation(
               turns: _isLoading ? 1 : 0,
               duration: const Duration(milliseconds: 600),
-              child: Icon(Icons.refresh, color: theme.brandColor1),
+              child: Icon(Icons.refresh, color: iconColor),
             ),
             tooltip: '刷新',
             onPressed: () {
@@ -159,15 +166,15 @@ class _RecallPageState extends State<RecallPage> {
               ),
               child: TextField(
                 controller: _searchController,
-                style: TextStyle(color: theme.fontGyColor1),
+                style: TextStyle(color: textColor),
                 decoration: InputDecoration(
                   hintText: '搜索回忆...',
-                  hintStyle: TextStyle(color: theme.fontGyColor3),
+                  hintStyle: TextStyle(color: hintTextColor),
                   filled: true,
                   fillColor: isDark
                       ? darkInput
                       : theme.whiteColor1.withAlpha(220),
-                  prefixIcon: Icon(Icons.search, color: theme.brandColor1),
+                  prefixIcon: Icon(Icons.search, color: iconColor),
                   contentPadding: const EdgeInsets.symmetric(
                     vertical: 16,
                     horizontal: 20,
@@ -241,6 +248,13 @@ class _RecallPageState extends State<RecallPage> {
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
         width: MediaQuery.of(context).size.width * 0.85,
@@ -271,30 +285,26 @@ class _RecallPageState extends State<RecallPage> {
               errorWidget: Icon(
                 TDIcons.time_filled,
                 size: 80,
-                color: theme.brandColor4,
+                color: iconColor,
               ),
             ),
             const SizedBox(height: 24),
             TDText(
               textLocalize("home_page"),
               font: theme.fontTitleLarge,
-              textColor: theme.fontGyColor1,
+              textColor: textColor,
               fontWeight: FontWeight.w600,
             ),
             const SizedBox(height: 8),
             TDText(
               "暂无回忆，去记录一些美好瞬间吧",
               font: theme.fontBodyMedium,
-              textColor: theme.fontGyColor3,
+              textColor: hintTextColor,
             ),
             const SizedBox(height: 40),
             TDButton(
               text: "打开本地离线 Demo 模型",
-              iconWidget: const Icon(
-                TDIcons.view_module,
-                color: Colors.white,
-                size: 20,
-              ),
+              iconWidget: Icon(TDIcons.view_module, color: iconColor, size: 20),
               type: TDButtonType.fill,
               theme: TDButtonTheme.primary,
               shape: TDButtonShape.round,
@@ -316,6 +326,13 @@ class _RecallPageState extends State<RecallPage> {
   }
 
   Widget _buildModelGrid(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return GridView.builder(
       padding: const EdgeInsets.all(16.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -405,7 +422,7 @@ class _RecallPageState extends State<RecallPage> {
                             child: Icon(
                               Icons.view_in_ar,
                               size: 40,
-                              color: theme.fontGyColor3,
+                              color: iconColor,
                             ),
                           ),
                         ),
@@ -425,7 +442,9 @@ class _RecallPageState extends State<RecallPage> {
                               child: TDText(
                                 '${(similarity * 100).toStringAsFixed(1)}%',
                                 font: theme.fontBodyExtraSmall,
-                                textColor: Colors.white,
+                                textColor: isDark
+                                    ? const Color(0xFFFFFFFF)
+                                    : Colors.white,
                               ),
                             ),
                           ),
@@ -442,12 +461,13 @@ class _RecallPageState extends State<RecallPage> {
                           font: theme.fontTitleMedium,
                           fontWeight: FontWeight.w600,
                           maxLines: 1,
+                          textColor: textColor,
                         ),
                         const SizedBox(height: 4),
                         TDText(
                           desc,
                           font: theme.fontBodySmall,
-                          textColor: theme.fontGyColor3,
+                          textColor: hintTextColor,
                           maxLines: 2,
                         ),
                       ],

@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:braindance/configs/app_config.dart';
+
 // ============================================================
 // 开发/生产模式切换
 // - 开发模式（kDebugMode）：连接本地 Vite dev server
@@ -15,7 +17,7 @@ import 'package:path_provider/path_provider.dart';
 // ============================================================
 class WebGLViewerPage extends StatefulWidget {
   final String initialModelUrl;
-  final String? posesUrl;       // 云端 webgl_poses.json 的公开 URL（可选）
+  final String? posesUrl; // 云端 webgl_poses.json 的公开 URL（可选）
   final String sceneId;
 
   const WebGLViewerPage({
@@ -71,15 +73,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _localPort = _localServer!.port;
     _localServer!.listen((HttpRequest request) async {
       String path = request.uri.path;
-      
+
       // ---- /proxy/ : Dart 端代理 HTTPS 请求，绕过 WebView 的 SSL 证书限制 ----
       if (path.startsWith('/proxy/')) {
         final encodedTarget = path.substring('/proxy/'.length);
         final targetUrl = Uri.decodeComponent(encodedTarget);
         try {
           final proxyClient = HttpClient()
-            ..badCertificateCallback =
-                (cert, host, port) => true;
+            ..badCertificateCallback = (cert, host, port) => true;
           final proxyUri = Uri.parse(targetUrl);
           final proxyReq = await proxyClient.getUrl(proxyUri);
           proxyReq.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
@@ -99,11 +100,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
       // ---- /local_models/ : 本地已下载文件 ----
       if (path.startsWith('/local_models/')) {
-        final filePath = Uri.decodeComponent(path.substring('/local_models/'.length));
+        final filePath = Uri.decodeComponent(
+          path.substring('/local_models/'.length),
+        );
         final file = File(filePath);
         if (await file.exists()) {
           request.response.headers.add('Access-Control-Allow-Origin', '*');
-          if (filePath.endsWith('.ply')) request.response.headers.contentType = ContentType('application', 'octet-stream');
+          if (filePath.endsWith('.ply'))
+            request.response.headers.contentType = ContentType(
+              'application',
+              'octet-stream',
+            );
           await request.response.addStream(file.openRead());
           await request.response.close();
           return;
@@ -126,12 +133,18 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final List<int> bytes = data.buffer.asUint8List();
 
         String contentType = 'text/plain';
-        if (path.endsWith('.html')) contentType = 'text/html; charset=utf-8';
-        else if (path.endsWith('.js')) contentType = 'application/javascript; charset=utf-8';
-        else if (path.endsWith('.css')) contentType = 'text/css; charset=utf-8';
-        else if (path.endsWith('.png')) contentType = 'image/png';
-        else if (path.endsWith('.ico')) contentType = 'image/x-icon';
-        else if (path.endsWith('.ply')) contentType = 'application/octet-stream';
+        if (path.endsWith('.html'))
+          contentType = 'text/html; charset=utf-8';
+        else if (path.endsWith('.js'))
+          contentType = 'application/javascript; charset=utf-8';
+        else if (path.endsWith('.css'))
+          contentType = 'text/css; charset=utf-8';
+        else if (path.endsWith('.png'))
+          contentType = 'image/png';
+        else if (path.endsWith('.ico'))
+          contentType = 'image/x-icon';
+        else if (path.endsWith('.ply'))
+          contentType = 'application/octet-stream';
 
         request.response.headers.contentType = ContentType.parse(contentType);
         // 允许跨域
@@ -148,34 +161,39 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   Future<void> _prepareModelAndLoad() async {
     final originalUrl = widget.initialModelUrl;
-    
-    if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
+
+    if (originalUrl.startsWith('http://') ||
+        originalUrl.startsWith('https://')) {
       try {
         // Fix string containing spaces or unencoded characters causing 400 Bad Request
         final encodedUrl = Uri.encodeFull(Uri.decodeFull(originalUrl));
         final uri = Uri.parse(encodedUrl);
         final requestPath = uri.path;
-        final sanitizedFileName = requestPath.replaceAll('/', '_').replaceAll('\\', '_');
-        
+        final sanitizedFileName = requestPath
+            .replaceAll('/', '_')
+            .replaceAll('\\', '_');
+
         final dir = await getApplicationDocumentsDirectory();
         final localFile = File('${dir.path}/$sanitizedFileName');
-        
+
         if (await localFile.exists()) {
           debugPrint('Using cached offline model: ${localFile.path}');
           _localModelPath = localFile.path;
           if (mounted) _initWebView();
         } else {
           debugPrint('Starting download from: $originalUrl');
-          setState(() { _isDownloading = true; _downloadProgress = 0.0; });
-          
+          setState(() {
+            _isDownloading = true;
+            _downloadProgress = 0.0;
+          });
+
           // 允许自托管 Supabase 的自签名或不被 Android 信任的证书
           final client = HttpClient()
-            ..badCertificateCallback =
-                (cert, host, port) => true;
+            ..badCertificateCallback = (cert, host, port) => true;
           final request = await client.getUrl(uri);
           request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
           final response = await request.close();
-          
+
           if (response.statusCode != 200) {
             String errorBody = '';
             try {
@@ -183,30 +201,38 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             } catch (_) {}
             throw Exception('HTTP Error ${response.statusCode}: $errorBody');
           }
-          
+
           final totalBytes = response.contentLength;
           int receivedBytes = 0;
-          
+
           final sink = localFile.openWrite();
-          await response.map((chunk) {
-            receivedBytes += chunk.length;
-            if (totalBytes > 0 && mounted) {
-              setState(() { _downloadProgress = receivedBytes / totalBytes; });
-            }
-            return chunk;
-          }).pipe(sink);
-          
+          await response
+              .map((chunk) {
+                receivedBytes += chunk.length;
+                if (totalBytes > 0 && mounted) {
+                  setState(() {
+                    _downloadProgress = receivedBytes / totalBytes;
+                  });
+                }
+                return chunk;
+              })
+              .pipe(sink);
+
           debugPrint('Download complete: ${localFile.path}');
           _localModelPath = localFile.path;
           if (mounted) {
-            setState(() { _isDownloading = false; });
+            setState(() {
+              _isDownloading = false;
+            });
             _initWebView();
           }
         }
       } catch (e) {
         debugPrint('Download error: $e');
         if (mounted) {
-          setState(() { _isDownloading = false; });
+          setState(() {
+            _isDownloading = false;
+          });
           TDToast.showText('下载模型失败: $e', context: context);
           _initWebView();
         }
@@ -237,11 +263,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-                onPageFinished: (String url) {
+          onPageFinished: (String url) {
             // 后备方案：页面加载完 2 秒后如果还没收到 ready 信号，则主动触发
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
-                debugPrint('WebView: no ready signal received, triggering manually');
+                debugPrint(
+                  'WebView: no ready signal received, triggering manually',
+                );
                 setState(() => _isWebReady = true);
                 _sendModelToVue();
               }
@@ -275,7 +303,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     String targetUrl;
     if (_localModelPath != null) {
       // 已下载到本地：通过本地 HTTP 服务提供
-      targetUrl = 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+      targetUrl =
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
     } else if (widget.initialModelUrl.startsWith('http://') ||
         widget.initialModelUrl.startsWith('https://')) {
       // 远程 URL：通过本地代理，避免 WebView 直接访问 HTTPS
@@ -287,7 +316,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
 
     debugPrint('Sending model URL to WebView: $targetUrl');
-    
+
     if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
       // 新版：同时传 PLY URL 和 webgl_poses.json 的公网 URL
       final payload = jsonEncode({'ply': targetUrl, 'poses': widget.posesUrl});
@@ -301,13 +330,30 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = TDTheme.of(context);
+    final brightness = MediaQuery.of(context).platformBrightness;
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    final appBarBg = isDark ? const Color(0xFF101014) : Colors.white;
+    final appBarFg = textColor;
+    final pageBg = isDark ? const Color(0xFF18181C) : Colors.white;
     return Scaffold(
+      backgroundColor: pageBg,
       appBar: AppBar(
-        title: Text(widget.sceneId),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        systemOverlayStyle: SystemUiOverlayStyle.light,
+        title: Text(widget.sceneId, style: TextStyle(color: appBarFg)),
+        backgroundColor: appBarBg,
+        foregroundColor: appBarFg,
+        systemOverlayStyle: isDark
+            ? SystemUiOverlayStyle.light
+            : SystemUiOverlayStyle.dark,
         elevation: 0,
+        iconTheme: IconThemeData(color: iconColor),
       ),
       body: _isUnsupportedPlatform
           ? Center(
@@ -316,18 +362,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.desktop_access_disabled, size: 80, color: Colors.grey),
+                    Icon(
+                      Icons.desktop_access_disabled,
+                      size: 80,
+                      color: iconColor,
+                    ),
                     const SizedBox(height: 16),
                     TDText(
                       '当前平台不支持内嵌网页',
-                      font: TDTheme.of(context).fontTitleLarge,
+                      font: theme.fontTitleLarge,
                       fontWeight: FontWeight.w600,
+                      textColor: textColor,
                     ),
                     const SizedBox(height: 12),
                     TDText(
                       'Flutter 官方的 webview_flutter 插件目前仅支持 Android / iOS / Web 平台。\n如果你正在使用 Windows / macOS 调试，不支持直接原位打开 3D 模型。\n\n请在移动端模拟器（Android Emulator/iOS Simulator）或真实手机设备上调试 3D 查看功能！',
-                      font: TDTheme.of(context).fontBodyMedium,
-                      textColor: TDTheme.of(context).fontGyColor3,
+                      font: theme.fontBodyMedium,
+                      textColor: hintTextColor,
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -347,21 +398,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const CircularProgressIndicator(),
+                        CircularProgressIndicator(color: iconColor),
                         const SizedBox(height: 16),
                         TDText(
                           '正在下载云端模型...\n这只需下载一次，之后可离线查看。\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
                           textAlign: TextAlign.center,
-                          font: TDTheme.of(context).fontBodyMedium,
-                          textColor: TDTheme.of(context).fontGyColor2,
+                          font: theme.fontBodyMedium,
+                          textColor: hintTextColor,
                         ),
                       ],
                     ),
                   )
                 else if (!_isWebReady && _controller != null)
-                  const Center(
-                    child: CircularProgressIndicator(),
-                  ),
+                  Center(child: CircularProgressIndicator(color: iconColor)),
               ],
             ),
     );
