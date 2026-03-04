@@ -149,20 +149,32 @@ class BasePipeline(ABC):
                 sb = _create_client(
                     supabase_url, 
                     supabase_key, 
-                    options=ClientOptions(postgrest_client_timeout=120, storage_client_timeout=600)
+                    options=ClientOptions(
+                        postgrest_client_timeout=120, 
+                        storage_client_timeout=1200  # 增加超时到 20 分钟以支持大文件
+                    )
                 )
 
             with open(ply_path, "rb") as f:
                 remote_path = f"{scene_id}/{Path(ply_path).name}"
-                try:
-                    res = sb.storage.from_(bucket).upload(
-                        path=remote_path,
-                        file=f,
-                        file_options={"upsert": "true", "contentType": "application/octet-stream"}
-                    )
-                except Exception as e:
-                    self.log(f"    -> ⚠️ Supabase 上传失败: {e}", level="WARN")
-                    return None
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        f.seek(0)
+                        res = sb.storage.from_(bucket).upload(
+                            path=remote_path,
+                            file=f,
+                            file_options={"upsert": "true", "contentType": "application/octet-stream"}
+                        )
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            self.log(f"    -> ⚠️ 第 {attempt + 1} 次上传失败，正在重试... ({e})", level="WARN")
+                            import time
+                            time.sleep(2 * (attempt + 1))
+                        else:
+                            self.log(f"    -> ⚠️ Supabase 上传失败 (已重试 {max_retries} 次): {e}", level="WARN")
+                            return None
 
             # Try to get a public URL if available
             public = None

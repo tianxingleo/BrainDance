@@ -238,8 +238,9 @@ class CloudWorker:
             if isinstance(task, dict) and task.get('mapper_type'):
                 task_params['mapper_type'] = task['mapper_type']
             
-            # 准备输出目录
-            task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
+            # 准备输出目录: 修改为 user_id/scene_id/output 格式
+            task_output_dir = self.CACHE_DIR / user_id / scene_id / "output"
+            task_output_dir.mkdir(parents=True, exist_ok=True)
             
             # 2. 准备上下文 (把通用的东西打包)
             context = {
