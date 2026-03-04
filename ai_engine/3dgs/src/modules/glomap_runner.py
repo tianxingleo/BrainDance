@@ -153,9 +153,14 @@ class GlomapRunner:
         
         if is_glomap:
             # 🟢 对于 GLOMAP，采用白名单纯净环境变量防止与 Conda 冲突崩溃 (SIGABRT -6)
+            # 添加系统级 CUDA 库路径以确保 GLOMAP 的 GPU 加速能正常工作
+            cuda_lib_path = "/usr/local/cuda/lib64" if os.path.exists("/usr/local/cuda/lib64") else ""
+            ld_library_paths = [cuda_lib_path, "/usr/local/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib", "/lib"]
+            ld_library_paths = [p for p in ld_library_paths if p] # filter empty
+            
             clean_env = {
-                "PATH": os.pathsep.join(["/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin"]),
-                "LD_LIBRARY_PATH": os.pathsep.join(["/usr/local/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib", "/lib"]),
+                "PATH": os.pathsep.join(["/usr/local/cuda/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin"]),
+                "LD_LIBRARY_PATH": os.pathsep.join(ld_library_paths),
                 "HOME": os.getenv("HOME", ""),
                 "USER": os.getenv("USER", ""),
                 "LANG": os.getenv("LANG", "en_US.UTF-8"),
