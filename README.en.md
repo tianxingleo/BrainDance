@@ -176,6 +176,21 @@ BrainDance/
 - **Infrastructure**: [Docker Desktop](https://www.docker.com/), [Supabase CLI](https://supabase.com/docs/guides/cli)
 - **Client**: Flutter SDK (3.10+), Android Studio / Xcode
 
+### Testing Environment
+
+#### Mobile Test Devices
+
+- **OPPO Find X8**
+- **HUAWEI Mate 30 Pro**
+
+#### Server Configuration
+
+- **CPU**: Intel Core i7-12600KF
+- **RAM**: 64GB
+- **GPU**: NVIDIA RTX 5070 12GB (Blackwell)
+- **OS**: Ubuntu on WSL2 (Windows 11)
+
+
 ### Deployment Steps
 
 This project supports **fully local deployment** and can run completely without cloud accounts.

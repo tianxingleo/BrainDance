@@ -17,10 +17,12 @@ from src.config import PipelineConfig
 
 class SceneAnalyzer:
     def __init__(self, cfg: PipelineConfig):
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
         self.cfg = cfg
-        self.api_key = self.cfg.dashscope_api_key
+        self.api_key = self.cfg.dashscope_api_key or os.getenv("DASHSCOPE_API_KEY")
         self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        self.model = "qwen-vl-max"
+        self.model = "qwen3.5-plus"  # Qwen3.5-Plus：最新顶级多模态模型
 
     def _encode_image(self, image_path):
         with open(image_path, "rb") as image_file:

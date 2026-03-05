@@ -13,7 +13,7 @@
 
 #### An Anti-Entropy Engine for Human Memory
 
-![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
 
 </div>
 
@@ -176,6 +176,20 @@ BrainDance/
 - **Infrastructure**: [Docker Desktop](https://www.docker.com/), [Supabase CLI](https://supabase.com/docs/guides/cli)
 - **Client**: Flutter SDK (3.10+), Android Studio / Xcode
 
+### 测试环境 (Testing Environment)
+
+#### 移动端测试设备 (Mobile Test Devices)
+
+- **OPPO Find X8**
+- **HUAWEI Mate 30 Pro**
+
+#### 服务器配置 (Server Configuration)
+
+- **CPU**: Intel Core i7-12600KF
+- **内存**: 64GB RAM
+- **显卡**: NVIDIA RTX 5070 12GB (Blackwell)
+- **操作系统**: Ubuntu on WSL2 (Windows 11)
+
 ### 部署步骤 (Deployment)
 
 本项目支持 **全本地化部署**，无需云端账号即可完整运行。
@@ -320,7 +334,7 @@ sequenceDiagram
 
 - **[Supabase](https://github.com/supabase/supabase)**: 本项目的灵魂。提供了开箱即用的 Auth、Storage 和 Realtime 能力，让我们能专注于 3D 业务逻辑。
 - **[pgvector](https://github.com/pgvector/pgvector)**: PostgreSQL 的向量扩展，替代了 ChromaDB，为本项目提供了高性能的 RAG 检索能力。
-- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: 强大的多模态大模型，赋予了 3D 场景"被理解"的能力（自动打标与描述）。
+- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: 强大的多模态大模型，赋予了 3D 场景”被理解”的能力（自动打标与描述）。
 - **[Ultralytics YOLO](https://www.ultralytics.com/zh/yolo)**: 使用了最新的 **YOLO12** (2025) 和 **YOLO26** 目标检测模型，为场景提供实时物体识别与开放词汇检测能力。YOLO12 引入以注意力为中心的架构，YOLO26 专为边缘和低功耗设备设计。
 - **[Qwen3-Embedding](https://help.aliyun.com/zh/model-studio/general-text-embedding/)**: 阿里巴巴 2025 年最新发布的文本嵌入模型系列，在多项 benchmarks 上达到 SOTA 水平，为本项目的 RAG 检索提供高精度语义向量支持。
 
@@ -349,7 +363,6 @@ sequenceDiagram
 
 
 
-
 我们相信，科技不应只是冰冷的参数竞赛。 **最好的科技，是让此在（Dasein）不再孤独，让瞬间成为永恒。**
 
 <div align="center">
@@ -358,3 +371,17 @@ sequenceDiagram
 <sub>Made with ❤️ by the BrainDance Team: 烫锟斤拷烫. Dedicated to everyone fighting against entropy.</sub>
 
 </div>
+
+---
+
+## 📜 版权与开源协议 (License & Copyright)
+
+**BrainDance (流光·记)** 的所有核心工程架构与业务代码的知识产权（Copyright）均归属开发者所有。
+
+本项目采用 **[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)** 协议对外公开源码。
+
+* ✅ **允许**：个人学习、学术研究、非营利组织使用以及二次修改。
+* ❌ **严禁任何商业用途**：包括但不限于将本项目或其衍生品用于企业内部生产环境、直接或间接的付费服务、集成至商业闭源产品等。若需获取商业授权，请直接联系原作者。
+
+> **⚠️ 第三方依赖特别声明 (Third-Party Acknowledgements)**
+> 本项目 AI 引擎部分集成了大量前沿学术成果（如 Apple ML-SHARP, Inria 3DGS 等）。这些上游依赖均受其各自的**非商业研究协议**严格约束。使用者在运行、修改或分发本系统时，必须同时遵守这些子目录（`ai_engine/3dgs/src/libs/`）下相应的许可证要求。

@@ -130,28 +130,51 @@ class BasePipeline(ABC):
             bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
             scene_id = params.get("scene_id") or Path(ply_path).stem
 
-            if not supabase_url or not supabase_key:
-                self.log("    -> ℹ️ Supabase 凭据未配置，跳过上传与入库")
-                return None
+            sb = self.context.get('supabase')
+            if not sb:
+                if not supabase_url or not supabase_key:
+                    self.log("    -> ℹ️ Supabase 凭据未配置，跳过上传与入库")
+                    return None
 
-            try:
-                from supabase import create_client as _create_client
-            except Exception:
-                _create_client = None
+                try:
+                    from supabase import create_client as _create_client
+                    from supabase import ClientOptions
+                except Exception:
+                    _create_client = None
 
-            if _create_client is None:
-                self.log("    -> ℹ️ Supabase 客户端不可用，跳过上传与入库")
-                return None
+                if _create_client is None:
+                    self.log("    -> ℹ️ Supabase 客户端不可用，跳过上传与入库")
+                    return None
 
-            sb = _create_client(supabase_url, supabase_key)
+                sb = _create_client(
+                    supabase_url, 
+                    supabase_key, 
+                    options=ClientOptions(
+                        postgrest_client_timeout=120, 
+                        storage_client_timeout=1200  # 增加超时到 20 分钟以支持大文件
+                    )
+                )
 
             with open(ply_path, "rb") as f:
                 remote_path = f"{scene_id}/{Path(ply_path).name}"
-                try:
-                    res = sb.storage.from_(bucket).upload(remote_path, f)
-                except Exception as e:
-                    self.log(f"    -> ⚠️ Supabase 上传失败: {e}", level="WARN")
-                    return None
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        f.seek(0)
+                        res = sb.storage.from_(bucket).upload(
+                            path=remote_path,
+                            file=f,
+                            file_options={"upsert": "true", "contentType": "application/octet-stream"}
+                        )
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            self.log(f"    -> ⚠️ 第 {attempt + 1} 次上传失败，正在重试... ({e})", level="WARN")
+                            import time
+                            time.sleep(2 * (attempt + 1))
+                        else:
+                            self.log(f"    -> ⚠️ Supabase 上传失败 (已重试 {max_retries} 次): {e}", level="WARN")
+                            return None
 
             # Try to get a public URL if available
             public = None
@@ -164,13 +187,14 @@ class BasePipeline(ABC):
             try:
                 record = {
                     "scene_id": scene_id,
+                    "user_id": self.context.get("user_id", "default_user"),
                     "description": metadata.get("ai_description", ""),
                     "tags": metadata.get("ai_tags", []),
                     "objects": metadata.get("ai_objects", []),
                     "ply_path": remote_path,
                     "meta_info": {"ai_score": metadata.get("ai_score", 0), "ai_reason": metadata.get("ai_reason", "")}
                 }
-                insert_res = sb.table("model_assets").insert(record).execute()
+                insert_res = sb.table("model_assets").upsert(record, on_conflict="scene_id").execute()
                 if getattr(insert_res, "error", None):
                     self.log(f"    -> ⚠️ Supabase 写入 model_assets 失败: {insert_res.error}", level="WARN")
                 else:

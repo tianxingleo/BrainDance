@@ -61,6 +61,8 @@ class SearchAPITester:
                 base_url = 'http://127.0.0.1:54321/functions/v1/search-models'
 
         self.base_url = base_url
+        self.api_key = os.getenv('SUPABASE_KEY') or os.getenv('SUPABASE_ANON_KEY')
+        print(f"Using API Key: {self.api_key}")
         self.results: List[TestResult] = []
 
     def send_request(self, query: str, threshold: float = 0.5) -> Dict[str, Any]:
@@ -69,16 +71,23 @@ class SearchAPITester:
             "query": query,
             "threshold": threshold
         }
+        
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         start_time = time.time()
         try:
             response = requests.post(
                 self.base_url,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 timeout=30
             )
             response_time = time.time() - start_time
+
+            if response.status_code != 200:
+                print(f"HTTP {response.status_code}: {response.text}")
 
             return {
                 "status_code": response.status_code,

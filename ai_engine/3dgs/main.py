@@ -1,3 +1,9 @@
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
 # main.py
 # 功能：程序入口文件，负责启动不同的运行模式
 # 实现：根据命令行参数选择本地调试模式或云端监听模式

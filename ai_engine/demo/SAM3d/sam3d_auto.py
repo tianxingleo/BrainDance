@@ -168,7 +168,7 @@ class VLMProcessor:
         pass
 
     def get_main_object_box(self, image_path):
-        """调用 Qwen-VL-Max 识别图片主体"""
+        """调用 Qwen3.5-Plus 识别图片主体"""
         print("🤖 [Qwen] Uploading image to API...")
         messages = [
             {
@@ -182,7 +182,7 @@ class VLMProcessor:
 
         try:
             response = dashscope.MultiModalConversation.call(
-                model='qwen-vl-max', 
+                model='qwen3.5-plus', 
                 messages=messages,
             )
 
