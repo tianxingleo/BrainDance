@@ -154,7 +154,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
           style: TextStyle(fontSize: 18, color: Colors.white70),
         ),
       );
-    } else if (!RecoConfig.cameraController!.value.isInitialized) {
+    } else if (RecoConfig.cameraController == null ||
+        !RecoConfig.cameraController!.value.isInitialized) {
       cameraView = Center(
         child: Text(
           textLocalize("reco_wait"),
@@ -281,37 +282,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       body: Stack(
         children: [
           Positioned.fill(child: cameraView),
-
-          // Info Button
-          Positioned(
-            top: MediaQuery.of(context).padding.top > 0
-                ? MediaQuery.of(context).padding.top + 16
-                : 40,
-            right: 16,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                setState(() {
-                  _showTips = true;
-                });
-              },
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.info_outline,
-                    color: Colors.white,
-                    size: 26,
-                  ),
-                ),
-              ),
-            ),
-          ),
           // 相机按钮
           Positioned(
             bottom: isRecording ? 80 : 130, // 略微上移，录制时如果底部菜单隐藏，可以稍下沉或保持
@@ -483,16 +453,36 @@ class _RecordPageState extends ConsumerState<RecordPage>
             ),
           ),
 
+          // Info Button
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 10,
+            right: 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() {
+                  _showTips = true;
+                });
+              },
+              child: const Icon(
+                Icons.info_outline,
+                color: Colors.white70,
+                size: 42,
+              ),
+            ),
+          ),
+
           if (_showTips)
             Positioned.fill(
               child: Container(
                 color: Colors.black87,
+                padding: const EdgeInsets.only(bottom: 80),
                 child: Center(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 32),
                     padding: const EdgeInsets.all(24),
                     constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.75,
+                      maxHeight: MediaQuery.of(context).size.height * 0.70,
                     ),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E1E1E),
