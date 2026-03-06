@@ -19,6 +19,10 @@ const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
 const loadError = ref(''); // 添加错误状态
 const currentFps = ref(0); // 实时帧数
+const showFocalSettings = ref(false); // 焦距设置面板
+const currentViewFov = ref(0); // 当前相机FOV
+const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
+const manualFocalPx = ref(null); // 手动焦距输入
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -49,6 +53,89 @@ let particleSystem;
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
 
+const calcFovFromFocal = (focalPx, imageHeightPx) => {
+  if (!focalPx || !imageHeightPx) return null;
+  return 2 * Math.atan((imageHeightPx / 2) / focalPx) * (180 / Math.PI);
+};
+
+const calcFocalFromFov = (fovDeg, imageHeightPx) => {
+  if (!fovDeg || !imageHeightPx) return null;
+  const halfFovRad = (fovDeg * Math.PI / 180) / 2;
+  if (halfFovRad <= 0) return null;
+  return (imageHeightPx / 2) / Math.tan(halfFovRad);
+};
+
+const refreshCurrentFocalInfo = () => {
+  if (!viewer || !viewer.camera) return;
+  const h = sceneMetadata.value.h;
+  currentViewFov.value = Number(viewer.camera.fov || 0);
+  if (h && currentViewFov.value > 0 && currentViewFov.value < 179) {
+    const focal = calcFocalFromFov(currentViewFov.value, h);
+    currentViewFocalPx.value = focal ? Number(focal.toFixed(1)) : 0;
+  }
+};
+
+const applyFocalLengthPx = (focalPx, options = {}) => {
+  if (!viewer || !viewer.camera) return;
+  const h = sceneMetadata.value.h;
+  if (!h || !focalPx) return;
+
+  const targetFov = calcFovFromFocal(focalPx, h);
+  if (!targetFov || !Number.isFinite(targetFov)) return;
+
+  const cam = viewer.camera;
+  const duration = options.duration ?? 0;
+  if (duration > 0) {
+    gsap.to(cam, {
+      fov: targetFov,
+      duration,
+      ease: options.ease || 'power2.out',
+      onUpdate: () => {
+        cam.updateProjectionMatrix();
+        refreshCurrentFocalInfo();
+      }
+    });
+  } else {
+    cam.fov = targetFov;
+    cam.updateProjectionMatrix();
+    refreshCurrentFocalInfo();
+  }
+};
+
+const focalMin = computed(() => {
+  const base = Number(sceneMetadata.value.fl_y || 0);
+  if (base > 0) return Math.max(50, Math.floor(base * 0.4));
+  return 50;
+});
+
+const focalMax = computed(() => {
+  const base = Number(sceneMetadata.value.fl_y || 0);
+  if (base > 0) return Math.max(500, Math.ceil(base * 2.5));
+  return 3000;
+});
+
+const toggleFocalSettings = () => {
+  showFocalSettings.value = !showFocalSettings.value;
+  if (showFocalSettings.value && !manualFocalPx.value) {
+    manualFocalPx.value = Number(
+      (currentViewFocalPx.value || sceneMetadata.value.fl_y || 500).toFixed(1)
+    );
+  }
+};
+
+const onManualFocalChange = () => {
+  const value = Number(manualFocalPx.value);
+  if (!Number.isFinite(value) || value <= 0) return;
+  applyFocalLengthPx(value);
+};
+
+const resetFocalToCapture = () => {
+  const captureFocal = Number(sceneMetadata.value.fl_y || 0);
+  if (!captureFocal) return;
+  manualFocalPx.value = Number(captureFocal.toFixed(1));
+  applyFocalLengthPx(captureFocal, { duration: 0.5, ease: 'power2.inOut' });
+};
+
 const updateDebugInfo = () => {
   if (!viewer || !viewer.camera) return;
   const euler = new THREE.Euler().setFromQuaternion(viewer.camera.quaternion, 'YXZ');
@@ -57,6 +144,7 @@ const updateDebugInfo = () => {
     y: (euler.y * 180 / Math.PI).toFixed(1),
     z: (euler.z * 180 / Math.PI).toFixed(1)
   };
+  refreshCurrentFocalInfo();
 };
 
 const copyMatrixToClipboard = () => {
@@ -362,14 +450,9 @@ const flyToImage = (poseData) => {
   const fl_y = poseData.fl_y || sceneMetadata.value.fl_y;
   const h = poseData.h || sceneMetadata.value.h;
   if (fl_y && h) {
-    // 物理焦距转 Three.js 垂直视场角公式
-    const targetFov = 2 * Math.atan((h / 2) / fl_y) * (180 / Math.PI);
-    gsap.to(cam, {
-      fov: targetFov,
-      duration: 1.5,
-      ease: "power3.inOut",
-      onUpdate: () => cam.updateProjectionMatrix() // 必须更新投影矩阵才生效
-    });
+    sceneMetadata.value.h = h;
+    manualFocalPx.value = Number(fl_y.toFixed(1));
+    applyFocalLengthPx(fl_y, { duration: 1.5, ease: 'power3.inOut' });
   }
 
   // 强行减小近剪裁面，防止“穿模”或由于贴太近导致不显示
@@ -499,6 +582,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
             fl_x: data.fl_x,
             fl_y: data.fl_y
           };
+          manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
           cameraPoses.value = data.frames.map(frame => {
             let imgUrl = frame.image_url;
             if (imgUrl && !imgUrl.startsWith('http')) {
@@ -521,9 +605,17 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
               id: frame.id,
               matrix: frame.matrix,
               image_url: imgUrl,
-              tag: frame.tag
+              tag: frame.tag,
+              fl_x: frame.fl_x,
+              fl_y: frame.fl_y,
+              w: frame.w || data.w,
+              h: frame.h || data.h
             };
           });
+          // 首次加载按拍摄焦距初始化查看相机
+          if (sceneMetadata.value.fl_y && sceneMetadata.value.h) {
+            applyFocalLengthPx(sceneMetadata.value.fl_y);
+          }
         } else {
           cameraPoses.value = data; // 兼容旧格式
         }
@@ -672,6 +764,7 @@ const adjustControlsToModel = () => {
 
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
   viewer.camera.lookAt(worldCenter);
+  refreshCurrentFocalInfo();
 };
 
 const onSessionStarted = (session) => {
@@ -832,6 +925,25 @@ onBeforeUnmount(async () => {
       <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="搜索想要的视角 (如: 正面特写...)"
         class="search-input" />
       <button @click="searchAndFly" class="search-btn">🔍 搜索视角</button>
+    </div>
+
+    <button class="focal-settings-toggle" @click="toggleFocalSettings">焦距设置</button>
+    <div class="focal-settings-panel" v-if="showFocalSettings">
+      <div class="focal-title">镜头焦距</div>
+      <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
+        @input="onManualFocalChange" />
+      <div class="focal-row">
+        <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
+          step="1" @change="onManualFocalChange" />
+        <span>px</span>
+      </div>
+      <div class="focal-row">
+        <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
+      </div>
+      <div class="focal-row">
+        <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
+      </div>
+      <button class="focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -1131,6 +1243,59 @@ button.active {
   background: #5A6A74;
 }
 
+.focal-settings-toggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 120;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.focal-settings-panel {
+  position: absolute;
+  top: 62px;
+  right: 20px;
+  z-index: 120;
+  width: 220px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.focal-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.focal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.focal-number-input {
+  width: 100px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.focal-reset-btn {
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #71838F;
+  border: none;
+}
+
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
@@ -1236,12 +1401,15 @@ button.active {
 /* FPS 计数器 */
 .fps-counter {
   position: absolute;
-  bottom: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(113, 131, 143, 0.8);
+  top: 10px;
+  left: 10px;
+  color: #d8f4ff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(216, 244, 255, 0.35);
+  border-radius: 6px;
+  padding: 3px 7px;
   font-family: monospace;
-  font-size: 10px;
+  font-size: 12px;
   z-index: 1000;
   pointer-events: none;
 }
