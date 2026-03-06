@@ -2,7 +2,6 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
-import '../extra_func/dynamic_background.dart';
 import 'webgl_viewer.dart';
 
 class RecallPage extends StatefulWidget {
@@ -117,7 +116,6 @@ class _RecallPageState extends State<RecallPage> {
     final iconColor = isDark
         ? const Color(0xFFEEEEEE)
         : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Scaffold(
       backgroundColor: isDark ? darkBg : theme.grayColor1,
       appBar: AppBar(
@@ -157,45 +155,96 @@ class _RecallPageState extends State<RecallPage> {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: Column(
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20.0,
-                vertical: 12.0,
-              ),
-              child: TextField(
-                controller: _searchController,
-                style: TextStyle(color: textColor),
-                decoration: InputDecoration(
-                  hintText: '搜索回忆...',
-                  hintStyle: TextStyle(color: hintTextColor),
-                  filled: true,
-                  fillColor: isDark
-                      ? darkInput
-                      : theme.whiteColor1.withAlpha(220),
-                  prefixIcon: Icon(Icons.search, color: iconColor),
-                  contentPadding: const EdgeInsets.symmetric(
-                    vertical: 16,
-                    horizontal: 20,
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 15.0,
+                    vertical: 10.0,
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(32.0),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: TextStyle(
+                        color: isDark
+                            ? const Color(0xFFFFFFFF)
+                            : const Color(0xFF333333),
+                        fontSize: 16,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: '搜索回忆...',
+                        hintStyle: TextStyle(
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : theme.fontGyColor3,
+                          fontSize: 16,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : theme.fontGyColor3,
+                        ),
+                        filled: true,
+                        fillColor: Colors.transparent,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 20,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: isDark
+                              ? const BorderSide(
+                                  color: Color(0xFF4582FF),
+                                  width: 1.5,
+                                )
+                              : BorderSide(
+                                  color: theme.brandColor7,
+                                  width: 1.5,
+                                ),
+                        ),
+                      ),
+                      onSubmitted: (value) => _searchModels(value),
+                      onChanged: (value) {
+                        if (value.isEmpty) _searchModels('');
+                      },
+                    ),
                   ),
                 ),
-                onSubmitted: (value) => _searchModels(value),
-                onChanged: (value) {
-                  if (value.isEmpty) _searchModels('');
-                },
-              ),
-            ),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _models.isEmpty
-                  ? _buildEmptyState(theme, isDark)
-                  : _buildModelGrid(theme, isDark),
+                Expanded(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (!_isLoading && _models.isEmpty)
+                        _buildEmptyState(theme, isDark),
+                      if (_isLoading)
+                        const Center(
+                          child: TDLoading(
+                            size: TDLoadingSize.large,
+                            icon: TDLoadingIcon.circle,
+                          ),
+                        )
+                      else if (_models.isNotEmpty)
+                        _buildModelGrid(theme, isDark),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -258,10 +307,10 @@ class _RecallPageState extends State<RecallPage> {
     return Center(
       child: Container(
         width: MediaQuery.of(context).size.width * 0.85,
-        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: 96, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
-          borderRadius: BorderRadius.circular(theme.radiusExtraLarge),
+          borderRadius: BorderRadius.circular(32.0),
           border: Border.all(
             color: isDark ? darkBorder : theme.whiteColor1,
             width: 1,
@@ -329,12 +378,14 @@ class _RecallPageState extends State<RecallPage> {
     final textColor = isDark
         ? const Color(0xFFFFFFFF)
         : const Color(0xFF333333);
-    final iconColor = isDark
-        ? const Color(0xFFEEEEEE)
-        : const Color(0xFF333333);
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return GridView.builder(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.only(
+        left: 16.0,
+        right: 16.0,
+        top: 4.0,
+        bottom: 16.0,
+      ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 16.0,
@@ -395,7 +446,7 @@ class _RecallPageState extends State<RecallPage> {
             child: Container(
               decoration: BoxDecoration(
                 color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-                borderRadius: BorderRadius.circular(theme.radiusLarge),
+                borderRadius: BorderRadius.circular(28.0),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withAlpha(20),
@@ -414,15 +465,15 @@ class _RecallPageState extends State<RecallPage> {
                         Container(
                           decoration: BoxDecoration(
                             color: isDark ? darkInput : theme.grayColor3,
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(theme.radiusLarge),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(28.0),
                             ),
                           ),
                           child: Center(
                             child: Icon(
                               Icons.view_in_ar,
-                              size: 40,
-                              color: iconColor,
+                              size: 64,
+                              color: theme.brandColor7.withAlpha(200),
                             ),
                           ),
                         ),

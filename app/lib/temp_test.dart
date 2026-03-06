@@ -1,0 +1,1 @@
+import 'package:tdesign_flutter/tdesign_flutter.dart'; import 'package:flutter/material.dart'; void main() { TDSearchBar(placeHolder: 'test', decoration: BoxDecoration(), inputDecoration: InputDecoration()); }
