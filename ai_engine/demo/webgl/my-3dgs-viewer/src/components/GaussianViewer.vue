@@ -442,7 +442,7 @@ const getViewerConfig = () => {
 let currentPlyUrl = '/models/scene_auto_sync.ply';
 let currentPosesUrl = '/models/webgl_poses_with_tags.json';
 
-const initViewer = async (plyUrl, posesUrl) => {
+const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
   if (isLoading.value) return;
   isLoading.value = true;
 
@@ -476,6 +476,10 @@ const initViewer = async (plyUrl, posesUrl) => {
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 
+    if (initialPoseMatrix) {
+      console.log("[Viewer] Jumping to initial RAG pose");
+      flyToImage({ matrix: initialPoseMatrix });
+    }
     // 告诉 Flutter：模型加载完成
     isLoading.value = false;
     if (window.BrainDanceChannel) {
@@ -771,12 +775,12 @@ onMounted(() => {
       console.log('[Flutter->WebGL] 收到加载请求:', input);
       if (typeof input === 'string') {
         // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
-        initViewer(input, null);
+        initViewer(input, null, null);
       } else if (typeof input === 'object' && input !== null) {
-        // 新版：同时传 PLY URL 和 poses URL
-        initViewer(input.ply || null, input.poses || null);
+        // 新版：同时传 PLY URL、poses URL 与 初始矩阵
+        initViewer(input.ply || null, input.poses || null, input.matrix || null);
       } else {
-        initViewer(null, null);
+        initViewer(null, null, null);
       }
     };
 

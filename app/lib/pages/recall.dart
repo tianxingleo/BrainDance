@@ -287,7 +287,131 @@ class _RecallPageState extends State<RecallPage> {
     );
   }
 
+
   Widget _buildModelGrid() {
+    // If it's search results and has matched_frames, use ListView
+    bool isSearchWithFrames = _models.isNotEmpty && _models.first.containsKey('matched_frames');
+
+    if (isSearchWithFrames) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(16.0),
+        itemCount: _models.length,
+        itemBuilder: (context, index) {
+          final model = _models[index];
+          final sceneId = model['scene_id'] ?? 'Unknown Scene';
+          final desc = model['description'] ?? '没有描述信息';
+          final similarity = model['similarity'] as double?;
+          final userId = model['user_id'] ?? '';
+          final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 16.0),
+            decoration: BoxDecoration(
+              color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Top header: Model Info
+                GestureDetector(
+                  onTap: () {
+                    _navigateToViewer(model, null);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              TDText(sceneId, font: TDTheme.of(context).fontTitleMedium, fontWeight: FontWeight.w600, maxLines: 1),
+                              const SizedBox(height: 4),
+                              TDText(desc, font: TDTheme.of(context).fontBodySmall, textColor: TDTheme.of(context).fontGyColor3, maxLines: 2),
+                            ],
+                          ),
+                        ),
+                        if (similarity != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(6)),
+                            child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: TDTheme.of(context).fontBodySmall, textColor: Colors.white),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Horizontal list of frames
+                if (matchedFrames.isNotEmpty)
+                  SizedBox(
+                    height: 120,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0).copyWith(bottom: 16.0),
+                      itemCount: matchedFrames.length,
+                      itemBuilder: (context, frameIndex) {
+                        final frame = matchedFrames[frameIndex];
+                        final imageName = frame['image_name'];
+                        final transformMatrix = frame['transform_matrix'];
+                        final frameSim = frame['similarity'] as double?;
+                        
+                        final imageUrl = "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
+
+                        return GestureDetector(
+                          onTap: () {
+                            _navigateToViewer(model, transformMatrix);
+                          },
+                          child: Container(
+                            width: 140,
+                            margin: const EdgeInsets.only(right: 12.0),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8.0),
+                              color: TDTheme.of(context).grayColor3,
+                              image: DecorationImage(
+                                image: NetworkImage(imageUrl),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            child: frameSim != null ? Stack(
+                              children: [
+                                Positioned(
+                                  bottom: 4,
+                                  left: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.6),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${(frameSim * 100).toStringAsFixed(1)}%', 
+                                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ) : null,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
     return GridView.builder(
       padding: const EdgeInsets.all(16.0),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -315,44 +439,12 @@ class _RecallPageState extends State<RecallPage> {
           },
           child: GestureDetector(
             onTap: () {
-              final plyPath = model['ply_path'] as String? ?? '';
-              final modelUrl = plyPath.isNotEmpty
-                  ? _toPublicUrl(plyPath)
-                  : './models/scene_auto_sync_raw.ply';
-              final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-              Navigator.push(
-                context,
-                PageRouteBuilder(
-                  pageBuilder: (context, animation, secondaryAnimation) =>
-                      WebGLViewerPage(
-                        initialModelUrl: modelUrl,
-                        posesUrl: posesUrl,
-                        sceneId: sceneId,
-                      ),
-                  transitionsBuilder:
-                      (context, animation, secondaryAnimation, child) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                              CurvedAnimation(
-                                parent: animation,
-                                curve: Curves.easeOutCubic,
-                              ),
-                            ),
-                            child: child,
-                          ),
-                        );
-                      },
-                ),
-              );
+              _navigateToViewer(model, null);
             },
             child: Container(
               decoration: BoxDecoration(
                 color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(
-                  TDTheme.of(context).radiusLarge,
-                ),
+                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.05),
@@ -371,18 +463,10 @@ class _RecallPageState extends State<RecallPage> {
                         Container(
                           decoration: BoxDecoration(
                             color: TDTheme.of(context).grayColor3,
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(
-                                TDTheme.of(context).radiusLarge,
-                              ),
-                            ),
+                            borderRadius: BorderRadius.vertical(top: Radius.circular(TDTheme.of(context).radiusLarge)),
                           ),
                           child: Center(
-                            child: Icon(
-                              Icons.view_in_ar,
-                              size: 40,
-                              color: TDTheme.of(context).fontGyColor3,
-                            ),
+                            child: Icon(Icons.view_in_ar, size: 40, color: TDTheme.of(context).fontGyColor3),
                           ),
                         ),
                         if (similarity != null)
@@ -390,21 +474,9 @@ class _RecallPageState extends State<RecallPage> {
                             top: 8,
                             right: 8,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: TDTheme.of(
-                                  context,
-                                ).brandColor4.withValues(alpha: 0.9),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: TDText(
-                                '${(similarity * 100).toStringAsFixed(1)}%',
-                                font: TDTheme.of(context).fontBodyExtraSmall,
-                                textColor: Colors.white,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(4)),
+                              child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: TDTheme.of(context).fontBodyExtraSmall, textColor: Colors.white),
                             ),
                           ),
                       ],
@@ -415,19 +487,9 @@ class _RecallPageState extends State<RecallPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TDText(
-                          sceneId,
-                          font: TDTheme.of(context).fontTitleMedium,
-                          fontWeight: FontWeight.w600,
-                          maxLines: 1,
-                        ),
+                        TDText(sceneId, font: TDTheme.of(context).fontTitleMedium, fontWeight: FontWeight.w600, maxLines: 1),
                         const SizedBox(height: 4),
-                        TDText(
-                          desc,
-                          font: TDTheme.of(context).fontBodySmall,
-                          textColor: TDTheme.of(context).fontGyColor3,
-                          maxLines: 2,
-                        ),
+                        TDText(desc, font: TDTheme.of(context).fontBodySmall, textColor: TDTheme.of(context).fontGyColor3, maxLines: 2),
                       ],
                     ),
                   ),
@@ -437,6 +499,42 @@ class _RecallPageState extends State<RecallPage> {
           ),
         );
       },
+    );
+  }
+
+  void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
+    final plyPath = model['ply_path'] as String? ?? '';
+    final modelUrl = plyPath.isNotEmpty ? _toPublicUrl(plyPath) : './models/scene_auto_sync_raw.ply';
+    final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
+    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    
+    // Convert transformMatrix if not null to List<double>
+    List<double>? initialPose;
+    if (transformMatrix != null && transformMatrix is List) {
+      initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
+    }
+
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => WebGLViewerPage(
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
+              child: child,
+            ),
+          );
+        },
+      ),
     );
   }
 }

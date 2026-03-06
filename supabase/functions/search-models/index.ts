@@ -508,7 +508,7 @@ async function searchModels(
    *
    * 传递参数必须与 RPC 函数定义完全匹配
    */
-  const { data, error } = await supabase.rpc("match_model_assets", {
+  const { data, error } = await supabase.rpc("match_memory_poses", {
     query_embedding: queryEmbedding,
     match_threshold: matchThreshold,
     match_count: matchCount,
