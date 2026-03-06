@@ -1,7 +1,7 @@
 import json
 import numpy as np
 
-with open('/home/ltx/projects/BrainDance/ai_engine/demo/webgl/my-3dgs-viewer/public/models/webgl_poses.json', 'r') as f:
+with open('/home/jiangbeihu/ltx/projects/BrainDance/3dgs_viewer/my-3dgs-viewer/public/models/webgl_poses.json', 'r') as f:
     poses = json.load(f)
 
 c2w = np.array(poses['frames'][0]['matrix']).reshape(4,4).T

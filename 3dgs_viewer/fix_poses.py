@@ -7,7 +7,7 @@ import re
 
 work_dir = Path('/home/ltx/braindance_workspace/scene_auto_sync')
 data_dir = work_dir / 'data'
-public_dir = Path('/home/ltx/projects/BrainDance/ai_engine/demo/webgl/my-3dgs-viewer/public/models')
+public_dir = Path('/home/jiangbeihu/ltx/projects/BrainDance/3dgs_viewer/my-3dgs-viewer/public/models')
 final_webgl_poses = public_dir / 'webgl_poses.json'
 webgl_images_dir = public_dir / 'images'
 webgl_images_dir.mkdir(exist_ok=True, parents=True)

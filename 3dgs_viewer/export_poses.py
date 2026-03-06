@@ -84,6 +84,6 @@ if __name__ == "__main__":
     # Hardcoded paths based on workspace context
     transforms_path = "/home/ltx/projects/BrainDance/ai_engine/demo/data_cache/test_scene_01/transforms.json"
     dataparser_path = "/home/ltx/projects/BrainDance/ai_engine/demo/outputs/test_scene_01/splatfacto/2025-12-03_023653/dataparser_transforms.json"
-    output_path = "/home/ltx/projects/BrainDance/ai_engine/demo/webgl/my-3dgs-viewer/public/models/webgl_poses.json"
+    output_path = "/home/jiangbeihu/ltx/projects/BrainDance/3dgs_viewer/my-3dgs-viewer/public/models/webgl_poses.json"
     
     export_aligned_poses(transforms_path, dataparser_path, output_path)

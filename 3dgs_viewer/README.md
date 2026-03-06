@@ -2,12 +2,12 @@
 
 ## 概述
 
-`ai_engine/demo/webgl` 是 BrainDance 项目的 Web 3D 高斯点云查看器 Demo，用于在浏览器中实时查看和交互 3DGS（3D Gaussian Splatting）重建的场景。
+`3dgs_viewer` 是 BrainDance 项目的 Web 3D 高斯点云查看器 Demo，用于在浏览器中实时查看和交互 3DGS（3D Gaussian Splatting）重建的场景。
 
 ## 目录结构
 
 ```
-ai_engine/demo/webgl/
+3dgs_viewer/
 ├── .env                      # 环境配置文件
 ├── run_glomap.py            # 主流水线脚本（视频 → 3DGS → WebGL）
 ├── calc_transform.py        # 坐标转换计算工具
@@ -38,13 +38,13 @@ pip install nerfstudio gsplat opencv-python numpy plyfile
 
 #### 前端依赖
 ```bash
-cd ai_engine/demo/webgl/my-3dgs-viewer
+cd 3dgs_viewer/my-3dgs-viewer
 npm install
 ```
 
 ### 2. 配置环境变量
 
-编辑 [.env](ai_engine/demo/webgl/.env) 文件：
+编辑 [.env](3dgs_viewer/.env) 文件：
 
 ```bash
 # Supabase 配置（可选）
@@ -63,10 +63,10 @@ DASHSCOPE_API_KEY=your_api_key_here
 
 ### 3. 完整流水线（推荐）
 
-使用 [run_glomap.py](ai_engine/demo/webgl/run_glomap.py:1) 从视频生成 3DGS 模型并自动部署到 WebGL 查看器：
+使用 [run_glomap.py](3dgs_viewer/run_glomap.py:1) 从视频生成 3DGS 模型并自动部署到 WebGL 查看器：
 
 ```bash
-cd ai_engine/demo/webgl
+cd 3dgs_viewer
 
 # 使用默认视频 (test.mp4)
 python run_glomap.py
@@ -107,7 +107,7 @@ npm run preview
 
 ## 功能详解
 
-### 主流水线 ([run_glomap.py](ai_engine/demo/webgl/run_glomap.py:1))
+### 主流水线 ([run_glomap.py](3dgs_viewer/run_glomap.py:1))
 
 **核心参数：**
 - `MAX_IMAGES`：限制最大图片数量（防止显存溢出）
@@ -125,7 +125,7 @@ npm run preview
 
 ### 辅助工具
 
-#### 图片同步 ([sync_images.py](ai_engine/demo/webgl/sync_images.py:1))
+#### 图片同步 ([sync_images.py](3dgs_viewer/sync_images.py:1))
 
 从现有训练数据同步图片到查看器：
 
@@ -133,15 +133,15 @@ npm run preview
 python sync_images.py
 ```
 
-#### 坐标转换 ([calc_transform.py](ai_engine/demo/webgl/calc_transform.py:1))
+#### 坐标转换 ([calc_transform.py](3dgs_viewer/calc_transform.py:1))
 
 计算 OpenCV 到 WebGL 的坐标转换矩阵。
 
-#### 位姿导出 ([export_poses.py](ai_engine/demo/webgl/export_poses.py:1))
+#### 位姿导出 ([export_poses.py](3dgs_viewer/export_poses.py:1))
 
 导出对齐后的相机位姿到 WebGL 格式。
 
-#### 语义打标 ([tag_poses.py](ai_engine/demo/webgl/tag_poses.py:1))
+#### 语义打标 ([tag_poses.py](3dgs_viewer/tag_poses.py:1))
 
 为相机镜头添加语义标签（支持中文自然语言搜索）：
 
@@ -156,7 +156,7 @@ python tag_poses.py
 
 ### WebGL 查看器功能
 
-查看器位于 [GaussianViewer.vue](ai_engine/demo/webgl/my-3dgs-viewer/src/components/GaussianViewer.vue:1)，支持以下功能：
+查看器位于 [GaussianViewer.vue](3dgs_viewer/my-3dgs-viewer/src/components/GaussianViewer.vue:1)，支持以下功能：
 
 #### 基础控制
 - **鼠标拖拽**：旋转视角
@@ -191,12 +191,12 @@ A: 检查：
 
 ### Q: 相机位姿不准确？
 A: 使用以下工具调试：
-1. 运行 [evaluate_poses.py](ai_engine/demo/webgl/evaluate_poses.py:1) 评估位姿质量
-2. 使用 [fix_poses.py](ai_engine/demo/webgl/fix_poses.py:1) 修复偏差
+1. 运行 [evaluate_poses.py](3dgs_viewer/evaluate_poses.py:1) 评估位姿质量
+2. 使用 [fix_poses.py](3dgs_viewer/fix_poses.py:1) 修复偏差
 3. 检查 `webgl_poses.json` 中的矩阵数据
 
 ### Q: 如何调整切割参数？
-A: 编辑 [run_glomap.py](ai_engine/demo/webgl/run_glomap.py:137) 中的：
+A: 编辑 [run_glomap.py](3dgs_viewer/run_glomap.py:137) 中的：
 - `KEEP_PERCENTILE`：保留点云比例（0.5-0.95）
 - `FORCE_SPHERICAL_CULLING`：是否强制切割
 
@@ -223,7 +223,7 @@ A:
 
 ## 相关文件
 
-- [环境配置](ai_engine/demo/webgl/.env)
-- [Vue 配置](ai_engine/demo/webgl/my-3dgs-viewer/package.json)
-- [主应用](ai_engine/demo/webgl/my-3dgs-viewer/src/App.vue)
-- [查看器组件](ai_engine/demo/webgl/my-3dgs-viewer/src/components/GaussianViewer.vue)
+- [环境配置](3dgs_viewer/.env)
+- [Vue 配置](3dgs_viewer/my-3dgs-viewer/package.json)
+- [主应用](3dgs_viewer/my-3dgs-viewer/src/App.vue)
+- [查看器组件](3dgs_viewer/my-3dgs-viewer/src/components/GaussianViewer.vue)
