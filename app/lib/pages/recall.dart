@@ -48,7 +48,10 @@ class _RecallPageState extends State<RecallPage> {
     if (plyPath == null || plyPath.isEmpty) return null;
     try {
       // 将 point_cloud.ply 替换为 webgl_poses.json
-      final posesPath = plyPath.replaceAll(RegExp(r'point_cloud\.ply$'), 'webgl_poses.json');
+      final posesPath = plyPath.replaceAll(
+        RegExp(r'point_cloud\.ply$'),
+        'webgl_poses.json',
+      );
       if (posesPath == plyPath) return null; // 替换失败，路径格式不符
       return Supabase.instance.client.storage
           .from('braindance-assets')
@@ -99,6 +102,108 @@ class _RecallPageState extends State<RecallPage> {
     }
   }
 
+  // 更黑的夜间色值
+  final darkBg = const Color(0xFF101014);
+  final darkCard = const Color(0xFF18181C);
+  final darkInput = const Color(0xFF23232A);
+  final darkBorder = const Color(0xFF23232A);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = TDTheme.of(context);
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Scaffold(
+      backgroundColor: isDark ? darkBg : theme.grayColor1,
+      appBar: AppBar(
+        backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
+        elevation: 0,
+        centerTitle: true,
+        title: TDText(
+          textLocalize("home_page"),
+          font: theme.fontHeadlineSmall,
+          fontWeight: FontWeight.w600,
+          textColor: textColor,
+        ),
+        actions: [
+          IconButton(
+            icon: AnimatedRotation(
+              turns: _isLoading ? 1 : 0,
+              duration: const Duration(milliseconds: 600),
+              child: Icon(Icons.refresh, color: iconColor),
+            ),
+            tooltip: '刷新',
+            onPressed: () {
+              setState(() {
+                _isLoading = true;
+              });
+              _fetchModels();
+            },
+          ),
+        ],
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isDark
+                ? [darkBg, darkCard]
+                : [theme.grayColor1, theme.whiteColor1],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20.0,
+                vertical: 12.0,
+              ),
+              child: TextField(
+                controller: _searchController,
+                style: TextStyle(color: textColor),
+                decoration: InputDecoration(
+                  hintText: '搜索回忆...',
+                  hintStyle: TextStyle(color: hintTextColor),
+                  filled: true,
+                  fillColor: isDark
+                      ? darkInput
+                      : theme.whiteColor1.withAlpha(220),
+                  prefixIcon: Icon(Icons.search, color: iconColor),
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 20,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                onSubmitted: (value) => _searchModels(value),
+                onChanged: (value) {
+                  if (value.isEmpty) _searchModels('');
+                },
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _models.isEmpty
+                  ? _buildEmptyState(theme, isDark)
+                  : _buildModelGrid(theme, isDark),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _searchModels(String query) async {
     if (query.trim().isEmpty) {
       setState(() {
@@ -143,90 +248,28 @@ class _RecallPageState extends State<RecallPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: TDTheme.of(context).grayColor1,
-      appBar: AppBar(
-        backgroundColor: TDTheme.of(
-          context,
-        ).whiteColor1.withValues(alpha: 0.95),
-        title: Container(
-          alignment: Alignment.centerLeft,
-          child: TDText(
-            textLocalize("home_page"),
-            font: TDTheme.of(context).fontHeadlineSmall,
-            fontWeight: FontWeight.w600,
-            textColor: TDTheme.of(context).fontGyColor1,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.blue),
-            tooltip: '刷新',
-            onPressed: () {
-              setState(() {
-                _isLoading = true;
-              });
-              _fetchModels();
-            },
-          ),
-        ],
-        toolbarHeight: 60,
-        elevation: 0,
-      ),
-      extendBodyBehindAppBar: true,
-      body: DynamicGradientBackground(
-        child: Column(
-          children: [
-            SizedBox(
-              height: MediaQuery.of(context).padding.top + 60,
-            ), // 为 AppBar 留出空间
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16.0,
-                vertical: 8.0,
-              ),
-              child: TDSearchBar(
-                controller: _searchController,
-                placeHolder: '搜索回忆...',
-                onSubmitted: (value) {
-                  _searchModels(value);
-                },
-                onTextChanged: (value) {
-                  if (value.isEmpty) {
-                    _searchModels('');
-                  }
-                },
-              ),
-            ),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _models.isEmpty
-                  ? _buildEmptyState()
-                  : _buildModelGrid(),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
         width: MediaQuery.of(context).size.width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         decoration: BoxDecoration(
-          color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-          borderRadius: BorderRadius.circular(
-            TDTheme.of(context).radiusExtraLarge,
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(theme.radiusExtraLarge),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
           ),
-          border: Border.all(color: TDTheme.of(context).whiteColor1, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Colors.black.withAlpha(20),
               blurRadius: 20,
               spreadRadius: 5,
             ),
@@ -243,30 +286,26 @@ class _RecallPageState extends State<RecallPage> {
               errorWidget: Icon(
                 TDIcons.time_filled,
                 size: 80,
-                color: TDTheme.of(context).brandColor4,
+                color: iconColor,
               ),
             ),
             const SizedBox(height: 24),
             TDText(
               textLocalize("home_page"),
-              font: TDTheme.of(context).fontTitleLarge,
-              textColor: TDTheme.of(context).fontGyColor1,
+              font: theme.fontTitleLarge,
+              textColor: textColor,
               fontWeight: FontWeight.w600,
             ),
             const SizedBox(height: 8),
             TDText(
               "暂无回忆，去记录一些美好瞬间吧",
-              font: TDTheme.of(context).fontBodyMedium,
-              textColor: TDTheme.of(context).fontGyColor3,
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
             ),
             const SizedBox(height: 40),
             TDButton(
               text: "打开本地离线 Demo 模型",
-              iconWidget: const Icon(
-                TDIcons.view_module,
-                color: Colors.white,
-                size: 20,
-              ),
+              iconWidget: Icon(TDIcons.view_module, color: iconColor, size: 20),
               type: TDButtonType.fill,
               theme: TDButtonTheme.primary,
               shape: TDButtonShape.round,
@@ -287,8 +326,15 @@ class _RecallPageState extends State<RecallPage> {
     );
   }
 
+  Widget _buildModelGrid(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
 
-  Widget _buildModelGrid() {
     // If it's search results and has matched_frames, use ListView
     bool isSearchWithFrames = _models.isNotEmpty && _models.first.containsKey('matched_frames');
 
@@ -307,11 +353,11 @@ class _RecallPageState extends State<RecallPage> {
           return Container(
             margin: const EdgeInsets.only(bottom: 16.0),
             decoration: BoxDecoration(
-              color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.9),
-              borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+              color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
+              borderRadius: BorderRadius.circular(theme.radiusLarge),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: Colors.black.withAlpha(20),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -334,17 +380,20 @@ class _RecallPageState extends State<RecallPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              TDText(sceneId, font: TDTheme.of(context).fontTitleMedium, fontWeight: FontWeight.w600, maxLines: 1),
+                              TDText(sceneId, font: theme.fontTitleMedium, fontWeight: FontWeight.w600, maxLines: 1, textColor: textColor),
                               const SizedBox(height: 4),
-                              TDText(desc, font: TDTheme.of(context).fontBodySmall, textColor: TDTheme.of(context).fontGyColor3, maxLines: 2),
+                              TDText(desc, font: theme.fontBodySmall, textColor: hintTextColor, maxLines: 2),
                             ],
                           ),
                         ),
                         if (similarity != null)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(6)),
-                            child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: TDTheme.of(context).fontBodySmall, textColor: Colors.white),
+                            decoration: BoxDecoration(
+                              color: theme.brandColor4.withAlpha(220),
+                              borderRadius: BorderRadius.circular(6)
+                            ),
+                            child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: theme.fontBodySmall, textColor: isDark ? const Color(0xFFFFFFFF) : Colors.white),
                           ),
                       ],
                     ),
@@ -363,7 +412,7 @@ class _RecallPageState extends State<RecallPage> {
                         final imageName = frame['image_name'];
                         final transformMatrix = frame['transform_matrix'];
                         final frameSim = frame['similarity'] as double?;
-                        
+
                         final imageUrl = "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
 
                         return GestureDetector(
@@ -375,7 +424,7 @@ class _RecallPageState extends State<RecallPage> {
                             margin: const EdgeInsets.only(right: 12.0),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8.0),
-                              color: TDTheme.of(context).grayColor3,
+                              color: isDark ? darkInput : theme.grayColor3,
                               image: DecorationImage(
                                 image: NetworkImage(imageUrl),
                                 fit: BoxFit.cover,
@@ -389,11 +438,11 @@ class _RecallPageState extends State<RecallPage> {
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.6),
+                                      color: Colors.black.withAlpha(100),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      '${(frameSim * 100).toStringAsFixed(1)}%', 
+                                      '${(frameSim * 100).toStringAsFixed(1)}%',
                                       style: const TextStyle(color: Colors.white, fontSize: 10),
                                     ),
                                   ),
@@ -443,11 +492,11 @@ class _RecallPageState extends State<RecallPage> {
             },
             child: Container(
               decoration: BoxDecoration(
-                color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.9),
-                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusLarge),
+                color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
+                borderRadius: BorderRadius.circular(theme.radiusLarge),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: Colors.black.withAlpha(20),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -462,11 +511,17 @@ class _RecallPageState extends State<RecallPage> {
                       children: [
                         Container(
                           decoration: BoxDecoration(
-                            color: TDTheme.of(context).grayColor3,
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(TDTheme.of(context).radiusLarge)),
+                            color: isDark ? darkInput : theme.grayColor3,
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(theme.radiusLarge),
+                            ),
                           ),
                           child: Center(
-                            child: Icon(Icons.view_in_ar, size: 40, color: TDTheme.of(context).fontGyColor3),
+                            child: Icon(
+                              Icons.view_in_ar,
+                              size: 40,
+                              color: iconColor,
+                            ),
                           ),
                         ),
                         if (similarity != null)
@@ -474,9 +529,21 @@ class _RecallPageState extends State<RecallPage> {
                             top: 8,
                             right: 8,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: TDTheme.of(context).brandColor4.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(4)),
-                              child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: TDTheme.of(context).fontBodyExtraSmall, textColor: Colors.white),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.brandColor4.withAlpha(220),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: TDText(
+                                '${(similarity * 100).toStringAsFixed(1)}%',
+                                font: theme.fontBodyExtraSmall,
+                                textColor: isDark
+                                    ? const Color(0xFFFFFFFF)
+                                    : Colors.white,
+                              ),
                             ),
                           ),
                       ],
@@ -487,9 +554,20 @@ class _RecallPageState extends State<RecallPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TDText(sceneId, font: TDTheme.of(context).fontTitleMedium, fontWeight: FontWeight.w600, maxLines: 1),
+                        TDText(
+                          sceneId,
+                          font: theme.fontTitleMedium,
+                          fontWeight: FontWeight.w600,
+                          maxLines: 1,
+                          textColor: textColor,
+                        ),
                         const SizedBox(height: 4),
-                        TDText(desc, font: TDTheme.of(context).fontBodySmall, textColor: TDTheme.of(context).fontGyColor3, maxLines: 2),
+                        TDText(
+                          desc,
+                          font: theme.fontBodySmall,
+                          textColor: hintTextColor,
+                          maxLines: 2,
+                        ),
                       ],
                     ),
                   ),
@@ -507,7 +585,7 @@ class _RecallPageState extends State<RecallPage> {
     final modelUrl = plyPath.isNotEmpty ? _toPublicUrl(plyPath) : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = model['scene_id'] ?? 'Unknown Scene';
-    
+
     // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
