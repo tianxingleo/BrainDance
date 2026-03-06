@@ -48,8 +48,17 @@ class SetConfig {
             setNightMode(val == 'true', ref);
           }
           break;
+        case 2:
+          AppConfig.hasReadRecordTip = settingsMsg[2] == 'true';
+          break;
       }
     }
+  }
+
+  static void setHasReadRecordTip(bool value) {
+    AppConfig.hasReadRecordTip = value;
+    settingsMsg[2] = value.toString();
+    saveMsgToFile();
   }
 
   static Future<bool> loadMsgFromFile() async {

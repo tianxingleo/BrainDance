@@ -379,8 +379,9 @@ class _RecallPageState extends State<RecallPage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        const WebGLViewerPage(sceneId: '本地 Demo 模型 (离线可用)'),
+                    builder: (context) => WebGLViewerPage(
+                      sceneId: textLocalize("recall_demo_title"),
+                    ),
                   ),
                 );
               },
