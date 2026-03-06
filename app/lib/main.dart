@@ -167,11 +167,9 @@ class MainScreen extends ConsumerWidget {
     final isDark = AppConfig.isNightMode;
     // 黑夜模式下强制使用更明亮的蓝色，以确保底层文字和图标的高可见性
     final brandColor = isDark
-        ? const Color(0xFF4582FF)
-        : TDTheme.of(context).brandColor7;
-    final lightBrandColor = brandColor.withAlpha(
-      isDark ? 160 : 128,
-    ); // 统一为蓝色基调，半透明使得未选中状态易于区分
+        ? Colors.white
+        : Colors.blueAccent; // 统一为蓝色基调，白天使用系统蓝色，夜晚使用更亮的蓝色以增强对比度
+    final lightBrandColor = brandColor.withAlpha(160); // 统一为蓝色基调，半透明使得未选中状态易于区分
     final selectedTextStyle = TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.bold,

@@ -121,6 +121,8 @@ class _RecallPageState extends State<RecallPage> {
       appBar: AppBar(
         backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: true,
         title: TDText(
           textLocalize("home_page"),
@@ -231,7 +233,12 @@ class _RecallPageState extends State<RecallPage> {
                     alignment: Alignment.center,
                     children: [
                       if (!_isLoading && _models.isEmpty)
-                        _buildEmptyState(theme, isDark),
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: 108.0,
+                          ), // 留出 main.dart 的 BottomNavigationBar 和间距高度 (90 height + 18 padding)
+                          child: _buildEmptyState(theme, isDark),
+                        ),
                       if (_isLoading)
                         const Center(
                           child: TDLoading(
@@ -307,7 +314,7 @@ class _RecallPageState extends State<RecallPage> {
     return Center(
       child: Container(
         width: MediaQuery.of(context).size.width * 0.85,
-        padding: const EdgeInsets.symmetric(vertical: 96, horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
           borderRadius: BorderRadius.circular(32.0),
@@ -353,7 +360,11 @@ class _RecallPageState extends State<RecallPage> {
             const SizedBox(height: 40),
             TDButton(
               text: "打开本地离线 Demo 模型",
-              iconWidget: Icon(TDIcons.view_module, color: iconColor, size: 20),
+              iconWidget: Icon(
+                TDIcons.view_module,
+                color: Colors.white,
+                size: 20,
+              ),
               type: TDButtonType.fill,
               theme: TDButtonTheme.primary,
               shape: TDButtonShape.round,
