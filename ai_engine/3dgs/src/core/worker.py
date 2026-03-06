@@ -326,6 +326,20 @@ class CloudWorker:
                     )
                 on_pipeline_log("上传 transforms.json 成功")
 
+            # 3. 上传预览图 preview_img_path (如果存在)
+            if metadata and metadata.get("preview_img_path") and Path(metadata["preview_img_path"]).exists():
+                upload_img_key = f"{user_id}/{scene_id}/output/preview.jpg" # 假设是 jpg
+                with open(metadata["preview_img_path"], 'rb') as f:
+                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                        path=upload_img_key,
+                        file=f,
+                        file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
+                    )
+                # 替换为远程 URL
+                remote_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(upload_img_key)
+                metadata["preview_img_path"] = remote_url
+                on_pipeline_log("上传预览图成功")
+
             # =================== 🟢 [RAG 集成] 资产入库 ===================
             # 只有当 AI 成功生成了描述，才存入知识库
             if metadata and "ai_description" in metadata:

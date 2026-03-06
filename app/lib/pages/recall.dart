@@ -66,7 +66,7 @@ class _RecallPageState extends State<RecallPage> {
       final response = await Supabase.instance.client
           .from('model_assets')
           .select(
-            'id, scene_id, description, ply_path, preview_img_path, created_at',
+            'id, scene_id, description, ply_path, preview_img_path, meta_info, created_at',
           )
           .order('created_at', ascending: false);
 
@@ -516,13 +516,25 @@ class _RecallPageState extends State<RecallPage> {
                               top: Radius.circular(theme.radiusLarge),
                             ),
                           ),
-                          child: Center(
-                            child: Icon(
-                              Icons.view_in_ar,
-                              size: 40,
-                              color: iconColor,
-                            ),
-                          ),
+                          clipBehavior: Clip.hardEdge,
+                          child: model['preview_img_path'] != null && model['preview_img_path'].toString().isNotEmpty
+                              ? Image.network(
+                                  model['preview_img_path'],
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      Center(child: Icon(Icons.view_in_ar, size: 40, color: iconColor)),
+                                  loadingBuilder: (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return const Center(child: CircularProgressIndicator());
+                                  },
+                                )
+                              : Center(
+                                  child: Icon(
+                                    Icons.view_in_ar,
+                                    size: 40,
+                                    color: iconColor,
+                                  ),
+                                ),
                         ),
                         if (similarity != null)
                           Positioned(
@@ -585,6 +597,13 @@ class _RecallPageState extends State<RecallPage> {
     final modelUrl = plyPath.isNotEmpty ? _toPublicUrl(plyPath) : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = model['scene_id'] ?? 'Unknown Scene';
+
+    // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
+    if (transformMatrix == null && model['meta_info'] != null) {
+      if (model['meta_info'] is Map && model['meta_info']['initial_camera_pose'] != null) {
+        transformMatrix = model['meta_info']['initial_camera_pose'];
+      }
+    }
 
     // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;

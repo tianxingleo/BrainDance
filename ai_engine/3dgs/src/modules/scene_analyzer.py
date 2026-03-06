@@ -192,3 +192,104 @@ class SceneAnalyzer:
                 log_callback(f"⚠️ [SceneAnalyzer] 单图分析出错: {e}")
             # 返回安全默认值，保证流水线继续
             return {"score": 0, "reason": "Analysis Error", "tags": [], "description": "", "objects": []}
+
+    def select_best_preview(self, frames: list, images_dir: str, log_callback=None) -> int:
+        """
+        [新增] 从一组带有位姿的帧中挑选出最适合作为封面（视角最全面）的图。
+        返回最合适帧的索引 (0 到 len(frames)-1)。
+        """
+        if not frames:
+            return 0
+        if len(frames) == 1:
+            return 0
+
+        # 如果未配置 API Key
+        if not self.api_key:
+            if log_callback:
+                log_callback("⚠️ [SceneAnalyzer] 未配置 API Key，封面图选择回退到第一帧")
+            return 0
+
+        # 从帧列表中均匀抽取最多 8 张候选图
+        sample_size = min(8, len(frames))
+        indices = [int(i * (len(frames) - 1) / (sample_size - 1)) for i in range(sample_size)]
+        candidate_frames = [frames[i] for i in indices]
+
+        prompt = f"""
+        你是一个 3D 场景分析助手。我提供了几张同一个场景的候选帧。
+        请根据以下标准，选出最适合作为 3D 模型预览图（封面图）的一张：
+        1. 视角最全面（不是看细节，而是看整体）。
+        2. 如果是房间，选择能看到房间绝大部分内容的。
+        3. 如果是单个物体，选择物体正面平视的。
+        4. 如果是书桌等场景，选择能正着拍到整个主体的。
+        
+        请仔细观察提供的图片，直接返回你认为最合适的一张图片的索引号（0 到 {sample_size - 1}），只返回一个数字，不要解释。
+        """
+
+        try:
+            if log_callback:
+                log_callback(f"🤖 [Qwen-VL] 正在从 {sample_size} 张候选图中挑选最佳封面...")
+
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt}
+                ]}
+            ]
+
+            # 组装图片数据
+            for frame in candidate_frames:
+                # 兼容不同格式的图片路径记录
+                # webgl_poses.json 使用了 'id' 或者 'image_url'，或者从 frames 取 'file_path'
+                # 尽量兼容：
+                img_name = frame.get('id') or frame.get('file_path') or frame.get('image_url')
+                if not img_name:
+                    continue
+                # 处理可能包含 images/ 前缀的情况
+                if img_name.startswith("images/"):
+                    img_name = img_name[7:]
+                elif img_name.startswith("images\\"):
+                    img_name = img_name[7:]
+                
+                img_path = os.path.join(images_dir, img_name)
+                # 简单容错：如果路径不存在，尝试去掉前缀或直接拼接
+                if not os.path.exists(img_path):
+                    if log_callback: log_callback(f"⚠️ 图片不存在: {img_path}")
+                    pass # 但我们还是继续，可能会导致调用失败
+                
+                if os.path.exists(img_path):
+                    messages[1]["content"].append({
+                        "type": "image_url", 
+                        "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(img_path)}"}
+                    })
+
+            if len(messages[1]["content"]) == 1:
+                return 0 # 没有有效图片被加入
+
+            if OpenAI is None:
+                raise RuntimeError("OpenAI client not available in environment")
+
+            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
+
+            resp = completion.choices[0].message.content.strip()
+            
+            # 使用正则提取出第一个数字
+            m = re.search(r'\d+', resp)
+            if m:
+                selected_idx = int(m.group(0))
+                # 确保索引在有效范围内
+                if 0 <= selected_idx < sample_size:
+                    # 返回在原 frames 数组中的真实索引
+                    best_orig_idx = indices[selected_idx]
+                    if log_callback:
+                        log_callback(f"✅ AI 成功选出封面帧: index {best_orig_idx} (候选图中的第 {selected_idx} 张)")
+                    return best_orig_idx
+            
+            if log_callback:
+                log_callback(f"⚠️ 无法解析 AI 的选择结果: '{resp}'，回退到第一帧")
+            return 0
+
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ 挑选封面失败: {e}，回退到第一帧")
+            return 0
