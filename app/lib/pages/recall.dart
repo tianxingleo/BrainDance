@@ -75,8 +75,8 @@ class _RecallPageState extends State<RecallPage> {
           if (_models.isEmpty) {
             _models.add({
               'id': 'local_demo',
-              'scene_id': '本地 Demo 模型 (离线可用)',
-              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'scene_id': textLocalize('recall_demo_title'),
+              'description': textLocalize('recall_demo_desc'),
               'ply_path': '',
             });
           }
@@ -89,14 +89,17 @@ class _RecallPageState extends State<RecallPage> {
           _models = [
             {
               'id': 'local_demo',
-              'scene_id': '本地 Demo 模型 (离线可用)',
-              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'scene_id': textLocalize('recall_demo_title'),
+              'description': textLocalize('recall_demo_desc'),
               'ply_path': '',
             },
           ];
           _isLoading = false;
         });
-        TDToast.showText('加载模型失败，已切换至离线模式', context: context);
+        TDToast.showText(
+          textLocalize('recall_error_offline'),
+          context: context,
+        );
       }
     }
   }
@@ -137,7 +140,7 @@ class _RecallPageState extends State<RecallPage> {
               duration: const Duration(milliseconds: 600),
               child: Icon(Icons.refresh, color: iconColor),
             ),
-            tooltip: '刷新',
+            tooltip: textLocalize("recall_refresh"),
             onPressed: () {
               setState(() {
                 _isLoading = true;
@@ -181,7 +184,7 @@ class _RecallPageState extends State<RecallPage> {
                         fontSize: 16,
                       ),
                       decoration: InputDecoration(
-                        hintText: '搜索回忆...',
+                        hintText: textLocalize("recall_search_hint"),
                         hintStyle: TextStyle(
                           color: isDark
                               ? const Color(0xFF888888)
@@ -298,7 +301,10 @@ class _RecallPageState extends State<RecallPage> {
         setState(() {
           _isLoading = false;
         });
-        TDToast.showText('搜索失败: $e', context: context);
+        TDToast.showText(
+          '${textLocalize("recall_error_search")}$e',
+          context: context,
+        );
       }
     }
   }
@@ -353,13 +359,13 @@ class _RecallPageState extends State<RecallPage> {
             ),
             const SizedBox(height: 8),
             TDText(
-              "暂无回忆，去记录一些美好瞬间吧",
+              textLocalize("recall_empty_title"),
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
             ),
             const SizedBox(height: 40),
             TDButton(
-              text: "打开本地离线 Demo 模型",
+              text: textLocalize("recall_open_demo"),
               iconWidget: Icon(
                 TDIcons.view_module,
                 color: Colors.white,
@@ -407,7 +413,7 @@ class _RecallPageState extends State<RecallPage> {
       itemBuilder: (context, index) {
         final model = _models[index];
         final sceneId = model['scene_id'] ?? 'Unknown Scene';
-        final desc = model['description'] ?? '没有描述信息';
+        final desc = model['description'] ?? textLocalize("recall_no_desc");
         final similarity = model['similarity'] as double?;
 
         return TweenAnimationBuilder<double>(
