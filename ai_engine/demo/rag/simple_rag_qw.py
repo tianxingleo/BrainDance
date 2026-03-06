@@ -119,7 +119,7 @@ def search_engine(query):
 # === 核心函数 4: 国产 LLM 回答 ===
 def chat_with_qwen(query, context_list):
     # 使用 Qwen3.5-Plus（效果媲美 qwen3-max，成本更低，1M 上下文）
-    llm = ChatTongyi(model_name="qwen3.5-plus") 
+    llm = ChatTongyi(model_name="qwen-plus") 
     
     context_str = "\n".join(context_list)
     prompt = f"""

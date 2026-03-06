@@ -102,7 +102,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=7):
     messages = [{"role": "user", "content": content}]
 
     try:
-        response = dashscope.MultiModalConversation.call(model='qwen3.5-plus', messages=messages)
+        response = dashscope.MultiModalConversation.call(model='qwen-plus', messages=messages)
         if response.status_code == 200:
             prompt_text = response.output.choices[0].message.content[0]["text"].strip()
             prompt_text = prompt_text.replace(".", "").replace('"', "").replace("'", "")
