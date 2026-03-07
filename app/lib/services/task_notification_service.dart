@@ -28,6 +28,9 @@ class TaskNotificationService extends ChangeNotifier {
   Set<String> _notifiedFailedTasks = {};
   GlobalKey<NavigatorState>? _navigatorKey;
 
+  // 禁用通知的路由集合
+  final Set<String> _disabledRoutes = {};
+
   // 当前显示的通知数据
   TaskNotificationData? _currentNotification;
   TaskNotificationData? get currentNotification => _currentNotification;
@@ -60,6 +63,29 @@ class TaskNotificationService extends ChangeNotifier {
     if (context != null) {
       Navigator.pushNamed(context, '/tasks');
     }
+  }
+
+  /// 禁用指定路由的通知
+  void disableNotificationForRoutes(List<String> routes) {
+    _disabledRoutes.addAll(routes);
+  }
+
+  /// 启用指定路由的通知
+  void enableNotificationForRoutes(List<String> routes) {
+    _disabledRoutes.removeAll(routes);
+  }
+
+  /// 检查当前路由是否允许显示通知
+  bool isNotificationEnabledForRoute(String? route) {
+    if (route == null) return true;
+    return !_disabledRoutes.contains(route);
+  }
+
+  /// 获取当前路由
+  String? get currentRoute {
+    final context = _navigatorKey?.currentContext;
+    if (context == null) return null;
+    return ModalRoute.of(context)?.settings.name;
   }
 
   /// 从本地缓存加载已通知过的任务ID
