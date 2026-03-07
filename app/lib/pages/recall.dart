@@ -29,7 +29,7 @@ class _RecallPageState extends State<RecallPage> {
   }
 
   /// 将 Storage 内的相对路径转为可访问的公开 URL。
-  /// ply_path 示例: "my_scene/point_cloud.ply"
+  /// ply_path 示例: "my_scene/point_cloud.splat"
   String _toPublicUrl(String storagePath) {
     try {
       return Supabase.instance.client.storage
@@ -40,15 +40,15 @@ class _RecallPageState extends State<RecallPage> {
     }
   }
 
-  /// 根据 PLY 路径推导同场景的 webgl_poses.json 公开 URL。
-  /// ply_path 格式：{user_id}/{scene_id}/output/point_cloud.ply
+  /// 根据模型路径推导同场景的 webgl_poses.json 公开 URL。
+  /// ply_path 格式：{user_id}/{scene_id}/output/point_cloud.(ply|splat|ksplat)
   /// poses 路径：{user_id}/{scene_id}/output/webgl_poses.json
   String? _toPosesUrl(String? plyPath) {
     if (plyPath == null || plyPath.isEmpty) return null;
     try {
-      // 将 point_cloud.ply 替换为 webgl_poses.json
+      // 将 point_cloud.xxx 替换为 webgl_poses.json
       final posesPath = plyPath.replaceAll(
-        RegExp(r'point_cloud\.ply$'),
+        RegExp(r'point_cloud\.(ply|splat|ksplat)$'),
         'webgl_poses.json',
       );
       if (posesPath == plyPath) return null; // 替换失败，路径格式不符

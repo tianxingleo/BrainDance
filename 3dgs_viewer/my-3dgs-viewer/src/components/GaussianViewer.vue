@@ -515,11 +515,12 @@ const getViewerConfig = () => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   return {
     'rootElement': containerRef.value,
-    'cameraUp': [0, 1, 0],
-    'initialCameraPosition': [0, 0, 5],
-    'initialCameraLookAt': [0, 0, 0],
+    'cameraUp': [0, -1, 0],
+    'initialCameraPosition': [0, 0, 0],
+    'initialCameraLookAt': [0, 0, 1],
     'useBuiltInControls': false,
-    'gpuAcceleratedSort': false,
+    'gpuAcceleratedSort': true,
+    'halfPrecisionCovariancesOnGPU': true,
     'webXRMode': GaussianSplats3D.WebXRMode.None,
     'sharedMemoryForWorkers': false,
     'antialiased': !isMobile,
@@ -557,10 +558,11 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     window.viewer = viewer;
 
     // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
-    console.log(`[Viewer] 加载 PLY: ${currentPlyUrl}`);
+    console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
     await viewer.addSplatScene(currentPlyUrl, {
       'showLoadingUI': true,
-      'progressiveLoad': false,
+      'progressiveLoad': true,
+      'splatAlphaTransferThreshold': 1,
       'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
     });
 

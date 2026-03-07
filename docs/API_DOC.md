@@ -1,6 +1,6 @@
 
 
-# BrainDance API 接入文档 (v1.0)
+# BrainDance API 接入文档 (v1.1)
 
 本文档描述了 BrainDance 3DGS 引擎的前端接入规范。本项目采用 **Supabase (BaaS) + Python (微服务)** 的混合架构。
 
@@ -79,6 +79,17 @@
 | `frame_interval` | int | 5 | 前馈生成时的帧间隔，值越小使用帧数越多（1=使用全部帧） |
 | `conf_threshold` | float | 0.5 | 深度置信度阈值，值越高过滤越严格 |
 
+**task_params 通用参数（所有会产出 3DGS 模型的任务都可用）:**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `delivery_format` | string | `splat` | 模型交付格式：`splat` / `ksplat` / `ply` |
+| `compression_opacity_threshold` | float | `0.05` | `.ply -> .splat` 时透明度剔除阈值 |
+| `ksplat_alpha_threshold` | int | `1` | `.ply -> .ksplat` 时透明度剔除阈值（传给 Node 工具） |
+
+> `delivery_format=ksplat` 时，Worker 所在环境必须安装 Node.js，并配置 `KSPLAT_SCRIPT_PATH` 指向 `GaussianSplats3D/util/create-ksplat.js`。  
+> 若 `.ksplat` 压缩失败，当前实现会自动回退并上传原始 `.ply`（任务不会失败）。
+
 **创建视频任务示例 (Dart):**
 ```dart
 final res = await supabase.from('processing_tasks').insert({
@@ -144,7 +155,7 @@ final res = await supabase.from('processing_tasks').insert({
 | `description` | text | AI 生成的场景描述 (用于展示) |
 | `objects` | string[] | 场景内关键物体列表 |
 | `tags` | array | 标签列表，如 `["室内", "红色"]` |
-| `ply_path` | text | **关键**：文件在 Storage 中的相对路径，需拼接下载链接 |
+| `ply_path` | text | **关键**：文件在 Storage 中的相对路径，需拼接下载链接。当前可能是 `point_cloud.ply` / `point_cloud.splat` / `point_cloud.ksplat` |
 | `preview_img_path` | text | 预览图 URL 或相对路径 |
 | `meta_info` | jsonb | 扩展元数据（如 `quality_score` / `quality_reason`） |
 | `created_at` | timestamp | 创建时间 |
@@ -179,7 +190,9 @@ braindance-assets/ (Bucket)
         │   ├── frame_001.jpg
         │   └── frame_002.jpg
         └── output/              <-- 训练结果
-            ├── point_cloud.ply
+            ├── point_cloud.splat   # 默认输出（推荐）
+            ├── point_cloud.ksplat  # 可选输出（需 Node + 脚本）
+            ├── point_cloud.ply     # 回退或显式指定 delivery_format=ply
             ├── transforms.json
             ├── webgl_poses.json
             ├── preview.jpg
@@ -188,10 +201,19 @@ braindance-assets/ (Bucket)
                 └── ...
 ```
 
-> 注：`webgl_poses.json` 与 `output/images/*` 主要由视频流水线（含空间锚点提取）生成，单图任务可能只产出 `point_cloud.ply`。
+> 注：`webgl_poses.json` 与 `output/images/*` 主要由视频流水线（含空间锚点提取）生成，单图任务可能只产出 `point_cloud.*`（后缀取决于 `delivery_format`）。
 
 ### 4.3 下载链接拼接
-`{Supabase_URL}/storage/v1/object/public/braindance-assets/{user_id}/{scene_id}/output/point_cloud.ply`
+`{Supabase_URL}/storage/v1/object/public/braindance-assets/{user_id}/{scene_id}/output/point_cloud.{ply|splat|ksplat}`
+
+### 4.4 Worker 相关环境变量（压缩/交付）
+
+| 变量名 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `MODEL_DELIVERY_FORMAT` | `splat` | 全局默认输出格式：`splat` / `ksplat` / `ply` |
+| `COMPRESSION_OPACITY_THRESHOLD` | `0.05` | `.splat` 压缩透明度阈值 |
+| `KSPLAT_ALPHA_THRESHOLD` | `1` | `.ksplat` 工具透明度阈值 |
+| `KSPLAT_SCRIPT_PATH` | 空 | `create-ksplat.js` 绝对路径（仅 `ksplat` 需要） |
 
 ---
 
@@ -243,7 +265,7 @@ curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
       "id": "uuid",
       "scene_id": "scene_20260118_001",
       "description": "桌子上的红色马克杯...",
-      "ply_path": "user_123/scene_001/output/point_cloud.ply",
+      "ply_path": "user_123/scene_001/output/point_cloud.splat",
       "created_at": "2026-01-18T10:00:00Z",
       "similarity": 0.89
     }
@@ -371,7 +393,7 @@ class SearchResult {
 
 ### 流程三：查看我的模型 (My Models)
 1.  调用 Supabase SDK: `.from('model_assets').select('*')`。
-2.  获取 `ply_path` 字段 (例如 `user_123/scene_001/output/point_cloud.ply`)。
+2.  获取 `ply_path` 字段 (例如 `user_123/scene_001/output/point_cloud.splat`)。
 3.  **前端拼接下载链接**:
     `https://<ProjectID>.supabase.co/storage/v1/object/public/braindance-assets/` + `ply_path`
 4.  将完整链接喂给 3D 渲染组件进行展示。
