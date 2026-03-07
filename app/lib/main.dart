@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -174,28 +175,52 @@ class GlobalNotificationOverlay extends StatefulWidget {
 }
 
 class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+    with TickerProviderStateMixin {
+  late AnimationController _showController;
+  late AnimationController _hideController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
+  Timer? _autoHideTimer;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
+    
+    // 显示动画控制器 (300ms)
+    _showController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
+    
+    // 隐藏动画控制器 (5秒逐渐消失)
+    _hideController = AnimationController(
+      duration: const Duration(seconds: 5),
+      vsync: this,
+    );
+    
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, -1),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(_controller);
+    ).animate(CurvedAnimation(parent: _showController, curve: Curves.easeOutCubic));
+    
+    // 淡出动画：从1.0到0.0
+    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _hideController, curve: Curves.easeInOut),
+    );
+    
+    // 监听隐藏动画完成
+    _hideController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        taskNotificationService.hideNotification();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _autoHideTimer?.cancel();
+    _showController.dispose();
+    _hideController.dispose();
     super.dispose();
   }
 
@@ -206,7 +231,10 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
       builder: (context, child) {
         final notification = taskNotificationService.currentNotification;
         if (notification == null) {
-          _controller.reverse();
+          // 重置动画控制器
+          _showController.reset();
+          _hideController.reset();
+          _autoHideTimer?.cancel();
           return const SizedBox.shrink();
         }
 
@@ -216,8 +244,17 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
           return const SizedBox.shrink();
         }
 
-        // 显示动画
-        _controller.forward();
+        // 显示动画：滑入
+        _showController.forward();
+
+        // 启动5秒后逐渐消失的动画
+        _autoHideTimer?.cancel();
+        _autoHideTimer = Timer(const Duration(milliseconds: 500), () {
+          // 等待显示动画完成后，开始5秒淡出动画
+          if (mounted && taskNotificationService.currentNotification != null) {
+            _hideController.forward(from: 0);
+          }
+        });
 
         return _buildNotificationWidget(notification);
       },
