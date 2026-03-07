@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../configs/app_config.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
@@ -20,16 +22,59 @@ class _RecallPageState extends State<RecallPage> {
 
   // 任务状态监听
   Timer? _taskStatusTimer;
-  Map<String, String> _previousTaskStatus = {}; // 记录上次的任务状态
+  Set<String> _notifiedCompletedTasks = {}; // 已通知过的 completed 任务ID
+  Set<String> _notifiedFailedTasks = {}; // 已通知过的 failed 任务ID
   OverlayEntry? _notificationOverlay;
   int _completedCount = 0;
   int _failedCount = 0;
 
+  // 本地缓存 key
+  static const String _kNotifiedCompletedTasks = 'notified_completed_tasks';
+  static const String _kNotifiedFailedTasks = 'notified_failed_tasks';
+
   @override
   void initState() {
     super.initState();
+    _loadNotifiedTasksFromCache(); // 先加载本地缓存
     _fetchModels();
     _startTaskStatusMonitoring();
+  }
+
+  /// 从本地缓存加载已通知过的任务ID
+  Future<void> _loadNotifiedTasksFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final completedJson = prefs.getString(_kNotifiedCompletedTasks);
+      final failedJson = prefs.getString(_kNotifiedFailedTasks);
+
+      if (completedJson != null) {
+        final List<dynamic> completedList = jsonDecode(completedJson);
+        _notifiedCompletedTasks = Set<String>.from(completedList);
+      }
+      if (failedJson != null) {
+        final List<dynamic> failedList = jsonDecode(failedJson);
+        _notifiedFailedTasks = Set<String>.from(failedList);
+      }
+    } catch (e) {
+      // 静默失败，使用空集合
+    }
+  }
+
+  /// 保存已通知过的任务ID到本地缓存
+  Future<void> _saveNotifiedTasksToCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _kNotifiedCompletedTasks,
+        jsonEncode(_notifiedCompletedTasks.toList()),
+      );
+      await prefs.setString(
+        _kNotifiedFailedTasks,
+        jsonEncode(_notifiedFailedTasks.toList()),
+      );
+    } catch (e) {
+      // 静默失败
+    }
   }
 
   @override
@@ -59,38 +104,36 @@ class _RecallPageState extends State<RecallPage> {
 
       if (!mounted) return;
 
-      final Map<String, String> currentStatus = {};
-      int newCompleted = 0;
-      int newFailed = 0;
+      final List<String> newlyCompletedIds = [];
+      final List<String> newlyFailedIds = [];
 
       for (final task in response) {
         final id = task['id'].toString();
         final status = task['status']?.toString() ?? 'pending';
-        currentStatus[id] = status;
-      }
 
-      // 检测状态变化
-      for (final entry in currentStatus.entries) {
-        final id = entry.key;
-        final status = entry.value;
-        final prevStatus = _previousTaskStatus[id];
-
-        // 如果之前不是 completed/failed，现在变成了
-        if (prevStatus != 'completed' && status == 'completed') {
-          newCompleted++;
+        // 检测 completed 状态变化，且未被通知过
+        if (status == 'completed' && !_notifiedCompletedTasks.contains(id)) {
+          newlyCompletedIds.add(id);
         }
-        if (prevStatus != 'failed' && status == 'failed') {
-          newFailed++;
+        // 检测 failed 状态变化，且未被通知过
+        if (status == 'failed' && !_notifiedFailedTasks.contains(id)) {
+          newlyFailedIds.add(id);
         }
       }
-
-      // 更新状态记录
-      _previousTaskStatus = currentStatus;
 
       // 如果有新完成或失败的任务，显示通知
-      if (newCompleted > 0 || newFailed > 0) {
-        _completedCount = newCompleted;
-        _failedCount = newFailed;
+      if (newlyCompletedIds.isNotEmpty || newlyFailedIds.isNotEmpty) {
+        _completedCount = newlyCompletedIds.length;
+        _failedCount = newlyFailedIds.length;
+
+        // 将新任务ID加入已通知集合
+        _notifiedCompletedTasks.addAll(newlyCompletedIds);
+        _notifiedFailedTasks.addAll(newlyFailedIds);
+
+        // 保存到本地缓存
+        _saveNotifiedTasksToCache();
+
+        // 显示通知
         _showTaskNotification();
       }
     } catch (e) {
