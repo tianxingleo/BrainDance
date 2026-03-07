@@ -90,12 +90,20 @@ class _RecallPageState extends State<RecallPage> {
     if (logs == null || logs.isEmpty) return [];
     
     try {
-      return logs
-          .whereType<Map<String, dynamic>>()
-          .map((log) => log['msg']?.toString() ?? '')
-          .where((msg) => msg.isNotEmpty)
-          .toList();
+      final List<String> result = [];
+      for (final log in logs) {
+        debugPrint('[RecallPage] log item type: ${log.runtimeType}, value: $log');
+        if (log is Map) {
+          final msg = log['msg']?.toString() ?? '';
+          if (msg.isNotEmpty) {
+            result.add(msg);
+          }
+        }
+      }
+      debugPrint('[RecallPage] parsed ${result.length} log msgs');
+      return result;
     } catch (e) {
+      debugPrint('[RecallPage] parse error: $e');
       return [];
     }
   }
