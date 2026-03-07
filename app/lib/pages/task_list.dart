@@ -3,6 +3,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
+import '../services/task_notification_service.dart';
 import 'webgl_viewer.dart';
 
 /// 状态分类配置
@@ -459,6 +460,10 @@ class _TaskListPageState extends State<TaskListPage> {
         setState(() {
           _tasksByStatus = grouped;
         });
+
+        // 标记所有任务为已通知（更新缓存）
+        final allTasks = grouped.values.expand((list) => list).toList();
+        taskNotificationService.markAllTasksAsNotified(allTasks);
       }
     } catch (e) {
       // 静默刷新失败不显示错误
@@ -505,6 +510,10 @@ class _TaskListPageState extends State<TaskListPage> {
           _tasksByStatus = grouped;
           _isLoading = false;
         });
+
+        // 标记所有任务为已通知（更新缓存）
+        final allTasks = grouped.values.expand((list) => list).toList();
+        taskNotificationService.markAllTasksAsNotified(allTasks);
       }
     } catch (e) {
       if (mounted) {

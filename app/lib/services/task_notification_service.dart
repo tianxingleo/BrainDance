@@ -157,21 +157,40 @@ class TaskNotificationService extends ChangeNotifier {
       final String? oldStatus = oldData['status']?.toString();
 
       // 检测状态变化为 completed 或 failed
+      // 只显示通知，不更新缓存（缓存只在打开任务页面时更新）
       if (newStatus == 'completed' && oldStatus != 'completed') {
         if (!_notifiedCompletedTasks.contains(id)) {
-          _notifiedCompletedTasks.add(id);
-          _saveNotifiedTasksToCache();
           _showTaskNotification(completedCount: 1, failedCount: 0);
         }
       } else if (newStatus == 'failed' && oldStatus != 'failed') {
         if (!_notifiedFailedTasks.contains(id)) {
-          _notifiedFailedTasks.add(id);
-          _saveNotifiedTasksToCache();
           _showTaskNotification(completedCount: 0, failedCount: 1);
         }
       }
     } catch (e) {
       // 静默失败
+    }
+  }
+
+  /// 标记所有任务为已通知（在打开任务页面时调用）
+  Future<void> markAllTasksAsNotified(List<Map<String, dynamic>> tasks) async {
+    bool hasChanges = false;
+
+    for (final task in tasks) {
+      final String id = task['id'].toString();
+      final String status = task['status']?.toString() ?? 'pending';
+
+      if (status == 'completed' && !_notifiedCompletedTasks.contains(id)) {
+        _notifiedCompletedTasks.add(id);
+        hasChanges = true;
+      } else if (status == 'failed' && !_notifiedFailedTasks.contains(id)) {
+        _notifiedFailedTasks.add(id);
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      await _saveNotifiedTasksToCache();
     }
   }
 
