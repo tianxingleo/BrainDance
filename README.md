@@ -340,6 +340,7 @@ sequenceDiagram
 
 #### Rendering & Viewer (渲染与查看器)
 
+- **Special Thanks**: 特别感谢 **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** 对 Web 端 3DGS 生态的持续贡献。
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
 
