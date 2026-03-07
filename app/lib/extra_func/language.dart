@@ -81,6 +81,11 @@ enum Language {
       "task_status_completed": "任务已完成",
       "task_status_failed": "任务处理失败",
       "task_status_unknown": "任务状态未知",
+      // 任务通知弹窗
+      "task_completed": "个任务已完成",
+      "task_failed": "个任务失败",
+      "task_notification_completed": "个记忆任务已完成，点击查看",
+      "task_notification_failed": "个记忆任务处理失败，点击查看",
     },
   ),
   en(
@@ -173,6 +178,11 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "task_status_completed": "Task completed",
       "task_status_failed": "Task failed",
       "task_status_unknown": "Unknown task status",
+      // Task notification popup
+      "task_completed": "task(s) completed",
+      "task_failed": "task(s) failed",
+      "task_notification_completed": "memory task(s) completed, tap to view",
+      "task_notification_failed": "memory task(s) failed, tap to view",
     },
   );
 
