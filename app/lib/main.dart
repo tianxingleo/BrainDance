@@ -194,7 +194,6 @@ class MainScreen extends ConsumerWidget {
               switchOutCurve: Curves.easeInCubic,
               child: Container(
                 key: ValueKey<int>(pageIndex),
-                child: getPage(pageIndex, ref),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(32),
                   gradient: LinearGradient(
@@ -206,6 +205,7 @@ class MainScreen extends ConsumerWidget {
                     end: Alignment.bottomRight,
                   ),
                 ),
+                child: getPage(pageIndex, ref),
               ),
             ),
       bottomNavigationBar: isRecording

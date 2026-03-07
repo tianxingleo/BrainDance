@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/reco_config.dart';
@@ -10,7 +9,6 @@ import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:braindance/pages/video_submit.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/main.dart' show isRecordingProvider;
-import 'dart:async';
 
 class RecordPage extends ConsumerStatefulWidget {
   const RecordPage({super.key});
