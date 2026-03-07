@@ -283,6 +283,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ),
       );
 
+    // 通知 Flutter 重建，让 WebViewWidget 真正挂载到树上
+    if (mounted) setState(() {});
+
     // Load the local HTML file matching the server port
     _loadLocalHtml();
   }

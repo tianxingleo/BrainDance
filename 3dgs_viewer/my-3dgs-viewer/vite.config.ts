@@ -16,8 +16,8 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    https: true,
     // 【✅ 必须添加以下 headers 才能让 3DGS 运行】
+    // https 由 basicSsl 插件自动处理，无需在此设置
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',

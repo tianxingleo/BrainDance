@@ -282,20 +282,37 @@ class _RecallPageState extends State<RecallPage> {
         body: {'query': query},
       );
 
-      if (response.status == 200) {
-        final data = response.data;
-        if (data['success'] == true) {
-          if (mounted) {
-            setState(() {
-              _models = List<Map<String, dynamic>>.from(data['results']);
-              _isLoading = false;
-            });
-          }
-        } else {
-          throw Exception('Search failed: ${data['error']}');
+      final data = response.data;
+      if (data is Map && data['success'] == true) {
+        if (mounted) {
+          setState(() {
+            _models = List<Map<String, dynamic>>.from(data['results'] ?? []);
+            _isLoading = false;
+          });
         }
       } else {
-        throw Exception('HTTP Error: ${response.status}');
+        final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
+        throw Exception(errMsg);
+      }
+    } on FunctionException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        // 从 details 里提取 Edge Function 返回的真实错误信息
+        String errMsg;
+        final details = e.details;
+        if (details is Map && details['error'] != null) {
+          errMsg = details['error'].toString();
+        } else if (details is String && details.isNotEmpty) {
+          errMsg = details;
+        } else {
+          errMsg = 'HTTP ${e.status}';
+        }
+        TDToast.showText(
+          '${textLocalize("recall_error_search")}$errMsg',
+          context: context,
+        );
       }
     } catch (e) {
       if (mounted) {

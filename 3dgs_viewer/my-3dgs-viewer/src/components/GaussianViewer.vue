@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
@@ -67,7 +67,7 @@ const calcFocalFromFov = (fovDeg, imageHeightPx) => {
 
 const refreshCurrentFocalInfo = () => {
   if (!viewer || !viewer.camera) return;
-  const h = sceneMetadata.value.h;
+  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
   currentViewFov.value = Number(viewer.camera.fov || 0);
   if (h && currentViewFov.value > 0 && currentViewFov.value < 179) {
     const focal = calcFocalFromFov(currentViewFov.value, h);
@@ -77,7 +77,8 @@ const refreshCurrentFocalInfo = () => {
 
 const applyFocalLengthPx = (focalPx, options = {}) => {
   if (!viewer || !viewer.camera) return;
-  const h = sceneMetadata.value.h;
+  // 优先使用位姿 JSON 中记录的真实图像高度，否则回退到视口高度
+  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
   if (!h || !focalPx) return;
 
   const targetFov = calcFovFromFocal(focalPx, h);
@@ -92,12 +93,16 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
       ease: options.ease || 'power2.out',
       onUpdate: () => {
         cam.updateProjectionMatrix();
+        // 更新 splat shader uniforms 并立即重绘
+        try { viewer.update(); viewer.render(); } catch (_) {}
         refreshCurrentFocalInfo();
       }
     });
   } else {
     cam.fov = targetFov;
     cam.updateProjectionMatrix();
+    // 更新 splat shader uniforms 并立即重绘，无需等到下一帧
+    try { viewer.update(); viewer.render(); } catch (_) {}
     refreshCurrentFocalInfo();
   }
 };
@@ -927,8 +932,10 @@ onBeforeUnmount(async () => {
       <button @click="searchAndFly" class="search-btn">🔍 搜索视角</button>
     </div>
 
-    <button class="focal-settings-toggle" @click="toggleFocalSettings">焦距设置</button>
-    <div class="focal-settings-panel" v-if="showFocalSettings">
+    <button class="focal-settings-toggle" @click="toggleFocalSettings"
+      @mousedown.stop @touchstart.stop @touchend.stop>焦距设置</button>
+    <div class="focal-settings-panel" v-if="showFocalSettings"
+      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
       <div class="focal-title">镜头焦距</div>
       <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
         @input="onManualFocalChange" />
