@@ -17,6 +17,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'services/task_notification_service.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
@@ -24,6 +25,10 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+
+// 全局 NavigatorKey
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
@@ -35,6 +40,10 @@ void main() async {
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
   ); //Supabase
+
+  // 初始化全局任务通知服务
+  taskNotificationService.setNavigatorKey(navigatorKey);
+  await taskNotificationService.init();
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
@@ -115,6 +124,7 @@ class Home extends ConsumerWidget {
     final hasSession = Supabase.instance.client.auth.currentSession != null;
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
       theme: themeData.systemThemeDataLight?.copyWith(
