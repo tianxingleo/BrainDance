@@ -145,15 +145,18 @@ class TaskNotificationService {
     _hideNotification(); // 先隐藏之前的
 
     _currentOverlay = OverlayEntry(
-      builder: (context) => _TaskNotificationWidget(
+      builder: (overlayContext) => _TaskNotificationWidget(
         completedCount: completedCount,
         failedCount: failedCount,
         onTap: () {
           _hideNotification();
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const TaskListPage()),
-          );
+          final navContext = _navigatorKey?.currentContext;
+          if (navContext != null) {
+            Navigator.push(
+              navContext,
+              MaterialPageRoute(builder: (context) => const TaskListPage()),
+            );
+          }
         },
         onDismiss: () {
           _hideNotification();
@@ -161,7 +164,8 @@ class TaskNotificationService {
       ),
     );
 
-    Overlay.of(context).insert(_currentOverlay!);
+    // 使用 rootOverlay: true 确保在最顶层显示
+    Overlay.of(context, rootOverlay: true).insert(_currentOverlay!);
 
     // 5秒后自动隐藏
     Future.delayed(const Duration(seconds: 5), () {
