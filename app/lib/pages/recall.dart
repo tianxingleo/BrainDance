@@ -117,13 +117,21 @@ class _RecallPageState extends State<RecallPage> {
           .eq('status', 'processing')
           .order('created_at', ascending: false);
 
+      debugPrint('[RecallPage] Fetched ${response.length} processing tasks');
+      
       if (mounted) {
         final Map<int, List<String>> logMap = {};
         for (final task in response) {
-          final logs = task['logs'] as List<dynamic>?;
-          final allLogs = _parseAllLogMsgs(logs);
-          if (allLogs.isNotEmpty) {
-            logMap[task['id'] as int] = allLogs;
+          final taskId = task['id'] as int;
+          final logs = task['logs'];
+          debugPrint('[RecallPage] Task $taskId logs type: ${logs?.runtimeType}, value: $logs');
+          
+          if (logs is List<dynamic>) {
+            final allLogs = _parseAllLogMsgs(logs);
+            if (allLogs.isNotEmpty) {
+              logMap[taskId] = allLogs;
+              debugPrint('[RecallPage] Task $taskId has ${allLogs.length} logs, latest: ${allLogs.last}');
+            }
           }
         }
         
@@ -131,9 +139,11 @@ class _RecallPageState extends State<RecallPage> {
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
+        
+        debugPrint('[RecallPage] Total tasks with logs: ${logMap.length}');
       }
     } catch (e) {
-      // 静默失败
+      debugPrint('[RecallPage] Error fetching processing tasks: $e');
     }
   }
 
