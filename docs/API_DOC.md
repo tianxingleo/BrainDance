@@ -47,12 +47,15 @@
 | :--- | :--- | :--- | :--- |
 | `id` | uuid | ❌ | 主键，**插入时留空**，数据库会自动生成并返回 |
 | `scene_id` | string | ✅ | **场景唯一标识**，建议前端生成 `timestamp_random` |
-| `user_id` | uuid | ✅ | 当前登录用户的 ID |
+| `display_name` | string | ❌ | 任务展示名称（用于列表显示），为空时可回退 `scene_id` |
+| `user_id` | string | ✅ | 当前登录用户的 ID (`auth.users.id` 字符串) |
 | `task_type` | string | ❌ | 任务类型，默认 `video_3dgs` |
-| `task_params` | json | ❌ | 任务参数，JSON格式 |
+| `task_params` | jsonb | ❌ | 任务参数，JSON 对象 |
 | `status` | string | ✅ | 固定填 `pending` |
 | `logs` | json | ❌ | (只读) 实时日志，格式 `[{"ts":..., "msg":...}]` |
 | `quality_score`| int | ❌ | (只读) AI 评分 |
+| `quality_reason`| string | ❌ | (只读) AI 评分原因 |
+| `tags` | string[] | ❌ | (只读) AI 标签 |
 
 **task_type 可选值:**
 
@@ -80,6 +83,7 @@
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260118_001',
+  'display_name': '客厅模型-第一版',
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'video_3dgs',
   'status': 'pending'
@@ -90,6 +94,7 @@ final res = await supabase.from('processing_tasks').insert({
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260118_002',
+  'display_name': '办公室扫描-快速版',
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'da3_feed_forward_3dgs',
   'task_params': {
@@ -104,9 +109,10 @@ final res = await supabase.from('processing_tasks').insert({
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260119_001',
+  'display_name': '手办单图重建',
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'single_image_sam3d',
-  'task_params': '{}',  // 可选自定义参数
+  'task_params': {},  // 可选自定义参数
   'status': 'pending'
 }).select();
 ```
@@ -115,9 +121,10 @@ final res = await supabase.from('processing_tasks').insert({
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260120_001',
+  'display_name': '桌面静物重建',
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'single_image_sharp',
-  'task_params': '{}',  // SHARP 无额外参数
+  'task_params': {},  // SHARP 无额外参数
   'status': 'pending'
 }).select();
 ```
@@ -133,10 +140,13 @@ final res = await supabase.from('processing_tasks').insert({
 | :--- | :--- | :--- |
 | `id` | uuid | 资产唯一 ID |
 | `scene_id` | string | 对应任务的场景 ID |
+| `user_id` | string | 资产所属用户 ID |
 | `description` | text | AI 生成的场景描述 (用于展示) |
+| `objects` | string[] | 场景内关键物体列表 |
 | `tags` | array | 标签列表，如 `["室内", "红色"]` |
-| `quality_score`| int | 质量评分 (0-100) |
 | `ply_path` | text | **关键**：文件在 Storage 中的相对路径，需拼接下载链接 |
+| `preview_img_path` | text | 预览图 URL 或相对路径 |
+| `meta_info` | jsonb | 扩展元数据（如 `quality_score` / `quality_reason`） |
 | `created_at` | timestamp | 创建时间 |
 
 **获取我的模型列表 (Dart):**
@@ -170,8 +180,15 @@ braindance-assets/ (Bucket)
         │   └── frame_002.jpg
         └── output/              <-- 训练结果
             ├── point_cloud.ply
-            └── gaussian_splat.splat
+            ├── transforms.json
+            ├── webgl_poses.json
+            ├── preview.jpg
+            └── images/
+                ├── frame_00001.jpg
+                └── ...
 ```
+
+> 注：`webgl_poses.json` 与 `output/images/*` 主要由视频流水线（含空间锚点提取）生成，单图任务可能只产出 `point_cloud.ply`。
 
 ### 4.3 下载链接拼接
 `{Supabase_URL}/storage/v1/object/public/braindance-assets/{user_id}/{scene_id}/output/point_cloud.ply`
