@@ -210,6 +210,12 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
           return const SizedBox.shrink();
         }
 
+        // 检查当前路由是否允许显示通知
+        final currentRoute = taskNotificationService.currentRoute;
+        if (!taskNotificationService.isNotificationEnabledForRoute(currentRoute)) {
+          return const SizedBox.shrink();
+        }
+
         // 显示动画
         _controller.forward();
 
