@@ -16,14 +16,14 @@ class TaskNotificationData {
 }
 
 /// 全局任务通知服务
-/// 单例模式，全局管理任务状态监听
+/// 单例模式，使用 Supabase Realtime 监听任务状态变化
 class TaskNotificationService extends ChangeNotifier {
   static final TaskNotificationService _instance =
       TaskNotificationService._internal();
   factory TaskNotificationService() => _instance;
   TaskNotificationService._internal();
 
-  Timer? _timer;
+  RealtimeChannel? _channel;
   Set<String> _notifiedCompletedTasks = {};
   Set<String> _notifiedFailedTasks = {};
   GlobalKey<NavigatorState>? _navigatorKey;
@@ -92,7 +92,8 @@ class TaskNotificationService extends ChangeNotifier {
   Future<void> _loadNotifiedTasksFromCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _notifiedCompletedTasks = _loadSetFromPrefs(prefs, _kNotifiedCompletedTasks);
+      _notifiedCompletedTasks =
+          _loadSetFromPrefs(prefs, _kNotifiedCompletedTasks);
       _notifiedFailedTasks = _loadSetFromPrefs(prefs, _kNotifiedFailedTasks);
     } catch (e) {
       // 静默失败，使用空集合
@@ -111,69 +112,63 @@ class TaskNotificationService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await Future.wait([
-        prefs.setString(_kNotifiedCompletedTasks, jsonEncode(_notifiedCompletedTasks.toList())),
-        prefs.setString(_kNotifiedFailedTasks, jsonEncode(_notifiedFailedTasks.toList())),
+        prefs.setString(
+            _kNotifiedCompletedTasks, jsonEncode(_notifiedCompletedTasks.toList())),
+        prefs.setString(
+            _kNotifiedFailedTasks, jsonEncode(_notifiedFailedTasks.toList())),
       ]);
     } catch (e) {
       // 静默失败
     }
   }
 
-  /// 启动任务状态监听（每5秒检查一次）
+  /// 启动 Realtime 监听
   void startMonitoring() {
-    if (_timer != null) return; // 已经在运行
+    if (_channel != null) return; // 已经在运行
 
-    _fetchTaskStatuses(); // 立即获取一次
-    _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      _fetchTaskStatuses();
-    });
+    _channel = Supabase.instance.client.channel('public:processing_tasks');
+
+    _channel!.onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'processing_tasks',
+      callback: (payload) => _handleTaskChange(payload),
+    );
+
+    _channel!.subscribe();
   }
 
-  /// 停止任务状态监听
+  /// 停止 Realtime 监听
   void stopMonitoring() {
-    _timer?.cancel();
-    _timer = null;
+    if (_channel != null) {
+      Supabase.instance.client.removeChannel(_channel!);
+      _channel = null;
+    }
   }
 
-  /// 获取任务状态并检测变化
-  Future<void> _fetchTaskStatuses() async {
+  /// 处理任务状态变化
+  void _handleTaskChange(PostgresChangePayload payload) {
     try {
-      final response = await Supabase.instance.client
-          .from('processing_tasks')
-          .select('id, status, scene_id, display_name')
-          .order('created_at', ascending: false);
+      final newData = payload.newRecord;
+      final oldData = payload.oldRecord;
 
-      final List<String> newlyCompletedIds = [];
-      final List<String> newlyFailedIds = [];
+      final String id = newData['id'].toString();
+      final String newStatus = newData['status']?.toString() ?? 'pending';
+      final String? oldStatus = oldData['status']?.toString();
 
-      for (final task in response) {
-        final id = task['id'].toString();
-        final status = task['status']?.toString() ?? 'pending';
-
-        // 检测 completed 状态变化，且未被通知过
-        if (status == 'completed' && !_notifiedCompletedTasks.contains(id)) {
-          newlyCompletedIds.add(id);
+      // 检测状态变化为 completed 或 failed
+      if (newStatus == 'completed' && oldStatus != 'completed') {
+        if (!_notifiedCompletedTasks.contains(id)) {
+          _notifiedCompletedTasks.add(id);
+          _saveNotifiedTasksToCache();
+          _showTaskNotification(completedCount: 1, failedCount: 0);
         }
-        // 检测 failed 状态变化，且未被通知过
-        if (status == 'failed' && !_notifiedFailedTasks.contains(id)) {
-          newlyFailedIds.add(id);
+      } else if (newStatus == 'failed' && oldStatus != 'failed') {
+        if (!_notifiedFailedTasks.contains(id)) {
+          _notifiedFailedTasks.add(id);
+          _saveNotifiedTasksToCache();
+          _showTaskNotification(completedCount: 0, failedCount: 1);
         }
-      }
-
-      // 如果有新完成或失败的任务，显示通知
-      if (newlyCompletedIds.isNotEmpty || newlyFailedIds.isNotEmpty) {
-        // 将新任务ID加入已通知集合
-        _notifiedCompletedTasks.addAll(newlyCompletedIds);
-        _notifiedFailedTasks.addAll(newlyFailedIds);
-
-        // 保存到本地缓存
-        _saveNotifiedTasksToCache();
-
-        // 显示通知
-        _showTaskNotification(
-          completedCount: newlyCompletedIds.length,
-          failedCount: newlyFailedIds.length,
-        );
       }
     } catch (e) {
       // 静默失败
