@@ -372,10 +372,12 @@ const applyAdvancedShader = (mesh) => {
   material.uniforms.uMaxRadius = globalUniforms.uMaxRadius;
   material.uniforms.uCenter = globalUniforms.uCenter;
 
-  material.vertexShader = `varying vec3 vWorldPosition;\n` + material.vertexShader;
+  material.vertexShader = `varying vec3 vWorldPosition;
+` + material.vertexShader;
   const vsEndIndex = material.vertexShader.lastIndexOf('}');
   if (vsEndIndex !== -1) {
-    const vsLogic = `vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;\n`;
+    const vsLogic = `vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+`;
     material.vertexShader = material.vertexShader.substring(0, vsEndIndex) + vsLogic + '}';
   }
 
@@ -515,12 +517,11 @@ const getViewerConfig = () => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   return {
     'rootElement': containerRef.value,
-    'cameraUp': [0, -1, 0],
-    'initialCameraPosition': [0, 0, 0],
-    'initialCameraLookAt': [0, 0, 1],
+    'cameraUp': [0, 1, 0],
+    'initialCameraPosition': [0, 0, 5],
+    'initialCameraLookAt': [0, 0, 0],
     'useBuiltInControls': false,
-    'gpuAcceleratedSort': true,
-    'halfPrecisionCovariancesOnGPU': true,
+    'gpuAcceleratedSort': false,
     'webXRMode': GaussianSplats3D.WebXRMode.None,
     'sharedMemoryForWorkers': false,
     'antialiased': !isMobile,
@@ -561,15 +562,11 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
     await viewer.addSplatScene(currentPlyUrl, {
       'showLoadingUI': true,
-      'progressiveLoad': true,
-      'splatAlphaTransferThreshold': 1,
-      'rotation': [0, 0, 0, 1], // [x, y, z, w] Identity Quaternion (No global rotation)
-    });
+        'progressiveLoad': false,
+        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
+      });
 
-    if (initialPoseMatrix) {
-      console.log("[Viewer] Jumping to initial RAG pose");
-      flyToImage({ matrix: initialPoseMatrix });
-    }
+    
     // 告诉 Flutter：模型加载完成
     isLoading.value = false;
     if (window.BrainDanceChannel) {
@@ -638,8 +635,10 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
         createParticleSystem(splatMesh);
         // 然后应用 Shader
         applyAdvancedShader(splatMesh);
-        // 最后调整相机，因为现在我们已经有了准确的 Center 和 Radius
-        adjustControlsToModel();
+        
+          if (initialPoseMatrix) {
+            setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
+          }
 
         animationState.lastFrameTime = Date.now();
         animationState.startTime = Date.now();
