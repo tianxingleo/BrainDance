@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,7 +17,8 @@ class _RecallPageState extends State<RecallPage> {
   String _currentFolder = 'root'; // 'root', 'in_progress', 'completed'
   List<Map<String, dynamic>> _models = [];
   List<Map<String, dynamic>> _processingTasks = [];
-  Map<int, String> _taskLatestLogs = {}; // taskId -> latest log msg
+  Map<int, List<String>> _taskAllLogs = {}; // taskId -> all log msgs
+  Set<int> _expandedTaskLogs = {}; // 展开的任务ID集合
   bool _isLoading = true;
   bool _isProcessingExpanded = true;
   final TextEditingController _searchController = TextEditingController();
@@ -64,64 +64,40 @@ class _RecallPageState extends State<RecallPage> {
     
     if (status == 'processing') {
       // 更新或添加 processing 任务
-      final logsJson = newData['logs'];
-      final latestMsg = _parseLatestLogMsg(logsJson);
+      final logsJson = newData['logs'] as List<dynamic>?;
+      final allLogs = _parseAllLogMsgs(logsJson);
       
       setState(() {
         // 移除旧版本（如果存在）
         _processingTasks.removeWhere((t) => t['id'] == taskId);
         // 添加更新后的任务
         _processingTasks.add(Map<String, dynamic>.from(newData));
-        if (latestMsg != null) {
-          _taskLatestLogs[taskId] = latestMsg;
+        if (allLogs.isNotEmpty) {
+          _taskAllLogs[taskId] = allLogs;
         }
       });
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       setState(() {
         _processingTasks.removeWhere((t) => t['id'] == taskId);
-        _taskLatestLogs.remove(taskId);
+        _taskAllLogs.remove(taskId);
+        _expandedTaskLogs.remove(taskId);
       });
     }
   }
 
-  /// 解析 logs JSON，获取最新的 msg
-  String? _parseLatestLogMsg(dynamic logsJson) {
-    if (logsJson == null) {
-      debugPrint('[RecallPage] logsJson is null');
-      return null;
-    }
+  /// 解析所有 logs，返回 msg 列表
+  List<String> _parseAllLogMsgs(List<dynamic>? logs) {
+    if (logs == null || logs.isEmpty) return [];
     
     try {
-      List<dynamic> logs;
-      if (logsJson is String) {
-        debugPrint('[RecallPage] logsJson is String: $logsJson');
-        logs = jsonDecode(logsJson) as List<dynamic>;
-      } else if (logsJson is List) {
-        debugPrint('[RecallPage] logsJson is List with ${logsJson.length} items');
-        logs = logsJson;
-      } else {
-        debugPrint('[RecallPage] logsJson is unknown type: ${logsJson.runtimeType}');
-        return null;
-      }
-      
-      if (logs.isEmpty) {
-        debugPrint('[RecallPage] logs list is empty');
-        return null;
-      }
-      
-      // 获取最后一条日志的 msg
-      final lastLog = logs.last;
-      debugPrint('[RecallPage] lastLog: $lastLog');
-      if (lastLog is Map<String, dynamic>) {
-        final msg = lastLog['msg']?.toString();
-        debugPrint('[RecallPage] parsed msg: $msg');
-        return msg;
-      }
-      return null;
+      return logs
+          .whereType<Map<String, dynamic>>()
+          .map((log) => log['msg']?.toString() ?? '')
+          .where((msg) => msg.isNotEmpty)
+          .toList();
     } catch (e) {
-      debugPrint('[RecallPage] Error parsing logs: $e');
-      return null;
+      return [];
     }
   }
 
@@ -135,18 +111,18 @@ class _RecallPageState extends State<RecallPage> {
           .order('created_at', ascending: false);
 
       if (mounted) {
-        final Map<int, String> logMap = {};
+        final Map<int, List<String>> logMap = {};
         for (final task in response) {
-          final logs = task['logs'];
-          final msg = _parseLatestLogMsg(logs);
-          if (msg != null) {
-            logMap[task['id'] as int] = msg;
+          final logs = task['logs'] as List<dynamic>?;
+          final allLogs = _parseAllLogMsgs(logs);
+          if (allLogs.isNotEmpty) {
+            logMap[task['id'] as int] = allLogs;
           }
         }
         
         setState(() {
           _processingTasks = List<Map<String, dynamic>>.from(response);
-          _taskLatestLogs = logMap;
+          _taskAllLogs = logMap;
         });
       }
     } catch (e) {
@@ -494,7 +470,9 @@ class _RecallPageState extends State<RecallPage> {
     final taskId = task['id'] as int;
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
     final displayName = task['display_name']?.toString();
-    final latestLog = _taskLatestLogs[taskId];
+    final allLogs = _taskAllLogs[taskId] ?? [];
+    final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
+    final isExpanded = _expandedTaskLogs.contains(taskId);
     
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -503,54 +481,125 @@ class _RecallPageState extends State<RecallPage> {
         color: isDark ? darkInput : theme.grayColor1,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.blue.withAlpha(20),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.blue.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  displayName ?? sceneId,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: textColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName ?? sceneId,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: textColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      latestLog ?? textLocalize('status_processing'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  latestLog ?? textLocalize('status_processing'),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+              ),
+              // 展开/收起日志按钮
+              if (allLogs.length > 1)
+                IconButton(
+                  icon: AnimatedRotation(
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                      size: 20,
+                    ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  onPressed: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedTaskLogs.remove(taskId);
+                      } else {
+                        _expandedTaskLogs.add(taskId);
+                      }
+                    });
+                  },
                 ),
-              ],
-            ),
+            ],
           ),
+          // 展开的日志列表
+          if (allLogs.length > 1)
+            AnimatedCrossFade(
+              firstChild: const SizedBox.shrink(),
+              secondChild: Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1A1A20) : theme.grayColor2,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: allLogs.reversed.map((log) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.only(top: 6, right: 8),
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF666666) : theme.fontGyColor4,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            log,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? const Color(0xFFAAAAAA) : theme.fontGyColor3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+              ),
+              crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 200),
+            ),
         ],
       ),
     );
