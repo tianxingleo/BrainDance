@@ -339,7 +339,7 @@ async function parseQueryIntent(
      *   * 避免 LLM 返回自然语言解释
      */
     const resp = await aiClient.chat.completions.create({
-      model: "qwen-plus",
+      model: "qwen-turbo",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userQuery },
