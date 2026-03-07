@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import 'webgl_viewer.dart';
+import 'task_list.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -135,6 +136,16 @@ class _RecallPageState extends State<RecallPage> {
           textColor: textColor,
         ),
         actions: [
+          IconButton(
+            icon: Icon(Icons.task_alt, color: iconColor),
+            tooltip: textLocalize("task_list_title"),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const TaskListPage()),
+              );
+            },
+          ),
           IconButton(
             icon: AnimatedRotation(
               turns: _isLoading ? 1 : 0,
