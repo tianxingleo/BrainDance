@@ -26,6 +26,11 @@ class TaskNotificationService extends ChangeNotifier {
   RealtimeChannel? _channel;
   Set<String> _notifiedCompletedTasks = {};
   Set<String> _notifiedFailedTasks = {};
+  
+  // 待通知的计数器（尚未被缓存记录的新任务）
+  int _pendingCompletedCount = 0;
+  int _pendingFailedCount = 0;
+  
   GlobalKey<NavigatorState>? _navigatorKey;
 
   // 禁用通知的路由集合
@@ -157,18 +162,31 @@ class TaskNotificationService extends ChangeNotifier {
       final String? oldStatus = oldData['status']?.toString();
 
       // 检测状态变化为 completed 或 failed
-      // 只显示通知，不更新缓存（缓存只在打开任务页面时更新）
+      // 增加待通知计数器，显示累积数量
       if (newStatus == 'completed' && oldStatus != 'completed') {
         if (!_notifiedCompletedTasks.contains(id)) {
-          _showTaskNotification(completedCount: 1, failedCount: 0);
+          _pendingCompletedCount++;
+          _showPendingNotification();
         }
       } else if (newStatus == 'failed' && oldStatus != 'failed') {
         if (!_notifiedFailedTasks.contains(id)) {
-          _showTaskNotification(completedCount: 0, failedCount: 1);
+          _pendingFailedCount++;
+          _showPendingNotification();
         }
       }
     } catch (e) {
       // 静默失败
+    }
+  }
+
+  /// 显示待通知任务的累积数量
+  void _showPendingNotification() {
+    if (_pendingCompletedCount > 0 || _pendingFailedCount > 0) {
+      _currentNotification = TaskNotificationData(
+        completedCount: _pendingCompletedCount,
+        failedCount: _pendingFailedCount,
+      );
+      notifyListeners();
     }
   }
 
@@ -192,23 +210,11 @@ class TaskNotificationService extends ChangeNotifier {
     if (hasChanges) {
       await _saveNotifiedTasksToCache();
     }
-  }
 
-  /// 显示任务状态变化通知
-  void _showTaskNotification({
-    required int completedCount,
-    required int failedCount,
-  }) {
-    _currentNotification = TaskNotificationData(
-      completedCount: completedCount,
-      failedCount: failedCount,
-    );
-    notifyListeners();
-
-    // 5秒后自动隐藏
-    Future.delayed(const Duration(seconds: 5), () {
-      hideNotification();
-    });
+    // 重置待通知计数器
+    _pendingCompletedCount = 0;
+    _pendingFailedCount = 0;
+    hideNotification();
   }
 
   /// 销毁服务
