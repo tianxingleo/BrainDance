@@ -9,6 +9,7 @@ import json
 import random
 import re
 import ast
+from pathlib import Path
 try:
     from openai import OpenAI
 except Exception:
@@ -22,7 +23,8 @@ class SceneAnalyzer:
         self.cfg = cfg
         self.api_key = self.cfg.dashscope_api_key or os.getenv("DASHSCOPE_API_KEY")
         self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        self.model = "qwen-plus"  # Qwen-VL-Plus：多模态模型
+        # 优先使用视觉模型，避免误用文本模型导致“未提供任何图片”。
+        self.model = os.getenv("DASHSCOPE_VL_MODEL", "qwen3-vl-plus")
 
     def _encode_image(self, image_path):
         with open(image_path, "rb") as image_file:
@@ -35,8 +37,11 @@ class SceneAnalyzer:
         if not self.api_key:
             return True, 60, "No API Key (Skipped)", [], "", []
 
-        # 随机抽图逻辑 (保持不变)
-        all_images = sorted([f for f in os.listdir(images_dir) if f.endswith(('.jpg', '.png'))])
+        # 随机抽图逻辑：兼容更多后缀，并统一大小写处理
+        image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+        all_images = sorted(
+            [p.name for p in Path(images_dir).iterdir() if p.is_file() and p.suffix.lower() in image_exts]
+        )
         if len(all_images) < 5: return False, 0, "图片过少", [], "", []
         selected_files = random.sample(all_images, min(6, len(all_images)))
         
@@ -73,16 +78,40 @@ class SceneAnalyzer:
         try:
             if log_callback: log_callback("🤖 [Qwen-VL] 正在进行场景评分与打标...")
             
+            if OpenAI is None:
+                raise RuntimeError("OpenAI client not available in environment")
+
             client = OpenAI(api_key=self.api_key, base_url=self.base_url)
             completion = client.chat.completions.create(
                 model=self.model, messages=messages, temperature=0.1
             )
             
-            resp = completion.choices[0].message.content.replace("```json", "").replace("```", "")
-            result = json.loads(resp)
+            resp = str(completion.choices[0].message.content)
+            cleaned = resp.replace("```json", "").replace("```", "").strip()
+            m = re.search(r"(\{.*\})", cleaned, flags=re.S)
+            json_text = m.group(1) if m else cleaned
+
+            # 兼容模型偶发的 JSON 格式偏差
+            result = None
+            parse_errors = []
+            try:
+                result = json.loads(json_text)
+            except Exception as e1:
+                parse_errors.append(str(e1))
+                try:
+                    result = json.loads(json_text.replace("'", '"'))
+                except Exception as e2:
+                    parse_errors.append(str(e2))
+                    try:
+                        result = ast.literal_eval(json_text)
+                    except Exception as e3:
+                        parse_errors.append(str(e3))
+
+            if result is None:
+                raise ValueError(f"Failed to parse model JSON output. Attempts: {parse_errors}. Raw: {resp}")
             
             # 解析结果
-            score = result.get("score", 0)
+            score = int(result.get("score", 0))
             reason = result.get("reason", "Unknown")
             tags = result.get("tags", [])
             passed = score >= self.cfg.min_quality_score
@@ -90,6 +119,13 @@ class SceneAnalyzer:
             # 🟢 [新增] 提取描述信息
             description = result.get("description", "")
             objects = result.get("objects", [])
+
+            # 模型未识别到图片时，避免错误阻断主流程
+            no_image_markers = ("未提供任何图片", "没有图片", "no image", "no images")
+            if isinstance(reason, str) and any(k in reason.lower() for k in [s.lower() for s in no_image_markers]):
+                if log_callback:
+                    log_callback("⚠️ [Qwen-VL] 未识别到图片输入，已自动跳过 AI 质检，继续后续流程")
+                return True, 60, "模型未识别到图片，已跳过AI质检", [], description, objects
             
             return passed, score, reason, tags, description, objects
 
@@ -193,21 +229,21 @@ class SceneAnalyzer:
             # 返回安全默认值，保证流水线继续
             return {"score": 0, "reason": "Analysis Error", "tags": [], "description": "", "objects": []}
 
-    def select_best_preview(self, frames: list, images_dir: str, log_callback=None) -> int:
+    def select_best_preview(self, frames: list, images_dir: str, log_callback=None) -> tuple[int, str]:
         """
         [新增] 从一组带有位姿的帧中挑选出最适合作为封面（视角最全面）的图。
-        返回最合适帧的索引 (0 到 len(frames)-1)。
+        返回: (最合适帧的原始索引, 选择理由)。
         """
         if not frames:
-            return 0
+            return 0, "无可用帧，默认第 0 帧"
         if len(frames) == 1:
-            return 0
+            return 0, "仅有 1 帧候选，默认选中"
 
         # 如果未配置 API Key
         if not self.api_key:
             if log_callback:
                 log_callback("⚠️ [SceneAnalyzer] 未配置 API Key，封面图选择回退到第一帧")
-            return 0
+            return 0, "未配置 API Key，回退第一帧"
 
         # 从帧列表中均匀抽取最多 8 张候选图
         sample_size = min(8, len(frames))
@@ -221,8 +257,13 @@ class SceneAnalyzer:
         2. 如果是房间，选择能看到房间绝大部分内容的。
         3. 如果是单个物体，选择物体正面平视的。
         4. 如果是书桌等场景，选择能正着拍到整个主体的。
-        
-        请仔细观察提供的图片，直接返回你认为最合适的一张图片的索引号（0 到 {sample_size - 1}），只返回一个数字，不要解释。
+
+        请严格返回 JSON（不要 markdown 代码块）：
+        {{
+            "index": 0,
+            "reason": "一句话说明选择理由"
+        }}
+        其中 index 必须是 0 到 {sample_size - 1} 的整数。
         """
 
         try:
@@ -263,7 +304,7 @@ class SceneAnalyzer:
                     })
 
             if len(messages[1]["content"]) == 1:
-                return 0 # 没有有效图片被加入
+                return 0, "没有有效候选图片，回退第一帧"
 
             if OpenAI is None:
                 raise RuntimeError("OpenAI client not available in environment")
@@ -271,25 +312,46 @@ class SceneAnalyzer:
             client = OpenAI(api_key=self.api_key, base_url=self.base_url)
             completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
 
-            resp = completion.choices[0].message.content.strip()
-            
-            # 使用正则提取出第一个数字
-            m = re.search(r'\d+', resp)
-            if m:
-                selected_idx = int(m.group(0))
-                # 确保索引在有效范围内
-                if 0 <= selected_idx < sample_size:
-                    # 返回在原 frames 数组中的真实索引
-                    best_orig_idx = indices[selected_idx]
-                    if log_callback:
-                        log_callback(f"✅ AI 成功选出封面帧: index {best_orig_idx} (候选图中的第 {selected_idx} 张)")
-                    return best_orig_idx
-            
+            resp = str(completion.choices[0].message.content).strip()
+
+            cleaned = resp.replace("```json", "").replace("```", "").strip()
+            m_json = re.search(r"(\{.*\})", cleaned, flags=re.S)
+            json_text = m_json.group(1) if m_json else cleaned
+
+            selected_idx = None
+            selected_reason = ""
+
+            # 优先按 JSON 解析
+            try:
+                result = json.loads(json_text)
+                selected_idx = int(result.get("index"))
+                selected_reason = str(result.get("reason", "")).strip()
+            except Exception:
+                # 兼容旧格式：只返回数字
+                m_idx = re.search(r"\d+", cleaned)
+                if m_idx:
+                    selected_idx = int(m_idx.group(0))
+
+                # 容错提取理由（例如 "reason: xxx" 或 "理由：xxx"）
+                m_reason = re.search(r"(?:reason|理由)\s*[:：]\s*(.+)", cleaned, flags=re.I)
+                if m_reason:
+                    selected_reason = m_reason.group(1).strip()
+
+            if selected_idx is not None and 0 <= selected_idx < sample_size:
+                best_orig_idx = indices[selected_idx]
+                if not selected_reason:
+                    selected_reason = "模型未提供明确理由"
+                if log_callback:
+                    log_callback(
+                        f"✅ AI 成功选出封面帧: index {best_orig_idx} (候选图中的第 {selected_idx} 张)，理由: {selected_reason}"
+                    )
+                return best_orig_idx, selected_reason
+
             if log_callback:
                 log_callback(f"⚠️ 无法解析 AI 的选择结果: '{resp}'，回退到第一帧")
-            return 0
+            return 0, "无法解析模型输出，回退第一帧"
 
         except Exception as e:
             if log_callback:
                 log_callback(f"⚠️ 挑选封面失败: {e}，回退到第一帧")
-            return 0
+            return 0, f"挑选失败: {e}"
