@@ -192,9 +192,9 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
       vsync: this,
     );
     
-    // 隐藏动画控制器 (5秒逐渐消失)
+    // 隐藏动画控制器 (1秒逐渐消失)
     _hideController = AnimationController(
-      duration: const Duration(seconds: 5),
+      duration: const Duration(seconds: 1),
       vsync: this,
     );
     
@@ -247,10 +247,10 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
         // 显示动画：滑入
         _showController.forward();
 
-        // 启动5秒后逐渐消失的动画
+        // 启动1秒后开始淡出动画（总显示时间约2秒）
         _autoHideTimer?.cancel();
-        _autoHideTimer = Timer(const Duration(milliseconds: 500), () {
-          // 等待显示动画完成后，开始5秒淡出动画
+        _autoHideTimer = Timer(const Duration(seconds: 1), () {
+          // 等待显示动画完成后，开始1秒淡出动画
           if (mounted && taskNotificationService.currentNotification != null) {
             _hideController.forward(from: 0);
           }

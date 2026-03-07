@@ -86,24 +86,40 @@ class _RecallPageState extends State<RecallPage> {
 
   /// 解析 logs JSON，获取最新的 msg
   String? _parseLatestLogMsg(dynamic logsJson) {
-    if (logsJson == null) return null;
+    if (logsJson == null) {
+      debugPrint('[RecallPage] logsJson is null');
+      return null;
+    }
     
     try {
       List<dynamic> logs;
       if (logsJson is String) {
+        debugPrint('[RecallPage] logsJson is String: $logsJson');
         logs = jsonDecode(logsJson) as List<dynamic>;
       } else if (logsJson is List) {
+        debugPrint('[RecallPage] logsJson is List with ${logsJson.length} items');
         logs = logsJson;
       } else {
+        debugPrint('[RecallPage] logsJson is unknown type: ${logsJson.runtimeType}');
         return null;
       }
       
-      if (logs.isEmpty) return null;
+      if (logs.isEmpty) {
+        debugPrint('[RecallPage] logs list is empty');
+        return null;
+      }
       
       // 获取最后一条日志的 msg
-      final lastLog = logs.last as Map<String, dynamic>;
-      return lastLog['msg']?.toString();
+      final lastLog = logs.last;
+      debugPrint('[RecallPage] lastLog: $lastLog');
+      if (lastLog is Map<String, dynamic>) {
+        final msg = lastLog['msg']?.toString();
+        debugPrint('[RecallPage] parsed msg: $msg');
+        return msg;
+      }
+      return null;
     } catch (e) {
+      debugPrint('[RecallPage] Error parsing logs: $e');
       return null;
     }
   }
