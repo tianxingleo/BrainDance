@@ -123,11 +123,13 @@ class Video3DGSPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
-        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=10)...")
+        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=1, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=10", "-q:v", "2",
+                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-q:v", "2",
+                "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
                 str(temp_dir / "frame_%05d.jpg")
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         except subprocess.CalledProcessError as e:
@@ -225,13 +227,6 @@ class Video3DGSPipeline(BasePipeline):
             final_ply_path = nerf_engine.export()
             
             self.log(f"💾 导出 PLY 完成: {final_ply_path}")
-            
-            # 上传 PLY 并在 model_assets 中写入记录（非强制，内部容错）
-            try:
-                self.upload_and_record(str(final_ply_path), pipeline_metadata, params)
-            except Exception:
-                # upload_and_record 内部已捕获异常，这里保证不抛出
-                pass
 
             # ==========================================
             # Step 5: 空间语义锚点提取
@@ -242,6 +237,54 @@ class Video3DGSPipeline(BasePipeline):
                 anchor_extractor.extract_and_save(self.scene_id, log_callback=self.log)
             else:
                 self.log("⚠️ 未找到 Supabase 客户端，跳过空间语义锚点提取")
+
+            # ==========================================
+            # Step 6: 智能挑选最佳封图与初始视点
+            # ==========================================
+            import json
+            webgl_poses_path = cfg.project_dir / "webgl_poses.json"
+            if webgl_poses_path.exists():
+                try:
+                    with open(webgl_poses_path, "r") as f:
+                        poses_data = json.load(f)
+                    frames = poses_data.get("frames", [])
+                    if frames:
+                        # 使用 SceneAnalyzer 挑选最佳帧
+                        best_idx, preview_reason = scene_analyzer.select_best_preview(
+                            frames=frames, 
+                            images_dir=str(cfg.project_dir / "raw_images"), 
+                            log_callback=self.log
+                        )
+                        
+                        best_frame = frames[best_idx]
+                        pipeline_metadata["initial_camera_pose"] = best_frame.get("matrix")
+                        pipeline_metadata["preview_selection_reason"] = preview_reason
+                        
+                        # 解析出对应的图片文件名
+                        best_img_name = best_frame.get("id") or best_frame.get("image_url")
+                        if best_img_name:
+                            if best_img_name.startswith("images/"):
+                                best_img_name = best_img_name[7:]
+                            elif best_img_name.startswith("images\\"):
+                                best_img_name = best_img_name[7:]
+                                
+                            preview_img = cfg.project_dir / "raw_images" / best_img_name
+                            if not preview_img.exists():
+                                preview_img = cfg.data_dir / "images" / best_img_name
+                                
+                            if preview_img.exists():
+                                pipeline_metadata["preview_img_path"] = str(preview_img)
+                                self.log(f"    -> 已提取初始视角和预览图: {best_img_name}")
+                                self.log(f"    -> 封面选择理由: {preview_reason}")
+                except Exception as e:
+                    self.log(f"⚠️ 提取预览特征失败: {e}")
+
+            # 上传 PLY 并在 model_assets 中写入记录（非强制，内部容错）
+            try:
+                self.upload_and_record(str(final_ply_path), pipeline_metadata, params)
+            except Exception:
+                # upload_and_record 内部已捕获异常，这里保证不抛出
+                pass
 
             self.log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
 

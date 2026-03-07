@@ -83,9 +83,20 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 ## 📋 安装与部署
 
 ### 环境要求
-- **GPU**：NVIDIA RTX 30/40/50系列 (推荐12GB+显存，测试显卡: RTX5070)
-- **操作系统**：Linux (Ubuntu 22.04) / Windows WSL2
-- **CUDA版本**：11.8 或 12.x
+
+**最低配置**
+- **GPU**: NVIDIA RTX 5070 12GB 或更高
+- **CPU**: Intel Core i5-14600KF 或同级处理器
+- **内存**: 64GB RAM
+- **操作系统**: Linux (Ubuntu 22.04) / Windows WSL2
+- **CUDA版本**: 11.8 或 12.x
+
+**推荐配置**
+- **GPU**: NVIDIA L20 45GB × 2 (双卡)
+- **CPU**: Intel Xeon Platinum 8260 × 2 (双路)
+- **内存**: 512GB RAM
+- **操作系统**: Linux (Ubuntu 22.04)
+- **CUDA版本**: 12.x
 
 ### 快速开始
 

@@ -81,6 +81,9 @@ SUPABASE_KEY=sb_secret_xxxx... (填 service_role key)
   - `id` (uuid): 任务唯一标识
   - `user_id` (text): 用户 ID
   - `scene_id` (text): 场景 ID
+  - `display_name` (text): 任务展示名称（前端列表显示）
+  - `task_type` (text): 任务类型（如 `video_3dgs` / `single_image_sam3d`）
+  - `task_params` (jsonb): 任务参数（JSON 对象）
   - `status` (text): 状态 (pending/processing/completed/failed)
   - `logs` (jsonb): 实时执行日志
   - `quality_score` (integer): AI 质检评分

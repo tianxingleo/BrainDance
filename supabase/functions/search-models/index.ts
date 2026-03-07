@@ -257,7 +257,7 @@ function errorResponse(message: string, status = 500): Response {
  * 解析用户查询意图
  *
  * 功能:
- * - 调用 LLM (通义千问 qwen3.5-plus) 分析用户输入
+ * - 调用 LLM (通义千问 qwen-plus) 分析用户输入
  * - 提取搜索文本 (去掉时间词等干扰)
  * - 提取时间范围 (开始时间和结束时间)
  *
@@ -330,7 +330,7 @@ async function parseQueryIntent(
      *
      * 参数说明:
      * - model: 使用的模型
-     *   * qwen3.5-plus: Qwen3.5 Plus，最新顶级模型，效果媲美 qwen3-max，支持 1M 上下文
+     *   * qwen-plus: Qwen3.5 Plus，最新顶级模型，效果媲美 qwen3-max，支持 1M 上下文
      *   * 相比旧版 qwen-plus，推理能力和多模态能力大幅提升
      * - messages: 对话历史
      *   * system: 系统提示词 (定义 LLM 角色)
@@ -339,7 +339,7 @@ async function parseQueryIntent(
      *   * 避免 LLM 返回自然语言解释
      */
     const resp = await aiClient.chat.completions.create({
-      model: "qwen3.5-plus",
+      model: "qwen-plus",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userQuery },
@@ -508,7 +508,7 @@ async function searchModels(
    *
    * 传递参数必须与 RPC 函数定义完全匹配
    */
-  const { data, error } = await supabase.rpc("match_model_assets", {
+  const { data, error } = await supabase.rpc("match_memory_poses", {
     query_embedding: queryEmbedding,
     match_threshold: matchThreshold,
     match_count: matchCount,

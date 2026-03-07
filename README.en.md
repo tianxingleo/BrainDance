@@ -339,6 +339,7 @@ This project is an exploration standing on the shoulders of giants. Core algorit
 
 #### Rendering & Viewer
 
+- **Special Thanks**: Special thanks to **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** for its continued contribution to the web 3DGS ecosystem.
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: Three.js-based web viewer, inspiration for our mobile WebView rendering.
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: Another excellent WebGL implementation, providing early conceptual references.
 

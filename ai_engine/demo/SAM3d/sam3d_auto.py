@@ -182,7 +182,7 @@ class VLMProcessor:
 
         try:
             response = dashscope.MultiModalConversation.call(
-                model='qwen3.5-plus', 
+                model='qwen-plus', 
                 messages=messages,
             )
 

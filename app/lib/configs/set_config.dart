@@ -34,16 +34,31 @@ class SetConfig {
           setLanguage(settingsMsg[0], ref);
           break;
         case 1:
-          // '' = system, 'true' = dark, 'false' = light
+          // '' = system (fallback to system default but freeze it), 'true' = dark, 'false' = light
           final val = settingsMsg[1];
           if (val.isEmpty) {
-            ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.system);
+            final isDark =
+                WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark;
+            AppConfig.isNightMode = isDark;
+            ref
+                .read(themeModeProvider.notifier)
+                .setThemeMode(isDark ? ThemeMode.dark : ThemeMode.light);
           } else {
             setNightMode(val == 'true', ref);
           }
           break;
+        case 2:
+          AppConfig.hasReadRecordTip = settingsMsg[2] == 'true';
+          break;
       }
     }
+  }
+
+  static void setHasReadRecordTip(bool value) {
+    AppConfig.hasReadRecordTip = value;
+    settingsMsg[2] = value.toString();
+    saveMsgToFile();
   }
 
   static Future<bool> loadMsgFromFile() async {

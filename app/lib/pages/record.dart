@@ -4,55 +4,34 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/reco_config.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/set_config.dart';
 import 'package:camera/camera.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:braindance/extra_func_v2/video_thumbnail.dart';
+import 'package:braindance/pages/video_submit.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:braindance/main.dart' show isRecordingProvider;
+import 'dart:async';
 
-// 相机水平/垂直视场角（度），与实际摄像头接近即可
-const double _kFovH = 65.0;
-const double _kFovV = 50.0;
-
-/// 记录一帧拍摄时的朝向
-class _CapturedFrame {
-  final double yaw;
-  final double pitch;
-  _CapturedFrame(this.yaw, this.pitch);
-}
-
-class RecordPage extends StatefulWidget {
+class RecordPage extends ConsumerStatefulWidget {
   const RecordPage({super.key});
 
   @override
-  State<RecordPage> createState() => _RecordPageState();
+  ConsumerState<RecordPage> createState() => _RecordPageState();
 }
 
-class _RecordPageState extends State<RecordPage>
-    with SingleTickerProviderStateMixin {
+class _RecordPageState extends ConsumerState<RecordPage>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
-
-  // 覆盖扫描模式
-  bool _isArMode = false;
-  bool _isRecording = false;
-
-  // 传感器订阅
-  StreamSubscription<AccelerometerEvent>? _accelSub;
-  StreamSubscription<MagnetometerEvent>? _magSub;
-  Timer? _sampleTimer;
-
-  // 原始传感器数据
-  double _ax = 0, _ay = 0, _az = -9.8;
-  double _magX = 30, _magY = 0, _magZ = -40;
-
-  // 融合后的稳定绝对朝向（无漂移）
-  double _yaw = 0; // 方位角 0-360°（磁北方向）
-  double _pitch = 0; // 俯仰角 -90°~+90°
-
-  // 已录制帧的朝向列表
-  final List<_CapturedFrame> _capturedFrames = [];
+  bool _showTips = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    _showTips = !AppConfig.hasReadRecordTip;
+
     _buttonAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 150),
@@ -62,216 +41,563 @@ class _RecordPageState extends State<RecordPage>
           parent: _buttonAnimController, curve: Curves.easeInOut),
     );
 
-    if (!RecoConfig.cameraEnabled) return;
+    //相机初始化
+    if (!RecoConfig.cameraEnabled) {
+      return;
+    }
     RecoConfig.onUpdate = () {
-      if (mounted) setState(() {});
+      setState(() {});
     };
     RecoConfig.cameraInitialize();
   }
 
-  // ─── 传感器融合：加速度计（俯仰/横滚） + 磁力计（方位角） ─────────────
-  // 采用绝对值解算，不进行时间积分，从而根治漂移问题
-  void _computeOrientation() {
-    // 由加速度计推算俯仰角（Gravity Vector 为主）
-    final pitch = atan2(-_ax, sqrt(_ay * _ay + _az * _az));
-    final roll = atan2(_ay, _az);
-
-    // 倾斜补偿后的磁力计分量（消除手机倾斜对方位角的影响）
-    final mx = _magX * cos(pitch) + _magZ * sin(pitch);
-    final my = _magX * sin(roll) * sin(pitch) +
-        _magY * cos(roll) -
-        _magZ * sin(roll) * cos(pitch);
-
-    // 从磁力计计算方位角（磁北，无累积漂移）
-    var yaw = atan2(-my, mx) * (180 / pi);
-    if (yaw < 0) yaw += 360;
-
-    if (mounted) {
-      setState(() {
-        _yaw = yaw;
-        _pitch = (pitch * (180 / pi)).clamp(-90.0, 90.0);
-      });
-    }
-  }
-
-  void _startSensors() {
-    _accelSub = accelerometerEventStream(samplingPeriod: const Duration(milliseconds: 50)).listen((event) {
-      _ax = event.x;
-      _ay = event.y;
-      _az = event.z;
-      _computeOrientation();
-    });
-
-    _magSub = magnetometerEventStream(samplingPeriod: const Duration(milliseconds: 50)).listen((event) {
-      _magX = event.x;
-      _magY = event.y;
-      _magZ = event.z;
-      _computeOrientation();
-    });
-
-    // 扫描模式实时记录采样
-    _sampleTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
-      if (_isRecording && _isArMode) {
-        setState(() {
-          // 只在模式开启且正在“录制”时记录当前朝向点
-          _capturedFrames.add(_CapturedFrame(_yaw, _pitch));
-        });
-      }
-    });
-  }
-
-  void _stopSensors() {
-    _accelSub?.cancel();
-    _magSub?.cancel();
-    _sampleTimer?.cancel();
-  }
-
-  void _toggleArMode() {
-    setState(() {
-      _isArMode = !_isArMode;
-      if (_isArMode) {
-        _capturedFrames.clear();
-        _startSensors();
-      } else {
-        _stopSensors();
-        _isRecording = false;
-      }
-    });
-  }
-
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _recordTimer?.cancel();
     _buttonAnimController.dispose();
-    RecoConfig.cameraController?.dispose();
-    RecoConfig.cameraController = null;
-    RecoConfig.onUpdate = () {};
-    _stopSensors();
+    RecoConfig.disposeCamera();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final controller = RecoConfig.cameraController;
+
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      if (controller != null && controller.value.isInitialized) {
+        if (controller.value.isRecordingVideo) {
+          _stopRecording(controller).whenComplete(() {
+            RecoConfig.disposeCamera();
+            if (mounted) setState(() {});
+          });
+        } else {
+          RecoConfig.disposeCamera();
+          if (mounted) setState(() {});
+        }
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      if (RecoConfig.cameraController == null) {
+        RecoConfig.cameraInitialize();
+      }
+    }
+  }
+
+  Timer? _recordTimer;
+  int _recordSeconds = 0;
+
+  Future<void> _stopRecording(CameraController controller) async {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+    if (controller.value.isRecordingVideo) {
+      if (mounted) {
+        ref.read(isRecordingProvider.notifier).state = false;
+      }
+      final file = await controller.stopVideoRecording();
+      if (mounted) TDToast.showText('录制完成', context: context);
+
+      String thumbPath = file.path;
+      try {
+        thumbPath = await VThumb.ensureThumb(file.path);
+      } catch (_) {}
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
+          ),
+        );
+      }
+    }
+  }
+
+  void _onRecordTap() async {
+    final controller = RecoConfig.cameraController;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final isRecording = ref.read(isRecordingProvider);
+
+    if (isRecording) {
+      // Manual stop
+      _stopRecording(controller);
+    } else {
+      // Start recording
+      await controller.startVideoRecording();
+      ref.read(isRecordingProvider.notifier).state = true;
+      _recordSeconds = 0;
+
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        _recordSeconds++;
+        if (_recordSeconds >= 180) {
+          // 3 min
+          _stopRecording(controller);
+        } else if (mounted) {
+          // Trigger a minor rebuild to pulse or update something if needed
+          setState(() {});
+        }
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    Widget cameraWidget;
+    final theme = TDTheme.of(context);
+    final isDark = AppConfig.isNightMode;
+    final isRecording = ref.watch(isRecordingProvider);
+
+    late final Widget cameraView;
     if (!RecoConfig.cameraEnabled) {
-      cameraWidget = Center(child: Text(textLocalize("reco_camun")));
-    } else if (!RecoConfig.cameraController!.value.isInitialized) {
-      cameraWidget = Center(child: Text(textLocalize("reco_wait")));
+      cameraView = Center(
+        child: Text(
+          textLocalize("reco_camun"),
+          style: TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
+    } else if (RecoConfig.cameraController == null ||
+        !RecoConfig.cameraController!.value.isInitialized) {
+      cameraView = Center(
+        child: Text(
+          textLocalize("reco_wait"),
+          style: TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
     } else {
       // ─── 1. 解决相机拉伸：根据屏幕比例动态计算缩放 ───
       final controller = RecoConfig.cameraController!;
       final size = MediaQuery.of(context).size;
       final deviceRatio = size.width / size.height;
       final cameraRatio = controller.value.aspectRatio; // 通常是 9/16 ≈ 0.56
-      
+
       // 如果相机比屏幕还窄，则按高度撑满并裁切宽度
       var scale = 1 / (cameraRatio * deviceRatio);
       if (scale < 1) scale = 1 / scale;
 
-      cameraWidget = Transform.scale(
+      cameraView = Transform.scale(
         scale: scale,
         child: Center(child: CameraPreview(controller)),
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // ─── 底层相机画面 ───
-          Positioned.fill(child: cameraWidget),
+    // 获取所有可用摄像头
+    final cameras = RecoConfig.cameras;
+    final List<Widget> cameraSwitchButtons = [];
 
-          // ─── 2. 覆盖可见性层 (Fog of War) ───
-          // 实现扫描覆盖效果：未拍摄区域全黑，已拍摄区域完全透明
-          if (_isArMode)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _FogOfWarPainter(
-                  capturedFrames: _capturedFrames,
-                  currentYaw: _yaw,
-                  currentPitch: _pitch,
+    int getLensPriority(CameraLensDirection dir) {
+      if (dir == CameraLensDirection.back) return 1;
+      if (dir == CameraLensDirection.front) return 2;
+      return 3;
+    }
+
+    final sortedIndices = List<int>.generate(cameras.length, (i) => i)
+      ..sort(
+        (a, b) => getLensPriority(
+          cameras[a].lensDirection,
+        ).compareTo(getLensPriority(cameras[b].lensDirection)),
+      );
+
+    int backCount = 1;
+    int frontCount = 1;
+    int externalCount = 1;
+
+    for (int i in sortedIndices) {
+      final cam = cameras[i];
+      String label = '';
+      switch (cam.lensDirection) {
+        case CameraLensDirection.back:
+          label = backCount == 1 ? '主摄' : '广角';
+          backCount++;
+          break;
+        case CameraLensDirection.front:
+          label = frontCount == 1 ? '自拍' : '前置$frontCount';
+          frontCount++;
+          break;
+        case CameraLensDirection.external:
+          label = '外置$externalCount';
+          externalCount++;
+          break;
+      }
+
+      final bool isSelected = RecoConfig.camNum == i;
+
+      cameraSwitchButtons.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: isRecording
+                  ? null
+                  : () async {
+                      if (RecoConfig.cameraEnabled) {
+                        RecoConfig.camNum = i;
+                        await RecoConfig.cameraInitialize();
+                        setState(() {});
+                      }
+                    },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? (isDark
+                            ? const Color(0xFF4582FF).withAlpha(200)
+                            : theme.brandColor7.withAlpha(220))
+                      : (isDark
+                            ? const Color(0xFF23232A).withAlpha(150)
+                            : Colors.white.withAlpha(150)),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: isSelected
+                        ? (isDark ? const Color(0xFF4582FF) : theme.brandColor7)
+                        : (isDark
+                              ? Colors.white.withAlpha(30)
+                              : Colors.black.withAlpha(20)),
+                    width: isSelected ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      RecoConfig.getCameraLensIcon(cam.lensDirection),
+                      size: 20,
+                      color: isSelected
+                          ? Colors.white
+                          : (isDark ? Colors.white70 : const Color(0xFF555555)),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: isSelected
+                            ? Colors.white
+                            : (isDark
+                                  ? Colors.white70
+                                  : const Color(0xFF555555)),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-
-          // ─── UI 控制栏 ───
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            right: 24,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(TDTheme.of(context).radiusRound),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      _isArMode ? TDIcons.scan : TDIcons.scan,
-                      color: _isArMode ? const Color(0xFF00E5FF) : Colors.white,
-                      size: 24,
-                    ),
-                    onPressed: _toggleArMode,
-                  ),
-                  if (!_isArMode)
-                    IconButton(
-                      icon: const Icon(TDIcons.refresh, color: Colors.white, size: 24),
-                      onPressed: () => RecoConfig.cameraSwitch(),
-                    ),
-                ],
-              ),
-            ),
           ),
+        ),
+      );
+    }
 
-          // ─── 录制按钮 ───
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
+      body: Stack(
+        children: [
+          Positioned.fill(child: cameraView),
+          // 相机按钮
           Positioned(
-            bottom: 40,
+            bottom: isRecording ? 80 : 130, // 略微上移，录制时如果底部菜单隐藏，可以稍下沉或保持
             left: 0,
             right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _isRecording = !_isRecording;
-                  });
-                  if (!_isArMode && _isRecording) {
-                     TDToast.showText('录制中...', context: context);
-                  }
-                },
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isRecording)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 24),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withAlpha(200),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.redAccent.withAlpha(100),
+                          blurRadius: 8,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${(_recordSeconds ~/ 60).toString().padLeft(2, '0')}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Center(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: _isRecording ? 32 : 64,
-                      height: _isRecording ? 32 : 64,
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(_isRecording ? 8 : 32),
+                Center(
+                  child: GestureDetector(
+                    onTapDown: (_) => _buttonAnimController.forward(),
+                    onTapUp: (_) async {
+                      _buttonAnimController.reverse();
+                      _onRecordTap();
+                    },
+                    onTapCancel: () => _buttonAnimController.reverse(),
+                    child: ScaleTransition(
+                      scale: _buttonScaleAnimation,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: isRecording
+                                ? [Colors.redAccent, Colors.red]
+                                : isDark
+                                ? [
+                                    const Color(0xFF4582FF),
+                                    const Color(0xFF2156CC),
+                                  ]
+                                : [theme.brandColor4, theme.brandColor7],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF18181C)
+                                : Colors.white,
+                            width: 4,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: isRecording
+                                  ? Colors.redAccent.withAlpha(100)
+                                  : isDark
+                                  ? const Color(0xFF4582FF).withAlpha(80)
+                                  : Colors.black.withAlpha(40),
+                              blurRadius: 16,
+                              spreadRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            width: 66,
+                            height: 66,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF18181C)
+                                  : Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withAlpha(20),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                width: isRecording ? 28 : 24,
+                                height: isRecording ? 28 : 24,
+                                decoration: BoxDecoration(
+                                  color: isRecording
+                                      ? Colors.redAccent
+                                      : isDark
+                                      ? const Color(0xFF4582FF)
+                                      : theme.brandColor6,
+                                  borderRadius: BorderRadius.circular(
+                                    isRecording ? 6.0 : 12.0,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+          // 顶部摄像头切换栏
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 10,
+                bottom: 20,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withAlpha(200),
+                    Colors.black.withAlpha(0),
+                  ],
+                ),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: cameraSwitchButtons,
+                ),
               ),
             ),
           ),
-          
-          if (_isArMode)
-            Positioned(
-              top: 100,
-              left: 20,
+
+          // Info Button
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 10,
+            right: 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() {
+                  _showTips = true;
+                });
+              },
+              child: const Icon(
+                Icons.info_outline,
+                color: Colors.white70,
+                size: 42,
+              ),
+            ),
+          ),
+
+          if (_showTips)
+            Positioned.fill(
               child: Container(
-                padding: const EdgeInsets.all(8),
-                color: Colors.black45,
-                child: Text(
-                  '方位(Yaw): ${_yaw.toStringAsFixed(1)}°\n俯仰(Pitch): ${_pitch.toStringAsFixed(1)}°\n已记录覆盖帧: ${_capturedFrames.length}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                color: Colors.black87,
+                padding: const EdgeInsets.only(bottom: 80),
+                child: Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.all(24),
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.70,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E1E),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Tips",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  textLocalize('reco_tip_title1'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  textLocalize('reco_tip1'),
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  textLocalize('reco_tip_title2'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  textLocalize('reco_tip2'),
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  textLocalize('reco_tip_title3'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  textLocalize('reco_tip3'),
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              SetConfig.setHasReadRecordTip(true);
+                              setState(() {
+                                _showTips = false;
+                              });
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blueAccent,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              child: Text(
+                                'OK',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -279,68 +605,4 @@ class _RecordPageState extends State<RecordPage>
       ),
     );
   }
-}
-
-/// ─── 3. 战争迷雾 Painter：实现全局覆盖检查 ───
-class _FogOfWarPainter extends CustomPainter {
-  final List<_CapturedFrame> capturedFrames;
-  final double currentYaw;
-  final double currentPitch;
-
-  _FogOfWarPainter({
-    required this.capturedFrames,
-    required this.currentYaw,
-    required this.currentPitch,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // A. 绘制一层半透明黑色遮罩，作为“未拍摄区域”
-    final layerPaint = Paint()..color = Colors.black.withValues(alpha: 0.85);
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), layerPaint);
-
-    // B. 使用 BlendMode.clear 在遮罩上挖出已拍摄的画面（洞口）
-    final clearPaint = Paint()
-      ..blendMode = BlendMode.clear
-      ..style = PaintingStyle.fill;
-
-    // 逻辑：遍历所有 capture 过的帧，将它们在当前视角下的相对位置投影到屏幕
-    for (var frame in capturedFrames) {
-      double dx = (frame.yaw - currentYaw);
-      // 处理 0/360 度循环越界
-      if (dx > 180) dx -= 360;
-      if (dx < -180) dx += 360;
-      double dy = (frame.pitch - currentPitch);
-
-      // 投影：角度偏移 -> 屏幕像素偏移
-      double screenX = size.width / 2 + (dx / _kFovH) * size.width;
-      double screenY = size.height / 2 - (dy / _kFovV) * size.height;
-
-      // 既然这一帧当时拍到了整个屏幕内容，那我们就把这块区域挖掉
-      canvas.drawRect(
-        Rect.fromCenter(
-          center: Offset(screenX, screenY), 
-          width: size.width, 
-          height: size.height
-        ),
-        clearPaint,
-      );
-    }
-
-    canvas.restore();
-    
-    // 绘制中心引导框（提示当前正在录制的范围）
-    final guidePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.3)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    canvas.drawRect(
-      Rect.fromCenter(center: size.center(Offset.zero), width: size.width, height: size.height),
-      guidePaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_FogOfWarPainter oldDelegate) => true;
 }

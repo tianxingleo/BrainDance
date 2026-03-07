@@ -77,12 +77,15 @@ class KnowledgeBase:
             
             # 资产路径 (用于未来复用)
             "ply_path": ply_path,
+            "preview_img_path": metadata.get('preview_img_path', ''),
             
             # 技术参数 (存入 JSONB)
             "meta_info": {
                 "quality_score": metadata.get('ai_score', 0),
                 "quality_reason": metadata.get('ai_reason', ''),
-                "engine_version": "nerfstudio-splatfacto"
+                "engine_version": "nerfstudio-splatfacto",
+                "initial_camera_pose": metadata.get('initial_camera_pose', None),
+                "is_ai_selected": "initial_camera_pose" in metadata
             }
         }
 
