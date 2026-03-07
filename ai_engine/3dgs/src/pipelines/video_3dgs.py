@@ -250,7 +250,7 @@ class Video3DGSPipeline(BasePipeline):
                     frames = poses_data.get("frames", [])
                     if frames:
                         # 使用 SceneAnalyzer 挑选最佳帧
-                        best_idx = scene_analyzer.select_best_preview(
+                        best_idx, preview_reason = scene_analyzer.select_best_preview(
                             frames=frames, 
                             images_dir=str(cfg.project_dir / "raw_images"), 
                             log_callback=self.log
@@ -258,6 +258,7 @@ class Video3DGSPipeline(BasePipeline):
                         
                         best_frame = frames[best_idx]
                         pipeline_metadata["initial_camera_pose"] = best_frame.get("matrix")
+                        pipeline_metadata["preview_selection_reason"] = preview_reason
                         
                         # 解析出对应的图片文件名
                         best_img_name = best_frame.get("id") or best_frame.get("image_url")
@@ -274,6 +275,7 @@ class Video3DGSPipeline(BasePipeline):
                             if preview_img.exists():
                                 pipeline_metadata["preview_img_path"] = str(preview_img)
                                 self.log(f"    -> 已提取初始视角和预览图: {best_img_name}")
+                                self.log(f"    -> 封面选择理由: {preview_reason}")
                 except Exception as e:
                     self.log(f"⚠️ 提取预览特征失败: {e}")
 
