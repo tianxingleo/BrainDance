@@ -127,8 +127,8 @@ class _RecallPageState extends State<RecallPage> {
           final logs = task['logs'];
           debugPrint('[RecallPage] Task $taskId logs type: ${logs?.runtimeType}, value: $logs');
           
-          if (logs is List<dynamic>) {
-            final allLogs = _parseAllLogMsgs(logs);
+          if (logs is List) {
+            final allLogs = _parseAllLogMsgs(List<dynamic>.from(logs));
             if (allLogs.isNotEmpty) {
               logMap[taskId] = allLogs;
               debugPrint('[RecallPage] Task $taskId has ${allLogs.length} logs, latest: ${allLogs.last}');
