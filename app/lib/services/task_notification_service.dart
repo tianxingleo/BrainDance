@@ -92,34 +92,28 @@ class TaskNotificationService extends ChangeNotifier {
   Future<void> _loadNotifiedTasksFromCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final completedJson = prefs.getString(_kNotifiedCompletedTasks);
-      final failedJson = prefs.getString(_kNotifiedFailedTasks);
-
-      if (completedJson != null) {
-        final List<dynamic> completedList = jsonDecode(completedJson);
-        _notifiedCompletedTasks = Set<String>.from(completedList);
-      }
-      if (failedJson != null) {
-        final List<dynamic> failedList = jsonDecode(failedJson);
-        _notifiedFailedTasks = Set<String>.from(failedList);
-      }
+      _notifiedCompletedTasks = _loadSetFromPrefs(prefs, _kNotifiedCompletedTasks);
+      _notifiedFailedTasks = _loadSetFromPrefs(prefs, _kNotifiedFailedTasks);
     } catch (e) {
       // 静默失败，使用空集合
     }
+  }
+
+  /// 从 SharedPreferences 加载 Set
+  Set<String> _loadSetFromPrefs(SharedPreferences prefs, String key) {
+    final json = prefs.getString(key);
+    if (json == null) return {};
+    return Set<String>.from(jsonDecode(json) as List<dynamic>);
   }
 
   /// 保存已通知过的任务ID到本地缓存
   Future<void> _saveNotifiedTasksToCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _kNotifiedCompletedTasks,
-        jsonEncode(_notifiedCompletedTasks.toList()),
-      );
-      await prefs.setString(
-        _kNotifiedFailedTasks,
-        jsonEncode(_notifiedFailedTasks.toList()),
-      );
+      await Future.wait([
+        prefs.setString(_kNotifiedCompletedTasks, jsonEncode(_notifiedCompletedTasks.toList())),
+        prefs.setString(_kNotifiedFailedTasks, jsonEncode(_notifiedFailedTasks.toList())),
+      ]);
     } catch (e) {
       // 静默失败
     }
