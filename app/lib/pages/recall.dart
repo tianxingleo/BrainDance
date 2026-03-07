@@ -2,7 +2,6 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
-import '../extra_func/dynamic_background.dart';
 import 'webgl_viewer.dart';
 
 class RecallPage extends StatefulWidget {
@@ -76,8 +75,8 @@ class _RecallPageState extends State<RecallPage> {
           if (_models.isEmpty) {
             _models.add({
               'id': 'local_demo',
-              'scene_id': '本地 Demo 模型 (离线可用)',
-              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'scene_id': textLocalize('recall_demo_title'),
+              'description': textLocalize('recall_demo_desc'),
               'ply_path': '',
             });
           }
@@ -90,14 +89,17 @@ class _RecallPageState extends State<RecallPage> {
           _models = [
             {
               'id': 'local_demo',
-              'scene_id': '本地 Demo 模型 (离线可用)',
-              'description': '预置的 3DGS 模型，无需网络即可查看。',
+              'scene_id': textLocalize('recall_demo_title'),
+              'description': textLocalize('recall_demo_desc'),
               'ply_path': '',
             },
           ];
           _isLoading = false;
         });
-        TDToast.showText('加载模型失败，已切换至离线模式', context: context);
+        TDToast.showText(
+          textLocalize('recall_error_offline'),
+          context: context,
+        );
       }
     }
   }
@@ -118,12 +120,13 @@ class _RecallPageState extends State<RecallPage> {
     final iconColor = isDark
         ? const Color(0xFFEEEEEE)
         : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Scaffold(
       backgroundColor: isDark ? darkBg : theme.grayColor1,
       appBar: AppBar(
         backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: true,
         title: TDText(
           textLocalize("home_page"),
@@ -138,7 +141,7 @@ class _RecallPageState extends State<RecallPage> {
               duration: const Duration(milliseconds: 600),
               child: Icon(Icons.refresh, color: iconColor),
             ),
-            tooltip: '刷新',
+            tooltip: textLocalize("recall_refresh"),
             onPressed: () {
               setState(() {
                 _isLoading = true;
@@ -158,45 +161,101 @@ class _RecallPageState extends State<RecallPage> {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: Column(
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20.0,
-                vertical: 12.0,
-              ),
-              child: TextField(
-                controller: _searchController,
-                style: TextStyle(color: textColor),
-                decoration: InputDecoration(
-                  hintText: '搜索回忆...',
-                  hintStyle: TextStyle(color: hintTextColor),
-                  filled: true,
-                  fillColor: isDark
-                      ? darkInput
-                      : theme.whiteColor1.withAlpha(220),
-                  prefixIcon: Icon(Icons.search, color: iconColor),
-                  contentPadding: const EdgeInsets.symmetric(
-                    vertical: 16,
-                    horizontal: 20,
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 15.0,
+                    vertical: 10.0,
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(32.0),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      style: TextStyle(
+                        color: isDark
+                            ? const Color(0xFFFFFFFF)
+                            : const Color(0xFF333333),
+                        fontSize: 16,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: textLocalize("recall_search_hint"),
+                        hintStyle: TextStyle(
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : theme.fontGyColor3,
+                          fontSize: 16,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : theme.fontGyColor3,
+                        ),
+                        filled: true,
+                        fillColor: Colors.transparent,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 20,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(32.0),
+                          borderSide: isDark
+                              ? const BorderSide(
+                                  color: Color(0xFF4582FF),
+                                  width: 1.5,
+                                )
+                              : BorderSide(
+                                  color: theme.brandColor7,
+                                  width: 1.5,
+                                ),
+                        ),
+                      ),
+                      onSubmitted: (value) => _searchModels(value),
+                      onChanged: (value) {
+                        if (value.isEmpty) _searchModels('');
+                      },
+                    ),
                   ),
                 ),
-                onSubmitted: (value) => _searchModels(value),
-                onChanged: (value) {
-                  if (value.isEmpty) _searchModels('');
-                },
-              ),
-            ),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _models.isEmpty
-                  ? _buildEmptyState(theme, isDark)
-                  : _buildModelGrid(theme, isDark),
+                Expanded(
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (!_isLoading && _models.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: 108.0,
+                          ), // 留出 main.dart 的 BottomNavigationBar 和间距高度 (90 height + 18 padding)
+                          child: _buildEmptyState(theme, isDark),
+                        ),
+                      if (_isLoading)
+                        const Center(
+                          child: TDLoading(
+                            size: TDLoadingSize.large,
+                            icon: TDLoadingIcon.circle,
+                          ),
+                        )
+                      else if (_models.isNotEmpty)
+                        _buildModelGrid(theme, isDark),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -243,7 +302,10 @@ class _RecallPageState extends State<RecallPage> {
         setState(() {
           _isLoading = false;
         });
-        TDToast.showText('搜索失败: $e', context: context);
+        TDToast.showText(
+          '${textLocalize("recall_error_search")}$e',
+          context: context,
+        );
       }
     }
   }
@@ -259,10 +321,10 @@ class _RecallPageState extends State<RecallPage> {
     return Center(
       child: Container(
         width: MediaQuery.of(context).size.width * 0.85,
-        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
-          borderRadius: BorderRadius.circular(theme.radiusExtraLarge),
+          borderRadius: BorderRadius.circular(32.0),
           border: Border.all(
             color: isDark ? darkBorder : theme.whiteColor1,
             width: 1,
@@ -298,14 +360,18 @@ class _RecallPageState extends State<RecallPage> {
             ),
             const SizedBox(height: 8),
             TDText(
-              "暂无回忆，去记录一些美好瞬间吧",
+              textLocalize("recall_empty_title"),
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
             ),
             const SizedBox(height: 40),
             TDButton(
-              text: "打开本地离线 Demo 模型",
-              iconWidget: Icon(TDIcons.view_module, color: iconColor, size: 20),
+              text: textLocalize("recall_open_demo"),
+              iconWidget: Icon(
+                TDIcons.view_module,
+                color: Colors.white,
+                size: 20,
+              ),
               type: TDButtonType.fill,
               theme: TDButtonTheme.primary,
               shape: TDButtonShape.round,
@@ -314,8 +380,9 @@ class _RecallPageState extends State<RecallPage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        const WebGLViewerPage(sceneId: '本地 Demo 模型 (离线可用)'),
+                    builder: (context) => WebGLViewerPage(
+                      sceneId: textLocalize("recall_demo_title"),
+                    ),
                   ),
                 );
               },
@@ -329,9 +396,6 @@ class _RecallPageState extends State<RecallPage> {
   Widget _buildModelGrid(TDThemeData theme, bool isDark) {
     final textColor = isDark
         ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final iconColor = isDark
-        ? const Color(0xFFEEEEEE)
         : const Color(0xFF333333);
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
 
@@ -462,7 +526,12 @@ class _RecallPageState extends State<RecallPage> {
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.only(
+        left: 16.0,
+        right: 16.0,
+        top: 4.0,
+        bottom: 16.0,
+      ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 16.0,
@@ -473,7 +542,7 @@ class _RecallPageState extends State<RecallPage> {
       itemBuilder: (context, index) {
         final model = _models[index];
         final sceneId = model['scene_id'] ?? 'Unknown Scene';
-        final desc = model['description'] ?? '没有描述信息';
+        final desc = model['description'] ?? textLocalize("recall_no_desc");
         final similarity = model['similarity'] as double?;
 
         return TweenAnimationBuilder<double>(
@@ -493,7 +562,7 @@ class _RecallPageState extends State<RecallPage> {
             child: Container(
               decoration: BoxDecoration(
                 color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-                borderRadius: BorderRadius.circular(theme.radiusLarge),
+                borderRadius: BorderRadius.circular(28.0),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withAlpha(20),
@@ -512,8 +581,8 @@ class _RecallPageState extends State<RecallPage> {
                         Container(
                           decoration: BoxDecoration(
                             color: isDark ? darkInput : theme.grayColor3,
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(theme.radiusLarge),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(28.0),
                             ),
                           ),
                           clipBehavior: Clip.hardEdge,
@@ -522,7 +591,7 @@ class _RecallPageState extends State<RecallPage> {
                                   model['preview_img_path'],
                                   fit: BoxFit.cover,
                                   errorBuilder: (context, error, stackTrace) =>
-                                      Center(child: Icon(Icons.view_in_ar, size: 40, color: iconColor)),
+                                      Center(child: Icon(Icons.view_in_ar, size: 64, color: theme.brandColor7.withAlpha(200))),
                                   loadingBuilder: (context, child, loadingProgress) {
                                     if (loadingProgress == null) return child;
                                     return const Center(child: CircularProgressIndicator());
@@ -531,8 +600,8 @@ class _RecallPageState extends State<RecallPage> {
                               : Center(
                                   child: Icon(
                                     Icons.view_in_ar,
-                                    size: 40,
-                                    color: iconColor,
+                                    size: 64,
+                                    color: theme.brandColor7.withAlpha(200),
                                   ),
                                 ),
                         ),

@@ -53,6 +53,15 @@ enum Language {
       "tip_cache": "已成功清除缓存",
       "tip_fail": "文件上传失败！",
       "tip_no_permission": "应用没有权限，无法保存到图库。",
+      "recall_search_hint": "搜索回忆...",
+      "recall_empty_title": "暂无回忆，去记录一些美好瞬间吧",
+      "recall_open_demo": "打开本地离线 Demo 模型",
+      "recall_no_desc": "没有描述信息",
+      "recall_demo_title": "本地 Demo 模型 (离线可用)",
+      "recall_demo_desc": "预置的 3DGS 模型，无需网络即可查看。",
+      "recall_error_offline": "加载模型失败，已切换至离线模式",
+      "recall_error_search": "搜索失败: ",
+      "recall_refresh": "刷新",
     },
   ),
   en(
@@ -114,6 +123,18 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "tip_cache": "The cache is successfully cleared",
       "tip_fail": "Failed to upload file(s)!",
       "tip_no_permission": "Does not have permission to save to the gallery.",
+      "recall_search_hint": "Search memories...",
+      "recall_empty_title":
+          "No memories yet, go record some beautiful moments!",
+      "recall_open_demo": "Open local offline Demo model",
+      "recall_no_desc": "No description available",
+      "recall_demo_title": "Local Demo Model (Available Offline)",
+      "recall_demo_desc":
+          "Pre-installed 3DGS model, viewable without network connectivity.",
+      "recall_error_offline":
+          "Failed to load models, switched to offline mode.",
+      "recall_error_search": "Search failed: ",
+      "recall_refresh": "Refresh",
     },
   );
 
