@@ -34,6 +34,8 @@ $RECYCLE.BIN/
 # =========================
 .env
 .env.*
+!.env.example
+!**/.env.example
 *.pem
 *.key
 config.yaml
@@ -126,6 +128,27 @@ app/assets/webgl/models/*.splat
 app/assets/webgl/models/*.obj
 app/assets/webgl/models/*.glb
 app/assets/webgl/models/*.gltf
+# 忽略 app/assets/webgl/models 下的图片文件
+app/assets/webgl/models/images/
+
+# 忽略 3dgs_viewer/ (WebGL Demo) 下的媒体文件
+3dgs_viewer/**/*.mp4
+3dgs_viewer/**/*.mov
+3dgs_viewer/**/*.avi
+3dgs_viewer/**/*.ply
+3dgs_viewer/**/*.splat
+3dgs_viewer/my-3dgs-viewer/public/models/images/
+app/assets/webgl/models/images/
+app/assets/webgl/models/*.jpg
+app/assets/webgl/models/*.jpeg
+app/assets/webgl/models/*.png
+app/assets/webgl/models/*.gif
+app/assets/webgl/models/*.webp
+
+# 忽略 WebGL 构建产物
+app/assets/webgl/assets/
+app/assets/webgl/dist/
+app/assets/webgl/.vite/
 
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
@@ -203,5 +226,5 @@ docs/old/idea.pdf
 # 备份文件超过100MB不应提交
 *.ply.bak
 *.mp4.bak
-ai_engine/demo/webgl/test.mp4.bak
-ai_engine/demo/webgl/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
+3dgs_viewer/test.mp4.bak
+3dgs_viewer/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak

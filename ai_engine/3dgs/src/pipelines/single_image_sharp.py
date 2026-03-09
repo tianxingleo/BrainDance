@@ -31,7 +31,7 @@ class SingleImageSharpPipeline(BasePipeline):
         self.log(f"3DGS 模型生成完毕: {generated_ply}")
 
         # 使用基类提供的 helper 执行 RAG 分析与上传/入库（方法内部保证容错）
-        metadata = {"engine": "sharp", "original_image": input_path}
+        metadata = {"engine": "sharp", "original_image": input_path, "preview_img_path": input_path}
         try:
             rag_meta = self.run_rag_analysis(input_path)
             metadata.update(rag_meta)

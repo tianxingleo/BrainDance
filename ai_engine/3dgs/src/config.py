@@ -28,6 +28,9 @@ class PipelineConfig:
     
     # 2. 【核心配置】
     work_root: Path = Path("./temp_workspace")
+
+    # GPU 配置：默认使用第 1 张卡（索引 0），可通过 GPU_INDEX 覆盖
+    gpu_index: int = field(default_factory=lambda: int(os.getenv("GPU_INDEX", 0)))
     
     # 🟢 [修复] 必须添加这一行，给一个默认训练步数 (兼容旧代码中的 .iterations)
     iterations: int = 30000
@@ -114,3 +117,12 @@ class PipelineConfig:
             
         # 设置 Setuptools 修复 (对应原代码 env["SETUPTOOLS_USE_DISTUTILS"])
         os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+
+        # 统一 GPU 选择策略：
+        # - 若显式设置了 GPU_INDEX，则强制绑定到对应物理卡
+        # - 否则若外部未设置 CUDA_VISIBLE_DEVICES，则使用配置中的 gpu_index
+        gpu_index_env = os.getenv("GPU_INDEX", "").strip()
+        if gpu_index_env:
+            os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index_env
+        elif not os.getenv("CUDA_VISIBLE_DEVICES", "").strip():
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(self.gpu_index)

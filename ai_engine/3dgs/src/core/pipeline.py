@@ -80,7 +80,8 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     try:
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
-             "-vf", "fps=10", "-q:v", "2", 
+             "-vf", "fps=10", "-q:v", "2",
+             "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
              str(temp_dir / "frame_%05d.jpg")],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
