@@ -1,14 +1,28 @@
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/reco_config.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/configs/set_config.dart';
-import 'package:camera/camera.dart';
-import 'package:braindance/extra_func_v2/video_thumbnail.dart';
-import 'package:braindance/pages/video_submit.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:braindance/main.dart' show isRecordingProvider;
 import 'dart:async';
+import 'dart:math';
+import 'dart:ui';
+
+import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/reco_config.dart';
+import 'package:braindance/configs/set_config.dart';
+import 'package:braindance/extra_func_v2/video_thumbnail.dart';
+import 'package:braindance/main.dart' show isRecordingProvider;
+import 'package:braindance/pages/video_submit.dart';
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+const double _kFovH = 65.0;
+const double _kFovV = 50.0;
+
+class _CapturedFrame {
+  final double yaw;
+  final double pitch;
+
+  const _CapturedFrame(this.yaw, this.pitch);
+}
 
 class RecordPage extends ConsumerStatefulWidget {
   const RecordPage({super.key});
@@ -21,7 +35,29 @@ class _RecordPageState extends ConsumerState<RecordPage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
+
   bool _showTips = false;
+  bool _isArMode = false;
+  bool _isArSampling = false;
+
+  Timer? _recordTimer;
+  int _recordSeconds = 0;
+
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+  StreamSubscription<MagnetometerEvent>? _magSub;
+  Timer? _sampleTimer;
+
+  double _ax = 0;
+  double _ay = 0;
+  double _az = -9.8;
+  double _magX = 30;
+  double _magY = 0;
+  double _magZ = -40;
+
+  double _yaw = 0;
+  double _pitch = 0;
+
+  final List<_CapturedFrame> _capturedFrames = [];
 
   @override
   void initState() {
@@ -38,12 +74,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
       CurvedAnimation(parent: _buttonAnimController, curve: Curves.easeInOut),
     );
 
-    //相机初始化
     if (!RecoConfig.cameraEnabled) {
       return;
     }
+
     RecoConfig.onUpdate = () {
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     };
     RecoConfig.cameraInitialize();
   }
@@ -52,7 +90,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _recordTimer?.cancel();
+    _recordTimer = null;
+    _stopSensors();
+    _setGlobalRecording(false);
     _buttonAnimController.dispose();
+    RecoConfig.onUpdate = () {};
     RecoConfig.disposeCamera();
     super.dispose();
   }
@@ -64,114 +106,230 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
+      if (_isArMode) {
+        _stopSensors();
+        if (_isArSampling) {
+          setState(() {
+            _isArSampling = false;
+          });
+          _setGlobalRecording(false);
+        }
+      }
+
       if (controller != null && controller.value.isInitialized) {
         if (controller.value.isRecordingVideo) {
-          _stopRecording(controller).whenComplete(() {
+          _stopVideoRecording(controller).whenComplete(() {
             RecoConfig.disposeCamera();
-            if (mounted) setState(() {});
+            if (mounted) {
+              setState(() {});
+            }
           });
         } else {
           RecoConfig.disposeCamera();
-          if (mounted) setState(() {});
+          if (mounted) {
+            setState(() {});
+          }
         }
       }
     } else if (state == AppLifecycleState.resumed) {
       if (RecoConfig.cameraController == null) {
         RecoConfig.cameraInitialize();
       }
+      if (_isArMode) {
+        _startSensors();
+      }
     }
   }
 
-  Timer? _recordTimer;
-  int _recordSeconds = 0;
+  void _setGlobalRecording(bool value) {
+    ref.read(isRecordingProvider.notifier).state = value;
+  }
 
-  Future<void> _stopRecording(CameraController controller) async {
+  Future<void> _stopVideoRecording(CameraController controller) async {
     _recordTimer?.cancel();
     _recordTimer = null;
-    if (controller.value.isRecordingVideo) {
-      if (mounted) {
-        ref.read(isRecordingProvider.notifier).state = false;
-      }
-      final file = await controller.stopVideoRecording();
-      if (mounted) TDToast.showText('录制完成', context: context);
 
-      String thumbPath = file.path;
-      try {
-        thumbPath = await VThumb.ensureThumb(file.path);
-      } catch (_) {}
+    if (!controller.value.isRecordingVideo) {
+      return;
+    }
 
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
-          ),
-        );
-      }
+    _setGlobalRecording(false);
+    final file = await controller.stopVideoRecording();
+
+    if (mounted) {
+      TDToast.showText('录制完成', context: context);
+    }
+
+    String thumbPath = file.path;
+    try {
+      thumbPath = await VThumb.ensureThumb(file.path);
+    } catch (_) {}
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
+        ),
+      );
     }
   }
 
-  void _onRecordTap() async {
+  Future<void> _toggleVideoRecording() async {
     final controller = RecoConfig.cameraController;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
 
-    final isRecording = ref.read(isRecordingProvider);
+    final isVideoRecording = ref.read(isRecordingProvider);
+    if (isVideoRecording) {
+      await _stopVideoRecording(controller);
+      return;
+    }
 
-    if (isRecording) {
-      // Manual stop
-      _stopRecording(controller);
-    } else {
-      // Start recording
-      await controller.startVideoRecording();
-      ref.read(isRecordingProvider.notifier).state = true;
-      _recordSeconds = 0;
+    await controller.startVideoRecording();
+    _setGlobalRecording(true);
+    _recordSeconds = 0;
+    if (mounted) {
+      setState(() {});
+    }
 
-      _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        _recordSeconds++;
-        if (_recordSeconds >= 180) {
-          // 3 min
-          _stopRecording(controller);
-        } else if (mounted) {
-          // Trigger a minor rebuild to pulse or update something if needed
-          setState(() {});
-        }
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _recordSeconds++;
+      if (_recordSeconds >= 180) {
+        _stopVideoRecording(controller);
+      } else if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _computeOrientation() {
+    final pitch = atan2(-_ax, sqrt(_ay * _ay + _az * _az));
+    final roll = atan2(_ay, _az);
+
+    final mx = _magX * cos(pitch) + _magZ * sin(pitch);
+    final my =
+        _magX * sin(roll) * sin(pitch) +
+        _magY * cos(roll) -
+        _magZ * sin(roll) * cos(pitch);
+
+    var yaw = atan2(-my, mx) * (180 / pi);
+    if (yaw < 0) {
+      yaw += 360;
+    }
+
+    if (mounted) {
+      setState(() {
+        _yaw = yaw;
+        _pitch = (pitch * (180 / pi)).clamp(-90.0, 90.0);
       });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  void _startSensors() {
+    if (_accelSub != null || _magSub != null) {
+      return;
+    }
+
+    _accelSub =
+        accelerometerEventStream(
+          samplingPeriod: const Duration(milliseconds: 50),
+        ).listen((event) {
+          _ax = event.x;
+          _ay = event.y;
+          _az = event.z;
+          _computeOrientation();
+        });
+
+    _magSub =
+        magnetometerEventStream(
+          samplingPeriod: const Duration(milliseconds: 50),
+        ).listen((event) {
+          _magX = event.x;
+          _magY = event.y;
+          _magZ = event.z;
+          _computeOrientation();
+        });
+
+    _sampleTimer ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
+      if (_isArMode && _isArSampling && mounted) {
+        setState(() {
+          _capturedFrames.add(_CapturedFrame(_yaw, _pitch));
+        });
+      }
+    });
+  }
+
+  void _stopSensors() {
+    _accelSub?.cancel();
+    _accelSub = null;
+    _magSub?.cancel();
+    _magSub = null;
+    _sampleTimer?.cancel();
+    _sampleTimer = null;
+  }
+
+  void _toggleArMode() {
+    final isVideoRecording = ref.read(isRecordingProvider) && !_isArSampling;
+    if (isVideoRecording) {
+      return;
+    }
+
+    setState(() {
+      _isArMode = !_isArMode;
+      if (_isArMode) {
+        _capturedFrames.clear();
+        _startSensors();
+      } else {
+        _stopSensors();
+        _isArSampling = false;
+        _setGlobalRecording(false);
+      }
+    });
+  }
+
+  void _toggleArSampling() {
+    if (!_isArMode) {
+      return;
+    }
+
+    setState(() {
+      _isArSampling = !_isArSampling;
+    });
+    _setGlobalRecording(_isArSampling);
+
+    if (mounted) {
+      TDToast.showText(_isArSampling ? '开始扫描覆盖' : '已暂停扫描', context: context);
+    }
+  }
+
+  Future<void> _onRecordTap() async {
+    if (_isArMode) {
+      _toggleArSampling();
+      return;
+    }
+
+    await _toggleVideoRecording();
+  }
+
+  List<Widget> _buildCameraSwitchButtons(
+    BuildContext context,
+    bool isAnyRecording,
+  ) {
     final theme = TDTheme.of(context);
     final isDark = AppConfig.isNightMode;
-    final isRecording = ref.watch(isRecordingProvider);
-
-    late final Widget cameraView;
-    if (!RecoConfig.cameraEnabled) {
-      cameraView = Center(
-        child: Text(
-          textLocalize("reco_camun"),
-          style: TextStyle(fontSize: 18, color: Colors.white70),
-        ),
-      );
-    } else if (RecoConfig.cameraController == null ||
-        !RecoConfig.cameraController!.value.isInitialized) {
-      cameraView = Center(
-        child: Text(
-          textLocalize("reco_wait"),
-          style: TextStyle(fontSize: 18, color: Colors.white70),
-        ),
-      );
-    } else {
-      cameraView = CameraPreview(RecoConfig.cameraController!);
-    }
-    // 获取所有可用摄像头
     final cameras = RecoConfig.cameras;
-    final List<Widget> cameraSwitchButtons = [];
+    final cameraSwitchButtons = <Widget>[];
 
     int getLensPriority(CameraLensDirection dir) {
-      if (dir == CameraLensDirection.back) return 1;
-      if (dir == CameraLensDirection.front) return 2;
+      if (dir == CameraLensDirection.back) {
+        return 1;
+      }
+      if (dir == CameraLensDirection.front) {
+        return 2;
+      }
       return 3;
     }
 
@@ -186,16 +344,16 @@ class _RecordPageState extends ConsumerState<RecordPage>
     int frontCount = 1;
     int externalCount = 1;
 
-    for (int i in sortedIndices) {
+    for (final i in sortedIndices) {
       final cam = cameras[i];
       String label = '';
       switch (cam.lensDirection) {
         case CameraLensDirection.back:
-          label = backCount == 1 ? '主摄' : '广角';
+          label = backCount == 1 ? '主摄' : '广角$backCount';
           backCount++;
           break;
         case CameraLensDirection.front:
-          label = frontCount == 1 ? '自拍' : '前置$frontCount';
+          label = frontCount == 1 ? '前置1' : '前置$frontCount';
           frontCount++;
           break;
         case CameraLensDirection.external:
@@ -204,7 +362,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
           break;
       }
 
-      final bool isSelected = RecoConfig.camNum == i;
+      final isSelected = RecoConfig.camNum == i;
 
       cameraSwitchButtons.add(
         Padding(
@@ -213,15 +371,25 @@ class _RecordPageState extends ConsumerState<RecordPage>
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(24),
-              onTap: isRecording
-                  ? null
-                  : () async {
-                      if (RecoConfig.cameraEnabled) {
-                        RecoConfig.camNum = i;
-                        await RecoConfig.cameraInitialize();
-                        setState(() {});
-                      }
-                    },
+              onTap: () async {
+                if (RecoConfig.cameraEnabled) {
+                  if (isAnyRecording) {
+                    try {
+                      await RecoConfig.trySwitchCameraDescription(i);
+                      if (mounted) setState(() {});
+                    } catch (e) {
+                      if (mounted)
+                        TDToast.showText('录像中无法直接切换传感器', context: context);
+                    }
+                  } else {
+                    RecoConfig.camNum = i;
+                    await RecoConfig.cameraInitialize();
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  }
+                }
+              },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 padding: const EdgeInsets.symmetric(
@@ -277,20 +445,160 @@ class _RecordPageState extends ConsumerState<RecordPage>
         ),
       );
     }
+
+    return cameraSwitchButtons;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = TDTheme.of(context);
+    final isDark = AppConfig.isNightMode;
+    final isVideoRecording = ref.watch(isRecordingProvider) && !_isArSampling;
+    final isAnyRecording = isVideoRecording || _isArSampling;
+
+    Widget cameraView;
+    if (!RecoConfig.cameraEnabled) {
+      cameraView = Center(
+        child: Text(
+          textLocalize('reco_camun'),
+          style: const TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
+    } else if (RecoConfig.cameraController == null ||
+        !RecoConfig.cameraController!.value.isInitialized) {
+      cameraView = Center(
+        child: Text(
+          textLocalize('reco_wait'),
+          style: const TextStyle(fontSize: 18, color: Colors.white70),
+        ),
+      );
+    } else {
+      final controller = RecoConfig.cameraController!;
+      final size = MediaQuery.of(context).size;
+      final deviceRatio = size.width / size.height;
+      final cameraRatio = controller.value.aspectRatio;
+
+      var scale = 1 / (cameraRatio * deviceRatio);
+      if (scale < 1) {
+        scale = 1 / scale;
+      }
+
+      cameraView = Transform.scale(
+        scale: scale,
+        child: Center(child: CameraPreview(controller)),
+      );
+    }
+
+    final cameraSwitchButtons = _buildCameraSwitchButtons(
+      context,
+      isAnyRecording,
+    );
+
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
       body: Stack(
         children: [
           Positioned.fill(child: cameraView),
-          // 相机按钮
+          if (_isArMode)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _FogOfWarPainter(
+                  capturedFrames: _capturedFrames,
+                  currentYaw: _yaw,
+                  currentPitch: _pitch,
+                ),
+              ),
+            ),
           Positioned(
-            bottom: isRecording ? 80 : 130, // 略微上移，录制时如果底部菜单隐藏，可以稍下沉或保持
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 10,
+                bottom: 20,
+              ),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withAlpha(200),
+                    Colors.black.withAlpha(0),
+                  ],
+                ),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 140.0), // 防止遮挡右侧按钮
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: cameraSwitchButtons,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 10,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withAlpha(110),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withAlpha(30)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      TDIcons.scan,
+                      color: _isArMode
+                          ? const Color(0xFF00E5FF)
+                          : Colors.white70,
+                      size: 24,
+                    ),
+                    onPressed: isVideoRecording ? null : _toggleArMode,
+                  ),
+                  if (!_isArMode)
+                    IconButton(
+                      icon: const Icon(
+                        TDIcons.refresh,
+                        color: Colors.white70,
+                        size: 24,
+                      ),
+                      onPressed: isAnyRecording
+                          ? null
+                          : () => RecoConfig.cameraSwitch(),
+                    ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.info_outline,
+                      color: Colors.white70,
+                      size: 24,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _showTips = true;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: isAnyRecording ? 80 : 130,
             left: 0,
             right: 0,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (isRecording)
+                if (isVideoRecording)
                   Container(
                     margin: const EdgeInsets.only(bottom: 24),
                     padding: const EdgeInsets.symmetric(
@@ -332,12 +640,32 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       ],
                     ),
                   ),
+                if (_isArSampling)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 24),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00BCD4).withAlpha(210),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '扫描中 ${_capturedFrames.length} 帧',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 Center(
                   child: GestureDetector(
                     onTapDown: (_) => _buttonAnimController.forward(),
                     onTapUp: (_) async {
                       _buttonAnimController.reverse();
-                      _onRecordTap();
+                      await _onRecordTap();
                     },
                     onTapCancel: () => _buttonAnimController.reverse(),
                     child: ScaleTransition(
@@ -349,7 +677,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           gradient: LinearGradient(
-                            colors: isRecording
+                            colors: isAnyRecording
                                 ? [Colors.redAccent, Colors.red]
                                 : isDark
                                 ? [
@@ -368,7 +696,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: isRecording
+                              color: isAnyRecording
                                   ? Colors.redAccent.withAlpha(100)
                                   : isDark
                                   ? const Color(0xFF4582FF).withAlpha(80)
@@ -399,16 +727,16 @@ class _RecordPageState extends ConsumerState<RecordPage>
                             child: Center(
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 300),
-                                width: isRecording ? 28 : 24,
-                                height: isRecording ? 28 : 24,
+                                width: isAnyRecording ? 28 : 24,
+                                height: isAnyRecording ? 28 : 24,
                                 decoration: BoxDecoration(
-                                  color: isRecording
+                                  color: isAnyRecording
                                       ? Colors.redAccent
                                       : isDark
                                       ? const Color(0xFF4582FF)
                                       : theme.brandColor6,
                                   borderRadius: BorderRadius.circular(
-                                    isRecording ? 6.0 : 12.0,
+                                    isAnyRecording ? 6.0 : 12.0,
                                   ),
                                 ),
                               ),
@@ -422,56 +750,22 @@ class _RecordPageState extends ConsumerState<RecordPage>
               ],
             ),
           ),
-          // 顶部摄像头切换栏
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 10,
-                bottom: 20,
-              ),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withAlpha(200),
-                    Colors.black.withAlpha(0),
-                  ],
+          if (_isArMode)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 72,
+              left: 20,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black45,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: cameraSwitchButtons,
+                child: Text(
+                  '方位(Yaw): ${_yaw.toStringAsFixed(1)}°\n俯仰(Pitch): ${_pitch.toStringAsFixed(1)}°\n已记录覆盖帧: ${_capturedFrames.length}',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ),
             ),
-          ),
-
-          // Info Button
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
-            right: 16,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                setState(() {
-                  _showTips = true;
-                });
-              },
-              child: const Icon(
-                Icons.info_outline,
-                color: Colors.white70,
-                size: 42,
-              ),
-            ),
-          ),
-
           if (_showTips)
             Positioned.fill(
               child: Container(
@@ -493,7 +787,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          "Tips",
+                          'Tips',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 20,
@@ -586,5 +880,73 @@ class _RecordPageState extends ConsumerState<RecordPage>
         ],
       ),
     );
+  }
+}
+
+class _FogOfWarPainter extends CustomPainter {
+  final List<_CapturedFrame> capturedFrames;
+  final double currentYaw;
+  final double currentPitch;
+
+  const _FogOfWarPainter({
+    required this.capturedFrames,
+    required this.currentYaw,
+    required this.currentPitch,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final layerPaint = Paint()..color = Colors.black.withAlpha(217);
+    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), layerPaint);
+
+    final clearPaint = Paint()
+      ..blendMode = BlendMode.clear
+      ..style = PaintingStyle.fill;
+
+    for (final frame in capturedFrames) {
+      var dx = frame.yaw - currentYaw;
+      if (dx > 180) {
+        dx -= 360;
+      }
+      if (dx < -180) {
+        dx += 360;
+      }
+      final dy = frame.pitch - currentPitch;
+
+      final screenX = size.width / 2 + (dx / _kFovH) * size.width;
+      final screenY = size.height / 2 - (dy / _kFovV) * size.height;
+
+      canvas.drawRect(
+        Rect.fromCenter(
+          center: Offset(screenX, screenY),
+          width: size.width,
+          height: size.height,
+        ),
+        clearPaint,
+      );
+    }
+
+    canvas.restore();
+
+    final guidePaint = Paint()
+      ..color = Colors.white.withAlpha(77)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawRect(
+      Rect.fromCenter(
+        center: size.center(Offset.zero),
+        width: size.width,
+        height: size.height,
+      ),
+      guidePaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FogOfWarPainter oldDelegate) {
+    return oldDelegate.currentYaw != currentYaw ||
+        oldDelegate.currentPitch != currentPitch ||
+        oldDelegate.capturedFrames.length != capturedFrames.length;
   }
 }

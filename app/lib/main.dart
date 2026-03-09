@@ -38,28 +38,11 @@ void main() async {
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
-    //摄像机分类。
-    for (var cam in camsTemp) {
-      switch (cam.lensDirection) {
-        case CameraLensDirection.front:
-          RecoConfig.frontCameras.add(cam);
-          break;
-        case CameraLensDirection.back:
-          RecoConfig.backCameras.add(cam);
-          break;
-        case CameraLensDirection.external:
-          RecoConfig.externalCameras.add(cam);
-          break;
-      }
-    }
     RecoConfig.cameras = camsTemp;
     RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
   } catch (e) {
     //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
     RecoConfig.cameras = [];
-    RecoConfig.frontCameras = [];
-    RecoConfig.backCameras = [];
-    RecoConfig.externalCameras = [];
     RecoConfig.cameraEnabled = false;
   }
   //

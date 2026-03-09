@@ -20,7 +20,7 @@ def get_image_tag(image_path):
     base64_image = encode_image(image_path)
     try:
         response = client.chat.completions.create(
-            model="qwen-vl-max", # 使用多模态模型或者qwen-vl-plus
+            model="qwen-plus", # 使用最新 Qwen3.5-Plus 多模态模型（支持文本+图像+视频，1M 上下文）
             messages=[
                 {
                     "role": "user",

@@ -123,11 +123,12 @@ class Video3DGSPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
-        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=10)...")
+        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=1, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=10", "-q:v", "2",
+                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-q:v", "2",
                 str(temp_dir / "frame_%05d.jpg")
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         except subprocess.CalledProcessError as e:

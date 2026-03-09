@@ -7,7 +7,7 @@
  * 功能描述: 提供自然语言搜索 3D 模型资产的能力
  *
  * 核心功能:
- * 1. 意图解析 - 使用 LLM (Qwen-Plus) 从自然语言中提取搜索词和时间范围
+ * 1. 意图解析 - 使用 LLM (Qwen3.5-Plus) 从自然语言中提取搜索词和时间范围
  * 2. 向量生成 - 调用 DashScope text-embedding-v2 生成语义向量
  * 3. 向量搜索 - 通过 pgvector 在 Supabase 中执行相似度搜索
  *
@@ -330,8 +330,8 @@ async function parseQueryIntent(
      *
      * 参数说明:
      * - model: 使用的模型
-     *   * qwen-plus: 通义千问 Plus 版，适合逻辑推理任务
-     *   * 相比 qwen-turbo，推理能力更强
+     *   * qwen-plus: Qwen3.5 Plus，最新顶级模型，效果媲美 qwen3-max，支持 1M 上下文
+     *   * 相比旧版 qwen-plus，推理能力和多模态能力大幅提升
      * - messages: 对话历史
      *   * system: 系统提示词 (定义 LLM 角色)
      *   * user: 用户查询

@@ -13,7 +13,7 @@
 
 #### An Anti-Entropy Engine for Human Memory
 
-![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License](https://img.shields.io/badge/license-MIT-blue)
+![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
 
 </div>
 
@@ -327,7 +327,7 @@ sequenceDiagram
 - **[nerfstudio](https://github.com/nerfstudio-project/nerfstudio)**: 提供了模块化最强的 NeRF/3DGS 训练框架，本项目的训练管线基于 `splatfacto` 模型修改。
 - **[gsplat](https://github.com/nerfstudio-project/gsplat)**: 极速 CUDA 光栅化后端，为云端训练提供了性能保障。
 - **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria 的原始论文实现，奠定了理论基础。
-- **[SAM3D](https://github.com/ ScreenVerse/sam-3d-objects)**: 单图 3DGS 生成框架，支持从单张照片重建高质量 3D 模型。
+- **[SAM3D](https://github.com/ScreenVerse/sam-3d-objects)**: 单图 3DGS 生成框架，支持从单张照片重建高质量 3D 模型。
 - **[SHARP](https://github.com/apple/ml-sharp)**: Apple 的高质量单图 3DGS 生成模型，通过神经网络直接预测高斯泼溅参数。
 
 #### Infrastructure & AI (基础设施与人工智能)
@@ -371,3 +371,17 @@ sequenceDiagram
 <sub>Made with ❤️ by the BrainDance Team: 烫锟斤拷烫. Dedicated to everyone fighting against entropy.</sub>
 
 </div>
+
+---
+
+## 📜 版权与开源协议 (License & Copyright)
+
+**BrainDance (流光·记)** 的所有核心工程架构与业务代码的知识产权（Copyright）均归属开发者所有。
+
+本项目采用 **[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)** 协议对外公开源码。
+
+* ✅ **允许**：个人学习、学术研究、非营利组织使用以及二次修改。
+* ❌ **严禁任何商业用途**：包括但不限于将本项目或其衍生品用于企业内部生产环境、直接或间接的付费服务、集成至商业闭源产品等。若需获取商业授权，请直接联系原作者。
+
+> **⚠️ 第三方依赖特别声明 (Third-Party Acknowledgements)**
+> 本项目 AI 引擎部分集成了大量前沿学术成果（如 Apple ML-SHARP, Inria 3DGS 等）。这些上游依赖均受其各自的**非商业研究协议**严格约束。使用者在运行、修改或分发本系统时，必须同时遵守这些子目录（`ai_engine/3dgs/src/libs/`）下相应的许可证要求。

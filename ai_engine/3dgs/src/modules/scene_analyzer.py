@@ -22,7 +22,7 @@ class SceneAnalyzer:
         self.cfg = cfg
         self.api_key = self.cfg.dashscope_api_key or os.getenv("DASHSCOPE_API_KEY")
         self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        self.model = "qwen-vl-max"
+        self.model = "qwen-plus"  # Qwen-VL-Plus：多模态模型
 
     def _encode_image(self, image_path):
         with open(image_path, "rb") as image_file:

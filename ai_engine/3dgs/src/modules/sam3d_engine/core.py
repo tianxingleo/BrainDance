@@ -114,7 +114,7 @@ class SAM3DEngine:
         pil_image = Image.open(image_path).convert("RGBA")
         orig_w, orig_h = pil_image.size
         
-        target_size = 400
+        target_size = 1920
         if max(orig_w, orig_h) > target_size:
             scale = target_size / max(orig_w, orig_h)
             new_w, new_h = int(orig_w * scale), int(orig_h * scale)

@@ -52,6 +52,15 @@ class CloudWorker:
             raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
 
         # --- 3. 建立连接 ---
+        # 修复 HTTPX 对 no_proxy 的 CIDR 解析不兼容的问题，强制把目标 IP 塞入 no_proxy
+        import urllib.parse
+        if self.SUPABASE_URL:
+            parsed = urllib.parse.urlparse(self.SUPABASE_URL)
+            if parsed.hostname:
+                no_proxy = os.environ.get("no_proxy", "")
+                if parsed.hostname not in no_proxy:
+                    os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
+
         # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
         self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
         
@@ -229,8 +238,9 @@ class CloudWorker:
             if isinstance(task, dict) and task.get('mapper_type'):
                 task_params['mapper_type'] = task['mapper_type']
             
-            # 准备输出目录
-            task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
+            # 准备输出目录: 修改为 user_id/scene_id/output 格式
+            task_output_dir = self.CACHE_DIR / user_id / scene_id / "output"
+            task_output_dir.mkdir(parents=True, exist_ok=True)
             
             # 2. 准备上下文 (把通用的东西打包)
             context = {

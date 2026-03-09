@@ -64,9 +64,19 @@ BrainDance/
 
 ### 1. 硬件要求
 
-* **GPU**: NVIDIA RTX 30/40/50 系列 (显存 >= 8GB)
+**最低配置**
+* **GPU**: NVIDIA RTX 5070 12GB 或更高
+* **CPU**: Intel Core i5-14600KF 或同级处理器
+* **RAM**: 64GB
 * **OS**: Linux (推荐 Ubuntu 22.04) 或 Windows WSL2
 * **CUDA**: 11.8 或 12.x
+
+**推荐配置（生产环境）**
+* **GPU**: NVIDIA L20 45GB × 2 (双卡配置)
+* **CPU**: Intel Xeon Platinum 8260 × 2 (双路配置)
+* **RAM**: 512GB
+* **OS**: Linux (Ubuntu 22.04)
+* **CUDA**: 12.x
 
 ### 2. 软件依赖
 

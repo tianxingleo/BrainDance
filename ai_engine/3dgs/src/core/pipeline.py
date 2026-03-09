@@ -1,3 +1,8 @@
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
+os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
+
 # src/core/pipeline.py
 # 功能：实现3DGS生成主流水线，协调各模块完成完整3D重建流程
 # 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
@@ -70,10 +75,23 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     temp_dir = cfg.project_dir / "temp_extract"
     temp_dir.mkdir(parents=True, exist_ok=True)
     log(f"    -> 正在进行 FFmpeg 抽帧...")
-    subprocess.run(["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
-                    "-vf", "fps=10", "-q:v", "2", 
-                    str(temp_dir / "frame_%05d.jpg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    log(f"    -> FFmpeg 抽帧完成")
+    
+    # [修改] 捕获 FFmpeg 错误输出，以便排查抽帧失败的具体原因
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
+             "-vf", "fps=10", "-q:v", "2", 
+             str(temp_dir / "frame_%05d.jpg")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        log(f"    -> FFmpeg 抽帧完成")
+    except subprocess.CalledProcessError as e:
+        log(f"❌ FFmpeg 抽帧失败! 错误码: {e.returncode}")
+        log(f"❌ 错误详情: {e.stderr}")
+        raise RuntimeError(f"FFmpeg extraction failed: {e.stderr}")
     
     # 清洗
     img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=0.85)

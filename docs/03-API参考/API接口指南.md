@@ -86,6 +86,7 @@ class SupabaseConfig {
 | 值 | 说明 | 输入文件 |
 |---|------|---------|
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
+| `da3_feed_forward_3dgs` | 视频转3DGS（前馈快速生成） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
 
@@ -95,12 +96,33 @@ class SupabaseConfig {
 |-----|------|------|
 | `mask_path` | string | 可选，自定义Mask图片路径 |
 
+**task_params 字段说明 (da3_feed_forward_3dgs):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `frame_interval` | int | 5 | 前馈生成时的帧间隔，值越小使用帧数越多（1=使用全部帧） |
+| `conf_threshold` | float | 0.5 | 深度置信度阈值，值越高过滤越严格 |
+
 **创建视频任务示例 (Dart):**
 ```dart
 final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260118_001',
   'user_id': supabase.auth.currentUser!.id,
   'task_type': 'video_3dgs',
+  'status': 'pending'
+}).select();
+```
+
+**创建 DA3 前馈式3DGS任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260118_002',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'da3_feed_forward_3dgs',
+  'task_params': {
+    'frame_interval': 2,  // 使用更多帧以提高质量
+    'conf_threshold': 0.5  // 深度置信度阈值
+  },
   'status': 'pending'
 }).select();
 ```
