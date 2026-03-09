@@ -53,6 +53,7 @@ class RecoConfig {
       return;
     }
     cameraController?.dispose();
+    cameraController = null;
   }
 
   //获取图标

@@ -155,6 +155,11 @@ BrainDance/
 │   ├── config.toml        #   - Supabase 本地开发配置
 │   └── README.md          #   - ☁️ 后端部署指南
 │
+├── dashboard/             # [Web] 系统状态可视化看板 (Vue 3 + Vite)
+│   ├── src/               #   - 前端源代码（Supabase 实时订阅）
+│   ├── .env.example       #   - Supabase 连接配置模板
+│   └── README.md          #   - 看板本地运行与部署说明
+│
 ├── docs/                  # [Doc] 项目文档
 │   ├── API_DOC.md         #   - API 接口文档
 │   ├── BrainDance 项目协作规范与开发协议 (v1.0).md  #   - 开发规范
@@ -167,6 +172,7 @@ BrainDance/
 > **说明**: 
 > - `app/` (Flutter 移动端) 正在开发中，尚未纳入本仓库
 > - `supabase/functions/` (搜索 Edge Functions) 正在开发中
+> - `dashboard/` 为新增独立前端看板，可单独构建后静态部署
 
 ## 🚀 快速开始 (Quick Start)
 
@@ -181,14 +187,20 @@ BrainDance/
 #### 移动端测试设备 (Mobile Test Devices)
 
 - **OPPO Find X8**
-- **HUAWEI Mate 30 Pro**
+- **OPPO Reno 14**
 
 #### 服务器配置 (Server Configuration)
 
-- **CPU**: Intel Core i7-12600KF
+- **当前 AI Engine 测试/推荐服务器（本机，2026-03-09 实测）**
+- **CPU**: Intel Xeon Platinum 8260 × 2（双路，96 线程）
+- **内存**: 503GiB（约 512GB）
+- **显卡**: NVIDIA L20 46GB × 2（双卡）
+- **操作系统**: Ubuntu 22.04.5 LTS（Kernel 6.8.0-100-generic）
+
+**AI Engine 最低配置（兼容基线）**
+- **CPU**: Intel Core i5-14600KF（不是 i7）
 - **内存**: 64GB RAM
-- **显卡**: NVIDIA RTX 5070 12GB (Blackwell)
-- **操作系统**: Ubuntu on WSL2 (Windows 11)
+- **显卡**: NVIDIA RTX 5070 12GB
 
 ### 部署步骤 (Deployment)
 
@@ -327,7 +339,7 @@ sequenceDiagram
 - **[nerfstudio](https://github.com/nerfstudio-project/nerfstudio)**: 提供了模块化最强的 NeRF/3DGS 训练框架，本项目的训练管线基于 `splatfacto` 模型修改。
 - **[gsplat](https://github.com/nerfstudio-project/gsplat)**: 极速 CUDA 光栅化后端，为云端训练提供了性能保障。
 - **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria 的原始论文实现，奠定了理论基础。
-- **[SAM3D](https://github.com/ ScreenVerse/sam-3d-objects)**: 单图 3DGS 生成框架，支持从单张照片重建高质量 3D 模型。
+- **[SAM3D](https://github.com/ScreenVerse/sam-3d-objects)**: 单图 3DGS 生成框架，支持从单张照片重建高质量 3D 模型。
 - **[SHARP](https://github.com/apple/ml-sharp)**: Apple 的高质量单图 3DGS 生成模型，通过神经网络直接预测高斯泼溅参数。
 
 #### Infrastructure & AI (基础设施与人工智能)
@@ -340,6 +352,7 @@ sequenceDiagram
 
 #### Rendering & Viewer (渲染与查看器)
 
+- **Special Thanks**: 特别感谢 **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** 对 Web 端 3DGS 生态的持续贡献。
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: 基于 Three.js 的 Web 端查看器，是我们移动端 WebView 渲染的灵感来源。
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: 另一个优秀的 WebGL 实现，提供了早期的思路参考。
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,16 +14,23 @@ import 'pages/record.dart';
 import 'pages/generate.dart';
 import 'pages/settings.dart';
 import 'pages/login.dart';
+import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'services/task_notification_service.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
 //MainScreen
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
+final isRecordingProvider = StateProvider((ref) => false);
+
+// 全局 NavigatorKey
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
@@ -34,6 +42,10 @@ void main() async {
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
   ); //Supabase
+
+  // 初始化全局任务通知服务
+  taskNotificationService.setNavigatorKey(navigatorKey);
+  await taskNotificationService.init();
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
@@ -79,10 +91,10 @@ class MyApp extends StatelessWidget with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.inactive:
-        RecoConfig.disposeCamera();
+        // Handled by RecordPage locally to prevent recording interruption
         break;
       case AppLifecycleState.resumed:
-        RecoConfig.refreshCamera();
+        // Handled by RecordPage locally
         break;
       case AppLifecycleState.paused: // 应用进入后台（例如用户按了Home键、切换到其他应用）
         GenConfig.saveUploadedAssets();
@@ -109,11 +121,12 @@ class Home extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
-    
+
     // 启动时检查是否有会话
     final hasSession = Supabase.instance.client.auth.currentSession != null;
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
       theme: themeData.systemThemeDataLight?.copyWith(
@@ -136,7 +149,223 @@ class Home extends ConsumerWidget {
         }, // 根路径对应主屏幕
         '/login': (context) => const LoginPage(), // 登录页
         '/example': (context) => RecallPage(), // "/example"路径对应....
+        '/tasks': (context) => const TaskListPage(), // 任务列表页
       },
+      // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
+      builder: (context, child) {
+        return Stack(
+          children: [
+            child!,
+            // 全局通知 Overlay 层
+            const GlobalNotificationOverlay(),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 全局通知 Overlay 层
+/// 使用 ListenableBuilder 监听通知状态变化
+class GlobalNotificationOverlay extends StatefulWidget {
+  const GlobalNotificationOverlay({super.key});
+
+  @override
+  State<GlobalNotificationOverlay> createState() => _GlobalNotificationOverlayState();
+}
+
+class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
+    with TickerProviderStateMixin {
+  late AnimationController _showController;
+  late AnimationController _hideController;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+  Timer? _autoHideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // 显示动画控制器 (300ms)
+    _showController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    
+    // 隐藏动画控制器 (1秒逐渐消失)
+    _hideController = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    );
+    
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _showController, curve: Curves.easeOutCubic));
+    
+    // 淡出动画：从1.0到0.0
+    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _hideController, curve: Curves.easeInOut),
+    );
+    
+    // 监听隐藏动画完成
+    _hideController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        taskNotificationService.hideNotification();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoHideTimer?.cancel();
+    _showController.dispose();
+    _hideController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: taskNotificationService,
+      builder: (context, child) {
+        final notification = taskNotificationService.currentNotification;
+        if (notification == null) {
+          // 重置动画控制器
+          _showController.reset();
+          _hideController.reset();
+          _autoHideTimer?.cancel();
+          return const SizedBox.shrink();
+        }
+
+        // 检查当前路由是否允许显示通知
+        final currentRoute = taskNotificationService.currentRoute;
+        if (!taskNotificationService.isNotificationEnabledForRoute(currentRoute)) {
+          return const SizedBox.shrink();
+        }
+
+        // 显示动画：滑入
+        _showController.forward();
+
+        // 启动1秒后开始淡出动画（总显示时间约2秒）
+        _autoHideTimer?.cancel();
+        _autoHideTimer = Timer(const Duration(seconds: 1), () {
+          // 等待显示动画完成后，开始1秒淡出动画
+          if (mounted && taskNotificationService.currentNotification != null) {
+            _hideController.forward(from: 0);
+          }
+        });
+
+        return _buildNotificationWidget(notification);
+      },
+    );
+  }
+
+  Widget _buildNotificationWidget(TaskNotificationData notification) {
+    final isDark = AppConfig.isNightMode;
+    final hasCompleted = notification.completedCount > 0;
+    final hasFailed = notification.failedCount > 0;
+
+    // 构建通知内容
+    String message = '';
+    IconData icon = Icons.check_circle;
+    Color iconColor = Colors.green;
+
+    if (hasCompleted && hasFailed) {
+      message =
+          '${notification.completedCount} ${textLocalize('task_completed')}，${notification.failedCount} ${textLocalize('task_failed')}';
+      icon = Icons.info;
+      iconColor = Colors.orange;
+    } else if (hasCompleted) {
+      message =
+          '${notification.completedCount} ${textLocalize('task_notification_completed')}';
+      icon = Icons.check_circle;
+      iconColor = Colors.green;
+    } else if (hasFailed) {
+      message =
+          '${notification.failedCount} ${textLocalize('task_notification_failed')}';
+      icon = Icons.error;
+      iconColor = Colors.red;
+    }
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Material(
+              color: Colors.transparent,
+              child: Center(
+                child: Container(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2A2A30) : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(30),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF3A3A40)
+                          : const Color(0xFFE0E0E0),
+                      width: 1,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () => taskNotificationService.navigateToTaskList(),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: iconColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(icon, color: iconColor, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF333333),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(
+                          Icons.keyboard_arrow_right,
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : const Color(0xFF999999),
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -144,9 +373,8 @@ class Home extends ConsumerWidget {
 //主屏幕
 class MainScreen extends ConsumerWidget {
   const MainScreen({super.key});
-  static const TextStyle selectedTextStyle = TextStyle(fontSize: 10);
-  static const double unselectedSize = 32;
-  static const double selectedSize = 36;
+  static const double unselectedSize = 30;
+  static const double selectedSize = 34;
   Widget getPage(int pageIndex, WidgetRef ref) {
     switch (pageIndex) {
       case 0:
@@ -163,94 +391,155 @@ class MainScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bool isLoading = ref.watch(loadingProvider); //加载状态
+    final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
+    final bool isRecording = ref.watch(isRecordingProvider);
+    final isDark = AppConfig.isNightMode;
+    // 黑夜模式下强制使用更明亮的蓝色，以确保底层文字和图标的高可见性
+    final brandColor = isDark
+        ? Colors.white
+        : Colors.blueAccent; // 统一为蓝色基调，白天使用系统蓝色，夜晚使用更亮的蓝色以增强对比度
+    final lightBrandColor = brandColor.withAlpha(160); // 统一为蓝色基调，半透明使得未选中状态易于区分
+    final selectedTextStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.bold,
+      color: brandColor,
+      height: 1.5,
+    );
+    final unselectedTextStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w500,
+      color: lightBrandColor,
+      height: 1.5,
+    );
     return Scaffold(
+      extendBody: true,
       body: isLoading
-          ? Scaffold(body: Center(child: Text('Now Loading...')))
+          ? Center(child: CircularProgressIndicator())
           : AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: ScaleTransition(
-                    scale: Tween<double>(
-                      begin: 0.95,
-                      end: 1.0,
-                    ).animate(CurvedAnimation(
-                      parent: animation,
-                      curve: Curves.easeOutCubic,
-                    )),
-                    child: child,
-                  ),
-                );
-              },
               child: Container(
                 key: ValueKey<int>(pageIndex),
                 child: getPage(pageIndex, ref),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(32),
+                  gradient: LinearGradient(
+                    colors: [
+                      TDTheme.of(context).brandColor1,
+                      TDTheme.of(context).brandColor4,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
               ),
             ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
+      bottomNavigationBar: isRecording
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 18, left: 18, right: 18),
+              child: PhysicalModel(
+                color: Colors.transparent,
+                elevation: 16,
+                borderRadius: BorderRadius.circular(32),
+                shadowColor: Colors.black.withOpacity(0.70),
+                clipBehavior: Clip.antiAlias,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppConfig.isNightMode
+                        ? const Color(0xFF18181C)
+                        : const Color(0xFF23232A),
+                    borderRadius: BorderRadius.circular(32),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 24,
+                        offset: Offset(16, 16),
+                      ),
+                    ],
+                  ),
+                  child: TDBottomTabBar(
+                    TDBottomTabBarBasicType.iconText,
+                    componentType: TDBottomTabBarComponentType.normal,
+                    useVerticalDivider: false,
+                    centerDistance: 0,
+                    barHeight: 90,
+                    navigationTabs: [
+                      TDBottomTabBarTabConfig(
+                        tabText: textLocalize("recall"),
+                        selectTabTextStyle: selectedTextStyle,
+                        unselectTabTextStyle: unselectedTextStyle,
+                        selectedIcon: Icon(
+                          Icons.home_rounded,
+                          size: selectedSize,
+                          color: brandColor,
+                        ),
+                        unselectedIcon: Icon(
+                          Icons.home_outlined,
+                          size: unselectedSize,
+                          color: lightBrandColor,
+                        ),
+                        onTap: () =>
+                            ref.read(pageIndexProvider.notifier).state = 0,
+                      ),
+                      TDBottomTabBarTabConfig(
+                        tabText: textLocalize("record"),
+                        selectTabTextStyle: selectedTextStyle,
+                        unselectTabTextStyle: unselectedTextStyle,
+                        selectedIcon: Icon(
+                          Icons.videocam_rounded,
+                          size: selectedSize,
+                          color: brandColor,
+                        ),
+                        unselectedIcon: Icon(
+                          Icons.videocam_outlined,
+                          size: unselectedSize,
+                          color: lightBrandColor,
+                        ),
+                        onTap: () =>
+                            ref.read(pageIndexProvider.notifier).state = 1,
+                      ),
+                      TDBottomTabBarTabConfig(
+                        tabText: textLocalize("generate"),
+                        selectTabTextStyle: selectedTextStyle,
+                        unselectTabTextStyle: unselectedTextStyle,
+                        selectedIcon: Icon(
+                          Icons.image_rounded,
+                          size: selectedSize,
+                          color: brandColor,
+                        ),
+                        unselectedIcon: Icon(
+                          Icons.image_outlined,
+                          size: unselectedSize,
+                          color: lightBrandColor,
+                        ),
+                        onTap: () =>
+                            ref.read(pageIndexProvider.notifier).state = 2,
+                      ),
+                      TDBottomTabBarTabConfig(
+                        tabText: textLocalize("settings"),
+                        selectTabTextStyle: selectedTextStyle,
+                        unselectTabTextStyle: unselectedTextStyle,
+                        selectedIcon: Icon(
+                          Icons.settings_rounded,
+                          size: selectedSize,
+                          color: brandColor,
+                        ),
+                        unselectedIcon: Icon(
+                          Icons.settings_outlined,
+                          size: unselectedSize,
+                          color: lightBrandColor,
+                        ),
+                        onTap: () =>
+                            ref.read(pageIndexProvider.notifier).state = 3,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ],
-        ),
-        child: TDBottomTabBar(
-          // 底部导航栏
-          TDBottomTabBarBasicType.iconText,
-          componentType: TDBottomTabBarComponentType.normal,
-          useVerticalDivider: false,
-          centerDistance: 4,
-          navigationTabs: [
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("recall"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
-            ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("record"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
-            ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("generate"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
-            ),
-            TDBottomTabBarTabConfig(
-              tabText: textLocalize("settings"),
-              selectTabTextStyle: selectedTextStyle,
-              unselectTabTextStyle: selectedTextStyle,
-              selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
-              unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
-              onTap: () =>
-                  ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
-            ),
-          ],
-          //backgroundColor: AppConfig.primaryColor,
-          currentIndex: pageIndex, // 当前选中索引
-          barHeight: 74,
-        ),
-      ),
     );
   }
 }
