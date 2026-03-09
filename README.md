@@ -185,10 +185,16 @@ BrainDance/
 
 #### 服务器配置 (Server Configuration)
 
-- **CPU**: Intel Core i7-12600KF
+- **当前 AI Engine 测试/推荐服务器（本机，2026-03-09 实测）**
+- **CPU**: Intel Xeon Platinum 8260 × 2（双路，96 线程）
+- **内存**: 503GiB（约 512GB）
+- **显卡**: NVIDIA L20 46GB × 2（双卡）
+- **操作系统**: Ubuntu 22.04.5 LTS（Kernel 6.8.0-100-generic）
+
+**AI Engine 最低配置（兼容基线）**
+- **CPU**: Intel Core i5-14600KF（不是 i7）
 - **内存**: 64GB RAM
-- **显卡**: NVIDIA RTX 5070 12GB (Blackwell)
-- **操作系统**: Ubuntu on WSL2 (Windows 11)
+- **显卡**: NVIDIA RTX 5070 12GB
 
 ### 部署步骤 (Deployment)
 

@@ -84,6 +84,14 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 
 ### 环境要求
 
+**当前测试/推荐设备（本机，2026-03-09 实测）**
+- **主机名**: hjbl40
+- **GPU**: NVIDIA L20 46GB × 2 (双卡)
+- **CPU**: Intel Xeon Platinum 8260 × 2 (双路，96 线程)
+- **内存**: 503GiB（约 512GB）
+- **操作系统**: Linux (Ubuntu 22.04.5 LTS)
+- **CUDA版本**: 12.x（驱动 570.211.01）
+
 **最低配置**
 - **GPU**: NVIDIA RTX 5070 12GB 或更高
 - **CPU**: Intel Core i5-14600KF 或同级处理器
@@ -91,8 +99,10 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 - **操作系统**: Linux (Ubuntu 22.04) / Windows WSL2
 - **CUDA版本**: 11.8 或 12.x
 
+> 说明：最低配置基线为 `i5-14600KF + 64GB + RTX 5070 12GB`（CPU 为 i5，不是 i7）。
+
 **推荐配置**
-- **GPU**: NVIDIA L20 45GB × 2 (双卡)
+- **GPU**: NVIDIA L20 46GB × 2 (双卡)
 - **CPU**: Intel Xeon Platinum 8260 × 2 (双路)
 - **内存**: 512GB RAM
 - **操作系统**: Linux (Ubuntu 22.04)
