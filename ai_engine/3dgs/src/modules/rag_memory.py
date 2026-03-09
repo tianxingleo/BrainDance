@@ -65,6 +65,9 @@ class RagMemory:
             row = {
                 "scene_id": task_data['scene_id'],
                 "user_id": task_data.get('user_id', 'default'),
+                "space_id": task_data.get("space_id"),
+                "capture_id": task_data.get("capture_id"),
+                "captured_at": task_data.get("captured_at"),
                 "description": description,
                 "objects": objects,
                 "tags": tags,

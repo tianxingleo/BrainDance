@@ -23,6 +23,9 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const timePeelEnabled = ref(false);
+const timePeelAlpha = ref(0.5);
+const timePeelMode = ref('blend'); // blend | base | overlay
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -532,13 +535,55 @@ const getViewerConfig = () => {
 let currentPlyUrl = '/models/scene_auto_sync.ply';
 let currentPosesUrl = '/models/webgl_poses_with_tags.json';
 
-const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
+const decomposeMatrixToTRS = (matrixArray) => {
+  const m = new THREE.Matrix4().fromArray(matrixArray);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  m.decompose(pos, quat, scale);
+  return {
+    position: [pos.x, pos.y, pos.z],
+    rotation: [quat.x, quat.y, quat.z, quat.w],
+    scale: [scale.x, scale.y, scale.z]
+  };
+};
+
+const applyTimePeelVisuals = () => {
+  if (!viewer || !timePeelEnabled.value) return;
+  const baseScene = viewer.getSplatScene ? viewer.getSplatScene(0) : null;
+  const overlayScene = viewer.getSplatScene ? viewer.getSplatScene(1) : null;
+  if (!baseScene || !overlayScene) return;
+
+  if (timePeelMode.value === 'base') {
+    baseScene.visible = true;
+    baseScene.opacity = 1.0;
+    overlayScene.visible = false;
+  } else if (timePeelMode.value === 'overlay') {
+    baseScene.visible = false;
+    overlayScene.visible = true;
+    overlayScene.opacity = 1.0;
+  } else {
+    baseScene.visible = true;
+    overlayScene.visible = true;
+    baseScene.opacity = Math.max(0.35, 1.0 - timePeelAlpha.value * 0.65);
+    overlayScene.opacity = timePeelAlpha.value;
+  }
+
+  try { viewer.update(); viewer.render(); } catch (_) {}
+};
+
+const initViewer = async (plyUrl, posesUrl, initialPoseMatrix, timePeelConfig = null) => {
   if (isLoading.value) return;
   isLoading.value = true;
 
   // 更新 URL（如果有新传入的值）
   if (plyUrl) currentPlyUrl = plyUrl;
   if (posesUrl) currentPosesUrl = posesUrl;
+  timePeelEnabled.value = Boolean(timePeelConfig);
+  if (timePeelConfig?.alpha !== undefined) {
+    timePeelAlpha.value = Number(timePeelConfig.alpha) || 0.5;
+  }
+  timePeelMode.value = 'blend';
 
   try {
     if (viewer) {
@@ -558,13 +603,35 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
 
-    // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
-    console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
-    await viewer.addSplatScene(currentPlyUrl, {
-      'showLoadingUI': true,
-        'progressiveLoad': false,
-        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
-      });
+    // 加载模型（单模型 / 时光剥离双模型）
+    if (timePeelConfig?.base && timePeelConfig?.overlay) {
+      const trs = decomposeMatrixToTRS(timePeelConfig.matrix || [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+      console.log(`[Viewer][TimePeel] 加载 base=${timePeelConfig.base}, overlay=${timePeelConfig.overlay}`);
+      await viewer.addSplatScenes([
+        {
+          path: timePeelConfig.base,
+          showLoadingUI: true,
+          progressiveLoad: false,
+          rotation: [0, 0, 0, 1]
+        },
+        {
+          path: timePeelConfig.overlay,
+          showLoadingUI: false,
+          progressiveLoad: false,
+          position: trs.position,
+          rotation: trs.rotation,
+          scale: trs.scale
+        }
+      ], true);
+      applyTimePeelVisuals();
+    } else {
+      console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
+      await viewer.addSplatScene(currentPlyUrl, {
+        'showLoadingUI': true,
+          'progressiveLoad': false,
+          'rotation': [0, 0, 0, 1]
+        });
+    }
 
     
     // 告诉 Flutter：模型加载完成
@@ -627,24 +694,32 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
       .catch(err => console.error("加载位姿失败:", err));
 
     const splatMesh = viewer.getSplatMesh();
-    splatMesh.visible = false;
+    if (!timePeelEnabled.value) {
+      splatMesh.visible = false;
+      setTimeout(() => {
+        if (splatMesh) {
+          // 先生成粒子系统，这会计算出 uCenter 和 uMaxRadius
+          createParticleSystem(splatMesh);
+          // 然后应用 Shader
+          applyAdvancedShader(splatMesh);
 
-    setTimeout(() => {
-      if (splatMesh) {
-        // 先生成粒子系统，这会计算出 uCenter 和 uMaxRadius
-        createParticleSystem(splatMesh);
-        // 然后应用 Shader
-        applyAdvancedShader(splatMesh);
-        
-          if (initialPoseMatrix) {
-            setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
-          }
+            if (initialPoseMatrix) {
+              setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
+            }
 
-        animationState.lastFrameTime = Date.now();
-        animationState.startTime = Date.now();
-        animationState.isLoaded = true;
+          animationState.lastFrameTime = Date.now();
+          animationState.startTime = Date.now();
+          animationState.isLoaded = true;
+        }
+      }, 200);
+    } else {
+      splatMesh.visible = true;
+      if (timePeelConfig?.pose) {
+        setTimeout(() => { flyToImage({ matrix: timePeelConfig.pose }); }, 50);
+      } else if (initialPoseMatrix) {
+        setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
       }
-    }, 200);
+    }
     // --- 5. 动画循环 (120 FPS 上限) ---
     let lastDrawTime = performance.now();
     const fpsInterval = 1000 / 120; // 目标 120 帧
@@ -874,12 +949,39 @@ onMounted(() => {
       console.log('[Flutter->WebGL] 收到加载请求:', input);
       if (typeof input === 'string') {
         // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
-        initViewer(input, null, null);
+        initViewer(input, null, null, null);
       } else if (typeof input === 'object' && input !== null) {
         // 新版：同时传 PLY URL、poses URL 与 初始矩阵
-        initViewer(input.ply || null, input.poses || null, input.matrix || null);
+        initViewer(input.ply || null, input.poses || null, input.matrix || null, null);
       } else {
-        initViewer(null, null, null);
+        initViewer(null, null, null, null);
+      }
+    };
+
+    window.loadTimePeelFromFlutter = (input) => {
+      console.log('[Flutter->WebGL] 收到时光剥离请求:', input);
+      if (typeof input === 'object' && input !== null) {
+        initViewer(input.base || null, null, input.pose || null, {
+          base: input.base || null,
+          overlay: input.overlay || null,
+          matrix: input.matrix || null,
+          alpha: input.alpha ?? 0.5,
+          pose: input.pose || null,
+        });
+      }
+    };
+
+    window.setTimePeelAlpha = (alpha) => {
+      const val = Number(alpha);
+      if (!Number.isFinite(val)) return;
+      timePeelAlpha.value = Math.max(0, Math.min(1, val));
+      applyTimePeelVisuals();
+    };
+
+    window.setTimePeelMode = (mode) => {
+      if (mode === 'base' || mode === 'overlay' || mode === 'blend') {
+        timePeelMode.value = mode;
+        applyTimePeelVisuals();
       }
     };
 
@@ -888,7 +990,7 @@ onMounted(() => {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
     } else {
       // 非 Flutter 环境（浏览器直接打开），用默认本地文件初始化
-      initViewer(null, null);
+      initViewer(null, null, null, null);
     }
 
     // 绑定原生事件用于调试拖拽

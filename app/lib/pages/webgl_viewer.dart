@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:braindance/configs/app_config.dart';
+import '../models/time_peeling_models.dart';
 
 // ============================================================
 // 开发/生产模式切换
@@ -20,6 +21,7 @@ class WebGLViewerPage extends StatefulWidget {
   final String? posesUrl; // 云端 webgl_poses.json 的公开 URL（可选）
   final String sceneId;
   final List<double>? initialPose; // 从 RAG 视角跳转传入的坐标矩阵
+  final TimePeelingPayload? timePeelingPayload;
 
   const WebGLViewerPage({
     super.key,
@@ -27,6 +29,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
+    this.timePeelingPayload,
   });
 
   @override
@@ -42,6 +45,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
   String? _localModelPath;
+  double _timePeelingAlpha = 0.5;
+  String _timePeelingMode = 'blend';
 
   @override
   void initState() {
@@ -166,6 +171,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   Future<void> _prepareModelAndLoad() async {
+    if (widget.timePeelingPayload != null) {
+      _timePeelingAlpha = widget.timePeelingPayload!.alpha;
+      if (mounted) _initWebView();
+      return;
+    }
+
     final originalUrl = widget.initialModelUrl;
 
     if (originalUrl.startsWith('http://') ||
@@ -307,22 +318,46 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   /// - 如果已下载到本地 -> 使用本地 HTTP /local_models/ 路由
   /// - 如果是远程 HTTPS URL  -> 转成本地 HTTP /proxy/ 路由，由 Dart 代理
   /// - 如果是相对路径（本地 demo） -> 直接传递
+  String _toWebAccessibleUrl(String inputUrl) {
+    if (_localModelPath != null &&
+        inputUrl == widget.initialModelUrl &&
+        widget.timePeelingPayload == null) {
+      return 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+    }
+    if (inputUrl.startsWith('http://') || inputUrl.startsWith('https://')) {
+      return 'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(inputUrl)}';
+    }
+    return inputUrl;
+  }
+
+  void _sendTimePeelingControl() {
+    if (!_isWebReady || widget.timePeelingPayload == null) return;
+    _controller?.runJavaScript(
+      "window.setTimePeelAlpha && window.setTimePeelAlpha(${_timePeelingAlpha.toStringAsFixed(3)})",
+    );
+    _controller?.runJavaScript(
+      "window.setTimePeelMode && window.setTimePeelMode('${_timePeelingMode}')",
+    );
+  }
+
   void _sendModelToVue() {
     if (!_isWebReady) return;
-    String targetUrl;
-    if (_localModelPath != null) {
-      // 已下载到本地：通过本地 HTTP 服务提供
-      targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
-    } else if (widget.initialModelUrl.startsWith('http://') ||
-        widget.initialModelUrl.startsWith('https://')) {
-      // 远程 URL：通过本地代理，避免 WebView 直接访问 HTTPS
-      targetUrl =
-          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
-    } else {
-      // 相对路径（本地 demo 模型）
-      targetUrl = widget.initialModelUrl;
+    if (widget.timePeelingPayload != null) {
+      final tp = widget.timePeelingPayload!;
+      final payload = jsonEncode({
+        'base': _toWebAccessibleUrl(tp.baseModelUrl),
+        'overlay': _toWebAccessibleUrl(tp.overlayModelUrl),
+        'matrix': tp.overlayMatrix,
+        'alpha': _timePeelingAlpha,
+        if (tp.pose != null) 'pose': tp.pose,
+      });
+      _controller?.runJavaScript("window.loadTimePeelFromFlutter($payload)");
+      _sendTimePeelingControl();
+      return;
     }
+
+    String targetUrl;
+    targetUrl = _toWebAccessibleUrl(widget.initialModelUrl);
 
     debugPrint('Sending model URL to WebView: $targetUrl');
 
@@ -347,7 +382,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   @override
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
-    final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = AppConfig.isNightMode;
     final textColor = isDark
         ? const Color(0xFFFFFFFF)
@@ -427,6 +461,66 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                   )
                 else if (!_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
+                if (widget.timePeelingPayload != null && _isWebReady)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 20,
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                const Text('当前'),
+                                Expanded(
+                                  child: Slider(
+                                    value: _timePeelingAlpha,
+                                    onChanged: (v) {
+                                      setState(() => _timePeelingAlpha = v);
+                                      _sendTimePeelingControl();
+                                    },
+                                  ),
+                                ),
+                                const Text('历史'),
+                              ],
+                            ),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('叠加'),
+                                  selected: _timePeelingMode == 'blend',
+                                  onSelected: (_) {
+                                    setState(() => _timePeelingMode = 'blend');
+                                    _sendTimePeelingControl();
+                                  },
+                                ),
+                                ChoiceChip(
+                                  label: const Text('仅当前'),
+                                  selected: _timePeelingMode == 'base',
+                                  onSelected: (_) {
+                                    setState(() => _timePeelingMode = 'base');
+                                    _sendTimePeelingControl();
+                                  },
+                                ),
+                                ChoiceChip(
+                                  label: const Text('仅历史'),
+                                  selected: _timePeelingMode == 'overlay',
+                                  onSelected: (_) {
+                                    setState(() => _timePeelingMode = 'overlay');
+                                    _sendTimePeelingControl();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
     );

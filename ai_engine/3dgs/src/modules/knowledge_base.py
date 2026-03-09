@@ -67,6 +67,9 @@ class KnowledgeBase:
         record = {
             "scene_id": scene_id,
             "user_id": task_data.get('user_id'),
+            "space_id": task_data.get("space_id"),
+            "capture_id": task_data.get("capture_id"),
+            "captured_at": task_data.get("captured_at"),
             "source_task_id": task_data.get('id'),
             
             # 语义数据
@@ -85,7 +88,9 @@ class KnowledgeBase:
                 "quality_reason": metadata.get('ai_reason', ''),
                 "engine_version": "nerfstudio-splatfacto",
                 "initial_camera_pose": metadata.get('initial_camera_pose', None),
-                "is_ai_selected": "initial_camera_pose" in metadata
+                "is_ai_selected": "initial_camera_pose" in metadata,
+                "alignment_matrix": metadata.get("alignment_matrix"),
+                "alignment_score": metadata.get("alignment_score"),
             }
         }
 

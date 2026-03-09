@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
+import 'time_peeling.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -172,7 +173,7 @@ class _RecallPageState extends State<RecallPage> {
       final response = await Supabase.instance.client
           .from('model_assets')
           .select(
-            'id, scene_id, description, ply_path, preview_img_path, meta_info, created_at',
+            'id, scene_id, description, ply_path, preview_img_path, meta_info, created_at, space_id, capture_id, captured_at',
           )
           .order('created_at', ascending: false);
 
@@ -242,6 +243,16 @@ class _RecallPageState extends State<RecallPage> {
           textColor: textColor,
         ),
         actions: [
+          IconButton(
+            icon: Icon(Icons.history_toggle_off, color: iconColor),
+            tooltip: '时光剥离',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const TimePeelingPage()),
+              );
+            },
+          ),
           IconButton(
             icon: Icon(Icons.task_alt, color: iconColor),
             tooltip: textLocalize("task_list_title"),
@@ -822,6 +833,22 @@ class _RecallPageState extends State<RecallPage> {
                               borderRadius: BorderRadius.circular(6)
                             ),
                             child: TDText('${(similarity * 100).toStringAsFixed(1)}%', font: theme.fontBodySmall, textColor: isDark ? const Color(0xFFFFFFFF) : Colors.white),
+                          ),
+                        if (model['space_id'] != null)
+                          IconButton(
+                            icon: const Icon(Icons.timeline),
+                            tooltip: '时光剥离',
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => TimePeelingPage(
+                                    initialSpaceId: model['space_id']?.toString(),
+                                    preferredCaptureId: model['capture_id']?.toString(),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                       ],
                     ),
