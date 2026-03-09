@@ -61,6 +61,7 @@ class ExpandableCategorySection extends StatefulWidget {
   final IconData icon;
   final Color color;
   final List<Map<String, dynamic>> tasks;
+  final Map<String, List<String>> taskLogs; // taskId -> logs
   final bool initiallyExpanded;
   final Function(Map<String, dynamic>)? onTaskTap;
   final Color? textColor;
@@ -72,6 +73,7 @@ class ExpandableCategorySection extends StatefulWidget {
     required this.icon,
     required this.color,
     required this.tasks,
+    this.taskLogs = const {},
     this.initiallyExpanded = true,
     this.onTaskTap,
     this.textColor,
@@ -228,7 +230,29 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     );
   }
 
+  /// 解析 logs JSON，返回 msg 列表
+  List<String> _parseLogMsgs(dynamic logs) {
+    if (logs == null) return [];
+    if (logs is! List) return [];
+    
+    try {
+      final List<String> result = [];
+      for (final log in logs) {
+        if (log is Map) {
+          final msg = log['msg']?.toString() ?? '';
+          if (msg.isNotEmpty) {
+            result.add(msg);
+          }
+        }
+      }
+      return result;
+    } catch (e) {
+      return [];
+    }
+  }
+
   Widget _buildTaskItem(Map<String, dynamic> task, TDThemeData theme, bool isDark, Color darkInput) {
+    final taskId = task['id'].toString();
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
     final description = task['description']?.toString() ?? '';
     final displayName = task['display_name']?.toString();
@@ -236,10 +260,17 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
         ? DateTime.tryParse(task['created_at'].toString())
         : null;
     final taskType = task['task_type']?.toString() ?? 'video_3dgs';
+    
+    // 获取该任务的 logs
+    final allLogs = widget.taskLogs[taskId] ?? [];
+    final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
 
     // 任务类型图标映射
     final taskTypeIcon = _getTaskTypeIcon(taskType);
     final taskTypeLabel = _getTaskTypeLabel(taskType);
+
+    // 判断是否为 processing 状态（显示加载动画）
+    final isProcessing = widget.color == Colors.blue;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -260,11 +291,22 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                 color: widget.color.withAlpha(20),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                taskTypeIcon,
-                color: widget.color,
-                size: 24,
-              ),
+              child: isProcessing
+                  ? const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      taskTypeIcon,
+                      color: widget.color,
+                      size: 24,
+                    ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -282,37 +324,15 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: widget.color.withAlpha(15),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          taskTypeLabel,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: widget.color,
-                          ),
-                        ),
-                      ),
-                      if (description.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            description,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 显示最新日志或描述
+                  Text(
+                    latestLog ?? description ?? '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -383,6 +403,7 @@ class TaskListPage extends StatefulWidget {
 
 class _TaskListPageState extends State<TaskListPage> {
   Map<String, List<Map<String, dynamic>>> _tasksByStatus = {};
+  Map<String, List<String>> _taskLogs = {}; // taskId -> logs
   Map<String, bool> _expandedStatus = {};
   bool _isLoading = true;
   String? _error;
@@ -392,6 +413,27 @@ class _TaskListPageState extends State<TaskListPage> {
   // 颜色配置
   final darkBg = const Color(0xFF101014);
   final darkCard = const Color(0xFF18181C);
+
+  /// 解析 logs JSON，返回 msg 列表
+  List<String> _parseLogMsgs(dynamic logs) {
+    if (logs == null) return [];
+    if (logs is! List) return [];
+    
+    try {
+      final List<String> result = [];
+      for (final log in logs) {
+        if (log is Map) {
+          final msg = log['msg']?.toString() ?? '';
+          if (msg.isNotEmpty) {
+            result.add(msg);
+          }
+        }
+      }
+      return result;
+    } catch (e) {
+      return [];
+    }
+  }
 
   @override
   void initState() {
@@ -435,22 +477,30 @@ class _TaskListPageState extends State<TaskListPage> {
 
   Future<void> _fetchTasksSilent() async {
     try {
-      // 调试阶段：不检查登录状态
-      // final userId = Supabase.instance.client.auth.currentSession?.user.id;
-      // if (userId == null) return;
-
       final response = await Supabase.instance.client
           .from('processing_tasks')
           .select('*')
-          // .eq('user_id', userId) // 调试阶段：不过滤用户
           .order('created_at', ascending: false);
 
       if (mounted) {
         final Map<String, List<Map<String, dynamic>>> grouped = {};
+        final Map<String, List<String>> logMap = {};
+        
         for (final task in response) {
           final status = task['status']?.toString() ?? 'pending';
+          final taskId = task['id'].toString();
+          
           grouped.putIfAbsent(status, () => []);
           grouped[status]!.add(Map<String, dynamic>.from(task));
+          
+          // 解析 logs
+          final logs = task['logs'];
+          if (logs is List) {
+            final parsedLogs = _parseLogMsgs(logs);
+            if (parsedLogs.isNotEmpty) {
+              logMap[taskId] = parsedLogs;
+            }
+          }
         }
 
         for (final status in grouped.keys) {
@@ -459,6 +509,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
         setState(() {
           _tasksByStatus = grouped;
+          _taskLogs = logMap;
         });
 
         // 标记所有任务为已通知（更新缓存）
@@ -477,28 +528,30 @@ class _TaskListPageState extends State<TaskListPage> {
     });
 
     try {
-      // 调试阶段：不检查登录状态
-      // final userId = Supabase.instance.client.auth.currentSession?.user.id;
-      // if (userId == null) {
-      //   setState(() {
-      //     _isLoading = false;
-      //     _error = textLocalize('error_not_logged_in');
-      //   });
-      //   return;
-      // }
-
       final response = await Supabase.instance.client
           .from('processing_tasks')
           .select('*')
-          // .eq('user_id', userId) // 调试阶段：不过滤用户
           .order('created_at', ascending: false);
 
       if (mounted) {
         final Map<String, List<Map<String, dynamic>>> grouped = {};
+        final Map<String, List<String>> logMap = {};
+        
         for (final task in response) {
           final status = task['status']?.toString() ?? 'pending';
+          final taskId = task['id'].toString();
+          
           grouped.putIfAbsent(status, () => []);
           grouped[status]!.add(Map<String, dynamic>.from(task));
+          
+          // 解析 logs
+          final logs = task['logs'];
+          if (logs is List) {
+            final parsedLogs = _parseLogMsgs(logs);
+            if (parsedLogs.isNotEmpty) {
+              logMap[taskId] = parsedLogs;
+            }
+          }
         }
 
         // 初始化展开状态
@@ -508,6 +561,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
         setState(() {
           _tasksByStatus = grouped;
+          _taskLogs = logMap;
           _isLoading = false;
         });
 
@@ -659,6 +713,7 @@ class _TaskListPageState extends State<TaskListPage> {
         icon: category.icon,
         color: category.color,
         tasks: _tasksByStatus[status]!,
+        taskLogs: _taskLogs,
         initiallyExpanded: _expandedStatus[status] ?? true,
         isDark: isDark,
         textColor: textColor,
