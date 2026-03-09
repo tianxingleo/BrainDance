@@ -16,6 +16,7 @@ class GlomapRunner:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
         self.colmap_use_gpu = os.getenv("COLMAP_USE_GPU", "1").strip().lower() not in {"0", "false", "no", "off"}
+        self.colmap_gpu_index = os.getenv("COLMAP_GPU_INDEX", "0").strip() or "0"
         self.colmap_exe = self._resolve_executable("colmap", "COLMAP_BIN")
         self.glomap_exe = self._resolve_executable("glomap", "GLOMAP_BIN")
 
@@ -34,6 +35,8 @@ class GlomapRunner:
         print(f"    -> 🎯 锁定引擎: COLMAP={self.colmap_exe}")
         print(f"    -> 🎯 锁定引擎: GLOMAP={self.glomap_exe}")
         print(f"    -> ⚙️ COLMAP GPU 开关: {'开启' if self.colmap_use_gpu else '关闭'}")
+        if self.colmap_use_gpu:
+            print(f"    -> 🖥️ COLMAP GPU 索引: {self.colmap_gpu_index}")
         
         self.env = os.environ.copy()
         self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
@@ -89,7 +92,7 @@ class GlomapRunner:
                 "--ImageReader.camera_model", "OPENCV",
                 "--ImageReader.single_camera", "1",
                 "--FeatureExtraction.use_gpu", "1" if self.colmap_use_gpu else "0",
-                "--FeatureExtraction.gpu_index", "0" if self.colmap_use_gpu else "-1"
+                "--FeatureExtraction.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1"
             ], f"Step 1: 特征提取 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
             # Step 2: 顺序匹配
@@ -100,7 +103,7 @@ class GlomapRunner:
                 "--database_path", str(database_path),
                 "--SequentialMatching.overlap", "25",
                 "--FeatureMatching.use_gpu", "1" if self.colmap_use_gpu else "0",
-                "--FeatureMatching.gpu_index", "0" if self.colmap_use_gpu else "-1"
+                "--FeatureMatching.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1"
             ], f"Step 2: 顺序匹配 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
             print(f"    -> 🚀 启动 GLOMAP 引擎...")
@@ -113,8 +116,8 @@ class GlomapRunner:
                 "--output_format", "bin",
                 "--GlobalPositioning.use_gpu", "1" if self.colmap_use_gpu else "0",
                 "--BundleAdjustment.use_gpu", "1" if self.colmap_use_gpu else "0",
-                "--GlobalPositioning.gpu_index", "0" if self.colmap_use_gpu else "-1",
-                "--BundleAdjustment.gpu_index", "0" if self.colmap_use_gpu else "-1",
+                "--GlobalPositioning.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
+                "--BundleAdjustment.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
             ], "Step 3: 全局映射 (GLOMAP)", retry_cpu=self.colmap_use_gpu)
 
             # Step 4: 目录修正
