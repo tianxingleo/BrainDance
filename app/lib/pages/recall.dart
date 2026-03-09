@@ -17,8 +17,8 @@ class _RecallPageState extends State<RecallPage> {
   String _currentFolder = 'root'; // 'root', 'in_progress', 'completed'
   List<Map<String, dynamic>> _models = [];
   List<Map<String, dynamic>> _processingTasks = [];
-  Map<int, List<String>> _taskAllLogs = {}; // taskId -> all log msgs
-  Set<int> _expandedTaskLogs = {}; // 展开的任务ID集合
+  Map<String, List<String>> _taskAllLogs = {}; // taskId -> all log msgs
+  Set<String> _expandedTaskLogs = {}; // 展开的任务ID集合
   bool _isLoading = true;
   bool _isProcessingExpanded = true;
   final TextEditingController _searchController = TextEditingController();
@@ -57,7 +57,7 @@ class _RecallPageState extends State<RecallPage> {
   void _handleRealtimeChange(PostgresChangePayload payload) {
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
-    final int? taskId = newData['id'] ?? oldData['id'];
+    final taskId = (newData['id'] ?? oldData['id'])?.toString();
     final String? status = newData['status']?.toString() ?? oldData['status']?.toString();
     
     if (taskId == null) return;
@@ -69,7 +69,7 @@ class _RecallPageState extends State<RecallPage> {
       
       setState(() {
         // 移除旧版本（如果存在）
-        _processingTasks.removeWhere((t) => t['id'] == taskId);
+        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
         // 添加更新后的任务
         _processingTasks.add(Map<String, dynamic>.from(newData));
         if (allLogs.isNotEmpty) {
@@ -79,7 +79,7 @@ class _RecallPageState extends State<RecallPage> {
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       setState(() {
-        _processingTasks.removeWhere((t) => t['id'] == taskId);
+        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
         _taskAllLogs.remove(taskId);
         _expandedTaskLogs.remove(taskId);
       });
@@ -121,9 +121,9 @@ class _RecallPageState extends State<RecallPage> {
       debugPrint('[RecallPage] Fetched ${response.length} processing tasks');
       
       if (mounted) {
-        final Map<int, List<String>> logMap = {};
+        final Map<String, List<String>> logMap = {};
         for (final task in response) {
-          final taskId = task['id'] as int;
+          final taskId = task['id'].toString();
           final logs = task['logs'];
           debugPrint('[RecallPage] Task $taskId logs type: ${logs?.runtimeType}, value: $logs');
           
@@ -485,7 +485,7 @@ class _RecallPageState extends State<RecallPage> {
     Color textColor,
     Color hintTextColor,
   ) {
-    final taskId = task['id'] as int;
+    final taskId = task['id'].toString();
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
     final displayName = task['display_name']?.toString();
     final allLogs = _taskAllLogs[taskId] ?? [];
