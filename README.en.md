@@ -155,6 +155,11 @@ BrainDance/
 │   ├── config.toml        #   - Supabase Local Development Config
 │   └── README.md          #   - ☁️ Backend Deployment Guide
 │
+├── dashboard/             # [Web] System Monitoring Dashboard (Vue 3 + Vite)
+│   ├── src/               #   - Frontend source (Supabase realtime subscriptions)
+│   ├── .env.example       #   - Supabase connection template
+│   └── README.md          #   - Local run and deployment guide
+│
 ├── docs/                  # [Doc] Project Documentation
 │   ├── API_DOC.md         #   - API Interface Documentation
 │   ├── BrainDance Project Collaboration Specification and Development Agreement (v1.0).md  #   - Development Specifications
@@ -167,6 +172,7 @@ BrainDance/
 > **Note**:
 > - `app/` (Flutter Mobile Client) is under development and not yet included in this repository
 > - `supabase/functions/` (Search Edge Functions) is under development
+> - `dashboard/` is a standalone web dashboard and can be statically deployed
 
 ## 🚀 Quick Start
 
@@ -181,7 +187,7 @@ BrainDance/
 #### Mobile Test Devices
 
 - **OPPO Find X8**
-- **HUAWEI Mate 30 Pro**
+- **OPPO Reno 14**
 
 #### Server Configuration
 

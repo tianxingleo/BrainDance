@@ -155,6 +155,11 @@ BrainDance/
 │   ├── config.toml        #   - Supabase 本地开发配置
 │   └── README.md          #   - ☁️ 后端部署指南
 │
+├── dashboard/             # [Web] 系统状态可视化看板 (Vue 3 + Vite)
+│   ├── src/               #   - 前端源代码（Supabase 实时订阅）
+│   ├── .env.example       #   - Supabase 连接配置模板
+│   └── README.md          #   - 看板本地运行与部署说明
+│
 ├── docs/                  # [Doc] 项目文档
 │   ├── API_DOC.md         #   - API 接口文档
 │   ├── BrainDance 项目协作规范与开发协议 (v1.0).md  #   - 开发规范
@@ -167,6 +172,7 @@ BrainDance/
 > **说明**: 
 > - `app/` (Flutter 移动端) 正在开发中，尚未纳入本仓库
 > - `supabase/functions/` (搜索 Edge Functions) 正在开发中
+> - `dashboard/` 为新增独立前端看板，可单独构建后静态部署
 
 ## 🚀 快速开始 (Quick Start)
 
@@ -181,7 +187,7 @@ BrainDance/
 #### 移动端测试设备 (Mobile Test Devices)
 
 - **OPPO Find X8**
-- **HUAWEI Mate 30 Pro**
+- **OPPO Reno 14**
 
 #### 服务器配置 (Server Configuration)
 
