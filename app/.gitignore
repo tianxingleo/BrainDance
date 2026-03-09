@@ -46,3 +46,8 @@ app.*.map.json
 
 # Private environment variables
 .env
+
+# Flutter generated plugin files (auto-generated, do not track)
+**/generated_plugin_registrant.*
+**/GeneratedPluginRegistrant.*
+**/generated_plugins.cmake

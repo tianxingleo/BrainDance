@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import 'webgl_viewer.dart';
+import 'task_list.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -12,20 +14,125 @@ class RecallPage extends StatefulWidget {
 }
 
 class _RecallPageState extends State<RecallPage> {
+  String _currentFolder = 'root'; // 'root', 'in_progress', 'completed'
   List<Map<String, dynamic>> _models = [];
+  List<Map<String, dynamic>> _processingTasks = [];
+  Map<String, List<String>> _taskAllLogs = {}; // taskId -> all log msgs
+  Set<String> _expandedTaskLogs = {}; // 展开的任务ID集合
   bool _isLoading = true;
+  bool _isProcessingExpanded = true;
   final TextEditingController _searchController = TextEditingController();
+  RealtimeChannel? _realtimeChannel;
 
   @override
   void initState() {
     super.initState();
     _fetchModels();
+    _fetchProcessingTasks();
+    _setupRealtimeListener();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _realtimeChannel?.unsubscribe();
     super.dispose();
+  }
+
+  /// 设置 Realtime 监听 processing_tasks 表的变化
+  void _setupRealtimeListener() {
+    _realtimeChannel = Supabase.instance.client.channel('public:processing_tasks:recall');
+    
+    _realtimeChannel!.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'processing_tasks',
+      callback: (payload) => _handleRealtimeChange(payload),
+    );
+    
+    _realtimeChannel!.subscribe();
+  }
+
+  /// 处理 Realtime 变化
+  void _handleRealtimeChange(PostgresChangePayload payload) {
+    final newData = payload.newRecord;
+    final oldData = payload.oldRecord;
+    final taskId = (newData['id'] ?? oldData['id'])?.toString();
+    final String? status = newData['status']?.toString() ?? oldData['status']?.toString();
+    
+    if (taskId == null) return;
+    
+    if (status == 'processing') {
+      // 更新或添加 processing 任务
+      final logsJson = newData['logs'] as List<dynamic>?;
+      final allLogs = _parseAllLogMsgs(logsJson);
+      
+      setState(() {
+        // 移除旧版本（如果存在）
+        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+        // 添加更新后的任务
+        _processingTasks.add(Map<String, dynamic>.from(newData));
+        if (allLogs.isNotEmpty) {
+          _taskAllLogs[taskId] = allLogs;
+        }
+      });
+    } else if (status != 'processing' && oldData['status'] == 'processing') {
+      // 任务从 processing 变为其他状态，移除
+      setState(() {
+        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+        _taskAllLogs.remove(taskId);
+        _expandedTaskLogs.remove(taskId);
+      });
+    }
+  }
+
+  /// 解析所有 logs，返回 msg 列表
+  List<String> _parseAllLogMsgs(List<dynamic>? logs) {
+    if (logs == null || logs.isEmpty) return [];
+    
+    final List<String> result = [];
+    for (final log in logs) {
+      if (log is Map) {
+        final msg = log['msg']?.toString() ?? '';
+        if (msg.isNotEmpty) {
+          result.add(msg);
+        }
+      }
+    }
+    return result;
+  }
+
+  /// 获取 processing 状态的任务
+  Future<void> _fetchProcessingTasks() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('processing_tasks')
+          .select('*')
+          .eq('status', 'processing')
+          .order('created_at', ascending: false);
+
+      if (mounted) {
+        final Map<String, List<String>> logMap = {};
+        for (final task in response) {
+          final taskId = task['id'].toString();
+          final logs = task['logs'];
+          
+          if (logs is List) {
+            final allLogs = _parseAllLogMsgs(List<dynamic>.from(logs));
+            if (allLogs.isNotEmpty) {
+              logMap[taskId] = allLogs;
+            }
+          }
+        }
+        
+        setState(() {
+          _processingTasks = List<Map<String, dynamic>>.from(response);
+          _taskAllLogs = logMap;
+        });
+      }
+    } catch (e) {
+      // 静默失败
+    }
   }
 
   /// 将 Storage 内的相对路径转为可访问的公开 URL。
@@ -136,6 +243,16 @@ class _RecallPageState extends State<RecallPage> {
         ),
         actions: [
           IconButton(
+            icon: Icon(Icons.task_alt, color: iconColor),
+            tooltip: textLocalize("task_list_title"),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const TaskListPage()),
+              );
+            },
+          ),
+          IconButton(
             icon: AnimatedRotation(
               turns: _isLoading ? 1 : 0,
               duration: const Duration(milliseconds: 600),
@@ -232,6 +349,8 @@ class _RecallPageState extends State<RecallPage> {
                     ),
                   ),
                 ),
+                // Processing 任务区域
+                if (_processingTasks.isNotEmpty) _buildProcessingSection(theme, isDark, textColor),
                 Expanded(
                   child: Stack(
                     alignment: Alignment.center,
@@ -259,6 +378,234 @@ class _RecallPageState extends State<RecallPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 构建 Processing 任务区域（可展开收起）
+  Widget _buildProcessingSection(TDThemeData theme, bool isDark, Color textColor) {
+    final hintTextColor = isDark ? const Color(0xFF888888) : theme.fontGyColor3;
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF333333) : theme.grayColor3,
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(15),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 标题栏（可点击展开/收起）
+          InkWell(
+            onTap: () {
+              setState(() {
+                _isProcessingExpanded = !_isProcessingExpanded;
+              });
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  // 旋转加载图标
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '${textLocalize('status_processing')} (${_processingTasks.length})',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _isProcessingExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 任务列表（可展开/收起）
+          AnimatedCrossFade(
+            firstChild: const SizedBox.shrink(),
+            secondChild: Column(
+              children: _processingTasks.map((task) => _buildProcessingTaskItem(task, theme, isDark, textColor, hintTextColor)).toList(),
+            ),
+            crossFadeState: _isProcessingExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 200),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建 processing 任务项
+  Widget _buildProcessingTaskItem(
+    Map<String, dynamic> task,
+    TDThemeData theme,
+    bool isDark,
+    Color textColor,
+    Color hintTextColor,
+  ) {
+    final taskId = task['id'].toString();
+    final sceneId = task['scene_id']?.toString() ?? 'Unknown';
+    final displayName = task['display_name']?.toString();
+    final allLogs = _taskAllLogs[taskId] ?? [];
+    final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
+    final isExpanded = _expandedTaskLogs.contains(taskId);
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? darkInput : theme.grayColor1,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.blue.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName ?? sceneId,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: textColor,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      latestLog ?? textLocalize('status_processing'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // 展开/收起日志按钮
+              if (allLogs.length > 1)
+                IconButton(
+                  icon: AnimatedRotation(
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                      size: 20,
+                    ),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedTaskLogs.remove(taskId);
+                      } else {
+                        _expandedTaskLogs.add(taskId);
+                      }
+                    });
+                  },
+                ),
+            ],
+          ),
+          // 展开的日志列表
+          if (allLogs.length > 1)
+            AnimatedCrossFade(
+              firstChild: const SizedBox.shrink(),
+              secondChild: Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1A1A20) : theme.grayColor2,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: allLogs.reversed.map((log) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.only(top: 6, right: 8),
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF666666) : theme.fontGyColor4,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            log,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? const Color(0xFFAAAAAA) : theme.fontGyColor3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+              ),
+              crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 200),
+            ),
+        ],
       ),
     );
   }

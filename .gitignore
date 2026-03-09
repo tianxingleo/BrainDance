@@ -72,6 +72,12 @@ service_account.json
 /app/.pub-cache/
 /app/.pub/
 
+# Dart doc 生成的 API 文档
+doc/api/
+
+# Flutter web 构建产物
+/app/web/build/
+
 # Android 相关
 /app/android/.gradle
 /app/android/local.properties
