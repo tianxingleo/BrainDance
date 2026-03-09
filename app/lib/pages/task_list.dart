@@ -230,27 +230,6 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     );
   }
 
-  /// 解析 logs JSON，返回 msg 列表
-  List<String> _parseLogMsgs(dynamic logs) {
-    if (logs == null) return [];
-    if (logs is! List) return [];
-    
-    try {
-      final List<String> result = [];
-      for (final log in logs) {
-        if (log is Map) {
-          final msg = log['msg']?.toString() ?? '';
-          if (msg.isNotEmpty) {
-            result.add(msg);
-          }
-        }
-      }
-      return result;
-    } catch (e) {
-      return [];
-    }
-  }
-
   Widget _buildTaskItem(Map<String, dynamic> task, TDThemeData theme, bool isDark, Color darkInput) {
     final taskId = task['id'].toString();
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
@@ -267,7 +246,6 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
 
     // 任务类型图标映射
     final taskTypeIcon = _getTaskTypeIcon(taskType);
-    final taskTypeLabel = _getTaskTypeLabel(taskType);
 
     // 判断是否为 processing 状态（显示加载动画）
     final isProcessing = widget.color == Colors.blue;
@@ -326,7 +304,7 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                   const SizedBox(height: 4),
                   // 显示最新日志或描述
                   Text(
-                    latestLog ?? description ?? '',
+                    latestLog ?? (description.isNotEmpty ? description : ''),
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,

@@ -89,23 +89,16 @@ class _RecallPageState extends State<RecallPage> {
   List<String> _parseAllLogMsgs(List<dynamic>? logs) {
     if (logs == null || logs.isEmpty) return [];
     
-    try {
-      final List<String> result = [];
-      for (final log in logs) {
-        debugPrint('[RecallPage] log item type: ${log.runtimeType}, value: $log');
-        if (log is Map) {
-          final msg = log['msg']?.toString() ?? '';
-          if (msg.isNotEmpty) {
-            result.add(msg);
-          }
+    final List<String> result = [];
+    for (final log in logs) {
+      if (log is Map) {
+        final msg = log['msg']?.toString() ?? '';
+        if (msg.isNotEmpty) {
+          result.add(msg);
         }
       }
-      debugPrint('[RecallPage] parsed ${result.length} log msgs');
-      return result;
-    } catch (e) {
-      debugPrint('[RecallPage] parse error: $e');
-      return [];
     }
+    return result;
   }
 
   /// 获取 processing 状态的任务
@@ -117,20 +110,16 @@ class _RecallPageState extends State<RecallPage> {
           .eq('status', 'processing')
           .order('created_at', ascending: false);
 
-      debugPrint('[RecallPage] Fetched ${response.length} processing tasks');
-      
       if (mounted) {
         final Map<String, List<String>> logMap = {};
         for (final task in response) {
           final taskId = task['id'].toString();
           final logs = task['logs'];
-          debugPrint('[RecallPage] Task $taskId logs type: ${logs?.runtimeType}, value: $logs');
           
           if (logs is List) {
             final allLogs = _parseAllLogMsgs(List<dynamic>.from(logs));
             if (allLogs.isNotEmpty) {
               logMap[taskId] = allLogs;
-              debugPrint('[RecallPage] Task $taskId has ${allLogs.length} logs, latest: ${allLogs.last}');
             }
           }
         }
@@ -139,11 +128,9 @@ class _RecallPageState extends State<RecallPage> {
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
-        
-        debugPrint('[RecallPage] Total tasks with logs: ${logMap.length}');
       }
     } catch (e) {
-      debugPrint('[RecallPage] Error fetching processing tasks: $e');
+      // 静默失败
     }
   }
 
