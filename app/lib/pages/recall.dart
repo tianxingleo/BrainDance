@@ -12,8 +12,10 @@ class RecallPage extends StatefulWidget {
 }
 
 class _RecallPageState extends State<RecallPage> {
+  String _currentFolder = 'root'; // 'root', 'in_progress', 'completed'
   List<Map<String, dynamic>> _models = [];
-  bool _isLoading = true;
+  List<Map<String, dynamic>> _tasks = [];
+  bool _isLoading = false;
   final TextEditingController _searchController = TextEditingController();
 
   @override
