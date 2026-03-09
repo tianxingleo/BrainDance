@@ -185,10 +185,17 @@ BrainDance/
 
 #### Server Configuration
 
-- **CPU**: Intel Core i7-12600KF
+- **Current AI Engine Test/Recommended Server (this machine, verified on 2026-03-09)**
+- **Hostname**: hjbl40
+- **CPU**: Intel Xeon Platinum 8260 × 2 (dual socket, 96 threads)
+- **RAM**: 503GiB (about 512GB)
+- **GPU**: NVIDIA L20 46GB × 2
+- **OS**: Ubuntu 22.04.5 LTS (Kernel 6.8.0-100-generic)
+
+**AI Engine Minimum Configuration (compatibility baseline)**
+- **CPU**: Intel Core i5-14600KF (not i7)
 - **RAM**: 64GB
-- **GPU**: NVIDIA RTX 5070 12GB (Blackwell)
-- **OS**: Ubuntu on WSL2 (Windows 11)
+- **GPU**: NVIDIA RTX 5070 12GB
 
 
 ### Deployment Steps
