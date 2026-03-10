@@ -19,7 +19,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
-import 'services/task_notification_service.dart';
+import 'services/notification_service.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
