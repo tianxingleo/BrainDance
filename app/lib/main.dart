@@ -193,104 +193,106 @@ class MainScreen extends ConsumerWidget {
             ),
       bottomNavigationBar: isRecording
           ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 18, left: 18, right: 18),
-              child: PhysicalModel(
-                color: Colors.transparent,
-                elevation: 16,
-                borderRadius: BorderRadius.circular(32),
-                shadowColor: Colors.black.withOpacity(0.70),
-                clipBehavior: Clip.antiAlias,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppConfig.isNightMode
-                        ? const Color(0xFF18181C)
-                        : const Color(0xFF23232A),
-                    borderRadius: BorderRadius.circular(32),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 24,
-                        offset: Offset(16, 16),
-                      ),
-                    ],
-                  ),
-                  child: TDBottomTabBar(
-                    TDBottomTabBarBasicType.iconText,
-                    componentType: TDBottomTabBarComponentType.normal,
-                    useVerticalDivider: false,
-                    centerDistance: 0,
-                    barHeight: 90,
-                    navigationTabs: [
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("recall"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.home_rounded,
-                          size: selectedSize,
-                          color: brandColor,
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 18, left: 18, right: 18),
+                child: PhysicalModel(
+                  color: Colors.transparent,
+                  elevation: 16,
+                  borderRadius: BorderRadius.circular(32),
+                  shadowColor: Colors.black.withOpacity(0.70),
+                  clipBehavior: Clip.antiAlias,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppConfig.isNightMode
+                          ? const Color(0xFF18181C)
+                          : const Color(0xFF23232A),
+                      borderRadius: BorderRadius.circular(32),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 24,
+                          offset: Offset(16, 16),
                         ),
-                        unselectedIcon: Icon(
-                          Icons.home_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
+                      ],
+                    ),
+                    child: TDBottomTabBar(
+                      TDBottomTabBarBasicType.iconText,
+                      componentType: TDBottomTabBarComponentType.normal,
+                      useVerticalDivider: false,
+                      centerDistance: 0,
+                      barHeight: 90,
+                      navigationTabs: [
+                        TDBottomTabBarTabConfig(
+                          tabText: textLocalize("recall"),
+                          selectTabTextStyle: selectedTextStyle,
+                          unselectTabTextStyle: unselectedTextStyle,
+                          selectedIcon: Icon(
+                            Icons.home_rounded,
+                            size: selectedSize,
+                            color: brandColor,
+                          ),
+                          unselectedIcon: Icon(
+                            Icons.home_outlined,
+                            size: unselectedSize,
+                            color: lightBrandColor,
+                          ),
+                          onTap: () =>
+                              ref.read(pageIndexProvider.notifier).state = 0,
                         ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 0,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("record"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.videocam_rounded,
-                          size: selectedSize,
-                          color: brandColor,
+                        TDBottomTabBarTabConfig(
+                          tabText: textLocalize("record"),
+                          selectTabTextStyle: selectedTextStyle,
+                          unselectTabTextStyle: unselectedTextStyle,
+                          selectedIcon: Icon(
+                            Icons.videocam_rounded,
+                            size: selectedSize,
+                            color: brandColor,
+                          ),
+                          unselectedIcon: Icon(
+                            Icons.videocam_outlined,
+                            size: unselectedSize,
+                            color: lightBrandColor,
+                          ),
+                          onTap: () =>
+                              ref.read(pageIndexProvider.notifier).state = 1,
                         ),
-                        unselectedIcon: Icon(
-                          Icons.videocam_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
+                        TDBottomTabBarTabConfig(
+                          tabText: textLocalize("generate"),
+                          selectTabTextStyle: selectedTextStyle,
+                          unselectTabTextStyle: unselectedTextStyle,
+                          selectedIcon: Icon(
+                            Icons.image_rounded,
+                            size: selectedSize,
+                            color: brandColor,
+                          ),
+                          unselectedIcon: Icon(
+                            Icons.image_outlined,
+                            size: unselectedSize,
+                            color: lightBrandColor,
+                          ),
+                          onTap: () =>
+                              ref.read(pageIndexProvider.notifier).state = 2,
                         ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 1,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("generate"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.image_rounded,
-                          size: selectedSize,
-                          color: brandColor,
+                        TDBottomTabBarTabConfig(
+                          tabText: textLocalize("settings"),
+                          selectTabTextStyle: selectedTextStyle,
+                          unselectTabTextStyle: unselectedTextStyle,
+                          selectedIcon: Icon(
+                            Icons.settings_rounded,
+                            size: selectedSize,
+                            color: brandColor,
+                          ),
+                          unselectedIcon: Icon(
+                            Icons.settings_outlined,
+                            size: unselectedSize,
+                            color: lightBrandColor,
+                          ),
+                          onTap: () =>
+                              ref.read(pageIndexProvider.notifier).state = 3,
                         ),
-                        unselectedIcon: Icon(
-                          Icons.image_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 2,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("settings"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.settings_rounded,
-                          size: selectedSize,
-                          color: brandColor,
-                        ),
-                        unselectedIcon: Icon(
-                          Icons.settings_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 3,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),

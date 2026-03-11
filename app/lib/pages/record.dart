@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui';
+import 'dart:io';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/reco_config.dart';
@@ -10,9 +11,12 @@ import 'package:braindance/main.dart' show isRecordingProvider;
 import 'package:braindance/pages/video_submit.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:braindance/extra_func/dir_and_file.dart';
 
 const double _kFovH = 65.0;
 const double _kFovV = 50.0;
@@ -154,10 +158,32 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     _setGlobalRecording(false);
-    final file = await controller.stopVideoRecording();
-
+    var file = await controller.stopVideoRecording();
     if (mounted) {
       TDToast.showText('录制完成', context: context);
+    }
+    // 检验能否保存视频到相册
+    late final AssetEntity newAsset;
+    final PermissionState ps = await PhotoManager.requestPermissionExtend();
+    if (!ps.isAuth) {
+      if (mounted) {
+        TDToast.showText('无法保存视频到相册。视频文件暂存于缓存中，注意缓存清理。', context: context);
+      }
+    } else {
+      //转移视频
+      newAsset = await PhotoManager.editor.saveVideo(
+        File(file.path),
+        title: file.name,
+      );
+      await FileSystem.deleteFile(file.path);
+      File? f = await newAsset.originFile;
+      if (f == null) {
+        if (mounted) {
+          TDToast.showText('保存视频到相册时发生错误', context: context);
+        }
+        throw ();
+      }
+      file = XFile(f.path);
     }
 
     String thumbPath = file.path;
@@ -187,13 +213,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
       await _stopVideoRecording(controller);
       return;
     }
-
-    await controller.startVideoRecording();
     _setGlobalRecording(true);
+    await controller.startVideoRecording();
+    await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
     _recordSeconds = 0;
-    if (mounted) {
-      setState(() {});
-    }
 
     _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _recordSeconds++;
@@ -475,6 +498,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     } else {
       final controller = RecoConfig.cameraController!;
       final size = MediaQuery.of(context).size;
+
       final deviceRatio = size.width / size.height;
       final cameraRatio = controller.value.aspectRatio;
 
@@ -541,56 +565,57 @@ class _RecordPageState extends ConsumerState<RecordPage>
               ),
             ),
           ),
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withAlpha(110),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withAlpha(30)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      TDIcons.scan,
-                      color: _isArMode
-                          ? const Color(0xFF00E5FF)
-                          : Colors.white70,
-                      size: 24,
+          if (!isVideoRecording)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 60,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(110),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white.withAlpha(30)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        TDIcons.scan,
+                        color: _isArMode
+                            ? const Color(0xFF00E5FF)
+                            : Colors.white70,
+                        size: 24,
+                      ),
+                      onPressed: isVideoRecording ? null : _toggleArMode,
                     ),
-                    onPressed: isVideoRecording ? null : _toggleArMode,
-                  ),
-                  if (!_isArMode)
+                    if (!_isArMode)
+                      IconButton(
+                        icon: const Icon(
+                          TDIcons.refresh,
+                          color: Colors.white70,
+                          size: 24,
+                        ),
+                        onPressed: isAnyRecording
+                            ? null
+                            : () => RecoConfig.cameraSwitch(),
+                      ),
                     IconButton(
                       icon: const Icon(
-                        TDIcons.refresh,
+                        Icons.info_outline,
                         color: Colors.white70,
                         size: 24,
                       ),
-                      onPressed: isAnyRecording
-                          ? null
-                          : () => RecoConfig.cameraSwitch(),
+                      onPressed: () {
+                        setState(() {
+                          _showTips = true;
+                        });
+                      },
                     ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.info_outline,
-                      color: Colors.white70,
-                      size: 24,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _showTips = true;
-                      });
-                    },
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           Positioned(
             bottom: isAnyRecording ? 80 : 130,
             left: 0,

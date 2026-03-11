@@ -52,7 +52,10 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
       user = client.auth.currentUser;
       if (user == null) {
-        if (mounted) TDToast.showText('登录已取消或失败', context: context);
+        if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+        return;
+      } else {
+        if (mounted) TDToast.showText('登录成功，请再次点击提交以开始上传', context: context);
         return;
       }
     }

@@ -19,13 +19,6 @@ class RecoConfig {
     await cameraController!.initialize().catchError((Object e) {
       suc = false;
     });
-    if (suc) {
-      try {
-        await cameraController!.lockCaptureOrientation(
-          DeviceOrientation.portraitUp,
-        );
-      } catch (e) {}
-    }
     onUpdate?.call();
     return suc;
   }
@@ -46,7 +39,7 @@ class RecoConfig {
     if ((cameraController == null) || !cameraController!.value.isInitialized) {
       await cameraInitialize();
     } else {
-      cameraController!.setDescription(cameras[camNum]);
+      await cameraController!.setDescription(cameras[camNum]);
     }
     onUpdate?.call();
   }
