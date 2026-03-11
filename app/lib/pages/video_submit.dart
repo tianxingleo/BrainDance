@@ -86,6 +86,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         'user_id': user.id,
         'status': 'pending',
         if (nameController.text.isNotEmpty) 'display_name': nameController.text,
+        'task_params': {'mapper_type': 'da3'},
       });
 
       if (mounted) {

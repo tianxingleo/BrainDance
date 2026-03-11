@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from src.core.factory import PipelineFactory  # 🟢 引入工厂
 from src.modules.rag_memory import RagMemory # 🟢 引入新模块
 from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
+from src.utils.ply_utils import compress_model_for_delivery
 
 # [初始化] 加载当前目录下的 .env 文件
 # 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
@@ -260,7 +261,7 @@ class CloudWorker:
             # 4. [核心修改] 执行多态的 run 方法
             # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
             
-            final_ply_path, metadata = pipeline.run(str(input_path), task_params)
+            final_model_path, metadata = pipeline.run(str(input_path), task_params)
 
             # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
             # 不管训练是否成功，只要有分析结果，都应该存下来
@@ -297,15 +298,42 @@ class CloudWorker:
                     )
 
             # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
-            if not final_ply_path or not Path(final_ply_path).exists():
-                raise RuntimeError("Pipeline 执行结束，但未生成有效的 PLY 文件，请检查训练日志。")
+            if not final_model_path or not Path(final_model_path).exists():
+                raise RuntimeError("Pipeline 执行结束，但未生成有效的模型文件，请检查训练日志。")
+
+            model_path_obj = Path(final_model_path)
+            delivery_format = str(
+                task_params.get("delivery_format") or os.getenv("MODEL_DELIVERY_FORMAT", "splat")
+            ).lower()
+            opacity_threshold = float(
+                task_params.get("compression_opacity_threshold", os.getenv("COMPRESSION_OPACITY_THRESHOLD", "0.05"))
+            )
+            ksplat_alpha_threshold = int(
+                task_params.get("ksplat_alpha_threshold", os.getenv("KSPLAT_ALPHA_THRESHOLD", "1"))
+            )
+
+            if model_path_obj.suffix.lower() == ".ply" and delivery_format in ("splat", "ksplat"):
+                try:
+                    compressed_path = compress_model_for_delivery(
+                        model_path=str(model_path_obj),
+                        output_format=delivery_format,
+                        opacity_threshold=opacity_threshold,
+                        ksplat_script_path=os.getenv("KSPLAT_SCRIPT_PATH", ""),
+                        alpha_removal_threshold=ksplat_alpha_threshold,
+                        log_callback=on_pipeline_log,
+                    )
+                    model_path_obj = Path(compressed_path)
+                    on_pipeline_log(f"✅ 模型压缩完成: {model_path_obj.name}")
+                except Exception as e:
+                    on_pipeline_log(f"⚠️ 模型压缩失败，回退原始文件上传: {e}")
 
             # =================== 阶段 D: 上传结果 ===================
             on_pipeline_log("训练完成，正在上传结果到云端...")
             
-            # 1. 上传 PLY 模型文件
-            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud.ply"
-            with open(final_ply_path, 'rb') as f:
+            # 1. 上传模型文件（支持 .ply / .splat / .ksplat）
+            model_suffix = model_path_obj.suffix.lower() or ".ply"
+            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud{model_suffix}"
+            with open(model_path_obj, 'rb') as f:
                 self.supabase.storage.from_(self.BUCKET_NAME).upload(
                     path=upload_ply_key, 
                     file=f, 
@@ -325,6 +353,43 @@ class CloudWorker:
                         file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
                     )
                 on_pipeline_log("上传 transforms.json 成功")
+
+            # 3. 上传预览图 preview_img_path (如果存在)
+            if metadata and metadata.get("preview_img_path") and Path(metadata["preview_img_path"]).exists():
+                upload_img_key = f"{user_id}/{scene_id}/output/preview.jpg" # 假设是 jpg
+                with open(metadata["preview_img_path"], 'rb') as f:
+                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                        path=upload_img_key,
+                        file=f,
+                        file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
+                    )
+                # 替换为远程 URL
+                remote_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(upload_img_key)
+                metadata["preview_img_path"] = remote_url
+                on_pipeline_log("上传预览图成功")
+
+            # 3.5 强制同步 model_assets 的模型路径，保证客户端总能拿到最新后缀
+            try:
+                model_assets_row = {
+                    "scene_id": scene_id,
+                    "user_id": user_id,
+                    "ply_path": upload_ply_key,
+                }
+                if metadata:
+                    if "ai_description" in metadata:
+                        model_assets_row["description"] = metadata.get("ai_description", "")
+                    if "ai_tags" in metadata:
+                        model_assets_row["tags"] = metadata.get("ai_tags", [])
+                    if "ai_objects" in metadata:
+                        model_assets_row["objects"] = metadata.get("ai_objects", [])
+                    if "preview_img_path" in metadata:
+                        model_assets_row["preview_img_path"] = metadata.get("preview_img_path", "")
+                self.supabase.table("model_assets").upsert(
+                    model_assets_row,
+                    on_conflict="scene_id"
+                ).execute()
+            except Exception as e:
+                on_pipeline_log(f"⚠️ 同步 model_assets 路径失败: {e}")
 
             # =================== 🟢 [RAG 集成] 资产入库 ===================
             # 只有当 AI 成功生成了描述，才存入知识库

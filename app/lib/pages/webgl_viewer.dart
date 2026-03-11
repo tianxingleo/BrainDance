@@ -19,12 +19,14 @@ class WebGLViewerPage extends StatefulWidget {
   final String initialModelUrl;
   final String? posesUrl; // 云端 webgl_poses.json 的公开 URL（可选）
   final String sceneId;
+  final List<double>? initialPose; // 从 RAG 视角跳转传入的坐标矩阵
 
   const WebGLViewerPage({
     super.key,
     this.initialModelUrl = './models/scene_auto_sync_raw.ply',
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
+    this.initialPose,
   });
 
   @override
@@ -106,7 +108,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final file = File(filePath);
         if (await file.exists()) {
           request.response.headers.add('Access-Control-Allow-Origin', '*');
-          if (filePath.endsWith('.ply'))
+          if (filePath.endsWith('.ply') ||
+              filePath.endsWith('.splat') ||
+              filePath.endsWith('.ksplat'))
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
@@ -143,7 +147,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           contentType = 'image/png';
         else if (path.endsWith('.ico'))
           contentType = 'image/x-icon';
-        else if (path.endsWith('.ply'))
+        else if (path.endsWith('.ply') ||
+            path.endsWith('.splat') ||
+            path.endsWith('.ksplat'))
           contentType = 'application/octet-stream';
 
         request.response.headers.contentType = ContentType.parse(contentType);
@@ -281,6 +287,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ),
       );
 
+    // 通知 Flutter 重建，让 WebViewWidget 真正挂载到树上
+    if (mounted) setState(() {});
+
     // Load the local HTML file matching the server port
     _loadLocalHtml();
   }
@@ -318,13 +327,20 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     debugPrint('Sending model URL to WebView: $targetUrl');
 
     if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
-      // 新版：同时传 PLY URL 和 webgl_poses.json 的公网 URL
-      final payload = jsonEncode({'ply': targetUrl, 'poses': widget.posesUrl});
+      // 新版：同时传模型 URL、webgl_poses.json 公网 URL 以及可能的初始视角矩阵
+      final payload = jsonEncode({
+        'ply': targetUrl, 
+        'poses': widget.posesUrl,
+        if (widget.initialPose != null) 'matrix': widget.initialPose,
+      });
       _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
     } else {
-      // 旧版兼容：只传 PLY URL，由 WebGL 内部使用默认位姿文件
-      final encodedUrl = jsonEncode(targetUrl);
-      _controller?.runJavaScript("window.loadModelFromFlutter($encodedUrl)");
+      // 旧版兼容：只传模型 URL，由 WebGL 内部使用默认位姿文件
+      final payload = jsonEncode({
+        'ply': targetUrl,
+        if (widget.initialPose != null) 'matrix': widget.initialPose,
+      });
+      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
     }
   }
 

@@ -155,6 +155,11 @@ BrainDance/
 │   ├── config.toml        #   - Supabase Local Development Config
 │   └── README.md          #   - ☁️ Backend Deployment Guide
 │
+├── dashboard/             # [Web] System Monitoring Dashboard (Vue 3 + Vite)
+│   ├── src/               #   - Frontend source (Supabase realtime subscriptions)
+│   ├── .env.example       #   - Supabase connection template
+│   └── README.md          #   - Local run and deployment guide
+│
 ├── docs/                  # [Doc] Project Documentation
 │   ├── API_DOC.md         #   - API Interface Documentation
 │   ├── BrainDance Project Collaboration Specification and Development Agreement (v1.0).md  #   - Development Specifications
@@ -167,6 +172,7 @@ BrainDance/
 > **Note**:
 > - `app/` (Flutter Mobile Client) is under development and not yet included in this repository
 > - `supabase/functions/` (Search Edge Functions) is under development
+> - `dashboard/` is a standalone web dashboard and can be statically deployed
 
 ## 🚀 Quick Start
 
@@ -181,14 +187,21 @@ BrainDance/
 #### Mobile Test Devices
 
 - **OPPO Find X8**
-- **HUAWEI Mate 30 Pro**
+- **OPPO Reno 14**
 
 #### Server Configuration
 
-- **CPU**: Intel Core i7-12600KF
+- **Current AI Engine Test/Recommended Server (this machine, verified on 2026-03-09)**
+- **Hostname**: hjbl40
+- **CPU**: Intel Xeon Platinum 8260 × 2 (dual socket, 96 threads)
+- **RAM**: 503GiB (about 512GB)
+- **GPU**: NVIDIA L20 46GB × 2
+- **OS**: Ubuntu 22.04.5 LTS (Kernel 6.8.0-100-generic)
+
+**AI Engine Minimum Configuration (compatibility baseline)**
+- **CPU**: Intel Core i5-14600KF (not i7)
 - **RAM**: 64GB
-- **GPU**: NVIDIA RTX 5070 12GB (Blackwell)
-- **OS**: Ubuntu on WSL2 (Windows 11)
+- **GPU**: NVIDIA RTX 5070 12GB
 
 
 ### Deployment Steps
@@ -339,6 +352,7 @@ This project is an exploration standing on the shoulders of giants. Core algorit
 
 #### Rendering & Viewer
 
+- **Special Thanks**: Special thanks to **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** for its continued contribution to the web 3DGS ecosystem.
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: Three.js-based web viewer, inspiration for our mobile WebView rendering.
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: Another excellent WebGL implementation, providing early conceptual references.
 

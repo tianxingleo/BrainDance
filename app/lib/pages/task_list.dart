@@ -1,0 +1,463 @@
+import 'dart:async';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../configs/app_config.dart';
+import '../services/notification_service.dart';
+import 'webgl_viewer.dart';
+import 'task_list/status_category.dart';
+import 'task_list/category_section.dart';
+
+export 'task_list/status_category.dart';
+export 'task_list/category_section.dart';
+
+/// 任务列表页面 - 使用Supabase Realtime轮询
+class TaskListPage extends StatefulWidget {
+  const TaskListPage({super.key});
+
+  @override
+  State<TaskListPage> createState() => _TaskListPageState();
+}
+
+class _TaskListPageState extends State<TaskListPage> {
+  Map<String, List<Map<String, dynamic>>> _tasksByStatus = {};
+  Map<String, List<String>> _taskLogs = {}; // taskId -> logs
+  Map<String, bool> _expandedStatus = {};
+  bool _isLoading = true;
+  String? _error;
+  Timer? _refreshTimer;
+  StreamSubscription<AuthState>? _authSubscription;
+
+  // 颜色配置
+  final darkBg = const Color(0xFF101014);
+  final darkCard = const Color(0xFF18181C);
+
+  /// 解析 logs JSON，返回 msg 列表
+  List<String> _parseLogMsgs(dynamic logs) {
+    if (logs == null) return [];
+    if (logs is! List) return [];
+    
+    try {
+      final List<String> result = [];
+      for (final log in logs) {
+        if (log is Map) {
+          final msg = log['msg']?.toString() ?? '';
+          if (msg.isNotEmpty) {
+            result.add(msg);
+          }
+        }
+      }
+      return result;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeData();
+  }
+
+  Future<void> _initializeData() async {
+    await _fetchTasks();
+    _setupAutoRefresh();
+    _listenAuthChanges();
+  }
+
+  void _listenAuthChanges() {
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+      if (event.event == AuthChangeEvent.signedOut) {
+        // 用户登出时清空数据
+        setState(() {
+          _tasksByStatus = {};
+          _error = textLocalize('error_not_logged_in');
+        });
+      } else if (event.event == AuthChangeEvent.signedIn) {
+        // 用户登录时刷新数据
+        _fetchTasks();
+      }
+    });
+  }
+
+  void _setupAutoRefresh() {
+    // 每5秒自动刷新一次，实现类似realtime的效果
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) {
+        _fetchTasksSilent();
+      }
+    });
+  }
+
+  Future<void> _fetchTasksSilent() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('processing_tasks')
+          .select('*')
+          .order('created_at', ascending: false);
+
+      if (mounted) {
+        final Map<String, List<Map<String, dynamic>>> grouped = {};
+        final Map<String, List<String>> logMap = {};
+        
+        for (final task in response) {
+          final status = task['status']?.toString() ?? 'pending';
+          final taskId = task['id'].toString();
+          
+          grouped.putIfAbsent(status, () => []);
+          grouped[status]!.add(Map<String, dynamic>.from(task));
+          
+          // 解析 logs
+          final logs = task['logs'];
+          if (logs is List) {
+            final parsedLogs = _parseLogMsgs(logs);
+            if (parsedLogs.isNotEmpty) {
+              logMap[taskId] = parsedLogs;
+            }
+          }
+        }
+
+        for (final status in grouped.keys) {
+          _expandedStatus.putIfAbsent(status, () => true);
+        }
+
+        setState(() {
+          _tasksByStatus = grouped;
+          _taskLogs = logMap;
+        });
+
+        // 标记所有任务为已通知（更新缓存）
+        final allTasks = grouped.values.expand((list) => list).toList();
+        taskNotificationService.markAllTasksAsNotified(allTasks);
+      }
+    } catch (e) {
+      // 静默刷新失败不显示错误
+    }
+  }
+
+  Future<void> _fetchTasks() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await Supabase.instance.client
+          .from('processing_tasks')
+          .select('*')
+          .order('created_at', ascending: false);
+
+      if (mounted) {
+        final Map<String, List<Map<String, dynamic>>> grouped = {};
+        final Map<String, List<String>> logMap = {};
+        
+        for (final task in response) {
+          final status = task['status']?.toString() ?? 'pending';
+          final taskId = task['id'].toString();
+          
+          grouped.putIfAbsent(status, () => []);
+          grouped[status]!.add(Map<String, dynamic>.from(task));
+          
+          // 解析 logs
+          final logs = task['logs'];
+          if (logs is List) {
+            final parsedLogs = _parseLogMsgs(logs);
+            if (parsedLogs.isNotEmpty) {
+              logMap[taskId] = parsedLogs;
+            }
+          }
+        }
+
+        // 初始化展开状态
+        for (final status in grouped.keys) {
+          _expandedStatus.putIfAbsent(status, () => true);
+        }
+
+        setState(() {
+          _tasksByStatus = grouped;
+          _taskLogs = logMap;
+          _isLoading = false;
+        });
+
+        // 标记所有任务为已通知（更新缓存）
+        final allTasks = grouped.values.expand((list) => list).toList();
+        taskNotificationService.markAllTasksAsNotified(allTasks);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = e.toString();
+        });
+        TDToast.showText(
+          '${textLocalize('error_fetch_tasks')}: $e',
+          context: context,
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _authSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = TDTheme.of(context);
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF333333);
+
+    return Scaffold(
+      backgroundColor: isDark ? darkBg : theme.grayColor1,
+      appBar: AppBar(
+        backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        centerTitle: true,
+        title: Text(
+          textLocalize('task_list_title'),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: AnimatedRotation(
+              turns: _isLoading ? 1 : 0,
+              duration: const Duration(milliseconds: 600),
+              child: Icon(
+                Icons.refresh,
+                color: isDark ? const Color(0xFFEEEEEE) : const Color(0xFF333333),
+              ),
+            ),
+            tooltip: textLocalize('refresh'),
+            onPressed: _isLoading ? null : _fetchTasks,
+          ),
+        ],
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isDark
+                ? [darkBg, darkCard]
+                : [theme.grayColor1, theme.whiteColor1],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: _buildBody(theme, isDark, textColor),
+      ),
+    );
+  }
+
+  Widget _buildBody(TDThemeData theme, bool isDark, Color textColor) {
+    if (_isLoading) {
+      return const Center(
+        child: TDLoading(
+          size: TDLoadingSize.large,
+          icon: TDLoadingIcon.circle,
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return _buildErrorState(theme, isDark, textColor);
+    }
+
+    if (_tasksByStatus.isEmpty) {
+      return _buildEmptyState(theme, isDark, textColor);
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchTasks,
+      child: ListView(
+        padding: const EdgeInsets.only(top: 8, bottom: 100),
+        children: _buildCategorySections(theme, isDark, textColor),
+      ),
+    );
+  }
+
+  List<Widget> _buildCategorySections(TDThemeData theme, bool isDark, Color textColor) {
+    // 按优先级排序状态
+    final sortedStatuses = _tasksByStatus.keys.toList()..sort((a, b) {
+      final priorityA = statusCategories.firstWhere(
+        (c) => c.status == a,
+        orElse: () => StatusCategory(
+          status: a,
+          labelKey: a,
+          icon: Icons.folder,
+          color: Colors.grey,
+          priority: 99,
+        ),
+      ).priority;
+      final priorityB = statusCategories.firstWhere(
+        (c) => c.status == b,
+        orElse: () => StatusCategory(
+          status: b,
+          labelKey: b,
+          icon: Icons.folder,
+          color: Colors.grey,
+          priority: 99,
+        ),
+      ).priority;
+      return priorityA.compareTo(priorityB);
+    });
+
+    return sortedStatuses.map((status) {
+      final category = statusCategories.firstWhere(
+        (c) => c.status == status,
+        orElse: () => StatusCategory(
+          status: status,
+          labelKey: status,
+          icon: Icons.folder,
+          color: Colors.grey,
+          priority: 99,
+        ),
+      );
+
+      return ExpandableCategorySection(
+        key: ValueKey(status),
+        title: textLocalize(category.labelKey),
+        icon: category.icon,
+        color: category.color,
+        tasks: _tasksByStatus[status]!,
+        taskLogs: _taskLogs,
+        initiallyExpanded: _expandedStatus[status] ?? true,
+        isDark: isDark,
+        textColor: textColor,
+        onTaskTap: (task) => _onTaskTap(task),
+      );
+    }).toList();
+  }
+
+  void _onTaskTap(Map<String, dynamic> task) {
+    final status = task['status']?.toString();
+    final sceneId = task['scene_id']?.toString();
+    
+    // 只有completed状态的任务才能查看
+    if (status == 'completed' && sceneId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => WebGLViewerPage(sceneId: sceneId),
+        ),
+      );
+    } else {
+      // 显示任务详情或状态提示
+      TDToast.showText(
+        textLocalize('task_status_${status ?? 'unknown'}'),
+        context: context,
+      );
+    }
+  }
+
+  Widget _buildEmptyState(TDThemeData theme, bool isDark, Color textColor) {
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? const Color(0xFF23232A) : theme.whiteColor1,
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(20),
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.inbox_outlined,
+              size: 80,
+              color: isDark ? const Color(0xFF666666) : theme.fontGyColor4,
+            ),
+            const SizedBox(height: 24),
+            Text(
+              textLocalize('task_list_empty_title'),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              textLocalize('task_list_empty_desc'),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState(TDThemeData theme, bool isDark, Color textColor) {
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 64,
+              color: Colors.red.withAlpha(180),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              textLocalize('error_title'),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error ?? textLocalize('error_unknown'),
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            TDButton(
+              text: textLocalize('retry'),
+              icon: Icons.refresh,
+              type: TDButtonType.fill,
+              theme: TDButtonTheme.primary,
+              shape: TDButtonShape.round,
+              size: TDButtonSize.medium,
+              onTap: _fetchTasks,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
