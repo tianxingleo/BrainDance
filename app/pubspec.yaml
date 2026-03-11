@@ -44,6 +44,8 @@ dependencies:
   flutter_dotenv: ^5.1.0
   sensors_plus: ^6.1.1
   shared_preferences: ^2.3.5
+  wakelock_plus: ^1.4.0
+  cross_file: ^0.3.5+2
 
 dev_dependencies:
   flutter_test:

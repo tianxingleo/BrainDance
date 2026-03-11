@@ -29,6 +29,7 @@ class VideoSubmitPage extends ConsumerStatefulWidget {
 class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final TextEditingController nameController = TextEditingController();
   bool _isUploading = false;
+  double _uploadProgress = 0.0;
 
   static final Random _rdg = Random();
 
@@ -78,6 +79,13 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
               contentType: 'video/mp4',
               upsert: true,
             ),
+            /*onSendProgress: (progress, total) {
+              if (mounted) {
+                setState(() {
+                  _uploadProgress = progress / total;
+                });
+              }
+            },*/
           );
 
       // 创建任务
@@ -160,7 +168,23 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           if (_isUploading)
             Container(
               color: Colors.black45,
-              child: const Center(child: CircularProgressIndicator()),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(
+                      '涓婁紶涓... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
         ],
       ),

@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 const double _kFovH = 65.0;
 const double _kFovV = 50.0;
@@ -150,6 +151,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 
   void _setGlobalRecording(bool value) {
+    if (value) {
+      WakelockPlus.enable();
+    } else {
+      WakelockPlus.disable();
+    }
     ref.read(isRecordingProvider.notifier).state = value;
   }
 
@@ -534,8 +540,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       isAnyRecording,
     );
     final mediaQuery = MediaQuery.of(context);
-    final bottomOffset =
-        mediaQuery.padding.bottom + (isAnyRecording ? 32 : 110);
+    final bottomOffset = mediaQuery.padding.bottom + 32;
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,

@@ -154,7 +154,8 @@ class GlobalNotificationOverlay extends StatefulWidget {
   const GlobalNotificationOverlay({super.key});
 
   @override
-  State<GlobalNotificationOverlay> createState() => _GlobalNotificationOverlayState();
+  State<GlobalNotificationOverlay> createState() =>
+      _GlobalNotificationOverlayState();
 }
 
 class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
@@ -168,29 +169,29 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
   @override
   void initState() {
     super.initState();
-    
+
     // 显示动画控制器 (300ms)
     _showController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    
+
     // 隐藏动画控制器 (1秒逐渐消失)
     _hideController = AnimationController(
       duration: const Duration(seconds: 1),
       vsync: this,
     );
-    
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _showController, curve: Curves.easeOutCubic));
-    
+
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero).animate(
+          CurvedAnimation(parent: _showController, curve: Curves.easeOutCubic),
+        );
+
     // 淡出动画：从1.0到0.0
     _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(parent: _hideController, curve: Curves.easeInOut),
     );
-    
+
     // 监听隐藏动画完成
     _hideController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
@@ -223,7 +224,9 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
 
         // 检查当前路由是否允许显示通知
         final currentRoute = taskNotificationService.currentRoute;
-        if (!taskNotificationService.isNotificationEnabledForRoute(currentRoute)) {
+        if (!taskNotificationService.isNotificationEnabledForRoute(
+          currentRoute,
+        )) {
           return const SizedBox.shrink();
         }
 
@@ -284,10 +287,14 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
               color: Colors.transparent,
               child: Center(
                 child: Container(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF2A2A30) : Colors.white,
                     borderRadius: BorderRadius.circular(12),
@@ -450,6 +457,7 @@ class MainScreen extends ConsumerWidget {
                       useVerticalDivider: false,
                       centerDistance: 0,
                       barHeight: 90,
+                      currentIndex: pageIndex,
                       navigationTabs: [
                         TDBottomTabBarTabConfig(
                           tabText: textLocalize("recall"),
