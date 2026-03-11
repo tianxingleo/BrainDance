@@ -20,7 +20,7 @@ class SpatialAnchorExtractor:
         self.scene_analyzer = SceneAnalyzer(cfg)
         self.rag_memory = RagMemory(supabase_client)
 
-    def extract_and_save(self, scene_id: str, log_callback=None):
+    def extract_and_save(self, scene_id: str, user_id: Optional[str] = None, log_callback=None):
         """执行空间语义锚点提取并保存到数据库"""
         if log_callback:
             log_callback("📍 [5/5] 开始提取空间语义锚点...")
@@ -77,13 +77,21 @@ class SpatialAnchorExtractor:
             if log_callback: log_callback(f"⚠️ 保存 webgl_poses.json 失败: {e}")
 
         # 3. 获取 model_id 和 user_id
+        fallback_user_id = user_id or "default_user"
+        if not fallback_user_id or fallback_user_id == "default_user":
+            fallback_user_id = self.cfg.project_name.split('_')[0] if '_' in self.cfg.project_name else "default_user"
+
         model_id = self._get_model_id(scene_id)
         if not model_id:
-            if log_callback: log_callback(f"⚠️ 未在数据库中找到 scene_id={scene_id} 的模型，跳过锚点提取")
-            return False
+            if log_callback:
+                log_callback(f"⚠️ 未在数据库中找到 scene_id={scene_id} 的模型，尝试自动补建后继续锚点提取")
+            model_id = self._ensure_model_id(scene_id=scene_id, user_id=fallback_user_id, log_callback=log_callback)
+            if not model_id:
+                if log_callback: log_callback(f"⚠️ 自动补建模型记录失败，跳过锚点提取")
+                return False
             
         bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
-        user_id = self.cfg.project_name.split('_')[0] if '_' in self.cfg.project_name else 'default_user'
+        user_id = fallback_user_id
         try:
             response = self.supabase.table("model_assets").select("user_id").eq("id", model_id).execute()
             if response.data and len(response.data) > 0:
@@ -244,6 +252,28 @@ class SpatialAnchorExtractor:
             return None
         except Exception as e:
             print(f"Error getting model_id: {e}")
+            return None
+
+    def _ensure_model_id(self, scene_id: str, user_id: str, log_callback=None) -> Optional[str]:
+        """确保 model_assets 中存在 scene_id 对应记录，并返回其 id。"""
+        try:
+            row = {
+                "scene_id": scene_id,
+                "user_id": user_id,
+                "description": "",
+                "tags": [],
+                "objects": [],
+                "ply_path": "",
+                "meta_info": {}
+            }
+            self.supabase.table("model_assets").upsert(row, on_conflict="scene_id").execute()
+            model_id = self._get_model_id(scene_id)
+            if model_id and log_callback:
+                log_callback(f"    -> ✅ 已自动补建 model_assets 记录: scene_id={scene_id}")
+            return model_id
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ 自动补建 model_assets 记录失败: {e}")
             return None
 
     def _get_image_tag(self, image_path: Path) -> str:

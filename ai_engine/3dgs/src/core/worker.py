@@ -336,7 +336,7 @@ class CloudWorker:
         frame_pattern = out_dir / "frame_%05d.jpg"
         subprocess.run([
             "ffmpeg", "-y", "-i", str(video_path),
-            "-vf", "fps=1,scale=1280:1280:force_original_aspect_ratio=decrease:flags=lanczos",
+            "-vf", "fps=5,scale=1280:1280:force_original_aspect_ratio=decrease:flags=lanczos",
             "-q:v", "2",
             str(frame_pattern),
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)

@@ -123,11 +123,11 @@ class Video3DGSPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
-        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=1, 最长边限制 1920px, Lanczos 超采样)...")
+        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=5, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-vf", "fps=5,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
                 "-q:v", "2",
                 "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
                 str(temp_dir / "frame_%05d.jpg")
@@ -234,7 +234,11 @@ class Video3DGSPipeline(BasePipeline):
             supabase_client = self.context.get('supabase')
             if supabase_client:
                 anchor_extractor = SpatialAnchorExtractor(cfg, supabase_client)
-                anchor_extractor.extract_and_save(self.scene_id, log_callback=self.log)
+                anchor_extractor.extract_and_save(
+                    self.scene_id,
+                    user_id=self.context.get("user_id"),
+                    log_callback=self.log
+                )
             else:
                 self.log("⚠️ 未找到 Supabase 客户端，跳过空间语义锚点提取")
 
