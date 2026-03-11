@@ -65,6 +65,7 @@ class Video3DGSPipeline(BasePipeline):
             #    如果字典里没有这个 key，它会返回 None (不会报错)，条件不成立。
 
             cfg.iterations = 7000 
+            cfg.training_iterations = 7000
             # 2. 修改配置 (cfg)。
             #    cfg 是全局配置对象，默认 iterations 可能设的是 30000 (标准质量)。
             #    这里直接把它改为 7000，意味着训练步数减少，速度变快，但质量会下降。
@@ -217,7 +218,7 @@ class Video3DGSPipeline(BasePipeline):
         # ==========================================
         # Step 4: 3DGS 训练与导出
         # ==========================================
-        self.log(f"🧠 [4/4] 开始 3DGS 训练 (迭代次数: {cfg.iterations})...")
+        self.log(f"🧠 [4/4] 开始 3DGS 训练 (迭代次数: {cfg.training_iterations})...")
         try:
             # 开始训练
             nerf_engine.train()

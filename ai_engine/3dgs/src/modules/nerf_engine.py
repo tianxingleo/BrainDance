@@ -41,6 +41,16 @@ class NerfstudioEngine:
             radius_scale=self.cfg.scene_radius_scale
         )
         self.scene_type = scene_type # 存下来给导出步骤用
+        is_da3_mapper = (self.cfg.mapper_type or "").strip().lower() == "da3"
+        stop_split_at = min(
+            self.cfg.training_iterations,
+            max(2000, self.cfg.training_iterations - 3000)
+        )
+        if is_da3_mapper:
+            stop_split_at = min(
+                stop_split_at,
+                max(1500, min(4000, self.cfg.training_iterations // 3))
+            )
 
         # 2. 组装命令
         cmd = [
@@ -50,16 +60,35 @@ class NerfstudioEngine:
             "--experiment-name", self.cfg.project_name,
             "--pipeline.model.random-init", "False",
             "--pipeline.model.background-color", "random",
-            "--pipeline.model.cull-alpha-thresh", "0.05",
-            "--pipeline.model.stop-split-at", "10000",
+            # 0.05 会把很多尚未稳定但几何上有价值的高斯提前删掉，容易越训越碎。
+            "--pipeline.model.cull-alpha-thresh", "0.005",
+            "--pipeline.model.stop-split-at", str(stop_split_at),
+            # 视频序列里相邻帧高度相关，用 FPS 采样能减少局部视角过采样带来的撕裂。
+            "--pipeline.datamanager.train-cameras-sampling-strategy", "fps",
             *collider_args,
             "--max-num-iterations", str(self.cfg.training_iterations),
             "--vis", "viewer+tensorboard",
             "--viewer.quit-on-train-completion", "True",
+        ]
+
+        if is_da3_mapper:
+            cmd.extend([
+                # DA3 初始化通常已经有较完整几何，后期继续频繁 refine/split 更容易越训越碎。
+                "--pipeline.model.warmup-length", "1000",
+                "--pipeline.model.refine-every", "200",
+                "--pipeline.model.reset-alpha-every", "60",
+                "--pipeline.model.densify-grad-thresh", "0.0004",
+                "--pipeline.model.densify-size-thresh", "0.02",
+                "--pipeline.model.split-screen-size", "0.08",
+                "--pipeline.model.stop-screen-size-at", "2000",
+                "--pipeline.model.use-scale-regularization", "True",
+            ])
+
+        cmd.extend([
             "nerfstudio-data",
             "--downscale-factor", "1",
-            "--auto-scale-poses", "False"
-        ]
+            "--auto-scale-poses", "False",
+        ])
         
         # 3. 执行
         subprocess.run(cmd, check=True, env=self.env)
