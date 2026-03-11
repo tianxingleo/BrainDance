@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from shutil import which
 
 # --- 项目引用 ---
 from src.config import PipelineConfig
@@ -24,6 +25,50 @@ class NerfstudioEngine:
         self.env = os.environ.copy()
         self.env["QT_QPA_PLATFORM"] = "offscreen"
         self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self._fix_cuda_env_for_gsplat()
+
+    def _fix_cuda_env_for_gsplat(self):
+        """
+        修复 gsplat JIT 编译时常见的 CUDA_HOME 错配问题。
+        典型报错：/some/env/bin/nvcc: not found
+        """
+        cuda_home = (self.env.get("CUDA_HOME") or "").strip()
+        if cuda_home:
+            nvcc_in_cuda_home = Path(cuda_home) / "bin" / "nvcc"
+            if nvcc_in_cuda_home.exists():
+                # 当前 CUDA_HOME 可用，不做改动
+                return
+
+        candidates = [
+            Path("/usr/local/cuda"),
+            Path("/usr/local/cuda-12.8"),
+            Path("/usr/local/cuda-12.6"),
+            Path("/usr/local/cuda-12.4"),
+            Path("/usr/local/cuda-12.1"),
+        ]
+        nvcc_path = None
+        for base in candidates:
+            p = base / "bin" / "nvcc"
+            if p.exists():
+                nvcc_path = p
+                break
+
+        if nvcc_path is None:
+            found = which("nvcc", path=self.env.get("PATH", ""))
+            if found:
+                nvcc_path = Path(found)
+
+        if nvcc_path is None:
+            # 不抛异常，后续命令会给出更具体错误；这里只做提示。
+            print("⚠️ 未检测到 nvcc，可导致 gsplat 编译失败。请安装 CUDA Toolkit 或配置 CUDA_HOME。")
+            return
+
+        fixed_cuda_home = str(nvcc_path.parent.parent)
+        self.env["CUDA_HOME"] = fixed_cuda_home
+        # 确保子进程优先使用修复后的 nvcc
+        current_path = self.env.get("PATH", "")
+        nvcc_bin_dir = str(nvcc_path.parent)
+        self.env["PATH"] = f"{nvcc_bin_dir}:{current_path}" if current_path else nvcc_bin_dir
 
     def train(self):
         """执行 splatfacto 训练"""
