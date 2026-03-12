@@ -118,25 +118,27 @@ cd BrainDance/ai_engine/3dgs
 
 > ⚠️ **重要**：所有后续命令都在 `ai_engine/3dgs` 目录下执行
 
-2. **创建conda环境**
+2. **创建并激活环境**
 ```bash
-conda create -n braindance python=3.10
-conda activate braindance
+conda create -n Braindance python=3.10
+conda activate Braindance
 ```
 
-3. **安装PyTorch (根据CUDA版本)**
+3. **安装依赖（以 Braindance 实际环境为准）**
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-```
-
-4. **安装项目依赖**
-```bash
+# 最小运行依赖
 pip install -r requirements.txt
 ```
 
-或者逐个安装：
+完整依赖（系统工具 + Python 全量依赖 + 编译/非编译分类 + nerfstudio patch）统一见：
+
+- `ai_engine/3dgs/ENVIRONMENT.md`
+
+4. **应用 nerfstudio patch（推荐）**
 ```bash
-pip install nerfstudio supabase python-dotenv openai ultralytics plyfile opencv-python dashscope
+SITE_PACKAGES=$(python -c "import site; print(site.getusersitepackages())")
+cd "$SITE_PACKAGES"
+patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.patch
 ```
 
 5. **配置环境变量**

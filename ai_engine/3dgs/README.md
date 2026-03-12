@@ -80,19 +80,24 @@ BrainDance/
 
 ### 2. 软件依赖
 
-确保已安装 `nerfstudio` 和 `ffmpeg`。
+依赖以 `Braindance` 实际环境为准，统一文档见：
+
+- `ENVIRONMENT.md`（系统版本、COLMAP/GLOMAP/FFmpeg、全量 Python 依赖、编译/非编译分类、nerfstudio patch）
+
+基础安装流程：
 
 ```bash
 # 1. 创建并激活 Conda 环境
-conda create -n braindance python=3.10
-conda activate braindance
+conda create -n Braindance python=3.10
+conda activate Braindance
 
-# 2. 安装 PyTorch (根据你的 CUDA 版本调整)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# 2. 安装最小依赖
+pip install -r requirements.txt
 
-# 3. 安装依赖库
-pip install nerfstudio supabase python-dotenv
-
+# 3. 应用 nerfstudio patch（推荐）
+SITE_PACKAGES=$(python -c "import site; print(site.getusersitepackages())")
+cd "$SITE_PACKAGES"
+patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.patch
 ```
 
 ### 3. 环境变量配置 (.env)
@@ -319,4 +324,3 @@ python main.py /path/to/your/video.mp4
 ---
 
 **BrainDance Team © 2026**
-
