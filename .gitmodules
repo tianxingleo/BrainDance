@@ -16,3 +16,6 @@
 [submodule "ai_engine/3dgs/src/libs/Sparse2DGS"]
 	path = ai_engine/3dgs/src/libs/Sparse2DGS
 	url = https://github.com/tianxingleo/Sparse2DGS.git
+[submodule "ai_engine/3dgs/src/libs/nerfstudio"]
+	path = ai_engine/3dgs/src/libs/nerfstudio
+	url = https://github.com/tianxingleo/nerfstudio.git

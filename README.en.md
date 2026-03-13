@@ -208,6 +208,24 @@ BrainDance/
 
 This project supports **fully local deployment** and can run completely without cloud accounts.
 
+#### 0. Get Full Source (Submodules + LFS)
+
+```bash
+# Install and initialize Git LFS (first time only)
+git lfs install
+
+# Clone main repo with all submodules
+git clone --recurse-submodules https://github.com/tianxingleo/BrainDance.git
+cd BrainDance
+
+# Pull LFS objects in main repo and every submodule
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+
+# Verify submodule status
+git submodule status --recursive
+```
+
 #### 1. Start Infrastructure (Supabase Local)
 
 One-click launch of database, storage buckets, authentication services, and Edge Functions based on Docker.
@@ -234,8 +252,17 @@ Worker is responsible for monitoring local Supabase task queues and calling GPU 
 ```bash
 cd ai_engine
 
-# 1. Install dependencies
+# 1. Install dependencies (including 3DGS submodules)
+cd ..
+git submodule sync --recursive
+git submodule update --init --recursive
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+cd ai_engine/3dgs
 pip install -r requirements.txt
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
+cd ../../ai_engine
 
 # 2. Configure environment variables (copy example and fill in URL/Key from previous step)
 cp .env.example .env

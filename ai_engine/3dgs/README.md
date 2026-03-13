@@ -82,7 +82,7 @@ BrainDance/
 
 依赖以 `Braindance` 实际环境为准，统一文档见：
 
-- `ENVIRONMENT.md`（系统版本、COLMAP/GLOMAP/FFmpeg、全量 Python 依赖、编译/非编译分类、nerfstudio patch）
+- `ENVIRONMENT.md`（系统版本、COLMAP/GLOMAP/FFmpeg、全量 Python 依赖、编译/非编译分类、`nerfstudio` 子模块安装）
 
 基础安装流程：
 
@@ -91,13 +91,24 @@ BrainDance/
 conda create -n Braindance python=3.10
 conda activate Braindance
 
-# 2. 安装最小依赖
+# 2. 拉取子模块（包含项目 fork 的 nerfstudio）
+cd /path/to/BrainDance
+git submodule sync --recursive
+git submodule update --init --recursive
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+
+# 3. 安装最小依赖
+cd ai_engine/3dgs
 pip install -r requirements.txt
 
-# 3. 应用 nerfstudio patch（推荐）
-SITE_PACKAGES=$(python -c "import site; print(site.getusersitepackages())")
-cd "$SITE_PACKAGES"
-patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.patch
+# 4. 强制使用仓库内 nerfstudio（已包含 weights_only=False 修复）
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
+
+# 5. 验证导入路径
+python -c "import nerfstudio, pathlib; print(pathlib.Path(nerfstudio.__file__).resolve())"
+# 预期路径包含: ai_engine/3dgs/src/libs/nerfstudio
 ```
 
 ### 3. 环境变量配置 (.env)

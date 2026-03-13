@@ -206,6 +206,24 @@ BrainDance/
 
 本项目支持 **全本地化部署**，无需云端账号即可完整运行。
 
+#### 0. 获取完整代码（子模块 + LFS）
+
+```bash
+# 首次使用请先安装并初始化 Git LFS
+git lfs install
+
+# 克隆主仓库并递归拉取全部子模块
+git clone --recurse-submodules https://github.com/tianxingleo/BrainDance.git
+cd BrainDance
+
+# 拉取主仓库与子模块的 LFS 对象
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+
+# 校验子模块状态
+git submodule status --recursive
+```
+
 #### 1. 启动基础设施 (Supabase Local)
 
 基于 Docker 一键拉起数据库、存储桶、鉴权服务与 Edge Functions。
@@ -232,8 +250,17 @@ Worker 负责监听本地 Supabase 的任务队列并调用 GPU 进行训练。
 ```bash
 cd ai_engine
 
-# 1. 安装依赖
+# 1. 安装依赖（含 3DGS 子模块）
+cd ..
+git submodule sync --recursive
+git submodule update --init --recursive
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+cd ai_engine/3dgs
 pip install -r requirements.txt
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
+cd ../../ai_engine
 
 # 2. 配置环境变量 (复制示例并填入上一步的 URL/Key)
 cp .env.example .env

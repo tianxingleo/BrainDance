@@ -25,7 +25,7 @@
 | COLMAP | `/usr/local/bin/colmap` | `3.14.0.dev0 (Commit 01ca9ec6)` | `with CUDA` | 是 |
 | GLOMAP | `/usr/local/bin/glomap` | 可用 | `compiled with CUDA` | 是 |
 | FFmpeg | `/usr/bin/ffmpeg` | `4.4.2-0ubuntu0.22.04.1` | `cuda + nvenc` 可用 | 按项目规则：GPU 版视为是 |
-| Nerfstudio CLI | `/home/jiangbeihu/.local/bin/ns-train` | 来自 `nerfstudio==1.1.5` | 依赖 PyTorch CUDA | 否（Python 包） |
+| Nerfstudio CLI | `$(which ns-train)` | 来自 `ai_engine/3dgs/src/libs/nerfstudio`（editable 安装） | 依赖 PyTorch CUDA | 否（Python 包） |
 
 说明：你要求“需要 GPU 加速的工具视为需要编译”，本文按该规则标注。
 
@@ -95,24 +95,32 @@
 
 - 除第 4 节列出的依赖外，其余依赖通常为纯 Python 或通用 wheel，可直接安装。
 
-## 6. nerfstudio patch
+## 6. nerfstudio 安装与补丁策略
 
-- patch 文件：`patches/0002_nerfstudio_eval_utils_weights_only.patch`
-- 目的：将 `torch.load(load_path, map_location="cpu")` 改为 `torch.load(..., weights_only=False)`。
+- 统一使用仓库子模块：`ai_engine/3dgs/src/libs/nerfstudio`（远程：`https://github.com/tianxingleo/nerfstudio.git`）。
+- `weights_only=False` 修复已提交到 fork，不再建议直接修改 site-packages。
+- 历史 patch 文件 `patches/0002_nerfstudio_eval_utils_weights_only.patch` 仅保留为审计记录。
 
-应用命令：
+推荐安装命令：
 
 ```bash
+cd /path/to/BrainDance
+git submodule sync --recursive
+git submodule update --init --recursive
+
 conda activate Braindance
-SITE_PACKAGES=$(python -c "import site; print(site.getusersitepackages())")
-cd "$SITE_PACKAGES"
-patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.patch
+cd ai_engine/3dgs
+pip install -r requirements.txt
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
 ```
 
 验证命令：
 
 ```bash
+python -c "import nerfstudio, pathlib; print(pathlib.Path(nerfstudio.__file__).resolve())"
 python -c "import importlib.util, pathlib; p=pathlib.Path(importlib.util.find_spec('nerfstudio.utils.eval_utils').origin); print('weights_only=False' in p.read_text())"
+which ns-train && ns-train -h | head -n 2
 ```
 
 ## 7. 全量依赖列表（全部包，不拆分）
