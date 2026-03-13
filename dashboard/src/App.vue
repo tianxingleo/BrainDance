@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
@@ -74,8 +75,8 @@ const searchKeyword = ref('')
 const autoRefresh = ref(true)
 const refreshSeconds = ref(60)
 const taskTrendRange = ref<'24h' | '7d' | '30d' | 'all'>('all')
-const isDarkTheme = ref(false)
-const accentColor = ref('#18b2a6')
+const isDarkTheme = ref(true)
+const accentColor = ref('#ef6c2f')
 
 const THEME_STORAGE_KEY = 'dashboard-theme-dark'
 const ACCENT_STORAGE_KEY = 'dashboard-theme-accent'
@@ -207,24 +208,96 @@ const totalStorageBytes = computed(() =>
   storageStats.value.reduce((sum, item) => sum + item.totalBytes, 0),
 )
 
+const edgeHealthyCount = computed(() => edgeChecks.value.filter((item) => item.status === 'ok').length)
+const queueCount = computed(() => pendingCount.value + processingCount.value)
+
+const refreshModeText = computed(() => (autoRefresh.value ? `${refreshSeconds.value}s 自动刷新` : '手动刷新'))
+
+const storageModeText = computed(() => {
+  if (storageProbeMode.value === 'bucket_list') return '列桶模式'
+  if (storageProbeMode.value === 'known_buckets') return '已知桶探测'
+  return '不可用'
+})
+
+type MetricTone = 'good' | 'warn' | 'bad' | 'neutral'
+
+const successSeverity = computed<MetricTone>(() => {
+  if (successRate.value < 70) return 'bad'
+  if (successRate.value < 90) return 'warn'
+  return 'good'
+})
+
+const failureSeverity = computed<MetricTone>(() => {
+  if (failedCount.value >= 5) return 'bad'
+  if (failedCount.value > 0) return 'warn'
+  return 'good'
+})
+
+const queueSeverity = computed<MetricTone>(() => {
+  if (queueCount.value >= 30) return 'bad'
+  if (queueCount.value >= 10) return 'warn'
+  return 'good'
+})
+
+const workerSeverity = computed<MetricTone>(() => (workerOnline.value ? 'good' : 'bad'))
+const realtimeSeverity = computed<MetricTone>(() => (realtimeHealthy.value ? 'good' : 'warn'))
+const storageSeverity = computed<MetricTone>(() => (storageApiReachable.value ? 'good' : 'bad'))
+
+const successHint = computed(() => {
+  if (successRate.value < 70) return '低于安全线'
+  if (successRate.value < 90) return '需要盯紧'
+  return '状态稳定'
+})
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const normalized = hex.replace('#', '')
+  const full = normalized.length === 3
+    ? normalized
+        .split('')
+        .map((char) => char + char)
+        .join('')
+    : normalized
+
+  const value = Number.parseInt(full, 16)
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+const chartTheme = computed(() => ({
+  textStrong: isDarkTheme.value ? '#f5ede2' : '#35261c',
+  textMuted: isDarkTheme.value ? '#b59f88' : '#7e6958',
+  axisLine: isDarkTheme.value ? 'rgba(234, 210, 184, 0.22)' : 'rgba(72, 52, 38, 0.18)',
+  splitLine: isDarkTheme.value ? 'rgba(234, 210, 184, 0.12)' : 'rgba(72, 52, 38, 0.1)',
+  area: hexToRgba(accentColor.value, isDarkTheme.value ? 0.18 : 0.14),
+  accentSoft: hexToRgba(accentColor.value, isDarkTheme.value ? 0.26 : 0.18),
+  paper: isDarkTheme.value ? '#171310' : '#f6efe6',
+  pie: ['#f2a33c', accentColor.value, '#5b8e78', '#cd5b43'],
+}))
+
 const dbRowsChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },
-  grid: { left: 8, right: 16, top: 18, bottom: 10, outerBoundsMode: 'same' as const },
+  grid: { left: 8, right: 14, top: 12, bottom: 10, outerBoundsMode: 'same' as const },
   xAxis: {
     type: 'value',
-    axisLabel: { color: '#64748b' },
-    splitLine: { lineStyle: { color: '#e2e8f0' } },
+    axisLabel: { color: chartTheme.value.textMuted },
+    axisLine: { lineStyle: { color: chartTheme.value.axisLine } },
+    splitLine: { lineStyle: { color: chartTheme.value.splitLine } },
   },
   yAxis: {
     type: 'category',
-    axisLabel: { color: '#334155' },
+    axisLabel: { color: chartTheme.value.textStrong },
+    axisLine: { show: false },
     data: ['processing_tasks', 'model_assets', 'memory_poses', 'rag_docs', 'tasks'],
   },
   series: [
     {
       type: 'bar',
-      barWidth: 16,
-      itemStyle: { color: '#0ea5e9', borderRadius: [0, 6, 6, 0] },
+      barWidth: 14,
+      itemStyle: { color: accentColor.value, borderRadius: [0, 10, 10, 0] },
+      emphasis: { itemStyle: { color: '#f2a33c' } },
       data: [
         dbCounts.value.processing_tasks,
         dbCounts.value.model_assets,
@@ -329,30 +402,34 @@ const taskTrendOption = computed(() => {
 
   return {
     tooltip: { trigger: 'axis' },
-    legend: { data: [rangeLabel], textStyle: { color: '#334155' } },
-    grid: { left: 12, right: 24, top: 36, bottom: 12, outerBoundsMode: 'same' as const },
+    legend: {
+      data: [rangeLabel],
+      top: 0,
+      textStyle: { color: chartTheme.value.textMuted, fontSize: 12 },
+    },
+    grid: { left: 12, right: 18, top: 34, bottom: 12, outerBoundsMode: 'same' as const },
     xAxis: {
       type: 'category',
       data: labels,
-      axisLabel: { color: '#64748b', hideOverlap: true },
-      axisLine: { lineStyle: { color: '#cbd5e1' } },
+      axisLabel: { color: chartTheme.value.textMuted, hideOverlap: true },
+      axisLine: { lineStyle: { color: chartTheme.value.axisLine } },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      axisLabel: { color: '#64748b' },
-      splitLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLabel: { color: chartTheme.value.textMuted },
+      splitLine: { lineStyle: { color: chartTheme.value.splitLine } },
     },
     series: [
       {
         name: rangeLabel,
         type: 'line',
-        smooth: 0.25,
+        smooth: 0.35,
         data: labels.map((key) => bucketMap[key]),
-        symbolSize: 8,
-        lineStyle: { width: 3, color: '#0f766e' },
-        itemStyle: { color: '#14b8a6' },
-        areaStyle: { color: 'rgba(20, 184, 166, 0.18)' },
+        symbolSize: 7,
+        lineStyle: { width: 3, color: accentColor.value },
+        itemStyle: { color: '#f2a33c', borderColor: accentColor.value, borderWidth: 2 },
+        areaStyle: { color: chartTheme.value.area },
       },
     ],
   }
@@ -360,19 +437,33 @@ const taskTrendOption = computed(() => {
 
 const statusPieOption = computed(() => ({
   tooltip: { trigger: 'item' },
-  legend: { bottom: 0, textStyle: { color: '#334155' } },
+  legend: {
+    bottom: 0,
+    itemGap: 18,
+    textStyle: { color: chartTheme.value.textMuted, fontSize: 12 },
+  },
   series: [
     {
       type: 'pie',
-      radius: ['48%', '72%'],
-      center: ['50%', '45%'],
-      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, formatter: '{b}: {d}%', color: '#334155' },
+      radius: ['46%', '74%'],
+      center: ['50%', '42%'],
+      itemStyle: {
+        borderRadius: 10,
+        borderColor: chartTheme.value.paper,
+        borderWidth: 2,
+      },
+      label: {
+        show: true,
+        formatter: '{b}\n{d}%',
+        color: chartTheme.value.textStrong,
+        fontSize: 12,
+      },
+      labelLine: { lineStyle: { color: chartTheme.value.axisLine } },
       data: [
-        { value: pendingCount.value, name: '排队中', itemStyle: { color: '#f59e0b' } },
-        { value: processingCount.value, name: '处理中', itemStyle: { color: '#0ea5e9' } },
-        { value: completedCount.value, name: '已完成', itemStyle: { color: '#10b981' } },
-        { value: failedCount.value, name: '失败', itemStyle: { color: '#ef4444' } },
+        { value: pendingCount.value, name: '排队中', itemStyle: { color: chartTheme.value.pie[0] } },
+        { value: processingCount.value, name: '处理中', itemStyle: { color: chartTheme.value.pie[1] } },
+        { value: completedCount.value, name: '已完成', itemStyle: { color: chartTheme.value.pie[2] } },
+        { value: failedCount.value, name: '失败', itemStyle: { color: chartTheme.value.pie[3] } },
       ],
     },
   ],
@@ -404,6 +495,7 @@ const formatBytes = (bytes: number) => {
 
 const applyTheme = () => {
   document.documentElement.classList.toggle('theme-dark', isDarkTheme.value)
+  document.documentElement.classList.toggle('theme-light', !isDarkTheme.value)
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
@@ -413,6 +505,148 @@ const edgeFunctionNames = computed(() => {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
+})
+
+const edgeStatusText = computed(() => {
+  if (!edgeChecks.value.length) return '还没探测'
+  if (edgeHealthyCount.value === edgeFunctionNames.value.length) return '全部在线'
+  if (!edgeHealthyCount.value) return '全部失联'
+  return '有函数掉线'
+})
+
+const edgeSeverity = computed<MetricTone>(() => {
+  if (!edgeFunctionNames.value.length) return 'warn'
+  if (edgeHealthyCount.value === edgeFunctionNames.value.length) return 'good'
+  if (!edgeHealthyCount.value) return 'bad'
+  return 'warn'
+})
+
+const overviewCards = computed(() => [
+  {
+    key: 'success',
+    label: '成功率',
+    value: `${successRate.value}%`,
+    note: successHint.value,
+    icon: 'lucide:gauge',
+    tone: successSeverity.value,
+  },
+  {
+    key: 'failed',
+    label: '失败任务',
+    value: `${failedCount.value}`,
+    note: failedCount.value ? '先查失败列表' : '当前无失败',
+    icon: 'lucide:octagon-alert',
+    tone: failureSeverity.value,
+  },
+  {
+    key: 'queue',
+    label: '队列总数',
+    value: `${queueCount.value}`,
+    note: `排队 ${pendingCount.value} / 处理 ${processingCount.value}`,
+    icon: 'lucide:list-todo',
+    tone: queueSeverity.value,
+  },
+  {
+    key: 'worker',
+    label: 'Worker',
+    value: workerOnline.value ? '在线' : '离线',
+    note: taskFreshnessText.value,
+    icon: 'lucide:bot',
+    tone: workerSeverity.value,
+  },
+  {
+    key: 'storage',
+    label: 'Storage 状态',
+    value: formatBytes(totalStorageBytes.value),
+    note: `${storageStats.value.length} 个桶`,
+    icon: 'lucide:database',
+    tone: storageSeverity.value,
+  },
+  {
+    key: 'edge',
+    label: 'Edge',
+    value: `${edgeHealthyCount.value}/${edgeFunctionNames.value.length}`,
+    note: edgeStatusText.value,
+    icon: 'lucide:plug-zap',
+    tone: edgeSeverity.value,
+  },
+  {
+    key: 'assets',
+    label: '模型资产',
+    value: `${modelAssetCount.value}`,
+    note: `姿态 ${memoryPoseCount.value}`,
+    icon: 'lucide:boxes',
+    tone: 'neutral' as const,
+  },
+  {
+    key: 'quality',
+    label: '平均质量',
+    value: `${avgQualityScore.value}`,
+    note: `均耗时 ${avgProcessMinutes.value}`,
+    icon: 'lucide:badge-check',
+    tone: 'neutral' as const,
+  },
+])
+
+const alertRows = computed(() => [
+  {
+    key: 'success',
+    label: '任务成功率',
+    value: `${successRate.value}%`,
+    note: successHint.value,
+    icon: 'lucide:gauge',
+    tone: successSeverity.value,
+  },
+  {
+    key: 'failed',
+    label: '失败任务',
+    value: `${failedCount.value}`,
+    note: failedCount.value ? '先查失败列表' : '当前无失败',
+    icon: 'lucide:triangle-alert',
+    tone: failureSeverity.value,
+  },
+  {
+    key: 'realtime',
+    label: '实时链路',
+    value: realtimeStatusText.value,
+    note: realtimeHealthy.value ? '订阅都在线' : '有频道重连',
+    icon: 'lucide:radio-tower',
+    tone: realtimeSeverity.value,
+  },
+  {
+    key: 'worker',
+    label: 'Worker',
+    value: workerOnline.value ? '在线' : '离线',
+    note: taskFreshnessText.value,
+    icon: 'lucide:bot',
+    tone: workerSeverity.value,
+  },
+  {
+    key: 'edge',
+    label: 'Edge',
+    value: `${edgeHealthyCount.value}/${edgeFunctionNames.value.length}`,
+    note: edgeStatusText.value,
+    icon: 'lucide:plug-zap',
+    tone: edgeSeverity.value,
+  },
+  {
+    key: 'storage',
+    label: 'Storage 状态',
+    value: storageApiReachable.value ? '可读' : '受限',
+    note: storageModeText.value,
+    icon: 'lucide:hard-drive',
+    tone: storageSeverity.value,
+  },
+])
+
+const activeAlertCount = computed(() =>
+  alertRows.value.filter((item) => item.tone === 'warn' || item.tone === 'bad').length,
+)
+
+const alertSummaryTone = computed<MetricTone>(() => {
+  if (activeAlertCount.value >= 3) return 'bad'
+  if (activeAlertCount.value > 0) return 'warn'
+  return 'good'
 })
 
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
@@ -704,6 +938,8 @@ onMounted(async () => {
   const savedAccent = localStorage.getItem(ACCENT_STORAGE_KEY)
   if (savedDark === '1') {
     isDarkTheme.value = true
+  } else if (savedDark === '0') {
+    isDarkTheme.value = false
   }
   if (savedAccent) {
     accentColor.value = savedAccent
@@ -736,100 +972,218 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-page">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">BrainDance Monitor</p>
-        <h1>系统状态可视化看板</h1>
-        <p class="hero-subtitle">新增 Supabase Storage 与数据库分析模块，实时展示可读取的接口与数据规模。</p>
-        <div class="hero-pills">
-          <span class="hero-pill">任务总量 {{ dbCounts.processing_tasks }}</span>
-          <span class="hero-pill">24h 新任务 {{ timeBasedStats.tasks24h }}</span>
-          <span class="hero-pill">资产 {{ dbCounts.model_assets }}</span>
-          <span class="hero-pill">Storage {{ formatBytes(totalStorageBytes) }}</span>
+    <section class="stage-grid">
+      <aside class="stage-rail stage-rail--tools">
+        <div class="rail-top">
+          <span class="rail-kicker">Control</span>
+          <div class="rail-badge" :class="`tone-${realtimeSeverity}`">
+            <Icon icon="lucide:radio-tower" />
+            <span>{{ realtimeStatusText }}</span>
+          </div>
         </div>
-      </div>
-      <div class="hero-actions">
-        <el-button :loading="refreshing" type="primary" @click="refreshDashboard">手动刷新</el-button>
-        <span class="refresh-time">最近刷新：{{ lastUpdated ?? '尚未刷新' }}</span>
-        <div class="theme-controls">
-          <el-switch v-model="isDarkTheme" inline-prompt active-text="夜间" inactive-text="白天" />
-          <el-color-picker
-            v-model="accentColor"
-            :predefine="['#18b2a6', '#2b7fff', '#ff7a59', '#f59e0b', '#7c5cff']"
-          />
+
+        <h1 class="rail-title">监控总览</h1>
+
+        <p class="rail-line">先看失败。</p>
+        <p class="rail-line">再看排队。</p>
+
+        <div class="rail-actions">
+          <el-button :loading="refreshing" type="primary" @click="refreshDashboard">
+            <Icon icon="lucide:refresh-cw" />
+            <span>立即刷新</span>
+          </el-button>
+
+          <div class="theme-controls">
+            <div class="theme-pill">
+              <Icon :icon="isDarkTheme ? 'lucide:moon-star' : 'lucide:sun-medium'" />
+              <el-switch v-model="isDarkTheme" inline-prompt active-text="夜航" inactive-text="纸面" />
+            </div>
+            <div class="theme-pill">
+              <Icon icon="lucide:paintbrush" />
+              <el-color-picker
+                v-model="accentColor"
+                :predefine="['#ef6c2f', '#ff9d2f', '#cf4f2f', '#2f8f83', '#315f8c']"
+              />
+            </div>
+          </div>
         </div>
-      </div>
-    </header>
+
+        <div class="rail-ledger">
+          <div class="ledger-row">
+            <Icon icon="lucide:clock-3" />
+            <div>
+              <span>最后采样</span>
+              <strong>{{ lastUpdated ?? '还没采样' }}</strong>
+            </div>
+          </div>
+          <div class="ledger-row">
+            <Icon icon="lucide:refresh-cw" />
+            <div>
+              <span>刷新节奏</span>
+              <strong>{{ refreshModeText }}</strong>
+            </div>
+          </div>
+          <div class="ledger-row">
+            <Icon icon="lucide:bot" />
+            <div>
+              <span>Worker</span>
+              <strong>{{ workerOnline ? '在线' : '离线' }}</strong>
+            </div>
+          </div>
+          <div class="ledger-row">
+            <Icon icon="lucide:database" />
+            <div>
+              <span>Storage 状态</span>
+              <strong>{{ storageApiReachable ? '可读' : '受限' }}</strong>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="stage-desk">
+        <div class="desk-head">
+          <div>
+            <span class="desk-kicker">Overview</span>
+            <h2 class="desk-title">任务总览</h2>
+          </div>
+          <div class="desk-summary" :class="`tone-${successSeverity}`">
+            <span>成功率</span>
+            <strong>{{ successRate }}%</strong>
+            <em>{{ successHint }}</em>
+          </div>
+        </div>
+
+        <div class="desk-ribbon">
+          <span>24h {{ timeBasedStats.tasks24h }} 任务</span>
+          <span>失败 {{ failedCount }}</span>
+          <span>排队 {{ pendingCount }}</span>
+          <span>处理中 {{ processingCount }}</span>
+          <span>Storage 状态 {{ storageStats.length }} 桶</span>
+          <span>Edge {{ edgeHealthyCount }}/{{ edgeFunctionNames.length }}</span>
+        </div>
+
+        <div class="overview-grid">
+          <article
+            v-for="item in overviewCards"
+            :key="item.key"
+            class="overview-card"
+            :class="`tone-${item.tone}`"
+          >
+            <div class="overview-card-top">
+              <div class="icon-chip">
+                <Icon :icon="item.icon" />
+              </div>
+              <span class="overview-label">{{ item.label }}</span>
+            </div>
+            <div class="overview-value">{{ item.value }}</div>
+            <p class="overview-note">{{ item.note }}</p>
+          </article>
+        </div>
+      </section>
+
+      <aside class="stage-rail stage-rail--alerts">
+        <div class="alerts-head">
+          <span class="rail-kicker">Alert</span>
+          <span class="alert-count" :class="`tone-${alertSummaryTone}`">{{ activeAlertCount }} 项</span>
+        </div>
+
+        <h3 class="alerts-title">异常摘要</h3>
+        <p class="alerts-copy">先抓红色。</p>
+
+        <div class="alerts-list">
+          <article
+            v-for="item in alertRows"
+            :key="item.key"
+            class="alert-item"
+            :class="`tone-${item.tone}`"
+          >
+            <div class="alert-item-top">
+              <div class="icon-chip icon-chip--small">
+                <Icon :icon="item.icon" />
+              </div>
+              <div>
+                <span class="alert-label">{{ item.label }}</span>
+                <strong class="alert-value">{{ item.value }}</strong>
+              </div>
+            </div>
+            <p class="alert-note">{{ item.note }}</p>
+          </article>
+        </div>
+      </aside>
+    </section>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon class="mb-16" />
-    <el-alert v-if="storageError" :title="`Storage API: ${storageError}`" type="warning" show-icon class="mb-16" />
+    <el-alert v-if="storageError" :title="`Storage: ${storageError}`" type="warning" show-icon class="mb-16" />
 
     <el-skeleton v-if="loading" :rows="7" animated />
 
     <template v-else>
-      <section class="stat-grid">
-        <el-card class="stat-card" shadow="hover">
-          <div class="kpi-title">Worker 心跳</div>
-          <div class="kpi-value">{{ workerOnline ? '在线' : '离线' }}</div>
-          <p class="stat-meta" :class="workerOnline ? 'ok' : 'bad'">{{ taskFreshnessText }}</p>
-        </el-card>
-
-        <el-card class="stat-card" shadow="hover">
-          <div class="kpi-title">Realtime 状态</div>
-          <div class="kpi-value">{{ realtimeStatusText }}</div>
-          <p class="stat-meta" :class="realtimeHealthy ? 'ok' : 'bad'">
-            tasks={{ channelState.processing_tasks }} | assets={{ channelState.model_assets }}
-          </p>
-        </el-card>
-
-        <el-card class="stat-card" shadow="hover">
-          <div class="kpi-title">Storage 接口</div>
-          <div class="kpi-value">{{ storageApiReachable ? '可访问' : '不可访问' }}</div>
-          <p class="stat-meta">
-            总容量 {{ formatBytes(totalStorageBytes) }} / 模式
-            {{ storageProbeMode === 'bucket_list' ? '列桶' : storageProbeMode === 'known_buckets' ? '已知桶探测' : '不可用' }}
-          </p>
-        </el-card>
-
-        <el-card class="stat-card" shadow="hover">
-          <el-statistic title="任务成功率" :value="successRate" suffix="%" />
-          <p class="stat-meta">平均质量 {{ avgQualityScore }} / 平均耗时 {{ avgProcessMinutes }}</p>
-        </el-card>
-      </section>
-
       <section class="filters-row">
-        <el-select v-model="selectedStatus" class="ctrl" placeholder="状态过滤">
-          <el-option label="全部状态" value="all" />
-          <el-option label="排队中" value="pending" />
-          <el-option label="处理中" value="processing" />
-          <el-option label="已完成" value="completed" />
-          <el-option label="失败" value="failed" />
-        </el-select>
+        <div class="filters-copy">
+          <div class="section-icon-shell">
+            <Icon icon="lucide:filter" />
+          </div>
+          <div>
+            <span class="filters-kicker">Filters</span>
+            <h3 class="filters-title">筛选器</h3>
+            <p class="filters-note">先收窄范围。</p>
+          </div>
+        </div>
 
-        <el-select v-model="selectedTaskType" class="ctrl" placeholder="任务类型过滤">
-          <el-option label="全部类型" value="all" />
-          <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
-        </el-select>
-
-        <el-input v-model="searchKeyword" class="ctrl search" clearable placeholder="搜索任务名 / scene_id / user_id" />
-
-        <div class="inline-ops">
-          <el-switch v-model="autoRefresh" inline-prompt active-text="自动刷新" inactive-text="手动" />
-          <el-select v-model="refreshSeconds" class="interval" :disabled="!autoRefresh">
-            <el-option :value="15" label="15s" />
-            <el-option :value="30" label="30s" />
-            <el-option :value="60" label="60s" />
-            <el-option :value="120" label="120s" />
+        <div class="filters-controls">
+          <el-select v-model="selectedStatus" class="ctrl" placeholder="状态过滤">
+            <el-option label="全部状态" value="all" />
+            <el-option label="排队中" value="pending" />
+            <el-option label="处理中" value="processing" />
+            <el-option label="已完成" value="completed" />
+            <el-option label="失败" value="failed" />
           </el-select>
+
+          <el-select v-model="selectedTaskType" class="ctrl" placeholder="任务类型过滤">
+            <el-option label="全部类型" value="all" />
+            <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
+          </el-select>
+
+          <el-input v-model="searchKeyword" class="ctrl search" clearable placeholder="搜任务或用户" />
+
+          <div class="inline-ops">
+            <el-switch v-model="autoRefresh" inline-prompt active-text="自动" inactive-text="手动" />
+            <el-select v-model="refreshSeconds" class="interval" :disabled="!autoRefresh">
+              <el-option :value="15" label="15s" />
+              <el-option :value="30" label="30s" />
+              <el-option :value="60" label="60s" />
+              <el-option :value="120" label="120s" />
+            </el-select>
+          </div>
+
+          <div class="filter-count">还剩 {{ filteredTasks.length }} 条</div>
         </div>
       </section>
 
-      <div class="section-title">任务运行态势</div>
+      <div class="section-heading">
+        <div class="section-heading-main">
+          <div class="section-icon-shell">
+            <Icon icon="lucide:activity" />
+          </div>
+          <div>
+            <span class="section-kicker">Task Pulse</span>
+            <h2>任务趋势</h2>
+          </div>
+        </div>
+        <div class="section-note">
+          <span>先看吞吐。</span>
+          <span>再看状态。</span>
+        </div>
+      </div>
+
       <section class="panel-grid">
         <el-card shadow="never" class="chart-card">
           <template #header>
             <div class="card-header-row">
-              <div class="card-header">任务趋势</div>
+              <div>
+                <div class="card-header">任务趋势</div>
+                <div class="header-meta">看最近吞吐。</div>
+              </div>
               <el-radio-group v-model="taskTrendRange" size="small">
                 <el-radio-button label="24h" value="24h">24h</el-radio-button>
                 <el-radio-button label="7d" value="7d">7d</el-radio-button>
@@ -841,21 +1195,42 @@ onUnmounted(() => {
           <v-chart class="chart" :option="taskTrendOption" autoresize />
         </el-card>
 
-        <el-card shadow="never" class="chart-card">
+        <el-card shadow="never" class="chart-card chart-card--compact">
           <template #header>
-            <div class="card-header">任务状态分布</div>
+            <div>
+              <div class="card-header">状态占比</div>
+              <div class="header-meta">先看失败占比。</div>
+            </div>
           </template>
           <v-chart class="chart pie" :option="statusPieOption" autoresize />
         </el-card>
       </section>
 
-      <div class="section-title">故障与队列详情</div>
+      <div class="section-heading">
+        <div class="section-heading-main">
+          <div class="section-icon-shell">
+            <Icon icon="lucide:list" />
+          </div>
+          <div>
+            <span class="section-kicker">Operations</span>
+            <h2>任务队列与失败</h2>
+          </div>
+        </div>
+        <div class="section-note">
+          <span>先看队列。</span>
+          <span>再看失败。</span>
+        </div>
+      </div>
+
       <section class="panel-grid second">
         <el-card shadow="never" class="table-card">
           <template #header>
-            <div class="card-header">任务队列（{{ filteredTasks.length }}）</div>
+            <div>
+              <div class="card-header">任务队列（{{ filteredTasks.length }}）</div>
+              <div class="header-meta">只显示前 20 条。</div>
+            </div>
           </template>
-          <el-table :data="taskQueue" stripe height="460" empty-text="没有匹配任务">
+          <el-table :data="taskQueue" stripe height="460" empty-text="没找到任务">
             <el-table-column label="任务名" min-width="200">
               <template #default="scope">
                 <div class="task-name">{{ formatDisplayName(scope.row) }}</div>
@@ -892,7 +1267,10 @@ onUnmounted(() => {
 
         <el-card shadow="never" class="fail-card">
           <template #header>
-            <div class="card-header">最近失败任务摘要</div>
+            <div>
+              <div class="card-header">失败任务</div>
+              <div class="header-meta">最后一条日志。</div>
+            </div>
           </template>
           <el-empty v-if="!failedTasks.length" description="暂无失败任务" />
           <el-timeline v-else>
@@ -910,13 +1288,31 @@ onUnmounted(() => {
         </el-card>
       </section>
 
-      <div class="section-title">Supabase 资源分析</div>
+      <div class="section-heading">
+        <div class="section-heading-main">
+          <div class="section-icon-shell">
+            <Icon icon="lucide:database" />
+          </div>
+          <div>
+            <span class="section-kicker">Resources</span>
+            <h2>资源状态</h2>
+          </div>
+        </div>
+        <div class="section-note">
+          <span>先看存储。</span>
+          <span>再看表数据。</span>
+        </div>
+      </div>
+
       <section class="panel-grid third">
         <el-card shadow="never" class="storage-card">
           <template #header>
-            <div class="card-header">Supabase Storage 状态分析</div>
+            <div>
+              <div class="card-header">Storage 状态</div>
+              <div class="header-meta">前端扫描结果。</div>
+            </div>
           </template>
-          <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="无可读桶（请检查 Storage policy）">
+          <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="桶还读不到">
             <el-table-column label="Bucket" min-width="180" prop="id" />
             <el-table-column label="可见性" width="90" align="center">
               <template #default="scope">
@@ -931,12 +1327,18 @@ onUnmounted(() => {
               <template #default="scope">{{ scope.row.latestUpdatedAt ? formatDateTime(scope.row.latestUpdatedAt) : '-' }}</template>
             </el-table-column>
           </el-table>
-          <p class="hint">说明：对象统计采用前端分页扫描（最多每桶 2000 条），用于运维观察，不等同账单精确值。</p>
+          <div class="hint-stack">
+            <p class="hint">前端最多扫 2000 条。</p>
+            <p class="hint">只看大势。</p>
+          </div>
         </el-card>
 
         <el-card shadow="never" class="db-card">
           <template #header>
-            <div class="card-header">数据库分析（可读表）</div>
+            <div>
+              <div class="card-header">数据库概览</div>
+              <div class="header-meta">只看短周期数据。</div>
+            </div>
           </template>
           <div class="db-metrics">
             <div class="metric-item">
@@ -952,11 +1354,11 @@ onUnmounted(() => {
               <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
             </div>
             <div class="metric-item">
-              <div class="metric-title">7d 活跃用户</div>
+              <div class="metric-title">7d 活跃</div>
               <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
             </div>
             <div class="metric-item">
-              <div class="metric-title">7d 新增资产</div>
+              <div class="metric-title">7d 资产</div>
               <div class="metric-value">{{ timeBasedStats.assets7d }}</div>
             </div>
           </div>
@@ -964,16 +1366,34 @@ onUnmounted(() => {
         </el-card>
       </section>
 
-      <div class="section-title">Supabase Edge Functions</div>
+      <div class="section-heading">
+        <div class="section-heading-main">
+          <div class="section-icon-shell">
+            <Icon icon="lucide:plug" />
+          </div>
+          <div>
+            <span class="section-kicker">Edge Reachability</span>
+            <h2>Edge 状态</h2>
+          </div>
+        </div>
+        <div class="section-note">
+          <span>先看可达。</span>
+          <span>再看延迟。</span>
+        </div>
+      </div>
+
       <section class="panel-grid fourth">
         <el-card shadow="never" class="edge-card">
           <template #header>
             <div class="card-header-row">
-              <div class="card-header">Deno Edge Functions 状态</div>
-              <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">刷新探测</el-button>
+              <div>
+                <div class="card-header">Edge Functions</div>
+                <div class="header-meta">只测网关可达。</div>
+              </div>
+              <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">重新探测</el-button>
             </div>
           </template>
-          <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="290" empty-text="未配置函数名">
+          <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="290" empty-text="还没配函数名">
             <el-table-column label="函数名" min-width="150" prop="name" />
             <el-table-column label="状态" width="120" align="center">
               <template #default="scope">
@@ -991,7 +1411,6 @@ onUnmounted(() => {
             <el-table-column label="最近检查" min-width="160" prop="lastCheckedAt" />
             <el-table-column label="说明" min-width="220" prop="message" />
           </el-table>
-          <p class="hint">默认探测方法为 OPTIONS 请求，仅判断函数网关可达性；函数名来自 `VITE_SUPABASE_EDGE_FUNCTIONS`。</p>
         </el-card>
       </section>
     </template>

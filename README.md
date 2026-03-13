@@ -13,7 +13,14 @@
 
 #### An Anti-Entropy Engine for Human Memory
 
-![Supabase](https://img.shields.io/badge/Supabase-Enabled-3ECF8E?logo=supabase&logoColor=white) ![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter&logoColor=white) ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
+![Flutter](https://img.shields.io/badge/Flutter-Mobile%20Client-02569B?logo=flutter&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-BaaS-3ECF8E?logo=supabase&logoColor=white)
+![Python](https://img.shields.io/badge/Python-AI%20Worker-3776AB?logo=python&logoColor=white)
+![Vue](https://img.shields.io/badge/Vue-Dashboard-4FC08D?logo=vuedotjs&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?logo=postgresql&logoColor=white)
+![pgvector](https://img.shields.io/badge/pgvector-Vector%20Search-6C47FF)
+![Three.js](https://img.shields.io/badge/Three.js-3D%20Viewer-000000?logo=threedotjs&logoColor=white)
+![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
 
 </div>
 
@@ -31,6 +38,35 @@
 - **🔍 空间语义检索 (Spatial RAG)**：结合多模态大模型理解场景内容，实现“Ctrl+F”搜索物理世界。
 - **⏳ 时光剥离 (Time Peeling)**：在同一坐标系下叠加多维时间切片，实现从“现在”回溯到“过去”的视觉体验。
 - **☁️ 端云协同渲染**：Mobile 采集 -> Cloud 高性能计算 -> Mobile/XR 轻量化查看。
+
+### 技术栈速览
+
+**前端与交互**
+
+![Flutter](https://img.shields.io/badge/Flutter-Mobile-02569B?logo=flutter&logoColor=white)
+![Vue 3](https://img.shields.io/badge/Vue%203-Dashboard-4FC08D?logo=vuedotjs&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-Build%20Tool-646CFF?logo=vite&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-Web-3178C6?logo=typescript&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-3D%20Rendering-000000?logo=threedotjs&logoColor=white)
+![ECharts](https://img.shields.io/badge/ECharts-Visualization-AA344D)
+
+**云服务与数据**
+
+![Supabase](https://img.shields.io/badge/Supabase-Platform-3ECF8E?logo=supabase&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Relational%20DB-4169E1?logo=postgresql&logoColor=white)
+![pgvector](https://img.shields.io/badge/pgvector-Embedding%20Search-6C47FF)
+![Deno](https://img.shields.io/badge/Deno-Edge%20Functions-000000?logo=deno&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Local%20Infra-2496ED?logo=docker&logoColor=white)
+
+**AI 与三维重建**
+
+![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-Training-EE4C2C?logo=pytorch&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-Frame%20Extraction-007808?logo=ffmpeg&logoColor=white)
+![COLMAP](https://img.shields.io/badge/COLMAP-SfM-1F6FEB)
+![GLOMAP](https://img.shields.io/badge/GLOMAP-Global%20Pose-0F9D58)
+![Nerfstudio](https://img.shields.io/badge/Nerfstudio-3DGS%20Pipeline-FF6F00)
+![Qwen-VL](https://img.shields.io/badge/Qwen--VL-Multimodal-FF6A00)
 
 ## 📜 序言：对抗熵增的战争
 
