@@ -186,7 +186,7 @@ python main.py /path/to/your/video.mp4
 
 ### 1) `da3_sugar` / `da3+sugar`（DA3 + SuGaR）
 
-- 用途：先用 DA3 做位姿与深度，再走 SuGaR 训练与导出，适合追求几何一致性和网格相关能力的场景。
+- 用途：先用 DA3 做位姿与深度，再由 SuGaR 使用 mesh/SDF 约束 3DGS；通常质量更高，但速度更慢。
 - 输入：`{user_id}/{scene_id}/raw/video.mp4`
 - 典型场景：室内空间、需要后续 mesh/refinement 的资产化流程。
 
@@ -204,7 +204,7 @@ python main.py /path/to/your/video.mp4
 
 ### 2) `da3_2dgs` / `da3+2dgs`（DA3 + 2DGS）
 
-- 用途：少量图片输入，先 DA3 解算，再用 2DGS 训练，适合小物体/少图快速重建。
+- 用途：少量图片输入，先 DA3 解算，再用 2DGS 训练；可视为 Nerfstudio 3DGS 的替代方案，在一定程度上质量更高，输出 2DGS。
 - 输入优先级：`raw/images.zip`（推荐） -> 下载失败时回退 `raw/image.png`
 - 典型场景：移动端多张照片上传、希望用较少图像得到可用点云。
 
@@ -222,7 +222,7 @@ python main.py /path/to/your/video.mp4
 
 ### 3) `sparse2dgs`（Sparse2DGS）
 
-- 用途：少图输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，适合极少视角下尽量稳定地恢复几何。
+- 用途：少量图片输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，输出 2DGS。
 - 输入：`{user_id}/{scene_id}/raw/images.zip`
 - 最低要求：至少 3 张有效图片（少于 3 张会直接失败）。
 - 典型场景：照片数量有限，但希望比常规少图流程有更强几何约束。
@@ -244,9 +244,9 @@ python main.py /path/to/your/video.mp4
 
 | 目标 | 推荐 task_type | 原因 |
 | --- | --- | --- |
-| 视频输入，追求更完整后处理能力 | `da3_sugar` | DA3 + SuGaR，偏“质量与可扩展后处理” |
-| 少图（2~60 张），想要快且成本低 | `da3_2dgs` | 输入灵活，链路短，工程接入简单 |
-| 少图但几何稳定性优先 | `sparse2dgs` | COLMAP + Sparse2DGS 约束更强 |
+| 视频输入，追求更高质量且可接受更慢速度 | `da3_sugar` | SuGaR 的 mesh/SDF 约束能提升质量，但耗时更高 |
+| 少图（2~60 张），希望替代 Nerfstudio 3DGS 并输出 2DGS | `da3_2dgs` | 2DGS 作为替代方案，在一定程度上质量更高 |
+| 少量图片直接生成 2DGS | `sparse2dgs` | 针对少图输入的 Sparse2DGS 路线 |
 
 ### 前端接入最小步骤
 

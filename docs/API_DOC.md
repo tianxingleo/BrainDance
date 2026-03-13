@@ -63,11 +63,11 @@
 |---|------|---------|
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `da3_feed_forward_3dgs` | 视频转3DGS（前馈快速生成） | `video.mp4` |
-| `da3_sugar` / `da3+sugar` | 视频转3DGS（DA3 + SuGaR） | `video.mp4` |
-| `da3_2dgs` / `da3+2dgs` | 少量图片转2DGS（DA3 + 2DGS） | `images.zip`（回退 `image.png`） |
+| `da3_sugar` / `da3+sugar` | SuGaR 使用 mesh/SDF 约束 3DGS（质量更高、速度更慢） | `video.mp4` |
+| `da3_2dgs` / `da3+2dgs` | Nerfstudio 3DGS 的替代路线（一定程度更高质量，输出 2DGS） | `images.zip`（回退 `image.png`） |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
-| `sparse2dgs` | 少量图片转3DGS（Sparse2DGS） | `images.zip` |
+| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `images.zip` |
 
 **task_params 字段说明 (sparse2dgs):**
 
@@ -135,9 +135,9 @@
 
 | task_type | 适合什么场景 | 输入要求 | 推荐起步参数 |
 |---|---|---|---|
-| `da3_sugar` / `da3+sugar` | 视频重建且需要更强后处理空间（SuGaR） | `raw/video.mp4` | `regularization=dn_consistency`, `refinement_time=short`, `fast_mode=true` |
-| `da3_2dgs` / `da3+2dgs` | 少图快速重建，工程接入优先 | `raw/images.zip`（失败回退 `raw/image.png`） | `iterations=7000`, `max_images=40~60`, `keep_ratio=1.0` |
-| `sparse2dgs` | 少图但几何稳定性优先 | `raw/images.zip`（至少 3 张） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
+| `da3_sugar` / `da3+sugar` | 质量优先且可接受更慢速度（mesh/SDF 约束 3DGS） | `raw/video.mp4` | `regularization=dn_consistency`, `refinement_time=short`, `fast_mode=true` |
+| `da3_2dgs` / `da3+2dgs` | 希望替代 Nerfstudio 3DGS 并输出 2DGS | `raw/images.zip`（失败回退 `raw/image.png`） | `iterations=7000`, `max_images=40~60`, `keep_ratio=1.0` |
+| `sparse2dgs` | 少量图片直接生成 2DGS | `raw/images.zip`（至少 3 张） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
 
 **图片任务上传约定（非常关键）:**
 
