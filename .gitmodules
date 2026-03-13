@@ -10,3 +10,9 @@
 [submodule "ai_engine/3dgs/src/libs/sam-3d-objects"]
 	path = ai_engine/3dgs/src/libs/sam-3d-objects
 	url = https://github.com/tianxingleo/sam-3d-objects.git
+[submodule "ai_engine/3dgs/src/libs/Depth-Anything-3"]
+	path = ai_engine/3dgs/src/libs/Depth-Anything-3
+	url = https://github.com/tianxingleo/Depth-Anything-3.git
+[submodule "ai_engine/3dgs/src/libs/Sparse2DGS"]
+	path = ai_engine/3dgs/src/libs/Sparse2DGS
+	url = https://github.com/tianxingleo/Sparse2DGS.git
