@@ -2,46 +2,61 @@ import os
 import shutil
 import subprocess
 import time
-import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from src.config import PipelineConfig
+import numpy as np
+
 from src.config import BASE_DIR
+from src.config import PipelineConfig
 from src.core.pipeline_base import BasePipeline
 from src.modules.da3_runner import DA3Runner
+from src.modules.image_proc import ImageProcessor
 from src.modules.scene_analyzer import SceneAnalyzer
 from src.utils.common import format_duration
 
 
 class DA3TwoDGSPipeline(BasePipeline):
     """
-    【少量图片 -> DA3 -> 2DGS】流水线
-    逻辑：图片整理 -> (可选) AI质检 -> DA3 位姿/深度解算 -> 2DGS 训练 -> 导出 PLY
+    【视频 -> DA3 -> 2DGS】流水线
+    逻辑：视频抽帧 -> (可选) AI质检 -> DA3 位姿/深度解算 -> 2DGS 训练 -> 导出 PLY
+
+    注意：2DGS 目标是替代 Nerfstudio 3DGS 训练链路，依赖较长视频序列。
+    不支持单图或少量图片输入。
     """
 
     def run(self, input_path: str, params: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-        self.log("🖼️ 启动 DA3 + 2DGS 流水线...")
+        self.log("🎬 启动 DA3 + 2DGS 视频流水线...")
         self.log(f"📄 输入文件: {input_path}")
 
         start_time = time.time()
-        input_obj = Path(input_path)
-        if not input_obj.exists():
-            raise FileNotFoundError(f"输入不存在: {input_obj}")
+        video_path = Path(input_path)
+        if not video_path.exists():
+            raise FileNotFoundError(f"输入视频不存在: {video_path}")
+
+        if video_path.suffix.lower() not in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+            raise RuntimeError("da3_2dgs 仅支持视频输入（mp4/mov/avi/mkv/webm）。")
 
         cfg = PipelineConfig(
             project_name=self.scene_id,
             mapper_type="da3",
+            video_path=video_path,
         )
         cfg.project_dir = Path(self.work_dir)
 
         # 参数（优先 task_params）
-        iterations = int(params.get("iterations", params.get("training_iterations", 7000)))
-        max_images = int(params.get("max_images", 60))
-        keep_ratio = float(params.get("keep_ratio", 1.0))
-        enable_scene_analysis = bool(params.get("enable_scene_analysis", False))
+        iterations = int(params.get("iterations", params.get("training_iterations", 30000)))
         gpu_index = int(params.get("gpu_index", 1))
         render_after_train = bool(params.get("render_after_train", False))
+
+        # 抽帧/数据规模参数（强调视频序列）
+        extract_fps = float(params.get("extract_fps", 2.0))
+        max_edge = int(params.get("max_edge", 1920))
+        blur_keep_ratio = float(params.get("blur_keep_ratio", 0.85))
+        max_images = int(params.get("max_images", cfg.max_images))
+        min_images = int(params.get("min_images", 24))
+
+        enable_scene_analysis = bool(params.get("enable_scene_analysis", False))
 
         # 2DGS 仓库路径：task_params > env > 常见默认路径
         dgs_repo = self._resolve_2dgs_repo(params.get("dgs_repo_path"))
@@ -52,24 +67,33 @@ class DA3TwoDGSPipeline(BasePipeline):
         raw_images_dir = cfg.project_dir / "raw_images"
         raw_images_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) 准备输入图片
-        self.log("📦 [1/4] 整理输入图片...")
-        self._prepare_images(
-            source=input_obj,
+        # 1) 视频抽帧与筛选
+        self.log("🎞️ [1/4] 视频抽帧与图片筛选...")
+        extracted_count = self._extract_video_to_images(
+            video_path=video_path,
             raw_images_dir=raw_images_dir,
+            extract_fps=extract_fps,
+            max_edge=max_edge,
+            blur_keep_ratio=blur_keep_ratio,
             max_images=max_images,
-            keep_ratio=keep_ratio,
+            cfg=cfg,
         )
+
+        if extracted_count < min_images:
+            raise RuntimeError(
+                f"可用帧数不足：{extracted_count} < {min_images}。"
+                "2DGS 需要较长视频序列，请提供更多连续视角。"
+            )
+
         image_files = self._list_images(raw_images_dir)
-        if len(image_files) < 2:
-            raise RuntimeError("图片数量不足，至少需要 2 张图片才能进行 DA3 + 2DGS。")
         self.log(f"    -> 图片准备完成，共 {len(image_files)} 张")
 
         pipeline_metadata: Dict[str, Any] = {
             "engine": "da3_2dgs",
-            "input_path": str(input_obj),
+            "input_path": str(video_path),
             "training_iterations": iterations,
             "preview_img_path": str(image_files[0]),
+            "frame_count": len(image_files),
         }
 
         # 2) 可选 AI 质检
@@ -125,6 +149,7 @@ class DA3TwoDGSPipeline(BasePipeline):
                 "gpu_index": gpu_index,
             }
         )
+
         self.log(f"💾 输出完成: {final_ply}")
         self.log(f"⏱️ 总耗时: {format_duration(time.time() - start_time)}")
         return str(final_ply), pipeline_metadata
@@ -149,9 +174,21 @@ class DA3TwoDGSPipeline(BasePipeline):
         for p in candidates:
             if p.exists() and (p / "train.py").exists():
                 return p
-        raise FileNotFoundError("找不到 2d-gaussian-splatting 仓库，请通过 task_params.dgs_repo_path 或 DGS2_REPO_PATH 配置。")
+        raise FileNotFoundError(
+            "找不到 2d-gaussian-splatting 仓库，请通过 task_params.dgs_repo_path 或 DGS2_REPO_PATH 配置。"
+        )
 
-    def _prepare_images(self, source: Path, raw_images_dir: Path, max_images: int, keep_ratio: float):
+    def _extract_video_to_images(
+        self,
+        *,
+        video_path: Path,
+        raw_images_dir: Path,
+        extract_fps: float,
+        max_edge: int,
+        blur_keep_ratio: float,
+        max_images: int,
+        cfg: PipelineConfig,
+    ) -> int:
         # 清理旧内容
         for item in raw_images_dir.iterdir():
             if item.is_file() or item.is_symlink():
@@ -159,50 +196,61 @@ class DA3TwoDGSPipeline(BasePipeline):
             else:
                 shutil.rmtree(item, ignore_errors=True)
 
-        if source.suffix.lower() == ".zip":
-            with zipfile.ZipFile(source, "r") as zf:
-                zf.extractall(raw_images_dir)
-        elif source.is_file() and source.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
-            shutil.copy2(source, raw_images_dir / source.name)
-        elif source.is_dir():
-            for img in self._list_images(source):
-                shutil.copy2(img, raw_images_dir / img.name)
-        else:
-            raise RuntimeError("输入文件格式不支持，需为 .zip、单张图片或图片目录。")
+        temp_dir = raw_images_dir.parent / "temp_extract"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-        images = self._list_images(raw_images_dir)
-        if not images:
-            raise RuntimeError("未找到可用图片，请检查 zip/目录内容。")
+        # 复制视频到工作区，保持目录一致性
+        dest_video_path = raw_images_dir.parent / video_path.name
+        if not dest_video_path.exists():
+            shutil.copy2(video_path, dest_video_path)
 
-        # 统一重命名，保证顺序稳定
-        tmp_dir = raw_images_dir / "_normalized"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        for idx, src in enumerate(images, start=1):
-            dst = tmp_dir / f"frame_{idx:05d}.jpg"
-            shutil.copy2(src, dst)
+        self.log(
+            f"    -> FFmpeg 抽帧: fps={extract_fps}, max_edge={max_edge}, "
+            "lanczos 重采样"
+        )
+        vf = f"fps={extract_fps},scale={max_edge}:{max_edge}:force_original_aspect_ratio=decrease:flags=lanczos"
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(dest_video_path),
+                    "-vf",
+                    vf,
+                    "-q:v",
+                    "2",
+                    "-map_metadata",
+                    "-1",
+                    str(temp_dir / "frame_%05d.jpg"),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"FFmpeg 抽帧失败: {e}")
 
-        for item in raw_images_dir.iterdir():
-            if item == tmp_dir:
-                continue
-            if item.is_file() or item.is_symlink():
-                item.unlink(missing_ok=True)
-            else:
-                shutil.rmtree(item, ignore_errors=True)
+        img_processor = ImageProcessor(cfg, log_callback=self.log)
+        img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=blur_keep_ratio)
 
-        keep_count = len(list(tmp_dir.glob("*")))
-        if keep_ratio > 0 and keep_ratio < 1:
-            keep_count = max(2, int(keep_count * keep_ratio))
-        keep_count = min(keep_count, max_images)
+        all_imgs = sorted([p for p in temp_dir.glob("*") if p.is_file()])
+        if len(all_imgs) > max_images:
+            indices = np.linspace(0, len(all_imgs) - 1, max_images, dtype=int)
+            all_imgs = [all_imgs[i] for i in sorted(set(indices))]
 
-        normalized = sorted(tmp_dir.glob("*"))[:keep_count]
-        for idx, src in enumerate(normalized, start=1):
-            dst = raw_images_dir / f"frame_{idx:05d}.jpg"
-            shutil.move(str(src), str(dst))
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        for idx, img in enumerate(all_imgs, start=1):
+            shutil.copy2(img, raw_images_dir / f"frame_{idx:05d}.jpg")
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return len(all_imgs)
 
     def _prepare_2dgs_dataset(self, cfg: PipelineConfig, dgs_data_dir: Path):
         sparse_src = cfg.data_dir / "colmap" / "sparse" / "0"
         images_src = cfg.data_dir / "images"
+
         if not sparse_src.exists():
             raise FileNotFoundError(f"COLMAP sparse 不存在: {sparse_src}")
         if not images_src.exists():
@@ -284,7 +332,17 @@ class DA3TwoDGSPipeline(BasePipeline):
             line = line.strip()
             if not line:
                 continue
-            if any(k in line for k in ["ITER", "Evaluating", "Saving Gaussians", "Training complete", "ERROR", "Error"]):
+            if any(
+                k in line
+                for k in [
+                    "ITER",
+                    "Evaluating",
+                    "Saving Gaussians",
+                    "Training complete",
+                    "ERROR",
+                    "Error",
+                ]
+            ):
                 self.log(f"    | {line}")
         process.wait()
         if process.returncode != 0:

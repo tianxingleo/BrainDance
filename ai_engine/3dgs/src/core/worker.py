@@ -199,7 +199,7 @@ class CloudWorker:
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
                 storage_path = f"{user_id}/{scene_id}/raw/image.png"
                 on_pipeline_log("下载单张图片...")
-            elif task_type in ('sparse2dgs', 'da3_2dgs', 'da3+2dgs'):
+            elif task_type in ('sparse2dgs',):
                 input_path = self.CACHE_DIR / f"{scene_id}_images.zip"
                 storage_path = f"{user_id}/{scene_id}/raw/images.zip"
                 on_pipeline_log("下载多图压缩包 (images.zip)...")
@@ -215,20 +215,7 @@ class CloudWorker:
                     res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
                     f.write(res)
             except Exception as e:
-                if task_type in ('da3_2dgs', 'da3+2dgs'):
-                    fallback_path = f"{user_id}/{scene_id}/raw/image.png"
-                    on_pipeline_log(f"⚠️ images.zip 下载失败，尝试回退 {fallback_path}")
-                    input_path = self.CACHE_DIR / f"{scene_id}.png"
-                    storage_path = fallback_path
-                    try:
-                        with open(input_path, 'wb') as f:
-                            res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
-                            f.write(res)
-                        on_pipeline_log("✅ 已回退到单图输入")
-                    except Exception as e2:
-                        raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e2}") from e2
-                else:
-                    raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
+                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
 
             # =================== 阶段 C: 执行引擎 ===================
             # 1. 获取任务类型和参数
