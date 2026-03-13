@@ -1,3 +1,6 @@
 [submodule "ai_engine/3dgs/src/libs/SuGaR"]
 	path = ai_engine/3dgs/src/libs/SuGaR
 	url = https://github.com/tianxingleo/SuGaR.git
+[submodule "ai_engine/3dgs/src/libs/2d-gaussian-splatting"]
+	path = ai_engine/3dgs/src/libs/2d-gaussian-splatting
+	url = https://github.com/tianxingleo/2d-gaussian-splatting.git
