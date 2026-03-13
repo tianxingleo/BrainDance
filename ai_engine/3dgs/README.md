@@ -15,6 +15,7 @@
 - [快速开始](#-快速开始) - 5 分钟上手
 - [环境准备](#-环境准备) - 硬件和软件要求
 - [运行模式](#-运行模式) - 本地/云端/单图模式
+- [论文 Pipeline 使用指南](#-论文-pipeline-使用指南新增) - DA3+SuGaR / DA3+2DGS / Sparse2DGS
 - [工作流原理](#-工作流原理) - 系统架构和数据流
 
 **适合读者**：运维人员、新用户、快速部署者
@@ -178,6 +179,81 @@ python main.py /path/to/your/video.mp4
 
 > 💿 启动本地模式: video.mp4
 > ... (开始直接运行 Pipeline)
+
+## 🧪 论文 Pipeline 使用指南（新增）
+
+下面三条是近期新增的“论文复现/组合型”流水线，统一通过 `processing_tasks.task_type` 触发。
+
+### 1) `da3_sugar` / `da3+sugar`（DA3 + SuGaR）
+
+- 用途：先用 DA3 做位姿与深度，再走 SuGaR 训练与导出，适合追求几何一致性和网格相关能力的场景。
+- 输入：`{user_id}/{scene_id}/raw/video.mp4`
+- 典型场景：室内空间、需要后续 mesh/refinement 的资产化流程。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `regularization` | `dn_consistency` | SuGaR 正则类型：`dn_consistency` / `density` / `sdf` |
+| `refinement_time` | `short` | 精炼时长：`short` / `medium` / `long` |
+| `fast_mode` | `true` | 快速模式，通常更快产出可交付 PLY |
+| `high_poly` | `false` | 是否启用更高面数相关流程 |
+| `gpu_index` | 环境默认 | 映射到 `CUDA_VISIBLE_DEVICES` |
+| `da3_repo_path` | 自动探测 | DA3 仓库路径（需含 `da3_to_sugar_pipeline.sh`） |
+| `sugar_repo_path` | 自动探测 | SuGaR 仓库路径（需含 `train_fast.py`） |
+
+### 2) `da3_2dgs` / `da3+2dgs`（DA3 + 2DGS）
+
+- 用途：少量图片输入，先 DA3 解算，再用 2DGS 训练，适合小物体/少图快速重建。
+- 输入优先级：`raw/images.zip`（推荐） -> 下载失败时回退 `raw/image.png`
+- 典型场景：移动端多张照片上传、希望用较少图像得到可用点云。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `iterations` | `7000` | 2DGS 训练步数（质量优先可提到 30k） |
+| `max_images` | `60` | 最大参与训练图片数 |
+| `keep_ratio` | `1.0` | 输入保留比例（0~1） |
+| `gpu_index` | `1` | 训练显卡索引 |
+| `enable_scene_analysis` | `false` | 是否先做 AI 质检 |
+| `render_after_train` | `false` | 是否训练后调用 `render.py` |
+| `dgs_repo_path` | 自动探测 | 2DGS 仓库路径（需含 `train.py`） |
+
+### 3) `sparse2dgs`（Sparse2DGS）
+
+- 用途：少图输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，适合极少视角下尽量稳定地恢复几何。
+- 输入：`{user_id}/{scene_id}/raw/images.zip`
+- 最低要求：至少 3 张有效图片（少于 3 张会直接失败）。
+- 典型场景：照片数量有限，但希望比常规少图流程有更强几何约束。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `iterations` | `7000` | Sparse2DGS 训练步数 |
+| `resolution` | `2` | 对应 `train.py -r`，值越小分辨率越高、耗时更大 |
+| `depth_ratio` | `1.0` | 深度损失权重比例 |
+| `lambda_dist` | `1000` | 几何约束强度 |
+| `conda_env` | `Braindance` | 用于 `conda run -n` 的环境名 |
+| `sparse2dgs_repo_path` | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
+| `colmap_matcher` | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
+| `colmap_mapper` | `mapper` | COLMAP mapper（失败时会回退 `mapper`） |
+
+### 选型建议（实战）
+
+| 目标 | 推荐 task_type | 原因 |
+| --- | --- | --- |
+| 视频输入，追求更完整后处理能力 | `da3_sugar` | DA3 + SuGaR，偏“质量与可扩展后处理” |
+| 少图（2~60 张），想要快且成本低 | `da3_2dgs` | 输入灵活，链路短，工程接入简单 |
+| 少图但几何稳定性优先 | `sparse2dgs` | COLMAP + Sparse2DGS 约束更强 |
+
+### 前端接入最小步骤
+
+1. 上传素材到标准路径（`video.mp4` / `images.zip` / `image.png`）。
+2. 向 `processing_tasks` 插入任务：`status='pending'` + 正确 `task_type`。
+3. 可选传入 `task_params` 调参（建议先默认参数跑通，再微调）。
+4. 监听 `status` 和 `logs`，完成后从 `output/point_cloud.*` 获取交付文件。
 
 ## 🔄 工作流原理
 

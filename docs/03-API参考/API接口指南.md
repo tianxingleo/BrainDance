@@ -147,6 +147,20 @@ class SupabaseConfig {
 | `render_after_train` | bool | false | 训练后是否执行 render.py |
 | `dgs_repo_path` | string | 自动探测 | 2DGS 仓库路径（可覆盖） |
 
+**论文 Pipeline 选型建议（重点）:**
+
+| task_type | 适合什么场景 | 输入要求 | 推荐起步参数 |
+|---|---|---|---|
+| `da3_sugar` / `da3+sugar` | 视频重建且需要更强后处理空间（SuGaR） | `raw/video.mp4` | `regularization=dn_consistency`, `refinement_time=short`, `fast_mode=true` |
+| `da3_2dgs` / `da3+2dgs` | 少图快速重建，工程接入优先 | `raw/images.zip`（失败回退 `raw/image.png`） | `iterations=7000`, `max_images=40~60`, `keep_ratio=1.0` |
+| `sparse2dgs` | 少图但几何稳定性优先 | `raw/images.zip`（至少 3 张） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
+
+**图片任务上传约定（非常关键）:**
+
+1. `da3_2dgs` / `sparse2dgs` 推荐上传 `images.zip` 到 `{user_id}/{scene_id}/raw/images.zip`。
+2. `da3_2dgs` 支持回退单图：当 `images.zip` 缺失时，Worker 会尝试 `{user_id}/{scene_id}/raw/image.png`。
+3. `sparse2dgs` 不建议单图，低于 3 张会失败。
+
 **创建视频任务示例 (Dart):**
 ```dart
 final res = await supabase.from('processing_tasks').insert({
@@ -173,6 +187,23 @@ final res = await supabase.from('processing_tasks').insert({
 }).select();
 ```
 
+**创建 DA3+SuGaR 视频任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_sugar_001',
+  'display_name': '客厅漫游-DA3+SuGaR',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'da3_sugar',
+  'task_params': {
+    'regularization': 'dn_consistency',
+    'refinement_time': 'short',
+    'fast_mode': true,
+    'high_poly': false
+  },
+  'status': 'pending'
+}).select();
+```
+
 **创建 DA3+2DGS 多图任务示例 (Dart):**
 ```dart
 final res = await supabase.from('processing_tasks').insert({
@@ -184,6 +215,23 @@ final res = await supabase.from('processing_tasks').insert({
     'iterations': 7000,
     'gpu_index': 1,
     'max_images': 40
+  },
+  'status': 'pending'
+}).select();
+```
+
+**创建 Sparse2DGS 多图任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_sparse2dgs_001',
+  'display_name': '展柜小场景-Sparse2DGS',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'sparse2dgs',
+  'task_params': {
+    'iterations': 7000,
+    'resolution': 2,
+    'depth_ratio': 1.0,
+    'lambda_dist': 1000
   },
   'status': 'pending'
 }).select();
