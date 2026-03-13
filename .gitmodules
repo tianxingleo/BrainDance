@@ -1,0 +1,3 @@
+[submodule "ai_engine/3dgs/src/libs/SuGaR"]
+	path = ai_engine/3dgs/src/libs/SuGaR
+	url = https://github.com/tianxingleo/SuGaR.git
