@@ -63,8 +63,24 @@
 |---|------|---------|
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `da3_feed_forward_3dgs` | 视频转3DGS（前馈快速生成） | `video.mp4` |
+| `da3_sugar` / `da3+sugar` | 视频转3DGS（DA3 + SuGaR） | `video.mp4` |
+| `da3_2dgs` / `da3+2dgs` | 少量图片转2DGS（DA3 + 2DGS） | `images.zip`（回退 `image.png`） |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
+| `sparse2dgs` | 少量图片转3DGS（Sparse2DGS） | `images.zip` |
+
+**task_params 字段说明 (sparse2dgs):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `iterations` | int | 7000 | Sparse2DGS 训练迭代数 |
+| `resolution` | int | 2 | 对应 `train.py -r`，值越小分辨率越高 |
+| `depth_ratio` | float | 1.0 | 深度损失权重比例参数 |
+| `lambda_dist` | float | 1000 | 几何约束损失权重 |
+| `conda_env` | string | `Braindance` | 运行 Sparse2DGS 的 Conda 环境名 |
+| `sparse2dgs_repo_path` | string | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
+| `colmap_matcher` | string | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
+| `colmap_mapper` | string | `mapper` | COLMAP 解算器（可选 `global_mapper`） |
 
 **task_params 字段说明 (single_image_sam3d):**
 
@@ -78,6 +94,31 @@
 |-----|------|--------|------|
 | `frame_interval` | int | 5 | 前馈生成时的帧间隔，值越小使用帧数越多（1=使用全部帧） |
 | `conf_threshold` | float | 0.5 | 深度置信度阈值，值越高过滤越严格 |
+
+**task_params 字段说明 (da3_sugar / da3+sugar):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `regularization` | string | `dn_consistency` | SuGaR正则化：`dn_consistency` / `density` / `sdf` |
+| `refinement_time` | string | `short` | 精炼时长：`short` / `medium` / `long` |
+| `high_poly` | bool | `false` | 完整流程时是否高面数mesh |
+| `fast_mode` | bool | `true` | 是否走fast模式（仅coarse，通常输出PLY更快） |
+| `gpu_index` | int | 环境默认 | 绑定GPU索引（会转成 `CUDA_VISIBLE_DEVICES`） |
+| `sugar_repo_path` | string | 自动探测 | SuGaR仓库路径 |
+| `da3_repo_path` | string | 自动探测 | DA3仓库路径 |
+| `sugar_scene_name` | string | `scene_id` | 覆盖SuGaR内部场景名 |
+
+**task_params 字段说明 (da3_2dgs / da3+2dgs):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `iterations` | int | 7000 | 2DGS 训练迭代数（高质量可设 30000） |
+| `gpu_index` | int | 1 | 绑定 GPU 索引（默认第二张卡） |
+| `max_images` | int | 60 | 参与重建的最大图片数 |
+| `keep_ratio` | float | 1.0 | 输入图片保留比例（0-1） |
+| `enable_scene_analysis` | bool | false | 是否启用 AI 质检 |
+| `render_after_train` | bool | false | 训练后是否执行 render.py |
+| `dgs_repo_path` | string | 自动探测 | 2DGS 仓库路径（可覆盖） |
 
 **task_params 通用参数（所有会产出 3DGS 模型的任务都可用）:**
 
@@ -111,6 +152,22 @@ final res = await supabase.from('processing_tasks').insert({
   'task_params': {
     'frame_interval': 2,  // 使用更多帧以提高质量
     'conf_threshold': 0.5  // 深度置信度阈值
+  },
+  'status': 'pending'
+}).select();
+```
+
+**创建 DA3+2DGS 多图任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_2dgs_001',
+  'display_name': '桌面小物件-DA3+2DGS',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'da3_2dgs',
+  'task_params': {
+    'iterations': 7000,
+    'gpu_index': 1,
+    'max_images': 40
   },
   'status': 'pending'
 }).select();
@@ -185,6 +242,7 @@ braindance-assets/ (Bucket)
     └── {scene_id}/              <-- 第二级：项目/场景隔离
         ├── raw/                 <-- 原始素材
         │   ├── video.mp4        # 视频任务 (task_type: video_3dgs)
+        │   ├── images.zip       # 多图任务 (task_type: da3_2dgs / da3+2dgs / sparse2dgs)
         │   └── image.png        # 单图任务 (task_type: single_image_sam3d)
         ├── processed/           <-- 抽帧图片
         │   ├── frame_001.jpg

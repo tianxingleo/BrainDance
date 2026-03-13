@@ -5,7 +5,7 @@
 set -e  # 任何命令失败立即退出
 
 # ================= 配置 =================
-DA3_OUTPUT_DIR="${1:-/home/ltx/projects/Depth-Anything-3/output/sugar_streaming}"
+DA3_OUTPUT_DIR="${1:-$PWD/output/sugar_streaming}"
 SCENE_NAME="${2:-sugar_video}"
 
 # SuGaR参数
@@ -16,19 +16,34 @@ FAST_MODE="${6:-false}"                 # true/false
 
 # 路径配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DA3_DIR="/home/ltx/projects/Depth-Anything-3"
-SUGAR_DIR="/home/ltx/projects/SuGaR"
+DA3_DIR="${DA3_DIR:-$SCRIPT_DIR}"
+if [ -n "${SUGAR_DIR:-}" ]; then
+    SUGAR_DIR="$SUGAR_DIR"
+elif [ -d "/ltx-data/SuGaR" ]; then
+    SUGAR_DIR="/ltx-data/SuGaR"
+else
+    SUGAR_DIR="/home/ltx/projects/SuGaR"
+fi
 
 SUGAR_DATA_DIR="$SUGAR_DIR/data/$SCENE_NAME"
 SUGAR_OUTPUT_DIR="$SUGAR_DIR/output/$SCENE_NAME"
 
-# 激活Conda环境
-CONDA_ENV="gs_linux_backup"
-CONDA_BASE="/home/ltx/miniforge3"
-source "$CONDA_BASE/etc/profile.d/conda.sh"
-conda activate $CONDA_ENV
+# 可选激活 Conda 环境（默认不强制）
+USE_CONDA="${USE_CONDA:-false}"
+CONDA_ENV="${CONDA_ENV:-}"
+CONDA_BASE="${CONDA_BASE:-$HOME/miniforge3}"
+if [ "$USE_CONDA" = "true" ] && [ -n "$CONDA_ENV" ]; then
+    if [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+        source "$CONDA_BASE/etc/profile.d/conda.sh"
+        conda activate "$CONDA_ENV"
+    else
+        echo "⚠️ conda.sh 不存在，跳过 conda 激活: $CONDA_BASE/etc/profile.d/conda.sh"
+    fi
+fi
 
-export CUDA_VISIBLE_DEVICES=0
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    export CUDA_VISIBLE_DEVICES="${GPU_INDEX:-0}"
+fi
 
 # ================= 使用说明 =================
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
@@ -57,6 +72,11 @@ fi
 
 if [ ! -d "$DA3_OUTPUT_DIR" ]; then
     echo "❌ 错误: DA3输出目录不存在: $DA3_OUTPUT_DIR"
+    exit 1
+fi
+
+if [ ! -d "$SUGAR_DIR" ]; then
+    echo "❌ 错误: SuGaR目录不存在: $SUGAR_DIR"
     exit 1
 fi
 
@@ -204,7 +224,7 @@ else
     python train_full_pipeline.py \
         -s "$SUGAR_DATA_DIR" \
         -r "$REGULARIZATION" \
-        ${HIGH_POLY:+--high_poly $HIGH_POLY} \
+        --high_poly "$HIGH_POLY" \
         --refinement_time "$REFINEMENT_TIME"
 
     if [ $? -ne 0 ]; then
