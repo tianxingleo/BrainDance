@@ -521,7 +521,12 @@ class Sparse2DGSPipeline(BasePipeline):
         ]
 
         env = os.environ.copy()
-        if "CUDA_VISIBLE_DEVICES" not in env:
-            env["CUDA_VISIBLE_DEVICES"] = "1"
+        # 仅使用环境变量控制 GPU，不做硬编码默认值。
+        # 优先级：
+        # 1) CUDA_VISIBLE_DEVICES（通用）
+        # 2) SPARSE2DGS_CUDA_VISIBLE_DEVICES（流水线专用，可覆盖通用变量）
+        sparse2dgs_cuda = env.get("SPARSE2DGS_CUDA_VISIBLE_DEVICES")
+        if sparse2dgs_cuda is not None:
+            env["CUDA_VISIBLE_DEVICES"] = sparse2dgs_cuda
 
         self._run_command(cmd, "Sparse2DGS 训练", cwd=sparse2dgs_repo, env=env)
