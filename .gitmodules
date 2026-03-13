@@ -4,3 +4,9 @@
 [submodule "ai_engine/3dgs/src/libs/2d-gaussian-splatting"]
 	path = ai_engine/3dgs/src/libs/2d-gaussian-splatting
 	url = https://github.com/tianxingleo/2d-gaussian-splatting.git
+[submodule "ai_engine/3dgs/src/libs/ml-sharp"]
+	path = ai_engine/3dgs/src/libs/ml-sharp
+	url = https://github.com/tianxingleo/ml-sharp.git
+[submodule "ai_engine/3dgs/src/libs/sam-3d-objects"]
+	path = ai_engine/3dgs/src/libs/sam-3d-objects
+	url = https://github.com/tianxingleo/sam-3d-objects.git
