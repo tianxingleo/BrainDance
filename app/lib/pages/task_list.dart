@@ -337,6 +337,8 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
         return Icons.image;
       case 'single_image_sharp':
         return Icons.auto_fix_high;
+      case 'sparse2dgs':
+        return Icons.photo_library;
       default:
         return Icons.view_in_ar;
     }
@@ -350,6 +352,8 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
         return 'SAM3D';
       case 'single_image_sharp':
         return 'Sharp 3D';
+      case 'sparse2dgs':
+        return 'Sparse2DGS';
       default:
         return taskType;
     }
