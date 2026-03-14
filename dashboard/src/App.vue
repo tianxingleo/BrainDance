@@ -982,7 +982,7 @@ onUnmounted(() => {
           </div>
 
           <div class="phone-hero">
-            <div class="phone-hero__badge">Flutter app style</div>
+            <div class="phone-hero__badge">实时总览</div>
             <strong>{{ successRate }}%</strong>
             <span>任务成功率</span>
             <p>{{ successHint }}，最近 24 小时完成 {{ timeBasedStats.completed24h }} 条。</p>
@@ -1062,9 +1062,9 @@ onUnmounted(() => {
         <section class="hero-card glass-card">
           <div class="hero-card__copy">
             <p class="eyebrow">BrainDance Operations</p>
-            <h2>将 dashboard 调整为更接近 Braindance Flutter app 的体验</h2>
+            <h2>统一查看任务、资源与服务状态</h2>
             <p class="hero-card__text">
-              使用冷灰蓝渐变、圆角大卡片、胶囊导航和柔和发光，让 web 端和移动端在视觉语义上保持一致。
+              面向运营与排障场景，集中展示任务成功率、队列压力、存储可用性和实时连接状态。
             </p>
 
             <div class="hero-card__actions">
