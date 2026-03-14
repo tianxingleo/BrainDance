@@ -3,15 +3,15 @@
 <img src="./app/assets/icon_square_transparent.png" alt="BrainDance Logo" width="120" />
 
 
-# 🕯️ BrainDance | 流光 · 记
+# BrainDance | 流光 · 记
 
 **“物理世界注定走向无序，而我们在比特世界重建永恒。”**
 
-“——这是物理世界的搜索引擎，第二大脑的空间可视化。”
+面向空间记忆的三维语义引擎与检索系统。
 
 [English](./README.en.md) | [简体中文](README.md)
 
-### 🏆 面向空间计算时代的三维语义记忆引擎
+### 从采集到检索的三维记忆链路
 
 #### An Anti-Entropy Engine for Human Memory
 
@@ -19,20 +19,20 @@
 
 </div>
 
-## 📖 项目概述 (Overview)
+## 项目概述 (Overview)
 
-**BrainDance (流光 · 记)** 是一个**面向移动端的“可检索三维记忆库”**。
+**BrainDance (流光 · 记)** 是一个把真实空间保存为可浏览、可检索、可回访数字资产的项目。
 
-不同于传统的相册只能记录二维的“画面”，BrainDance 利用 **3D Gaussian Splatting (高斯泼溅)** 等计算机图形学前沿技术，将现实世界的物理空间以 1:1 的高保真度转化为数字资产。
+它的出发点很简单：照片和视频能留下画面，但很难保住空间感。一个房间怎么摆、一个街角从哪看过去、某件东西当时放在什么位置，这些信息在 2D 媒介里通常会被压缩掉。
 
-更进一步，我们结合了 **Multimodal AI (多模态大模型)** 与 **RAG (检索增强生成)** 技术，让这些三维场景具备了“语义”。你可以像在搜索引擎里一样**搜索现实世界**，让空间记忆不再只是“能看”，而是“能找、能回溯、能定位”。
+BrainDance 用 **3D Gaussian Splatting (高斯泼溅)** 等技术把真实场景重建成三维资产，再接入 **Multimodal AI (多模态大模型)** 与 **RAG (检索增强生成)**，让这些场景不只是“能看”，还可以被搜索、定位和回溯。可以把它理解成一个面向现实空间的记忆索引系统。
 
 ### 核心特性
 
-- **📷 移动端低成本扫描**：利用手机采集视频与图片素材，通过云端计算和 AI 质检提升低质量素材下的重建成功率。
-- **🔍 空间语义检索 (Spatial RAG)**：结合多模态大模型、向量检索与空间锚点，实现“Ctrl+F”搜索物理世界。
-- **⏳ 时光剥离 (Time Peeling)**：围绕同一空间在不同时间的扫描结果，探索面向时间维度的空间记忆表达。
-- **☁️ 端云协同渲染**：Mobile 采集 -> Cloud 高性能计算 -> Mobile/Web 轻量化查看。
+- **📷 低门槛采集**：用手机视频或图片就能发起空间采集，重建计算放在云端完成。
+- **🔍 空间语义检索**：结合多模态理解、向量检索和空间锚点，在三维场景里查找物体、位置和相关视角。
+- **⏳ 时间维度回看**：围绕同一空间的多次扫描结果，比较不同时间下的变化。
+- **☁️ 端云协同链路**：移动端负责采集与查看，Supabase 和 AI Worker 负责存储、调度与重建处理。
 
 ### 技术栈速览
 
@@ -48,68 +48,67 @@
 
 ![Python](https://img.shields.io/badge/Python-Worker-3776AB?logo=python&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-Training-EE4C2C?logo=pytorch&logoColor=white) ![FFmpeg](https://img.shields.io/badge/FFmpeg-Frame%20Extraction-007808?logo=ffmpeg&logoColor=white) ![COLMAP](https://img.shields.io/badge/COLMAP-SfM-1F6FEB) ![GLOMAP](https://img.shields.io/badge/GLOMAP-Global%20Pose-0F9D58) ![Nerfstudio](https://img.shields.io/badge/Nerfstudio-3DGS%20Pipeline-FF6F00) ![Qwen-VL](https://img.shields.io/badge/Qwen--VL-Multimodal-FF6A00)
 
-## 📜 序言：对抗熵增的战争
+## 为什么做这个项目
 
-**物理学**告诉我们，宇宙的终极命运是**熵增**。房屋会变旧，物品会破碎，秩序会变成混乱。
+BrainDance 面向的是一个很具体的移动端问题：手机已经能高频记录生活，但现有记录方式大多停留在照片、视频和文字层面，真正和空间有关的信息很难被保存和再次利用。
 
-在**生物学**层面，熵增表现为**遗忘**。海马体的衰退让我们忘记了回家的路，忘记了爱人的脸。在**社会学**层面，熵增表现为**消亡**。城市更新的推土机下，老街、胡同与那些烟火气终将化为尘土。
+照片和视频当然有价值，但它们记录的大多只是某个角度下的一帧。过几年再回看，你可能还记得画面，却很难重新找回那个空间本身的尺度、方向、布局，以及某件物品具体放在哪里。
 
-现有的技术，2D 照片与视频，只是对现实苍白的“截屏”。它们丢失了深度，丢失了光影，更丢失了空间感。它们无法对抗遗忘，因为它们本身就是扁平的。
+我们希望把这件事做成一个真正能在手机场景里使用的应用链路：用户在移动端完成采集，云端完成三维重建与语义理解，再把结果返回到移动端和 Web 端进行浏览、检索和回看。项目使用 **3D Gaussian Splatting (高斯泼溅)**、**Multimodal AI (多模态大模型)** 和 **RAG (检索增强生成)**，目标不是单纯生成一个 3D 模型，而是把现实空间整理成可检索、可定位、可追溯的数字记忆资产。
 
-**BrainDance (流光 · 记)** 不仅仅是一个 App，它是人类对抗时间熵增的通用工具。利用 **3D Gaussian Splatting (高斯泼溅)** 与 **Multimodal AI (多模态大模型)** 等前沿技术，我们试图捕获光的场域，**在数字世界里建立负熵**，为每个人、每座城，留下一份可以穿越时间的**空间档案**。
+## 应用价值：个人记忆、公共档案与长期留存
 
-## 🌌 价值坐标系：微观、宏观与纵深
-
-BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文明的完整记忆生态：
+结合比赛强调的移动端创新、真实场景和落地能力，BrainDance 当前主要面向三类场景：
 
 ### 1. 微观尺度 (The Micro Scale)
 
-> **"为即将消逝的记忆，建立数字海马体。"**
-
 - **个人见证 (Spatial Journal)**：
-  - 当你毕业离开住了 4 年的宿舍，或搬离充满回忆的出租屋时，一次扫描即可把整个物理空间折叠成可回访的数字记忆。
+  - 比如毕业离开住了 4 年的宿舍，或者搬离住过很久的出租屋，用户可以在离开前用手机完成一次采集，把整个空间保存下来，之后再回看时看到的不只是一张照片，而是一个还能重新进入和检索的场景。
 - **医疗辅助 (The Cure)**：
-  - 对于阿尔茨海默症等记忆障碍场景，沉浸式空间回访比平面照片更接近真实的熟悉感。
+  - 在阿尔茨海默症等记忆障碍场景里，空间回访可能比平面照片更接近人对熟悉环境的真实感受，这类能力也更符合移动端随时采集、随时调取的使用方式。
 
 ### 2. 宏观尺度 (The Macro Scale)
 
-> **"一座城市的数字方舟，对抗文明的断层。"**
-
 - **众包档案馆 (Crowd-Sourced Archive)**：
-  - 汇聚用户扫描数据，为即将消失的街区、店铺和建筑留下一份可进入、可浏览的三维档案。
+  - 如果能持续汇聚用户扫描数据，就有机会把正在消失的街区、店铺和建筑保留下来，形成可进入、可浏览、可检索的三维档案。
 - **集体记忆 (Collective Memory)**：
-  - 让后人不是阅读历史，而是亲自“走进”历史。
+  - 这样留下来的内容，不只是文字和图片，而是后续可以真正走进去看、并支持语义检索的空间材料。
 
 ### 3. 时间尺度 (The Temporal Scale)
 
-> **"空间计算时代的‘数字胶片’。"**
-
 - **数字底片 (The Digital Negative)**：
-  - 2D 视频的分辨率会过时，空间资产却可以在未来设备上继续被重新渲染。
+  - 2D 视频的展示方式很容易过时，但空间资产可以随着终端能力提升继续被重新渲染，在后续设备上仍有复用价值。
 - **面向未来 (Future-Proof)**：
-  - 我们今天保存的不是单纯影像，而是面向下一代 XR 终端的原生空间资产。
+  - 今天保存下来的不只是影像文件，也可能是未来 XR 设备仍然可以继续使用的空间数据。这让项目具备了从手机应用延展到空间计算场景的潜力。
 
-## ⚡ 核心功能与技术哲学
+## 核心能力与创新点
 
 ### 空间 RAG：像搜索文字一样搜索现实
 
-我们不仅重建了“形”，更赋予了“意”。通过集成 **Multimodal LLM (多模态大语言模型)** 的视觉理解能力，BrainDance 将非结构化的 3D 场景转化为**可检索的语义数据库**。
+对 BrainDance 来说，三维重建不是终点。更关键的是把场景里的物体、位置和时间信息整理成可检索的数据，让用户可以像搜索文字一样搜索现实空间。接入 **Multimodal LLM (多模态大语言模型)** 后，用户不需要手动翻看每个场景，而是可以直接用自然语言发起查询。
 
 - **User Query**: "爷爷留下的那块怀表在哪？"
 - **System Action**: 语义理解 -> 空间索引匹配 -> 摄像机自动飞越 -> **显示最相关的空间位置与视角**
 
 ### 时光剥离：在同一空间里回看不同时间
 
-BrainDance 的目标不只是记录一个静态场景，而是逐步形成同一空间在不同时间下的多层记忆切片。对于房间布置变化、成长记录、装修过程、城市更新等场景，这种“在同一坐标系下看变化”的方式，比传统按时间排序的照片更接近真实记忆。
+BrainDance 不只想记录一个静态场景，也想记录同一空间在不同时间下的变化。对于房间布置、成长记录、装修过程和城市更新这类场景，在同一坐标系里对比前后变化，往往比按时间顺序翻照片更直观。
 
-## 🛠️ 技术架构与实现 (Technical Architecture)
+### 技术亮点
 
-本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建的端云协同流程。
+- **移动端轻采集，云端重计算**：用户在手机端完成视频或图片采集，计算密集型重建任务放在 GPU Worker 执行，更符合移动应用的性能边界。
+- **从 3D 重建走向 3D 检索**：项目不只生成三维模型，还把场景理解、对象标注和向量检索整合进链路，形成可查询的空间记忆系统。
+- **端云协同的完整闭环**：从素材上传、任务调度、状态回传，到模型浏览和语义搜索，当前仓库已经覆盖完整的软件链路，而不是单点算法演示。
+- **支持多种重建流水线**：除了常规 `video_3dgs`，还接入了 `single_image_sam3d`、`single_image_sharp`、`da3_sugar`、`da3_2dgs`、`sparse2dgs` 等任务类型，便于根据不同输入场景切换方案。
 
-系统当前主要由四部分组成，通过 **Supabase** 解耦：
+## 技术架构与实现 (Technical Architecture)
+
+本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建，再到多端检索与浏览的端云协同流程。
+
+系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
 1. **Client (Flutter)**  
-   负责素材采集、上传、任务创建、状态查看与模型浏览。客户端直接连接 Supabase Storage / DB，并通过 Realtime 获取任务进度。
+   负责素材采集、上传、任务创建、状态查看与模型浏览。客户端直接连接 Supabase Storage / DB，并通过 Realtime 获取任务进度，是整条用户链路的交互入口。
 
 2. **Backend as a Service (Supabase)**  
    提供 PostgreSQL、Storage、Auth、Realtime 与 Edge Functions：
@@ -119,10 +118,10 @@ BrainDance 的目标不只是记录一个静态场景，而是逐步形成同一
    - **RLS**：基于数据库策略控制用户资产访问权限。
 
 3. **Edge Functions (Deno)**  
-   当前仓库已包含 `supabase/functions/search-models`，用于承载语义搜索接口，负责 Embedding 调用、时间解析与向量检索。
+   当前仓库已包含 `supabase/functions/search-models`，用于承载语义搜索接口，负责 Embedding 调用、时间解析与向量检索，是“搜索现实空间”这条链路的接口层。
 
 4. **AI Worker (Python)**  
-   部署在 Linux / WSL GPU 节点，监听 `processing_tasks`，根据 `task_type` 执行不同流水线，上传结果并回写日志、评分、标签和资产信息。
+   部署在 Linux / WSL GPU 节点，监听 `processing_tasks`，根据 `task_type` 执行不同流水线，上传结果并回写日志、评分、标签和资产信息，承担项目主要的 AI 和 3D 重建计算。
 
 ### 当前已接入的主要任务类型
 
@@ -135,9 +134,9 @@ BrainDance 的目标不只是记录一个静态场景，而是逐步形成同一
 - `da3_2dgs` / `da3+2dgs`
 - `sparse2dgs`
 
-## 📂 目录结构 (Directory Structure)
+## 系统组成 (Project Structure)
 
-本项目遵循 **Monorepo** 策略，所有服务托管于同一仓库，按模块拆分：
+本项目采用 **Monorepo** 结构，把移动端、云服务、AI 引擎和可视化工具放在同一仓库中，方便统一开发、联调和演示：
 
 ```text
 BrainDance/
@@ -173,18 +172,26 @@ BrainDance/
 └── README.md
 ```
 
-> **说明**
-> - `app/`、`dashboard/`、`supabase/functions/` 均已纳入本仓库
-> - 根 README 只保留项目总览与最短启动路径，模块细节请看各子目录 README
+这套结构对应的是一条完整的软件链路，而不是单一算法仓库：`app/` 负责采集与交互，`supabase/` 负责存储和任务流转，`ai_engine/` 负责重建与理解，`dashboard/` 和 `3dgs_viewer/` 负责观测、调试和展示。
 
-## 🚀 快速开始 (Quick Start)
+## 快速开始 (Quick Start)
 
 ### 环境要求 (Prerequisites)
 
-- **AI Engine**: NVIDIA GPU, Python 3.10+, CUDA 11.8+/12.x
+- **AI Engine**: NVIDIA GPU，CUDA 12.8，Python 3.10+
+- **Hardware**: 具体显卡、CPU 与内存要求见下方“测试环境”
 - **Infrastructure**: Docker, Supabase CLI
 - **Client**: Flutter SDK, Android Studio / Xcode
 - **Dashboard**: Node.js 18+
+
+### 最短启动路径
+
+如果只想快速跑通主链路，按下面的顺序启动即可：
+
+1. 在 `supabase/` 中运行本地服务。
+2. 在 `ai_engine/3dgs/` 中启动 Worker。
+3. 在 `dashboard/` 中启动状态看板。
+4. 在 `app/` 中启动移动端应用并创建任务。
 
 ### 测试环境 (Testing Environment)
 
@@ -206,9 +213,9 @@ BrainDance/
 - **内存**: 64GB RAM
 - **显卡**: NVIDIA RTX 5070 12GB
 
-### 部署步骤 (Deployment)
+### 启动步骤 (Runbook)
 
-#### 0. 获取完整代码（子模块 + LFS）
+#### 0. 获取完整代码（含子模块与 LFS）
 
 ```bash
 git lfs install
@@ -287,9 +294,18 @@ flutter run
 - Recall 资产页
 - 基于 WebView 的移动端 WebGL 模型查看
 
-## 🗂️ 数据流与存储约定
+如需单独验证搜索链路，可在本地启动 `search-models` 函数：
 
-Storage 默认以 `braindance-assets` bucket 为中心，当前常见路径为：
+```bash
+cd supabase/functions/search-models
+supabase functions serve search-models --no-verify-jwt --env-file .env.local
+```
+
+搜索接口的测试方法见 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+
+## 数据流与存储约定
+
+Storage 目前以 `braindance-assets` bucket 为中心，常见路径约定如下：
 
 ```text
 {user_id}/{scene_id}/raw/video.mp4
@@ -309,13 +325,9 @@ Storage 默认以 `braindance-assets` bucket 为中心，当前常见路径为�
 - `model_assets`：模型路径、描述、标签、对象与 Embedding
 - `memory_poses`：帧级空间锚点与向量
 
-## 🔎 语义搜索 (Semantic Search)
+## 语义搜索 (Semantic Search)
 
-当前仓库已包含 Edge Function：
-
-- `supabase/functions/search-models`
-
-其职责是：
+当前仓库已包含 `supabase/functions/search-models`，用于承载自然语言搜索接口。它主要负责：
 
 1. 解析自然语言中的检索目标与时间条件。
 2. 调用 Embedding 接口生成向量。
@@ -328,15 +340,30 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-## 📚 文档导航 (Documentation)
+## 文档导航 (Documentation)
 
-- [`docs/01-入门指南/快速开始.md`](./docs/01-入门指南/快速开始.md)
-- [`docs/01-入门指南/本地部署.md`](./docs/01-入门指南/本地部署.md)
-- [`supabase/README.md`](./supabase/README.md)
-- [`ai_engine/3dgs/README.md`](./ai_engine/3dgs/README.md)
-- [`docs/开发文档/设计及创新性分析报告.md`](./docs/开发文档/设计及创新性分析报告.md)
+如果你是第一次接触这个项目，建议按下面的顺序阅读：
 
-## 📜 版权与开源协议 (License & Copyright)
+- 入门与部署：[docs/01-入门指南/快速开始.md](./docs/01-入门指南/快速开始.md)、[docs/01-入门指南/本地部署.md](./docs/01-入门指南/本地部署.md)
+- 后端与基础设施：[supabase/README.md](./supabase/README.md)
+- AI 引擎与重建流水线：[ai_engine/3dgs/README.md](./ai_engine/3dgs/README.md)
+- 第三方依赖与引用：[ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md](./ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md)
+- 项目设计文档：[docs/开发文档/设计及创新性分析报告.md](./docs/开发文档/设计及创新性分析报告.md)
+
+## 参考与致谢 (Acknowledgements)
+
+BrainDance 的三维重建与语义理解能力建立在多个优秀开源项目和研究工作的基础上。这里保留项目级简版致谢，详细论文引用、许可证与上游说明见 [`ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md`](./ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md)。
+
+- [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) - 模块化 NeRF / 3DGS 框架
+- [2D Gaussian Splatting](https://github.com/hbb1/2d-gaussian-splatting) - 2DGS 表达与几何重建
+- [Sparse2DGS](https://github.com/Wuuu3511/Sparse2DGS) - 稀疏视角下的 2DGS 重建
+- [SuGaR](https://github.com/Anttwo/SuGaR) - 面向网格提取与精修的 Gaussian 表达
+- [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) - 深度估计与视图空间恢复
+- [SHARP](https://github.com/apple/ml-sharp) - 单图快速视图合成与 Gaussian 生成
+- [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects) - 单图 / 少图 3D 物体生成
+- [Supabase](https://github.com/supabase/supabase) - Auth、Storage、Realtime 与 Edge Functions 基础设施
+
+## 版权与开源协议 (License & Copyright)
 
 **BrainDance (流光·记)** 的所有核心工程架构与业务代码的知识产权均归属原作者及项目贡献者所有。
 
