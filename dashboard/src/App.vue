@@ -76,7 +76,7 @@ const autoRefresh = ref(true)
 const refreshSeconds = ref(60)
 const taskTrendRange = ref<'24h' | '7d' | '30d' | 'all'>('all')
 const isDarkTheme = ref(true)
-const accentColor = ref('#ef6c2f')
+const accentColor = ref('#71839a')
 
 const THEME_STORAGE_KEY = 'dashboard-theme-dark'
 const ACCENT_STORAGE_KEY = 'dashboard-theme-accent'
@@ -267,14 +267,14 @@ const hexToRgba = (hex: string, alpha: number) => {
 }
 
 const chartTheme = computed(() => ({
-  textStrong: isDarkTheme.value ? '#f5ede2' : '#35261c',
-  textMuted: isDarkTheme.value ? '#b59f88' : '#7e6958',
-  axisLine: isDarkTheme.value ? 'rgba(234, 210, 184, 0.22)' : 'rgba(72, 52, 38, 0.18)',
-  splitLine: isDarkTheme.value ? 'rgba(234, 210, 184, 0.12)' : 'rgba(72, 52, 38, 0.1)',
+  textStrong: isDarkTheme.value ? '#eef4fb' : '#243447',
+  textMuted: isDarkTheme.value ? '#9eb0c5' : '#6a7d92',
+  axisLine: isDarkTheme.value ? 'rgba(190, 206, 224, 0.24)' : 'rgba(110, 130, 152, 0.2)',
+  splitLine: isDarkTheme.value ? 'rgba(190, 206, 224, 0.1)' : 'rgba(110, 130, 152, 0.1)',
   area: hexToRgba(accentColor.value, isDarkTheme.value ? 0.18 : 0.14),
   accentSoft: hexToRgba(accentColor.value, isDarkTheme.value ? 0.26 : 0.18),
-  paper: isDarkTheme.value ? '#171310' : '#f6efe6',
-  pie: ['#f2a33c', accentColor.value, '#5b8e78', '#cd5b43'],
+  paper: isDarkTheme.value ? '#101722' : '#f4f8fc',
+  pie: ['#8aa0bb', accentColor.value, '#78b39d', '#d27070'],
 }))
 
 const dbRowsChartOption = computed(() => ({
@@ -643,12 +643,6 @@ const activeAlertCount = computed(() =>
   alertRows.value.filter((item) => item.tone === 'warn' || item.tone === 'bad').length,
 )
 
-const alertSummaryTone = computed<MetricTone>(() => {
-  if (activeAlertCount.value >= 3) return 'bad'
-  if (activeAlertCount.value > 0) return 'warn'
-  return 'good'
-})
-
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
   const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? ''
   const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? ''
@@ -972,101 +966,149 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-page">
-    <section class="stage-grid">
-      <aside class="stage-rail stage-rail--tools">
-        <div class="rail-top">
-          <span class="rail-kicker">Control</span>
-          <div class="rail-badge" :class="`tone-${realtimeSeverity}`">
-            <Icon icon="lucide:radio-tower" />
-            <span>{{ realtimeStatusText }}</span>
-          </div>
-        </div>
-
-        <h1 class="rail-title">监控总览</h1>
-
-        <p class="rail-line">先看失败。</p>
-        <p class="rail-line">再看排队。</p>
-
-        <div class="rail-actions">
-          <el-button :loading="refreshing" type="primary" @click="refreshDashboard">
-            <Icon icon="lucide:refresh-cw" />
-            <span>立即刷新</span>
-          </el-button>
-
-          <div class="theme-controls">
-            <div class="theme-pill">
-              <Icon :icon="isDarkTheme ? 'lucide:moon-star' : 'lucide:sun-medium'" />
-              <el-switch v-model="isDarkTheme" inline-prompt active-text="夜航" inactive-text="纸面" />
-            </div>
-            <div class="theme-pill">
-              <Icon icon="lucide:paintbrush" />
-              <el-color-picker
-                v-model="accentColor"
-                :predefine="['#ef6c2f', '#ff9d2f', '#cf4f2f', '#2f8f83', '#315f8c']"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div class="rail-ledger">
-          <div class="ledger-row">
-            <Icon icon="lucide:clock-3" />
+    <section class="shell-grid">
+      <aside class="phone-shell">
+        <div class="phone-shell__glow"></div>
+        <div class="phone-shell__frame">
+          <div class="phone-shell__head">
             <div>
-              <span>最后采样</span>
-              <strong>{{ lastUpdated ?? '还没采样' }}</strong>
+              <p class="eyebrow">BrainDance</p>
+              <h1>Dashboard</h1>
+            </div>
+            <div class="status-dot" :class="`tone-${realtimeSeverity}`">
+              <Icon icon="lucide:radio-tower" />
+              <span>{{ realtimeStatusText }}</span>
             </div>
           </div>
-          <div class="ledger-row">
-            <Icon icon="lucide:refresh-cw" />
-            <div>
-              <span>刷新节奏</span>
-              <strong>{{ refreshModeText }}</strong>
+
+          <div class="phone-hero">
+            <div class="phone-hero__badge">Flutter app style</div>
+            <strong>{{ successRate }}%</strong>
+            <span>任务成功率</span>
+            <p>{{ successHint }}，最近 24 小时完成 {{ timeBasedStats.completed24h }} 条。</p>
+          </div>
+
+          <div class="phone-stats">
+            <article class="phone-stat-card">
+              <span>排队</span>
+              <strong>{{ pendingCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>处理中</span>
+              <strong>{{ processingCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>失败</span>
+              <strong>{{ failedCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>资产</span>
+              <strong>{{ modelAssetCount }}</strong>
+            </article>
+          </div>
+
+          <div class="phone-panel">
+            <div class="phone-panel__title">
+              <span>Live status</span>
+              <strong>{{ taskFreshnessText }}</strong>
+            </div>
+            <div class="phone-list">
+              <div class="phone-list__item">
+                <Icon icon="lucide:clock-3" />
+                <div>
+                  <span>最后采样</span>
+                  <strong>{{ lastUpdated ?? '还没采样' }}</strong>
+                </div>
+              </div>
+              <div class="phone-list__item">
+                <Icon icon="lucide:refresh-cw" />
+                <div>
+                  <span>刷新节奏</span>
+                  <strong>{{ refreshModeText }}</strong>
+                </div>
+              </div>
+              <div class="phone-list__item">
+                <Icon icon="lucide:database" />
+                <div>
+                  <span>Storage</span>
+                  <strong>{{ storageApiReachable ? '可读' : '受限' }}</strong>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="ledger-row">
-            <Icon icon="lucide:bot" />
-            <div>
-              <span>Worker</span>
-              <strong>{{ workerOnline ? '在线' : '离线' }}</strong>
+
+          <div class="bottom-dock">
+            <div class="bottom-dock__item bottom-dock__item--active">
+              <Icon icon="lucide:layout-dashboard" />
+              <span>概览</span>
             </div>
-          </div>
-          <div class="ledger-row">
-            <Icon icon="lucide:database" />
-            <div>
-              <span>Storage 状态</span>
-              <strong>{{ storageApiReachable ? '可读' : '受限' }}</strong>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:activity" />
+              <span>趋势</span>
+            </div>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:database-zap" />
+              <span>资源</span>
+            </div>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:settings-2" />
+              <span>设置</span>
             </div>
           </div>
         </div>
       </aside>
 
-      <section class="stage-desk">
-        <div class="desk-head">
-          <div>
-            <span class="desk-kicker">Overview</span>
-            <h2 class="desk-title">任务总览</h2>
-          </div>
-          <div class="desk-summary" :class="`tone-${successSeverity}`">
-            <span>成功率</span>
-            <strong>{{ successRate }}%</strong>
-            <em>{{ successHint }}</em>
-          </div>
-        </div>
+      <main class="content-stage">
+        <section class="hero-card glass-card">
+          <div class="hero-card__copy">
+            <p class="eyebrow">BrainDance Operations</p>
+            <h2>将 dashboard 调整为更接近 Braindance Flutter app 的体验</h2>
+            <p class="hero-card__text">
+              使用冷灰蓝渐变、圆角大卡片、胶囊导航和柔和发光，让 web 端和移动端在视觉语义上保持一致。
+            </p>
 
-        <div class="desk-ribbon">
-          <span>24h {{ timeBasedStats.tasks24h }} 任务</span>
-          <span>失败 {{ failedCount }}</span>
-          <span>排队 {{ pendingCount }}</span>
-          <span>处理中 {{ processingCount }}</span>
-          <span>Storage 状态 {{ storageStats.length }} 桶</span>
-          <span>Edge {{ edgeHealthyCount }}/{{ edgeFunctionNames.length }}</span>
-        </div>
+            <div class="hero-card__actions">
+              <el-button :loading="refreshing" type="primary" @click="refreshDashboard">
+                <Icon icon="lucide:refresh-cw" />
+                <span>立即刷新</span>
+              </el-button>
 
-        <div class="overview-grid">
+              <div class="theme-pill">
+                <Icon :icon="isDarkTheme ? 'lucide:moon-star' : 'lucide:sun-medium'" />
+                <el-switch v-model="isDarkTheme" inline-prompt active-text="夜间" inactive-text="日间" />
+              </div>
+
+              <div class="theme-pill">
+                <Icon icon="lucide:paintbrush-2" />
+                <el-color-picker
+                  v-model="accentColor"
+                  :predefine="['#71839a', '#5f86c2', '#86a8a1', '#8d9bc4', '#a0afc7']"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="hero-card__summary">
+            <article class="summary-pill" :class="`tone-${successSeverity}`">
+              <span>成功率</span>
+              <strong>{{ successRate }}%</strong>
+            </article>
+            <article class="summary-pill" :class="`tone-${queueSeverity}`">
+              <span>队列</span>
+              <strong>{{ queueCount }}</strong>
+            </article>
+            <article class="summary-pill" :class="`tone-${workerSeverity}`">
+              <span>Worker</span>
+              <strong>{{ workerOnline ? '在线' : '离线' }}</strong>
+            </article>
+          </div>
+        </section>
+
+        <section class="overview-grid">
           <article
             v-for="item in overviewCards"
             :key="item.key"
-            class="overview-card"
+            class="overview-card glass-card"
             :class="`tone-${item.tone}`"
           >
             <div class="overview-card-top">
@@ -1078,341 +1120,264 @@ onUnmounted(() => {
             <div class="overview-value">{{ item.value }}</div>
             <p class="overview-note">{{ item.note }}</p>
           </article>
-        </div>
-      </section>
+        </section>
 
-      <aside class="stage-rail stage-rail--alerts">
-        <div class="alerts-head">
-          <span class="rail-kicker">Alert</span>
-          <span class="alert-count" :class="`tone-${alertSummaryTone}`">{{ activeAlertCount }} 项</span>
-        </div>
+        <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon class="mb-16" />
+        <el-alert v-if="storageError" :title="`Storage: ${storageError}`" type="warning" show-icon class="mb-16" />
+        <el-skeleton v-if="loading" :rows="7" animated />
 
-        <h3 class="alerts-title">异常摘要</h3>
-        <p class="alerts-copy">先抓红色。</p>
-
-        <div class="alerts-list">
-          <article
-            v-for="item in alertRows"
-            :key="item.key"
-            class="alert-item"
-            :class="`tone-${item.tone}`"
-          >
-            <div class="alert-item-top">
-              <div class="icon-chip icon-chip--small">
-                <Icon :icon="item.icon" />
+        <template v-else>
+          <section class="filters-row glass-card">
+            <div class="section-heading-main">
+              <div class="section-icon-shell">
+                <Icon icon="lucide:sliders-horizontal" />
               </div>
               <div>
-                <span class="alert-label">{{ item.label }}</span>
-                <strong class="alert-value">{{ item.value }}</strong>
+                <span class="section-kicker">Filters</span>
+                <h3 class="filters-title">筛选与刷新</h3>
               </div>
             </div>
-            <p class="alert-note">{{ item.note }}</p>
-          </article>
-        </div>
-      </aside>
+
+            <div class="filters-controls">
+              <el-select v-model="selectedStatus" class="ctrl" placeholder="状态过滤">
+                <el-option label="全部状态" value="all" />
+                <el-option label="排队中" value="pending" />
+                <el-option label="处理中" value="processing" />
+                <el-option label="已完成" value="completed" />
+                <el-option label="失败" value="failed" />
+              </el-select>
+
+              <el-select v-model="selectedTaskType" class="ctrl" placeholder="任务类型过滤">
+                <el-option label="全部类型" value="all" />
+                <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
+              </el-select>
+
+              <el-input v-model="searchKeyword" class="ctrl search" clearable placeholder="搜索任务 / 场景 / 用户" />
+
+              <div class="inline-ops">
+                <el-switch v-model="autoRefresh" inline-prompt active-text="自动" inactive-text="手动" />
+                <el-select v-model="refreshSeconds" class="interval" :disabled="!autoRefresh">
+                  <el-option :value="15" label="15s" />
+                  <el-option :value="30" label="30s" />
+                  <el-option :value="60" label="60s" />
+                  <el-option :value="120" label="120s" />
+                </el-select>
+              </div>
+
+              <div class="filter-count">{{ filteredTasks.length }} 条结果</div>
+            </div>
+          </section>
+
+          <section class="panel-grid panel-grid--charts">
+            <el-card shadow="never" class="chart-card glass-card chart-card--wide">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">任务趋势</div>
+                    <div class="header-meta">对齐 app 的柔和蓝灰节奏感。</div>
+                  </div>
+                  <el-radio-group v-model="taskTrendRange" size="small">
+                    <el-radio-button label="24h" value="24h">24h</el-radio-button>
+                    <el-radio-button label="7d" value="7d">7d</el-radio-button>
+                    <el-radio-button label="30d" value="30d">30d</el-radio-button>
+                    <el-radio-button label="all" value="all">全部</el-radio-button>
+                  </el-radio-group>
+                </div>
+              </template>
+              <v-chart class="chart" :option="taskTrendOption" autoresize />
+            </el-card>
+
+            <el-card shadow="never" class="chart-card glass-card chart-card--compact">
+              <template #header>
+                <div>
+                  <div class="card-header">状态占比</div>
+                  <div class="header-meta">快速读出失败与完成比例。</div>
+                </div>
+              </template>
+              <v-chart class="chart pie" :option="statusPieOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--operations">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">任务队列</div>
+                  <div class="header-meta">显示筛选后的前 20 条任务。</div>
+                </div>
+              </template>
+              <el-table :data="taskQueue" stripe height="460" empty-text="没找到任务">
+                <el-table-column label="任务名" min-width="220">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatDisplayName(scope.row) }}</div>
+                    <div class="task-sub">{{ scope.row.task_type || 'video_3dgs' }} / {{ scope.row.scene_id }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="110" align="center">
+                  <template #default="scope">
+                    <el-tag :type="statusMap[scope.row.status]?.type || 'info'">
+                      {{ statusMap[scope.row.status]?.label || scope.row.status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="进度" min-width="140">
+                  <template #default="scope">
+                    <el-progress
+                      :percentage="getProgressByStatus(scope.row.status)"
+                      :status="scope.row.status === 'failed' ? 'exception' : undefined"
+                    />
+                  </template>
+                </el-table-column>
+                <el-table-column label="质量" width="85" align="center">
+                  <template #default="scope">
+                    {{ typeof scope.row.quality_score === 'number' ? scope.row.quality_score : '-' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="更新时间" min-width="165">
+                  <template #default="scope">
+                    {{ formatDateTime(scope.row.updated_at) }}
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">异常摘要</div>
+                  <div class="header-meta">{{ activeAlertCount }} 项需要关注。</div>
+                </div>
+              </template>
+
+              <div class="alerts-list alerts-list--soft">
+                <article
+                  v-for="item in alertRows"
+                  :key="item.key"
+                  class="alert-item"
+                  :class="`tone-${item.tone}`"
+                >
+                  <div class="alert-item-top">
+                    <div class="icon-chip icon-chip--small">
+                      <Icon :icon="item.icon" />
+                    </div>
+                    <div>
+                      <span class="alert-label">{{ item.label }}</span>
+                      <strong class="alert-value">{{ item.value }}</strong>
+                    </div>
+                  </div>
+                  <p class="alert-note">{{ item.note }}</p>
+                </article>
+              </div>
+
+              <el-divider />
+
+              <el-empty v-if="!failedTasks.length" description="暂无失败任务" />
+              <el-timeline v-else>
+                <el-timeline-item
+                  v-for="item in failedTasks"
+                  :key="item.id"
+                  type="danger"
+                  :timestamp="formatDateTime(item.updated_at)"
+                >
+                  <div class="fail-title">{{ formatDisplayName(item) }}</div>
+                  <div class="fail-sub">{{ item.scene_id }} / {{ item.user_id }}</div>
+                  <div class="fail-log">{{ getLatestLogMessage(item.logs) }}</div>
+                </el-timeline-item>
+              </el-timeline>
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--resources">
+            <el-card shadow="never" class="storage-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">Storage 状态</div>
+                  <div class="header-meta">前端扫描的桶与体积估算。</div>
+                </div>
+              </template>
+              <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="桶还读不到">
+                <el-table-column label="Bucket" min-width="180" prop="id" />
+                <el-table-column label="可见性" width="90" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.public ? 'success' : 'info'">{{ scope.row.public ? 'Public' : 'Private' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="对象数" width="95" align="right" prop="objectCount" />
+                <el-table-column label="估算体积" min-width="120" align="right">
+                  <template #default="scope">{{ formatBytes(scope.row.totalBytes) }}</template>
+                </el-table-column>
+                <el-table-column label="最近更新" min-width="170">
+                  <template #default="scope">{{ scope.row.latestUpdatedAt ? formatDateTime(scope.row.latestUpdatedAt) : '-' }}</template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="db-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">数据库概览</div>
+                  <div class="header-meta">短周期活跃度与总量。</div>
+                </div>
+              </template>
+              <div class="db-metrics">
+                <div class="metric-item">
+                  <div class="metric-title">24h 任务</div>
+                  <div class="metric-value">{{ timeBasedStats.tasks24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 失败</div>
+                  <div class="metric-value bad">{{ timeBasedStats.failed24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 完成</div>
+                  <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 活跃</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 资产</div>
+                  <div class="metric-value">{{ timeBasedStats.assets7d }}</div>
+                </div>
+              </div>
+              <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--edge">
+            <el-card shadow="never" class="edge-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">Edge Functions</div>
+                    <div class="header-meta">只测网关可达和延迟。</div>
+                  </div>
+                  <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">重新探测</el-button>
+                </div>
+              </template>
+              <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="290" empty-text="还没配函数名">
+                <el-table-column label="函数名" min-width="150" prop="name" />
+                <el-table-column label="状态" width="120" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.status === 'ok' ? 'success' : scope.row.status === 'missing' ? 'warning' : 'danger'">
+                      {{ scope.row.status === 'ok' ? '可达' : scope.row.status === 'missing' ? '未部署' : '异常' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="HTTP" width="90" align="center">
+                  <template #default="scope">{{ scope.row.httpStatus ?? '-' }}</template>
+                </el-table-column>
+                <el-table-column label="延迟(ms)" width="100" align="right">
+                  <template #default="scope">{{ scope.row.latencyMs ?? '-' }}</template>
+                </el-table-column>
+                <el-table-column label="最近检查" min-width="160" prop="lastCheckedAt" />
+                <el-table-column label="说明" min-width="220" prop="message" />
+              </el-table>
+            </el-card>
+          </section>
+        </template>
+      </main>
     </section>
-
-    <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon class="mb-16" />
-    <el-alert v-if="storageError" :title="`Storage: ${storageError}`" type="warning" show-icon class="mb-16" />
-
-    <el-skeleton v-if="loading" :rows="7" animated />
-
-    <template v-else>
-      <section class="filters-row">
-        <div class="filters-copy">
-          <div class="section-icon-shell">
-            <Icon icon="lucide:filter" />
-          </div>
-          <div>
-            <span class="filters-kicker">Filters</span>
-            <h3 class="filters-title">筛选器</h3>
-            <p class="filters-note">先收窄范围。</p>
-          </div>
-        </div>
-
-        <div class="filters-controls">
-          <el-select v-model="selectedStatus" class="ctrl" placeholder="状态过滤">
-            <el-option label="全部状态" value="all" />
-            <el-option label="排队中" value="pending" />
-            <el-option label="处理中" value="processing" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="失败" value="failed" />
-          </el-select>
-
-          <el-select v-model="selectedTaskType" class="ctrl" placeholder="任务类型过滤">
-            <el-option label="全部类型" value="all" />
-            <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
-          </el-select>
-
-          <el-input v-model="searchKeyword" class="ctrl search" clearable placeholder="搜任务或用户" />
-
-          <div class="inline-ops">
-            <el-switch v-model="autoRefresh" inline-prompt active-text="自动" inactive-text="手动" />
-            <el-select v-model="refreshSeconds" class="interval" :disabled="!autoRefresh">
-              <el-option :value="15" label="15s" />
-              <el-option :value="30" label="30s" />
-              <el-option :value="60" label="60s" />
-              <el-option :value="120" label="120s" />
-            </el-select>
-          </div>
-
-          <div class="filter-count">还剩 {{ filteredTasks.length }} 条</div>
-        </div>
-      </section>
-
-      <div class="section-heading">
-        <div class="section-heading-main">
-          <div class="section-icon-shell">
-            <Icon icon="lucide:activity" />
-          </div>
-          <div>
-            <span class="section-kicker">Task Pulse</span>
-            <h2>任务趋势</h2>
-          </div>
-        </div>
-        <div class="section-note">
-          <span>先看吞吐。</span>
-          <span>再看状态。</span>
-        </div>
-      </div>
-
-      <section class="panel-grid">
-        <el-card shadow="never" class="chart-card">
-          <template #header>
-            <div class="card-header-row">
-              <div>
-                <div class="card-header">任务趋势</div>
-                <div class="header-meta">看最近吞吐。</div>
-              </div>
-              <el-radio-group v-model="taskTrendRange" size="small">
-                <el-radio-button label="24h" value="24h">24h</el-radio-button>
-                <el-radio-button label="7d" value="7d">7d</el-radio-button>
-                <el-radio-button label="30d" value="30d">30d</el-radio-button>
-                <el-radio-button label="all" value="all">全部</el-radio-button>
-              </el-radio-group>
-            </div>
-          </template>
-          <v-chart class="chart" :option="taskTrendOption" autoresize />
-        </el-card>
-
-        <el-card shadow="never" class="chart-card chart-card--compact">
-          <template #header>
-            <div>
-              <div class="card-header">状态占比</div>
-              <div class="header-meta">先看失败占比。</div>
-            </div>
-          </template>
-          <v-chart class="chart pie" :option="statusPieOption" autoresize />
-        </el-card>
-      </section>
-
-      <div class="section-heading">
-        <div class="section-heading-main">
-          <div class="section-icon-shell">
-            <Icon icon="lucide:list" />
-          </div>
-          <div>
-            <span class="section-kicker">Operations</span>
-            <h2>任务队列与失败</h2>
-          </div>
-        </div>
-        <div class="section-note">
-          <span>先看队列。</span>
-          <span>再看失败。</span>
-        </div>
-      </div>
-
-      <section class="panel-grid second">
-        <el-card shadow="never" class="table-card">
-          <template #header>
-            <div>
-              <div class="card-header">任务队列（{{ filteredTasks.length }}）</div>
-              <div class="header-meta">只显示前 20 条。</div>
-            </div>
-          </template>
-          <el-table :data="taskQueue" stripe height="460" empty-text="没找到任务">
-            <el-table-column label="任务名" min-width="200">
-              <template #default="scope">
-                <div class="task-name">{{ formatDisplayName(scope.row) }}</div>
-                <div class="task-sub">{{ scope.row.task_type || 'video_3dgs' }} / {{ scope.row.scene_id }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="110" align="center">
-              <template #default="scope">
-                <el-tag :type="statusMap[scope.row.status]?.type || 'info'">
-                  {{ statusMap[scope.row.status]?.label || scope.row.status }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="进度" min-width="140">
-              <template #default="scope">
-                <el-progress
-                  :percentage="getProgressByStatus(scope.row.status)"
-                  :status="scope.row.status === 'failed' ? 'exception' : undefined"
-                />
-              </template>
-            </el-table-column>
-            <el-table-column label="质量" width="85" align="center">
-              <template #default="scope">
-                {{ typeof scope.row.quality_score === 'number' ? scope.row.quality_score : '-' }}
-              </template>
-            </el-table-column>
-            <el-table-column label="更新时间" min-width="165">
-              <template #default="scope">
-                {{ formatDateTime(scope.row.updated_at) }}
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-
-        <el-card shadow="never" class="fail-card">
-          <template #header>
-            <div>
-              <div class="card-header">失败任务</div>
-              <div class="header-meta">最后一条日志。</div>
-            </div>
-          </template>
-          <el-empty v-if="!failedTasks.length" description="暂无失败任务" />
-          <el-timeline v-else>
-            <el-timeline-item
-              v-for="item in failedTasks"
-              :key="item.id"
-              type="danger"
-              :timestamp="formatDateTime(item.updated_at)"
-            >
-              <div class="fail-title">{{ formatDisplayName(item) }}</div>
-              <div class="fail-sub">{{ item.scene_id }} / {{ item.user_id }}</div>
-              <div class="fail-log">{{ getLatestLogMessage(item.logs) }}</div>
-            </el-timeline-item>
-          </el-timeline>
-        </el-card>
-      </section>
-
-      <div class="section-heading">
-        <div class="section-heading-main">
-          <div class="section-icon-shell">
-            <Icon icon="lucide:database" />
-          </div>
-          <div>
-            <span class="section-kicker">Resources</span>
-            <h2>资源状态</h2>
-          </div>
-        </div>
-        <div class="section-note">
-          <span>先看存储。</span>
-          <span>再看表数据。</span>
-        </div>
-      </div>
-
-      <section class="panel-grid third">
-        <el-card shadow="never" class="storage-card">
-          <template #header>
-            <div>
-              <div class="card-header">Storage 状态</div>
-              <div class="header-meta">前端扫描结果。</div>
-            </div>
-          </template>
-          <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="桶还读不到">
-            <el-table-column label="Bucket" min-width="180" prop="id" />
-            <el-table-column label="可见性" width="90" align="center">
-              <template #default="scope">
-                <el-tag :type="scope.row.public ? 'success' : 'info'">{{ scope.row.public ? 'Public' : 'Private' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="对象数" width="95" align="right" prop="objectCount" />
-            <el-table-column label="估算体积" min-width="120" align="right">
-              <template #default="scope">{{ formatBytes(scope.row.totalBytes) }}</template>
-            </el-table-column>
-            <el-table-column label="最近更新" min-width="170">
-              <template #default="scope">{{ scope.row.latestUpdatedAt ? formatDateTime(scope.row.latestUpdatedAt) : '-' }}</template>
-            </el-table-column>
-          </el-table>
-          <div class="hint-stack">
-            <p class="hint">前端最多扫 2000 条。</p>
-            <p class="hint">只看大势。</p>
-          </div>
-        </el-card>
-
-        <el-card shadow="never" class="db-card">
-          <template #header>
-            <div>
-              <div class="card-header">数据库概览</div>
-              <div class="header-meta">只看短周期数据。</div>
-            </div>
-          </template>
-          <div class="db-metrics">
-            <div class="metric-item">
-              <div class="metric-title">24h 任务</div>
-              <div class="metric-value">{{ timeBasedStats.tasks24h }}</div>
-            </div>
-            <div class="metric-item">
-              <div class="metric-title">24h 失败</div>
-              <div class="metric-value bad">{{ timeBasedStats.failed24h }}</div>
-            </div>
-            <div class="metric-item">
-              <div class="metric-title">24h 完成</div>
-              <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
-            </div>
-            <div class="metric-item">
-              <div class="metric-title">7d 活跃</div>
-              <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
-            </div>
-            <div class="metric-item">
-              <div class="metric-title">7d 资产</div>
-              <div class="metric-value">{{ timeBasedStats.assets7d }}</div>
-            </div>
-          </div>
-          <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
-        </el-card>
-      </section>
-
-      <div class="section-heading">
-        <div class="section-heading-main">
-          <div class="section-icon-shell">
-            <Icon icon="lucide:plug" />
-          </div>
-          <div>
-            <span class="section-kicker">Edge Reachability</span>
-            <h2>Edge 状态</h2>
-          </div>
-        </div>
-        <div class="section-note">
-          <span>先看可达。</span>
-          <span>再看延迟。</span>
-        </div>
-      </div>
-
-      <section class="panel-grid fourth">
-        <el-card shadow="never" class="edge-card">
-          <template #header>
-            <div class="card-header-row">
-              <div>
-                <div class="card-header">Edge Functions</div>
-                <div class="header-meta">只测网关可达。</div>
-              </div>
-              <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">重新探测</el-button>
-            </div>
-          </template>
-          <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="290" empty-text="还没配函数名">
-            <el-table-column label="函数名" min-width="150" prop="name" />
-            <el-table-column label="状态" width="120" align="center">
-              <template #default="scope">
-                <el-tag :type="scope.row.status === 'ok' ? 'success' : scope.row.status === 'missing' ? 'warning' : 'danger'">
-                  {{ scope.row.status === 'ok' ? '可达' : scope.row.status === 'missing' ? '未部署' : '异常' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="HTTP" width="90" align="center">
-              <template #default="scope">{{ scope.row.httpStatus ?? '-' }}</template>
-            </el-table-column>
-            <el-table-column label="延迟(ms)" width="100" align="right">
-              <template #default="scope">{{ scope.row.latencyMs ?? '-' }}</template>
-            </el-table-column>
-            <el-table-column label="最近检查" min-width="160" prop="lastCheckedAt" />
-            <el-table-column label="说明" min-width="220" prop="message" />
-          </el-table>
-        </el-card>
-      </section>
-    </template>
   </div>
 </template>
