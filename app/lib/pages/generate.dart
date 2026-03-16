@@ -1,4 +1,5 @@
-﻿import 'package:braindance/extra_func/dir_and_file.dart';
+﻿import 'dart:async';
+import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -54,17 +55,124 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
         '${_rdg.nextInt(1000000).toString().padLeft(6, '0')}';
   }
 
+  /// 弹出 ActionSheet 让用户选择图片任务类型，返回 task_type 字符串，取消返回 null。
+  Future<String?> _showImageTaskTypeSheet() {
+    final completer = Completer<String?>();
+    TDActionSheet(
+      context,
+      items: [
+        TDActionSheetItem(label: '物体'),
+        TDActionSheetItem(label: '场景'),
+      ],
+      cancelText: textLocalize("gen_cancel"),
+      onSelected: (item, index) {
+        if (index == 0) {
+          completer.complete('single_image_sam3d');
+        } else {
+          completer.complete('single_image_sharp');
+        }
+      },
+      onCancel: () {
+        if (!completer.isCompleted) completer.complete(null);
+      },
+      onClose: () {
+        if (!completer.isCompleted) completer.complete(null);
+      },
+    ).show();
+    return completer.future;
+  }
+
   Future<void> _submit() async {
     if (_tabController.index == 0) {
-      // 图生实现流程说明：
-      // 图片数量限制为 1 (已在 maxImageCount 中设置为 1)
-      // 命名类型用 sharp，提交文件改为图片
-      // 注意 API_Doc 说明，具体步骤：
-      // 1. 验证图片：确保 GenConfig.uploadedImages 非空。
-      // 2. 生成 ID: final sceneId = _generateSceneId();
-      // 3. 上传图片: 将上传至 Storage 路径: '{user.id}/{sceneId}/raw/image.png'
-      // 4. 写入任务: 向 processing_tasks 表记录一条新数据，设置 'task_type': 'single_image_sharp'
-      TDToast.showText('图生功能尚未实装，详见代码注释', context: context);
+      if (GenConfig.uploadedImages.isEmpty) {
+        if (mounted) TDToast.showText('请先选择图片', context: context);
+        return;
+      }
+
+      // 弹窗让用户选择拍摄内容类型
+      final taskType = await _showImageTaskTypeSheet();
+      if (taskType == null) return; // 用户取消
+
+      final client = Supabase.instance.client;
+      var user = client.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          TDToast.showText('未登录，即将跳转登录页面...', context: context);
+          await Navigator.pushNamed(context, '/login');
+        }
+        user = client.auth.currentUser;
+        if (user == null) {
+          if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+          return;
+        } else {
+          if (mounted) TDToast.showText('登录成功，开始上传', context: context);
+        }
+      }
+
+      setState(() {
+        _isUploading = true;
+      });
+
+      try {
+        final sceneId = _generateSceneId();
+
+        // 上传图片
+        final imageStoragePath = '${user.id}/$sceneId/raw/image.png';
+        final imagePath = GenConfig.uploadedImages[0].assetPath!;
+        final file = File(imagePath);
+        final fileSize = await file.length();
+        final url =
+            '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$imageStoragePath';
+        final dio = Dio();
+
+        await dio.post(
+          url,
+          data: file.openRead(),
+          options: Options(
+            headers: {
+              'Authorization':
+                  'Bearer ${client.auth.currentSession?.accessToken}',
+              'apikey': SupabaseConfig.anonKey,
+              'Content-Type': 'image/png',
+              'Content-Length': fileSize.toString(),
+            },
+          ),
+          onSendProgress: (count, total) {
+            if (mounted) {
+              setState(() {
+                _uploadProgress = count / fileSize;
+              });
+            }
+          },
+        );
+
+        // 创建任务
+        await client.from("processing_tasks").insert({
+          'scene_id': sceneId,
+          'user_id': user.id,
+          'status': 'pending',
+          'task_type': taskType,
+        });
+
+        if (mounted) {
+          TDToast.showText('提交成功，任务已创建', context: context);
+          ref.read(pageIndexProvider.notifier).state = 0;
+          final nav = Navigator.of(context);
+          GenConfig.uploadedImages.clear();
+          nav.pushNamed('/tasks');
+        }
+      } catch (e) {
+        if (mounted) {
+          print(e);
+          TDToast.showText('提交失败: $e', context: context);
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isUploading = false;
+          });
+        }
+      }
     } else if (_tabController.index == 1) {
       // 文本生成实现流程说明：
       // 此处预留对接外部图文生成模型的接口。用户通过 _textEditingController 输入文本后，
