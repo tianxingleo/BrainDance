@@ -86,6 +86,8 @@ enum Language {
       "task_failed": "个任务失败",
       "task_notification_completed": "个记忆任务已完成，点击查看",
       "task_notification_failed": "个记忆任务处理失败，点击查看",
+      "logs_collapse": "收起日志",
+      "logs_expand": "展开日志",
     },
   ),
   en(
@@ -183,6 +185,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "task_failed": "task(s) failed",
       "task_notification_completed": "memory task(s) completed, tap to view",
       "task_notification_failed": "memory task(s) failed, tap to view",
+      "logs_collapse": "Collapse logs",
+      "logs_expand": "Expand logs",
     },
   );
 
