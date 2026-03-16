@@ -60,6 +60,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final completer = Completer<String?>();
     TDActionSheet(
       context,
+      description: '拍摄的内容为……（用于优化生成效果）',
       items: [
         TDActionSheetItem(label: '物体'),
         TDActionSheetItem(label: '场景'),
