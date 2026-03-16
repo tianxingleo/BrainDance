@@ -9,14 +9,21 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:braindance/configs/gen_config.dart';
 import '../extra_func/dynamic_background.dart';
 
-class GeneratePage extends StatefulWidget {
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:braindance/main.dart' show pageIndexProvider;
+import 'package:dio/dio.dart';
+import 'dart:math';
+import '../configs/supabase_config.dart';
+
+class GeneratePage extends ConsumerStatefulWidget {
   const GeneratePage({super.key});
 
   @override
-  State<GeneratePage> createState() => _GeneratePageState();
+  ConsumerState<GeneratePage> createState() => _GeneratePageState();
 }
 
-class _GeneratePageState extends State<GeneratePage>
+class _GeneratePageState extends ConsumerState<GeneratePage>
     with TickerProviderStateMixin {
   late final TabController _tabController;
   late final ScrollController _scrollController;
@@ -28,9 +35,130 @@ class _GeneratePageState extends State<GeneratePage>
     fontSize: 16,
     fontFamily: AppConfig.fontFamily,
   );
-  static const int maxImageCount = 3;
-  static const int sizeLimit = 4096; //鏂囦欢澶у皬闄愬埗(kb)
-  static bool firstCheck = false; //妫€娴嬬敤鎴锋槸鍚︿笉鏄涓€娆℃墦寮€璇ョ晫闈?
+  static const int maxImageCount = 1;
+  static const int sizeLimit = 40960; //限制大小(kb)
+  static bool firstCheck = false;
+
+  bool _isUploading = false;
+  double _uploadProgress = 0.0;
+
+  static final Random _rdg = Random();
+
+  static String _generateSceneId() {
+    DateTime time = DateTime.now();
+    return 'scene_'
+        '${time.year.toString().padLeft(4, '0')}'
+        '${time.month.toString().padLeft(2, '0')}'
+        '${time.day.toString().padLeft(2, '0')}'
+        '_'
+        '${_rdg.nextInt(1000000).toString().padLeft(6, '0')}';
+  }
+
+  Future<void> _submit() async {
+    if (_tabController.index == 0) {
+      // 图生实现流程说明：
+      // 图片数量限制为 1 (已在 maxImageCount 中设置为 1)
+      // 命名类型用 sharp，提交文件改为图片
+      // 注意 API_Doc 说明，具体步骤：
+      // 1. 验证图片：确保 GenConfig.uploadedImages 非空。
+      // 2. 生成 ID: final sceneId = _generateSceneId();
+      // 3. 上传图片: 将上传至 Storage 路径: '{user.id}/{sceneId}/raw/image.png'
+      // 4. 写入任务: 向 processing_tasks 表记录一条新数据，设置 'task_type': 'single_image_sharp'
+      TDToast.showText('图生功能尚未实装，详见代码注释', context: context);
+    } else if (_tabController.index == 1) {
+      // 文本生成实现流程说明：
+      // 此处预留对接外部图文生成模型的接口。用户通过 _textEditingController 输入文本后，
+      // 会触发后台大模型解析，生成并返回可供创建视频或3DGS的中间产物。
+      TDToast.showText('文生功能尚未实装，详见代码注释', context: context);
+    } else if (_tabController.index == 2) {
+      // 视频生成，按 record 页（video_submit）逻辑实现：
+      if (GenConfig.uploadedVideos.isEmpty) {
+        if (mounted) TDToast.showText('请先选择视频', context: context);
+        return;
+      }
+
+      final client = Supabase.instance.client;
+      var user = client.auth.currentUser;
+      if (user == null) {
+        if (mounted) {
+          TDToast.showText('未登录，即将跳转登录页面...', context: context);
+          await Navigator.pushNamed(context, '/login');
+        }
+        user = client.auth.currentUser;
+        if (user == null) {
+          if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+          return;
+        } else {
+          if (mounted) TDToast.showText('登录成功，开始上传', context: context);
+        }
+      }
+
+      setState(() {
+        _isUploading = true;
+      });
+
+      try {
+        final sceneId = _generateSceneId();
+
+        // 上传视频
+        final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
+        final videoPath = GenConfig.uploadedVideos[0].assetPath!;
+        final file = File(videoPath);
+        final url =
+            '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
+        final dio = Dio();
+
+        await dio.post(
+          url,
+          data: file.openRead(),
+          options: Options(
+            headers: {
+              'Authorization':
+                  'Bearer ${client.auth.currentSession?.accessToken}',
+              'apikey': SupabaseConfig.anonKey,
+              'Content-Type': 'video/mp4',
+            },
+          ),
+          onSendProgress: (count, total) {
+            if (mounted) {
+              setState(() {
+                _uploadProgress = count / total;
+              });
+            }
+          },
+        );
+
+        // 创建任务 (跟 video_submit 相同)
+        await client.from("processing_tasks").insert({
+          'scene_id': sceneId,
+          'user_id': user.id,
+          'status': 'pending',
+          'task_params': {'mapper_type': 'da3'},
+        });
+
+        if (mounted) {
+          TDToast.showText('提交成功，任务已创建', context: context);
+          ref.read(pageIndexProvider.notifier).state = 0;
+          final nav = Navigator.of(context);
+          // 跳转到第一页的任务列表，清空当前页面缓存
+          GenConfig.uploadedVideos.clear();
+          nav.pushNamed('/tasks');
+        }
+      } catch (e) {
+        if (mounted) {
+          print(e);
+          TDToast.showText('提交失败: $e', context: context);
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isUploading = false;
+          });
+        }
+      }
+    }
+  }
+
   void loadCache() async {
     //Image
     final List<String> paths = await GenConfig.loadImagePathsFile();
@@ -290,8 +418,12 @@ class _GeneratePageState extends State<GeneratePage>
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    color: TDTheme.of(
+                      context,
+                    ).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(
+                      TDTheme.of(context).radiusExtraLarge,
+                    ),
                     border: Border.all(
                       color: TDTheme.of(context).whiteColor1,
                       width: 1,
@@ -301,7 +433,7 @@ class _GeneratePageState extends State<GeneratePage>
                         color: Colors.black.withValues(alpha: 0.05),
                         blurRadius: 20,
                         spreadRadius: 5,
-                      )
+                      ),
                     ],
                   ),
                   child: myTDUpload,
@@ -332,8 +464,12 @@ class _GeneratePageState extends State<GeneratePage>
                 const SizedBox(height: 24),
                 Container(
                   decoration: BoxDecoration(
-                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    color: TDTheme.of(
+                      context,
+                    ).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(
+                      TDTheme.of(context).radiusExtraLarge,
+                    ),
                     border: Border.all(
                       color: TDTheme.of(context).whiteColor1,
                       width: 1,
@@ -343,7 +479,7 @@ class _GeneratePageState extends State<GeneratePage>
                         color: Colors.black.withValues(alpha: 0.05),
                         blurRadius: 20,
                         spreadRadius: 5,
-                      )
+                      ),
                     ],
                   ),
                   child: TDTextarea(
@@ -356,7 +492,9 @@ class _GeneratePageState extends State<GeneratePage>
                     },
                     decoration: BoxDecoration(
                       color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                      borderRadius: BorderRadius.circular(
+                        TDTheme.of(context).radiusExtraLarge,
+                      ),
                       border: Border.all(color: Colors.transparent),
                     ),
                     textStyle: TextStyle(
@@ -423,8 +561,12 @@ class _GeneratePageState extends State<GeneratePage>
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
+                    color: TDTheme.of(
+                      context,
+                    ).whiteColor1.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(
+                      TDTheme.of(context).radiusExtraLarge,
+                    ),
                     border: Border.all(
                       color: TDTheme.of(context).whiteColor1,
                       width: 1,
@@ -434,7 +576,7 @@ class _GeneratePageState extends State<GeneratePage>
                         color: Colors.black.withValues(alpha: 0.05),
                         blurRadius: 20,
                         spreadRadius: 5,
-                      )
+                      ),
                     ],
                   ),
                   child: myTDUpload,
@@ -446,7 +588,7 @@ class _GeneratePageState extends State<GeneratePage>
         );
         break;
     }
-    
+
     if (currentTabContent != null) {
       tabContents.add(
         Expanded(
@@ -480,7 +622,9 @@ class _GeneratePageState extends State<GeneratePage>
           fontWeight: FontWeight.w600,
           textColor: TDTheme.of(context).fontGyColor1,
         ),
-        backgroundColor: TDTheme.of(context).whiteColor1.withValues(alpha: 0.95),
+        backgroundColor: TDTheme.of(
+          context,
+        ).whiteColor1.withValues(alpha: 0.95),
         elevation: 0,
         centerTitle: true,
       ),
@@ -488,11 +632,9 @@ class _GeneratePageState extends State<GeneratePage>
       body: DynamicGradientBackground(
         child: Stack(
           children: [
-            SafeArea(
-              child: Column(children: tabContents),
-            ),
+            SafeArea(child: Column(children: tabContents)),
             Align(
-              alignment: Alignment.bottomCenter,
+              alignment: Alignment(0, 0.7),
               child: Container(
                 padding: const EdgeInsets.only(bottom: 32, top: 24),
                 decoration: BoxDecoration(
@@ -508,13 +650,13 @@ class _GeneratePageState extends State<GeneratePage>
                   ),
                 ),
                 child: TDButton(
-                  onTap: () {
-                    TDToast.showText(textLocalize('tip_unava'), context: context);
-                  },
+                  onTap: _isUploading ? () {} : _submit,
                   style: TDButtonStyle(
                     backgroundColor: AppConfig.primaryColor,
                     textColor: Colors.white,
-                    radius: BorderRadius.circular(TDTheme.of(context).radiusRound),
+                    radius: BorderRadius.circular(
+                      TDTheme.of(context).radiusRound,
+                    ),
                   ),
                   type: TDButtonType.fill,
                   shape: TDButtonShape.round,
@@ -525,6 +667,27 @@ class _GeneratePageState extends State<GeneratePage>
                 ),
               ),
             ),
+            if (_isUploading)
+              Container(
+                color: Colors.black45,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 16),
+                      Text(
+                        '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import '../configs/supabase_config.dart';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
@@ -56,8 +58,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         if (mounted) TDToast.showText('登录已取消或未完成', context: context);
         return;
       } else {
-        if (mounted) TDToast.showText('登录成功，请再次点击提交以开始上传', context: context);
-        return;
+        if (mounted) TDToast.showText('登录成功，开始上传', context: context);
       }
     }
 
@@ -70,23 +71,32 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       // 上传视频
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
-      await client.storage
-          .from('braindance-assets')
-          .upload(
-            videoStoragePath,
-            File(widget.videoPath),
-            fileOptions: const FileOptions(
-              contentType: 'video/mp4',
-              upsert: true,
-            ),
-            /*onSendProgress: (progress, total) {
-              if (mounted) {
-                setState(() {
-                  _uploadProgress = progress / total;
-                });
-              }
-            },*/
-          );
+      final file = File(widget.videoPath);
+      final url =
+          '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
+      final dio = Dio();
+
+      await dio.post(
+        url,
+        data: file.openRead(),
+        options: Options(
+          headers: {
+            'Authorization':
+                'Bearer ${client.auth.currentSession?.accessToken}',
+            'apikey': SupabaseConfig.anonKey,
+            'Content-Type': 'video/mp4',
+          },
+        ),
+        onSendProgress: (count, total) {
+          if (mounted) {
+            print('上传: $count');
+            print('总大小: $total');
+            setState(() {
+              _uploadProgress = count / total;
+            });
+          }
+        },
+      );
 
       // 创建任务
       await client.from("processing_tasks").insert({
@@ -101,7 +111,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         TDToast.showText('提交成功，任务已创建', context: context);
         // 回到 Recall (也就是主页列表) 页面查看生成的模型状态
         ref.read(pageIndexProvider.notifier).state = 0;
-        Navigator.pop(context); // 退出 submitting 页面
+        final nav = Navigator.of(context);
+        nav.popUntil((route) => route.isFirst); // 退出到主页
+        nav.pushNamed('/tasks'); // 自动打开任务列表
       }
     } catch (e) {
       if (mounted) {
@@ -175,7 +187,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                     const CircularProgressIndicator(),
                     const SizedBox(height: 16),
                     Text(
-                      '涓婁紶涓... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                      '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 16,
