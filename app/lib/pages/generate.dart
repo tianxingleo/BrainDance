@@ -42,6 +42,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   bool _isUploading = false;
   double _uploadProgress = 0.0;
+  String? _generatedImageUrl;
+  bool _isGenerating = false;
 
   static final Random _rdg = Random();
 
@@ -81,6 +83,253 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
       },
     ).show();
     return completer.future;
+  }
+
+  /// 显示文生图预览底部弹窗，支持重新生成和确认使用
+  void _showTextImagePreview(String prompt) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (builderContext, setSheetState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              decoration: BoxDecoration(
+                color: TDTheme.of(context).whiteColor1,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+              ),
+              child: Column(
+                children: [
+                  // 顶部标题栏
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TDText(
+                          textLocalize('gen_text_preview_title'),
+                          font: TDTheme.of(context).fontTitleMedium,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(sheetContext),
+                          child: Icon(
+                            Icons.close,
+                            color: TDTheme.of(context).fontGyColor3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  // 图片预览
+                  Expanded(
+                    child: _isGenerating
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(),
+                                const SizedBox(height: 16),
+                                TDText(
+                                  textLocalize('gen_text_generating'),
+                                  textColor:
+                                      TDTheme.of(context).fontGyColor2,
+                                ),
+                              ],
+                            ),
+                          )
+                        : _generatedImageUrl != null
+                            ? Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    _generatedImageUrl!,
+                                    fit: BoxFit.contain,
+                                    loadingBuilder: (context, child,
+                                        loadingProgress) {
+                                      if (loadingProgress == null) {
+                                        return child;
+                                      }
+                                      return const Center(
+                                        child:
+                                            CircularProgressIndicator(),
+                                      );
+                                    },
+                                    errorBuilder:
+                                        (context, error, stackTrace) {
+                                      return Center(
+                                        child: TDText(
+                                          '图片加载失败',
+                                          textColor: TDTheme.of(context)
+                                              .fontGyColor3,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                  ),
+                  // 底部按钮
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                    child: Row(
+                      children: [
+                        // 重新生成按钮
+                        Expanded(
+                          child: TDButton(
+                            onTap: _isGenerating
+                                ? () {}
+                                : () async {
+                                    setSheetState(() {});
+                                    setState(() {
+                                      _isGenerating = true;
+                                    });
+                                    try {
+                                      final response = await Supabase
+                                          .instance.client.functions
+                                          .invoke(
+                                        'text-to-image',
+                                        body: {'prompt': prompt},
+                                      );
+                                      final data = response.data;
+                                      if (data is Map &&
+                                          data['success'] == true &&
+                                          data['image_url'] != null) {
+                                        setState(() {
+                                          _generatedImageUrl =
+                                              data['image_url'] as String;
+                                        });
+                                      } else {
+                                        if (mounted) {
+                                          TDToast.showText(
+                                            '重新生成失败',
+                                            context: context,
+                                          );
+                                        }
+                                      }
+                                    } catch (e) {
+                                      if (mounted) {
+                                        TDToast.showText(
+                                          '重新生成失败: $e',
+                                          context: context,
+                                        );
+                                      }
+                                    } finally {
+                                      setState(() {
+                                        _isGenerating = false;
+                                      });
+                                      setSheetState(() {});
+                                    }
+                                  },
+                            text: textLocalize('gen_text_regenerate'),
+                            theme: TDButtonTheme.light,
+                            size: TDButtonSize.large,
+                            shape: TDButtonShape.round,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // 确认使用按钮
+                        Expanded(
+                          child: TDButton(
+                            onTap: (_isGenerating ||
+                                    _generatedImageUrl == null)
+                                ? () {}
+                                : () async {
+                                    Navigator.pop(sheetContext);
+                                    await _confirmTextImage(prompt);
+                                  },
+                            text: textLocalize('gen_text_confirm'),
+                            style: TDButtonStyle(
+                              backgroundColor: AppConfig.primaryColor,
+                              textColor: Colors.white,
+                              radius: BorderRadius.circular(
+                                TDTheme.of(context).radiusRound,
+                              ),
+                            ),
+                            type: TDButtonType.fill,
+                            theme: TDButtonTheme.primary,
+                            size: TDButtonSize.large,
+                            shape: TDButtonShape.round,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 确认使用文生图片：分类 + 上传 + 创建任务
+  Future<void> _confirmTextImage(String prompt) async {
+    final client = Supabase.instance.client;
+    var user = client.auth.currentUser;
+    if (user == null) {
+      if (mounted) {
+        TDToast.showText('未登录，即将跳转登录页面...', context: context);
+        await Navigator.pushNamed(context, '/login');
+      }
+      user = client.auth.currentUser;
+      if (user == null) {
+        if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+        return;
+      }
+    }
+
+    setState(() {
+      _isUploading = true;
+    });
+
+    try {
+      final response = await client.functions.invoke(
+        'confirm-text-image',
+        body: {
+          'image_url': _generatedImageUrl,
+          'prompt': prompt,
+        },
+      );
+
+      final data = response.data;
+      if (data is Map && data['success'] == true) {
+        if (mounted) {
+          TDToast.showText('提交成功，任务已创建', context: context);
+          ref.read(pageIndexProvider.notifier).state = 0;
+          final nav = Navigator.of(context);
+          _generatedImageUrl = null;
+          _textEditingController.clear();
+          GenConfig.uploadedText = '';
+          nav.pushNamed('/tasks');
+        }
+      } else {
+        final errMsg = (data is Map) ? (data['error'] ?? '提交失败') : '服务器返回异常';
+        throw Exception(errMsg);
+      }
+    } on FunctionException catch (e) {
+      if (mounted) {
+        TDToast.showText('提交失败: ${e.details}', context: context);
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText('提交失败: $e', context: context);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -175,10 +424,53 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
         }
       }
     } else if (_tabController.index == 1) {
-      // 文本生成实现流程说明：
-      // 此处预留对接外部图文生成模型的接口。用户通过 _textEditingController 输入文本后，
-      // 会触发后台大模型解析，生成并返回可供创建视频或3DGS的中间产物。
-      TDToast.showText('文生功能尚未实装，详见代码注释', context: context);
+      // 文本生成流程
+      final prompt = _textEditingController.text.trim();
+      if (prompt.isEmpty) {
+        if (mounted) TDToast.showText('请先输入描述文本', context: context);
+        return;
+      }
+
+      setState(() {
+        _isGenerating = true;
+      });
+
+      try {
+        // 调用 text-to-image edge function
+        final response = await Supabase.instance.client.functions.invoke(
+          'text-to-image',
+          body: {'prompt': prompt},
+        );
+
+        final data = response.data;
+        if (data is Map && data['success'] == true && data['image_url'] != null) {
+          final imageUrl = data['image_url'] as String;
+          setState(() {
+            _generatedImageUrl = imageUrl;
+            _isGenerating = false;
+          });
+          if (mounted) {
+            _showTextImagePreview(prompt);
+          }
+        } else {
+          final errMsg = (data is Map) ? (data['error'] ?? '生成失败') : '服务器返回异常';
+          throw Exception(errMsg);
+        }
+      } on FunctionException catch (e) {
+        if (mounted) {
+          TDToast.showText('生成失败: ${e.details}', context: context);
+        }
+      } catch (e) {
+        if (mounted) {
+          TDToast.showText('生成失败: $e', context: context);
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isGenerating = false;
+          });
+        }
+      }
     } else if (_tabController.index == 2) {
       // 视频生成，按 record 页（video_submit）逻辑实现：
       if (GenConfig.uploadedVideos.isEmpty) {
@@ -761,7 +1053,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                   ),
                 ),
                 child: TDButton(
-                  onTap: _isUploading ? () {} : _submit,
+                  onTap: (_isUploading || _isGenerating) ? () {} : _submit,
                   style: TDButtonStyle(
                     backgroundColor: AppConfig.primaryColor,
                     textColor: Colors.white,
@@ -778,7 +1070,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 ),
               ),
             ),
-            if (_isUploading)
+            if (_isUploading || _isGenerating)
               Container(
                 color: Colors.black45,
                 child: Center(
@@ -788,7 +1080,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                       const CircularProgressIndicator(),
                       const SizedBox(height: 16),
                       Text(
-                        '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                        _isGenerating
+                            ? textLocalize('gen_text_generating')
+                            : '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,

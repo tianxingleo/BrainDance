@@ -86,6 +86,11 @@ enum Language {
       "task_failed": "个任务失败",
       "task_notification_completed": "个记忆任务已完成，点击查看",
       "task_notification_failed": "个记忆任务处理失败，点击查看",
+      // 文生图流程
+      "gen_text_generating": "正在生成图片...",
+      "gen_text_regenerate": "重新生成",
+      "gen_text_confirm": "使用此图片",
+      "gen_text_preview_title": "生成图片预览",
     },
   ),
   en(
@@ -183,6 +188,11 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "task_failed": "task(s) failed",
       "task_notification_completed": "memory task(s) completed, tap to view",
       "task_notification_failed": "memory task(s) failed, tap to view",
+      // Text-to-image flow
+      "gen_text_generating": "Generating image...",
+      "gen_text_regenerate": "Regenerate",
+      "gen_text_confirm": "Use this image",
+      "gen_text_preview_title": "Generated Image Preview",
     },
   );
 
