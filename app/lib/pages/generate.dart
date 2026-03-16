@@ -104,6 +104,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
         final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
         final videoPath = GenConfig.uploadedVideos[0].assetPath!;
         final file = File(videoPath);
+        final fileSize = await file.length();
         final url =
             '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
         final dio = Dio();
@@ -117,12 +118,13 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                   'Bearer ${client.auth.currentSession?.accessToken}',
               'apikey': SupabaseConfig.anonKey,
               'Content-Type': 'video/mp4',
+              'Content-Length': fileSize.toString(),
             },
           ),
           onSendProgress: (count, total) {
             if (mounted) {
               setState(() {
-                _uploadProgress = count / total;
+                _uploadProgress = count / fileSize;
               });
             }
           },

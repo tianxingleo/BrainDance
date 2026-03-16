@@ -72,6 +72,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       // 上传视频
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
       final file = File(widget.videoPath);
+      final fileSize = await file.length();
       final url =
           '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
       final dio = Dio();
@@ -85,14 +86,13 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                 'Bearer ${client.auth.currentSession?.accessToken}',
             'apikey': SupabaseConfig.anonKey,
             'Content-Type': 'video/mp4',
+            'Content-Length': fileSize.toString(),
           },
         ),
         onSendProgress: (count, total) {
           if (mounted) {
-            print('上传: $count');
-            print('总大小: $total');
             setState(() {
-              _uploadProgress = count / total;
+              _uploadProgress = count / fileSize;
             });
           }
         },
