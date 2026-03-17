@@ -72,6 +72,33 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+};
+
+type EmbeddingResponse = {
+  data?: Array<{
+    embedding?: number[];
+  }>;
+};
+
+type AiClient = {
+  chat: {
+    completions: {
+      create: (options: Record<string, unknown>) => Promise<ChatCompletionResponse>;
+    };
+  };
+  embeddings: {
+    create: (options: Record<string, unknown>) => Promise<EmbeddingResponse>;
+  };
+};
+
+type SearchResultRow = Record<string, unknown>;
+
 // ============================================================================
 // 【配置常量】全局配置参数
 // ============================================================================
@@ -282,7 +309,7 @@ function errorResponse(message: string, status = 500): Response {
  * - 这样至少可以进行基本的语义搜索
  */
 async function parseQueryIntent(
-  aiClient: typeof OpenAI.prototype,
+  aiClient: AiClient,
   userQuery: string,
 ): Promise<
   { searchText: string; startTime: string | null; endTime: string | null }
@@ -353,7 +380,7 @@ async function parseQueryIntent(
      * resp.choices[0].message.content 是 LLM 返回的 JSON 字符串
      * 例如: '{"search_text": "红色杯子", "start_time": "2026-01-13..."}'
      */
-    const intentStr = resp.choices[0]?.message?.content;
+    const intentStr = resp.choices?.[0]?.message?.content ?? null;
     const intent = safeJsonParse(intentStr);
 
     /**
@@ -412,7 +439,7 @@ async function parseQueryIntent(
  * // 返回: [0.012, -0.034, 0.056, ..., -0.023] (1536 个浮点数)
  */
 async function getEmbedding(
-  aiClient: typeof OpenAI.prototype,
+  aiClient: AiClient,
   text: string,
 ): Promise<number[] | null> {
   try {
@@ -431,7 +458,7 @@ async function getEmbedding(
     });
 
     // 提取向量
-    const embedding = resp.data[0]?.embedding;
+    const embedding = resp.data?.[0]?.embedding;
 
     // 向量验证
     if (!embedding) {
@@ -488,7 +515,7 @@ async function getEmbedding(
  * - similarity: 相似度分数 (0.0-1.0)
  */
 async function searchModels(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   queryEmbedding: number[],
   matchThreshold: number,
   matchCount: number,
@@ -514,7 +541,7 @@ async function searchModels(
     match_count: matchCount,
     filter_start: filterStart,
     filter_end: filterEnd,
-  });
+  } as never) as { data: unknown; error: { message: string } | null };
 
   // 错误处理
   if (error) {
@@ -523,9 +550,10 @@ async function searchModels(
   }
 
   // 记录结果数量
-  console.log(`[Search] 找到 ${data?.length || 0} 条结果`);
+  const rows = Array.isArray(data) ? data as SearchResultRow[] : [];
+  console.log(`[Search] 找到 ${rows.length} 条结果`);
 
-  return data;
+  return rows;
 }
 
 // ============================================================================
@@ -656,7 +684,7 @@ serve(async (req: Request) => {
      * - chat.completions.create() - 聊天补全 (意图解析)
      * - embeddings.create() - 向量生成 (语义搜索)
      */
-    const aiClient = {
+    const aiClient: AiClient = {
       chat: {
         completions: {
           create: async (options: Record<string, unknown>) => {
@@ -701,7 +729,7 @@ serve(async (req: Request) => {
           return resp.json();
         },
       },
-    } as typeof OpenAI.prototype;
+    };
 
     /**
      * 创建 Supabase 客户端
