@@ -1,4 +1,7 @@
 import os
+import random
+import re
+import socket
 import shutil
 import subprocess
 import time
@@ -9,14 +12,15 @@ from typing import Any, Dict, Tuple
 import numpy as np
 
 from src.core.pipeline_base import BasePipeline
+from src.config import PipelineConfig
 from src.utils.common import format_duration
 
 
 class Sparse2DGSPipeline(BasePipeline):
     """
     【少量图片 -> Sparse2DGS】流水线
-    输入约定：Worker 下载的 raw/images.zip（或单图兜底）
-    流程：解压图片 -> COLMAP 解算 -> Sparse2DGS 训练 -> 返回 point_cloud.ply
+    输入约定：Worker 下载的 raw/images.zip / raw/video.mp4（或单图兜底）
+    流程：解压图片/视频随机抽帧 -> COLMAP 解算 -> Sparse2DGS 训练 -> 返回 point_cloud.ply
     """
 
     def run(self, input_path: str, params: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
@@ -28,17 +32,22 @@ class Sparse2DGSPipeline(BasePipeline):
         if not input_file.exists():
             raise FileNotFoundError(f"输入文件不存在: {input_file}")
 
+        cfg = PipelineConfig()
         sparse2dgs_repo = Path(
             params.get("sparse2dgs_repo_path")
-            or os.getenv("SPARSE2DGS_REPO_PATH", "/ltx-data/Sparse2DGS")
+            or cfg.sparse2dgs_repo_path
         )
-        conda_env = str(params.get("conda_env") or os.getenv("SPARSE2DGS_CONDA_ENV", "Braindance"))
+        conda_env = str(params.get("conda_env") or cfg.sparse2dgs_conda_env)
         iterations = int(params.get("iterations", 7000))
         resolution = int(params.get("resolution", 2))
         depth_ratio = float(params.get("depth_ratio", 1.0))
         lambda_dist = int(float(params.get("lambda_dist", 1000)))
         colmap_matcher = str(params.get("colmap_matcher", "exhaustive_matcher"))
         colmap_mapper = str(params.get("colmap_mapper", "mapper"))
+        video_sample_count = int(params.get("video_sample_count", params.get("sample_image_count", 12)))
+        video_random_seed = int(params.get("video_random_seed", 42))
+        min_video_frame_gap = int(params.get("min_video_frame_gap", 3))
+        max_video_edge = int(params.get("video_max_edge", 0))
 
         if not sparse2dgs_repo.exists():
             raise FileNotFoundError(f"Sparse2DGS 仓库不存在: {sparse2dgs_repo}")
@@ -58,7 +67,14 @@ class Sparse2DGSPipeline(BasePipeline):
         output_scene_dir.mkdir(parents=True, exist_ok=True)
 
         # 1) 准备图像
-        self._prepare_images(input_file, images_dir)
+        input_type = self._prepare_images(
+            input_file=input_file,
+            images_dir=images_dir,
+            video_sample_count=video_sample_count,
+            video_random_seed=video_random_seed,
+            min_video_frame_gap=min_video_frame_gap,
+            max_video_edge=max_video_edge,
+        )
         image_count = self._count_images(images_dir)
         if image_count < 3:
             raise RuntimeError(f"可用图片数量不足（当前 {image_count} 张），至少需要 3 张")
@@ -73,6 +89,10 @@ class Sparse2DGSPipeline(BasePipeline):
         self.log("📦 组装 Sparse2DGS 输入目录...")
         self._prepare_sparse2dgs_scene(images_dir, sparse0_dir, sparse_scene_dir)
         dataset_link = self._ensure_sparse2dgs_dataset_link(sparse2dgs_repo, sparse_scene_dir)
+        self._sync_sparse2dgs_mvs_config(
+            sparse2dgs_repo=sparse2dgs_repo,
+            ckpt_path=self._resolve_sparse2dgs_ckpt_path(sparse2dgs_repo, params),
+        )
 
         # 4) 训练 Sparse2DGS
         self.log(
@@ -107,22 +127,43 @@ class Sparse2DGSPipeline(BasePipeline):
             "image_count": image_count,
             "iterations": iterations,
             "preview_img_path": str(preview) if preview.exists() else "",
-            "input_type": "images_zip",
+            "input_type": input_type,
         }
 
         self.log(f"✅ Sparse2DGS 完成: {final_ply}")
         self.log(f"⏱️ 总耗时: {format_duration(time.time() - start_time)}")
         return str(final_ply), metadata
 
-    def _prepare_images(self, input_file: Path, images_dir: Path):
+    def _prepare_images(
+        self,
+        *,
+        input_file: Path,
+        images_dir: Path,
+        video_sample_count: int,
+        video_random_seed: int,
+        min_video_frame_gap: int,
+        max_video_edge: int,
+    ) -> str:
         if input_file.suffix.lower() == ".zip":
             with zipfile.ZipFile(input_file, "r") as zf:
                 zf.extractall(images_dir)
+            input_type = "images_zip"
+        elif input_file.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}:
+            self._extract_random_frames_from_video(
+                video_path=input_file,
+                images_dir=images_dir,
+                sample_count=video_sample_count,
+                random_seed=video_random_seed,
+                min_frame_gap=min_video_frame_gap,
+                max_edge=max_video_edge,
+            )
+            input_type = "video_random_frames"
         elif input_file.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
             shutil.copy2(str(input_file), str(images_dir / input_file.name))
+            input_type = "single_image"
         else:
             raise RuntimeError(
-                f"不支持的输入类型: {input_file.suffix}，请上传 raw/images.zip 或单图"
+                f"不支持的输入类型: {input_file.suffix}，请上传 raw/images.zip、raw/video.mp4 或单图"
             )
 
         # 展平目录，统一放到 images_dir 根下
@@ -143,12 +184,118 @@ class Sparse2DGSPipeline(BasePipeline):
                     p.rmdir()
                 except OSError:
                     pass
+        return input_type
+
+    def _extract_random_frames_from_video(
+        self,
+        *,
+        video_path: Path,
+        images_dir: Path,
+        sample_count: int,
+        random_seed: int,
+        min_frame_gap: int,
+        max_edge: int,
+    ):
+        import cv2
+
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise RuntimeError(f"无法打开视频: {video_path}")
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        self.log(
+            f"🎞️ 检测到视频输入: total_frames={total_frames}, fps={fps:.3f}, target_samples={sample_count}"
+        )
+
+        if total_frames <= 0:
+            cap.release()
+            raise RuntimeError(f"视频无有效帧: {video_path}")
+
+        candidate_indices = self._sample_video_indices(
+            total_frames=total_frames,
+            sample_count=max(3, sample_count),
+            min_frame_gap=max(0, min_frame_gap),
+            random_seed=random_seed,
+        )
+        self.log(f"🎲 已随机选取 {len(candidate_indices)} 个帧索引")
+
+        saved = 0
+        for frame_idx in candidate_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                self.log(f"⚠️ 跳过无法读取的帧: {frame_idx}", level="WARN")
+                continue
+
+            if max_edge > 0:
+                h, w = frame.shape[:2]
+                long_edge = max(h, w)
+                if long_edge > max_edge:
+                    scale = max_edge / float(long_edge)
+                    new_w = max(1, int(round(w * scale)))
+                    new_h = max(1, int(round(h * scale)))
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+            output_path = images_dir / f"frame_{saved:04d}_src_{frame_idx:06d}.jpg"
+            if not cv2.imwrite(str(output_path), frame):
+                self.log(f"⚠️ 帧写入失败: {frame_idx}", level="WARN")
+                continue
+            saved += 1
+
+        cap.release()
+
+        if saved < 3:
+            raise RuntimeError(f"视频抽帧后有效图片不足（当前 {saved} 张），至少需要 3 张")
+
+        self.log(f"✅ 视频随机抽帧完成: {saved} 张")
+
+    def _sample_video_indices(
+        self,
+        *,
+        total_frames: int,
+        sample_count: int,
+        min_frame_gap: int,
+        random_seed: int,
+    ) -> list[int]:
+        if total_frames <= sample_count:
+            return list(range(total_frames))
+
+        rng = random.Random(random_seed)
+        selected: list[int] = []
+        candidates = list(range(total_frames))
+        rng.shuffle(candidates)
+
+        for idx in candidates:
+            if all(abs(idx - existing) >= min_frame_gap for existing in selected):
+                selected.append(idx)
+                if len(selected) >= sample_count:
+                    break
+
+        if len(selected) < sample_count:
+            remaining = sorted(set(range(total_frames)) - set(selected))
+            rng.shuffle(remaining)
+            for idx in remaining:
+                selected.append(idx)
+                if len(selected) >= sample_count:
+                    break
+
+        return sorted(selected[:sample_count])
 
     def _count_images(self, images_dir: Path) -> int:
         valid_ext = {".jpg", ".jpeg", ".png", ".webp"}
         return sum(1 for p in images_dir.iterdir() if p.is_file() and p.suffix.lower() in valid_ext)
 
-    def _run_command(self, cmd, step_name: str, cwd: Path = None, env: Dict[str, str] = None):
+    def _run_command(
+        self,
+        cmd,
+        step_name: str,
+        cwd: Path = None,
+        env: Dict[str, str] = None,
+        *,
+        stream_all: bool = False,
+        heartbeat_seconds: int = 60,
+    ):
         self.log(f"    -> {step_name}: {' '.join(map(str, cmd))}")
         process = subprocess.Popen(
             cmd,
@@ -157,7 +304,7 @@ class Sparse2DGSPipeline(BasePipeline):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1,
+            bufsize=0,
         )
 
         assert process.stdout is not None
@@ -175,11 +322,35 @@ class Sparse2DGSPipeline(BasePipeline):
             "✅",
             "❌",
         )
-        for line in process.stdout:
-            line = line.strip()
-            if not line:
+        last_output_at = time.monotonic()
+        buffer = ""
+
+        while True:
+            chunk = process.stdout.read(1)
+            if chunk == "" and process.poll() is not None:
+                break
+            if chunk == "":
+                now = time.monotonic()
+                if heartbeat_seconds > 0 and now - last_output_at >= heartbeat_seconds:
+                    self.log(f"    | {step_name} 仍在执行...")
+                    last_output_at = now
+                time.sleep(0.2)
                 continue
-            if any(k in line for k in keywords):
+
+            if chunk in {"\n", "\r"}:
+                line = buffer.strip()
+                buffer = ""
+                if line:
+                    if stream_all or any(k in line for k in keywords):
+                        self.log(f"    | {line}")
+                    last_output_at = time.monotonic()
+                continue
+
+            buffer += chunk
+
+        if buffer.strip():
+            line = buffer.strip()
+            if stream_all or any(k in line for k in keywords):
                 self.log(f"    | {line}")
 
         process.wait()
@@ -313,6 +484,70 @@ class Sparse2DGSPipeline(BasePipeline):
             shutil.copytree(scene_dir, target)
             self.log(f"📁 符号链接失败，已复制场景到: {target}")
         return target
+
+    def _resolve_sparse2dgs_ckpt_path(self, sparse2dgs_repo: Path, params: Dict[str, Any]) -> Path:
+        requested = params.get("sparse2dgs_ckpt_path") or os.environ.get("SPARSE2DGS_CKPT_PATH")
+        candidates = []
+        if requested:
+            candidates.append(Path(str(requested)).expanduser())
+
+        candidates.extend(
+            [
+                sparse2dgs_repo / "model_clmvsnet.ckpt",
+                Path("/ltx-data/Sparse2DGS/model_clmvsnet.ckpt"),
+                Path("/home/ltx/projects/Sparse2DGS/model_clmvsnet.ckpt"),
+            ]
+        )
+
+        seen = set()
+        for candidate in candidates:
+            candidate = candidate.resolve() if candidate.exists() else candidate
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            if candidate.is_file():
+                return candidate
+
+        searched = "\n".join(f"  - {path}" for path in candidates)
+        raise FileNotFoundError(
+            "找不到 Sparse2DGS 所需的 CLMVSNet checkpoint（model_clmvsnet.ckpt）。\n"
+            f"已检查以下路径:\n{searched}"
+        )
+
+    def _sync_sparse2dgs_mvs_config(self, *, sparse2dgs_repo: Path, ckpt_path: Path):
+        config_path = sparse2dgs_repo / "MVS" / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"Sparse2DGS 缺少 MVS 配置文件: {config_path}")
+
+        dataset_path = (sparse2dgs_repo / "dtu_sparse").resolve()
+        ckpt_path = ckpt_path.resolve()
+        content = config_path.read_text(encoding="utf-8")
+
+        updated = content
+        updated, ckpt_replaced = re.subn(
+            r'(^\s*ckpt_path:\s*).*$',
+            rf'\1"{ckpt_path.as_posix()}"',
+            updated,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        updated, dataset_replaced = re.subn(
+            r'(^\s*path:\s*).*$',
+            rf'\1"{dataset_path.as_posix()}"',
+            updated,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+        if ckpt_replaced != 1 or dataset_replaced != 1:
+            raise RuntimeError(f"Sparse2DGS MVS 配置格式异常，无法自动修正: {config_path}")
+
+        if updated != content:
+            config_path.write_text(updated, encoding="utf-8")
+            self.log(f"🛠️ 已校准 Sparse2DGS MVS 配置: ckpt={ckpt_path}, dataset={dataset_path}")
+        else:
+            self.log(f"✅ Sparse2DGS MVS 配置已就绪: ckpt={ckpt_path}")
 
     def _generate_dtu_camera_txts(self, sparse0_dir: Path, images_dir: Path, scene_dir: Path):
         txt_dir = scene_dir / "colmap_txt"
@@ -494,6 +729,12 @@ class Sparse2DGSPipeline(BasePipeline):
         depth_ratio: float,
         lambda_dist: int,
     ):
+        self._ensure_local_diff_surfel_rasterizer(
+            sparse2dgs_repo=sparse2dgs_repo,
+            conda_env=conda_env,
+        )
+        train_port = self._find_free_tcp_port()
+
         cmd = [
             "conda",
             "run",
@@ -517,10 +758,19 @@ class Sparse2DGSPipeline(BasePipeline):
             "-1",
             "--save_iterations",
             str(iterations),
-            "--quiet",
+            "--port",
+            str(train_port),
         ]
 
         env = os.environ.copy()
+        local_python_paths = [
+            str((sparse2dgs_repo / "submodules" / "diff-surfel-rasterization").resolve()),
+            str(sparse2dgs_repo.resolve()),
+        ]
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [*local_python_paths, *([existing_pythonpath] if existing_pythonpath else [])]
+        )
         # 仅使用环境变量控制 GPU，不做硬编码默认值。
         # 优先级：
         # 1) CUDA_VISIBLE_DEVICES（通用）
@@ -529,4 +779,55 @@ class Sparse2DGSPipeline(BasePipeline):
         if sparse2dgs_cuda is not None:
             env["CUDA_VISIBLE_DEVICES"] = sparse2dgs_cuda
 
-        self._run_command(cmd, "Sparse2DGS 训练", cwd=sparse2dgs_repo, env=env)
+        self.log(f"🌐 Sparse2DGS viewer 端口: {train_port}")
+        self._run_command(
+            cmd,
+            "Sparse2DGS 训练",
+            cwd=sparse2dgs_repo,
+            env=env,
+            stream_all=True,
+            heartbeat_seconds=30,
+        )
+
+    def _ensure_local_diff_surfel_rasterizer(self, *, sparse2dgs_repo: Path, conda_env: str):
+        rasterizer_root = sparse2dgs_repo / "submodules" / "diff-surfel-rasterization"
+        setup_py = rasterizer_root / "setup.py"
+        package_dir = rasterizer_root / "diff_surfel_rasterization"
+        local_ext = next(package_dir.glob("_C*.so"), None)
+        if local_ext is not None:
+            self.log(f"✅ 使用本地 diff_surfel_rasterization 扩展: {local_ext}")
+            return
+
+        if not setup_py.exists():
+            raise FileNotFoundError(f"缺少 diff-surfel-rasterization 构建脚本: {setup_py}")
+
+        self.log("🛠️ 构建本地 diff_surfel_rasterization 扩展，避免加载错误的全局包...")
+        build_cmd = [
+            "conda",
+            "run",
+            "-n",
+            conda_env,
+            "python",
+            "setup.py",
+            "build_ext",
+            "--inplace",
+        ]
+        build_env = os.environ.copy()
+        existing_pythonpath = build_env.get("PYTHONPATH", "")
+        build_env["PYTHONPATH"] = os.pathsep.join(
+            [str(rasterizer_root.resolve()), *([existing_pythonpath] if existing_pythonpath else [])]
+        )
+        self._run_command(build_cmd, "构建 diff-surfel-rasterization", cwd=rasterizer_root, env=build_env)
+
+        local_ext = next(package_dir.glob("_C*.so"), None)
+        if local_ext is None:
+            raise FileNotFoundError(
+                f"diff_surfel_rasterization 构建后仍未找到本地扩展: {package_dir / '_C*.so'}"
+            )
+        self.log(f"✅ 本地 diff_surfel_rasterization 扩展构建完成: {local_ext}")
+
+    def _find_free_tcp_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            return int(sock.getsockname()[1])

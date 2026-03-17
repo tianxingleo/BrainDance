@@ -147,7 +147,10 @@ const corsHeaders = {
  *
  * 官方文档: https://help.aliyun.com/zh/dashscope/
  */
-const DASHSCOPE_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DASHSCOPE_API_URL =
+  Deno.env.get("DASHSCOPE_BASE_URL") ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DASHSCOPE_EMBEDDING_MODEL =
+  Deno.env.get("DASHSCOPE_EMBEDDING_MODEL") ?? "text-embedding-v2";
 
 // ============================================================================
 // 【辅助函数】工具性函数，用于数据处理和格式化
@@ -454,7 +457,7 @@ async function getEmbedding(
      */
     const resp = await aiClient.embeddings.create({
       input: [text], // 包装成数组
-      model: "text-embedding-v2",
+      model: DASHSCOPE_EMBEDDING_MODEL,
     });
 
     // 提取向量

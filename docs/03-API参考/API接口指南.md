@@ -94,7 +94,7 @@ class SupabaseConfig {
 | `da3_2dgs` / `da3+2dgs` | Nerfstudio 3DGS 的替代路线（输出 2DGS） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
-| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `images.zip` |
+| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `images.zip` / `video.mp4` |
 
 **task_params 字段说明 (sparse2dgs):**
 
@@ -108,6 +108,10 @@ class SupabaseConfig {
 | `sparse2dgs_repo_path` | string | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
 | `colmap_matcher` | string | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
 | `colmap_mapper` | string | `mapper` | COLMAP 解算器（可选 `global_mapper`） |
+| `video_sample_count` | int | 12 | 当输入为视频时，随机抽取的帧数 |
+| `video_random_seed` | int | 42 | 视频随机抽帧种子 |
+| `min_video_frame_gap` | int | 3 | 视频随机抽帧时的最小帧间隔 |
+| `video_max_edge` | int | 0 | 抽帧后图片长边限制，0 表示不缩放 |
 
 **task_params 字段说明 (single_image_sam3d):**
 

@@ -125,7 +125,7 @@ class DA3SuGaRPipeline(BasePipeline):
 
         self.log("🧠 [3/3] 开始执行 SuGaR 训练脚本...")
         da3_repo = self._resolve_da3_repo(cfg, params)
-        sugar_repo = self._resolve_sugar_repo(params)
+        sugar_repo = self._resolve_sugar_repo(cfg, params)
         script_path = da3_repo / "da3_to_sugar_pipeline.sh"
         if not script_path.exists():
             raise FileNotFoundError(f"找不到脚本: {script_path}")
@@ -206,12 +206,9 @@ class DA3SuGaRPipeline(BasePipeline):
         candidate_list: List[Path] = []
         if params.get("da3_repo_path"):
             candidate_list.append(Path(str(params["da3_repo_path"])))
-        if os.getenv("DA3_REPO_PATH"):
-            candidate_list.append(Path(os.getenv("DA3_REPO_PATH", "")))
         candidate_list.extend(
             [
                 cfg.da3_repo_path,
-                Path("/ltx-data/Depth-Anything-3"),
             ]
         )
         for candidate in candidate_list:
@@ -219,13 +216,11 @@ class DA3SuGaRPipeline(BasePipeline):
                 return candidate
         raise FileNotFoundError("未找到可用的 DA3 仓库路径（缺少 da3_to_sugar_pipeline.sh）")
 
-    def _resolve_sugar_repo(self, params: Dict[str, Any]) -> Path:
+    def _resolve_sugar_repo(self, cfg: PipelineConfig, params: Dict[str, Any]) -> Path:
         candidate_list: List[Path] = []
         if params.get("sugar_repo_path"):
             candidate_list.append(Path(str(params["sugar_repo_path"])))
-        if os.getenv("SUGAR_REPO_PATH"):
-            candidate_list.append(Path(os.getenv("SUGAR_REPO_PATH", "")))
-        candidate_list.extend([Path("/ltx-data/SuGaR"), Path("/home/ltx/projects/SuGaR")])
+        candidate_list.append(cfg.sugar_repo_path)
 
         for candidate in candidate_list:
             if candidate and (candidate / "train_fast.py").exists():

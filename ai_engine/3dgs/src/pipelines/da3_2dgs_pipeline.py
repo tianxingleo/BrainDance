@@ -1,5 +1,9 @@
 import os
+import pty
+import re
+import select
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -48,6 +52,8 @@ class DA3TwoDGSPipeline(BasePipeline):
         iterations = int(params.get("iterations", params.get("training_iterations", 30000)))
         gpu_index = int(params.get("gpu_index", 1))
         render_after_train = bool(params.get("render_after_train", False))
+        viewer_ip = str(params.get("viewer_ip", "127.0.0.1"))
+        viewer_port = self._resolve_viewer_port(params.get("viewer_port"))
 
         # 抽帧/数据规模参数（强调视频序列）
         extract_fps = float(params.get("extract_fps", 2.0))
@@ -135,6 +141,8 @@ class DA3TwoDGSPipeline(BasePipeline):
             iterations=iterations,
             gpu_index=gpu_index,
             render_after_train=render_after_train,
+            viewer_ip=viewer_ip,
+            viewer_port=viewer_port,
         )
 
         final_ply = dgs_output_dir / "point_cloud" / f"iteration_{iterations}" / "point_cloud.ply"
@@ -159,15 +167,10 @@ class DA3TwoDGSPipeline(BasePipeline):
         if repo_path_param:
             candidates.append(Path(str(repo_path_param)))
 
-        env_repo = os.getenv("DGS2_REPO_PATH", "").strip()
-        if env_repo:
-            candidates.append(Path(env_repo))
-
         candidates.extend(
             [
+                PipelineConfig().dgs2_repo_path,
                 BASE_DIR / "src/libs/2d-gaussian-splatting",
-                Path("/ltx-data/2d-gaussian-splatting"),
-                Path("/home/ltx/projects/2d-gaussian-splatting"),
             ]
         )
 
@@ -281,6 +284,8 @@ class DA3TwoDGSPipeline(BasePipeline):
         iterations: int,
         gpu_index: int,
         render_after_train: bool,
+        viewer_ip: str,
+        viewer_port: int,
     ):
         dgs_output_dir.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -300,7 +305,15 @@ class DA3TwoDGSPipeline(BasePipeline):
             str(iterations),
             "--test_iterations",
             str(iterations),
+            "--ip",
+            viewer_ip,
+            "--port",
+            str(viewer_port),
         ]
+        if viewer_port == 0:
+            self.log("    -> 2DGS viewer 端口: 自动分配临时端口 (--port 0)")
+        else:
+            self.log(f"    -> 2DGS viewer 端口: {viewer_ip}:{viewer_port}")
         self._run_cmd(train_cmd, cwd=dgs_repo, env=env, desc=f"2DGS 训练 ({iterations} iter)")
 
         if render_after_train:
@@ -319,35 +332,101 @@ class DA3TwoDGSPipeline(BasePipeline):
     def _run_cmd(self, cmd: List[str], cwd: Path, env: Dict[str, str], desc: str):
         self.log(f"🚀 {desc}")
         self.log(f"    => {' '.join(cmd)}")
+
+        cmd = list(cmd)
+        if cmd and Path(cmd[0]).name.startswith("python") and "-u" not in cmd[1:]:
+            cmd.insert(1, "-u")
+
+        env = env.copy()
+        env.setdefault("PYTHONUNBUFFERED", "1")
+
+        master_fd, slave_fd = pty.openpty()
         process = subprocess.Popen(
             cmd,
             cwd=str(cwd),
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            text=False,
+            close_fds=True,
         )
-        assert process.stdout is not None
-        for line in process.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            if any(
-                k in line
-                for k in [
-                    "ITER",
-                    "Evaluating",
-                    "Saving Gaussians",
-                    "Training complete",
-                    "ERROR",
-                    "Error",
-                ]
-            ):
-                self.log(f"    | {line}")
-        process.wait()
-        if process.returncode != 0:
+        os.close(slave_fd)
+
+        buffer = ""
+        try:
+            while True:
+                ready, _, _ = select.select([master_fd], [], [], 0.2)
+                saw_eof = False
+                if ready:
+                    try:
+                        chunk = os.read(master_fd, 4096)
+                    except OSError:
+                        chunk = b""
+                    if chunk:
+                        buffer = self._flush_stream_buffer(
+                            buffer + chunk.decode("utf-8", errors="replace")
+                        )
+                    else:
+                        saw_eof = True
+
+                if process.poll() is not None and (not ready or saw_eof):
+                    break
+
+            while True:
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                buffer = self._flush_stream_buffer(
+                    buffer + chunk.decode("utf-8", errors="replace")
+                )
+        finally:
+            os.close(master_fd)
+
+        if buffer.strip():
+            self._log_subprocess_line(buffer)
+
+        if process.wait() != 0:
             raise subprocess.CalledProcessError(process.returncode, cmd)
+
+    def _flush_stream_buffer(self, buffer: str) -> str:
+        start = 0
+        for idx, char in enumerate(buffer):
+            if char in "\r\n":
+                line = buffer[start:idx]
+                if line.strip():
+                    self._log_subprocess_line(line)
+                start = idx + 1
+        return buffer[start:]
+
+    def _log_subprocess_line(self, line: str):
+        clean_line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line).strip()
+        if clean_line:
+            self.log(f"    | {clean_line}")
 
     def _list_images(self, folder: Path) -> List[Path]:
         exts = {".png", ".jpg", ".jpeg", ".webp"}
         return sorted([p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in exts])
+
+    def _resolve_viewer_port(self, viewer_port_param: Any) -> int:
+        """Headless 训练默认使用临时端口，避免固定 6009 冲突。"""
+        if viewer_port_param is None or str(viewer_port_param).strip() == "":
+            return 0
+
+        viewer_port = int(viewer_port_param)
+        if viewer_port < 0:
+            raise ValueError("viewer_port 不能为负数")
+        if viewer_port == 0:
+            return 0
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", viewer_port))
+            except OSError as exc:
+                raise RuntimeError(
+                    f"viewer_port={viewer_port} 已被占用，请改用其他端口或传 0 自动分配。"
+                ) from exc
+        return viewer_port
