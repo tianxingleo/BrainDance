@@ -7,7 +7,7 @@ void main() {
   final image = img.decodeImage(file.readAsBytesSync());
   if (image == null) return;
 
-  print('Original size: ${image.width}x${image.height}');
+  stdout.writeln('Original size: ${image.width}x${image.height}');
 
   int transparent = 0, opaque = 0;
   for (int y = 0; y < image.height; y += 5) {
@@ -19,7 +19,7 @@ void main() {
       }
     }
   }
-  print('transparent pixels: $transparent, opaque pixels: $opaque');
+  stdout.writeln('transparent pixels: $transparent, opaque pixels: $opaque');
 
   final w = image.width, h = image.height;
   final size = w > h ? w : h;
@@ -44,5 +44,7 @@ void main() {
   img.compositeImage(dark, image, dstX: dstX, dstY: dstY);
   File('assets/icon_square_dark.png').writeAsBytesSync(img.encodePng(dark));
 
-  print('Done. Transparent: ${size}x$size, Opaque white: ${size}x$size, Opaque dark: ${size}x$size');
+  stdout.writeln(
+    'Done. Transparent: ${size}x$size, Opaque white: ${size}x$size, Opaque dark: ${size}x$size',
+  );
 }
