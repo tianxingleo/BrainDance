@@ -8,6 +8,9 @@ class RecoConfig {
   //程序
   static late final bool cameraEnabled;
   static late final List<CameraDescription> cameras;
+  static List<CameraDescription> frontCameras = [];
+  static List<CameraDescription> backCameras = [];
+  static List<CameraDescription> externalCameras = [];
   static CameraController? cameraController;
   //可变
   static int camNum = 0;
