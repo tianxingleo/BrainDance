@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@iconify/vue": "^5.0.0",
     "@supabase/supabase-js": "^2.98.0",
     "dayjs": "^1.11.19",
     "echarts": "^6.0.0",

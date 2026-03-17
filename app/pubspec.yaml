@@ -36,7 +36,7 @@ dependencies:
   tdesign_flutter: ^0.2.7
   video_thumbnail_pro: ^0.7.3
   image_picker: ^1.1.2
-  camera: ^0.11.3
+  camera: ^0.12.0
   photo_manager: ^3.8.3
   supabase_flutter: ^2.12.0
   webview_flutter: ^4.13.1
@@ -44,6 +44,10 @@ dependencies:
   flutter_dotenv: ^5.1.0
   sensors_plus: ^6.1.1
   shared_preferences: ^2.3.5
+  wakelock_plus: ^1.4.0
+  cross_file: ^0.3.5+2
+  dio: ^5.9.2
+  sqflite: ^2.2.5
 
 dev_dependencies:
   flutter_test:
@@ -77,8 +81,6 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/icon_square_transparent.png"
   min_sdk_android: 21 # android min sdk min:16, default 21
-  adaptive_icon_background: "#000000"
-  adaptive_icon_foreground: "assets/icon_square_transparent.png"
   web:
     generate: true
     image_path: "assets/icon_square_transparent.png"
@@ -128,8 +130,8 @@ flutter:
     - assets/fonts/
     - assets/sprites/
     - assets/webgl/
-    - assets/webgl/assets/
     - assets/webgl/models/
+    - assets/webgl/assets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:
