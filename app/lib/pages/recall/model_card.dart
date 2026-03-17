@@ -73,23 +73,32 @@ class ModelCard extends StatelessWidget {
                         ),
                       ),
                       clipBehavior: Clip.hardEdge,
-                      child: model['preview_img_path'] != null && model['preview_img_path'].toString().isNotEmpty
+                      child:
+                          model['preview_img_path'] != null &&
+                              model['preview_img_path'].toString().isNotEmpty
                           ? Image.network(
                               model['preview_img_path'],
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
-                                  Center(child: Icon(Icons.view_in_ar, size: 64, color: theme.brandColor7.withAlpha(200))),
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return const Center(child: CircularProgressIndicator());
-                              },
+                                  _ModelMockCover(
+                                    isDark: isDark,
+                                    accentColor: isDark
+                                        ? const Color(0xFF7AA2FF)
+                                        : AppConfig.primaryColor,
+                                  ),
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  },
                             )
-                          : Center(
-                              child: Icon(
-                                Icons.view_in_ar,
-                                size: 64,
-                                color: theme.brandColor7.withAlpha(200),
-                              ),
+                          : _ModelMockCover(
+                              isDark: isDark,
+                              accentColor: isDark
+                                  ? const Color(0xFF7AA2FF)
+                                  : AppConfig.primaryColor,
                             ),
                     ),
                     if (similarity != null)
@@ -148,14 +157,17 @@ class ModelCard extends StatelessWidget {
 
   void _navigateToViewer(BuildContext context) {
     final plyPath = model['ply_path'] as String? ?? '';
-    final modelUrl = plyPath.isNotEmpty ? toPublicUrl(plyPath) : './models/scene_auto_sync_raw.ply';
+    final modelUrl = plyPath.isNotEmpty
+        ? toPublicUrl(plyPath)
+        : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
     final sceneId = model['scene_id'] ?? 'Unknown Scene';
 
     dynamic transformMatrix;
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (model['meta_info'] != null) {
-      if (model['meta_info'] is Map && model['meta_info']['initial_camera_pose'] != null) {
+      if (model['meta_info'] is Map &&
+          model['meta_info']['initial_camera_pose'] != null) {
         transformMatrix = model['meta_info']['initial_camera_pose'];
       }
     }
@@ -169,12 +181,13 @@ class ModelCard extends StatelessWidget {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => WebGLViewerPage(
-          initialModelUrl: modelUrl,
-          posesUrl: posesUrl,
-          sceneId: sceneId,
-          initialPose: initialPose,
-        ),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            WebGLViewerPage(
+              initialModelUrl: modelUrl,
+              posesUrl: posesUrl,
+              sceneId: sceneId,
+              initialPose: initialPose,
+            ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
             opacity: animation,
@@ -186,6 +199,49 @@ class ModelCard extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _ModelMockCover extends StatelessWidget {
+  final bool isDark;
+  final Color accentColor;
+
+  const _ModelMockCover({required this.isDark, required this.accentColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A1E27) : const Color(0xFFF6F8FC),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withAlpha(18)
+              : accentColor.withAlpha(35),
+        ),
+      ),
+      child: Center(
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withAlpha(6)
+                : Colors.white.withAlpha(190),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withAlpha(18)
+                  : accentColor.withAlpha(28),
+            ),
+          ),
+          child: Icon(
+            Icons.auto_awesome_mosaic_rounded,
+            size: 28,
+            color: accentColor.withAlpha(210),
+          ),
+        ),
       ),
     );
   }

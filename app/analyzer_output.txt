@@ -1,7 +1,10 @@
 Analyzing app...                                                
 
    info - The imported package 'image' isn't a dependency of the importing package - get_color.dart:2:8 - depend_on_referenced_packages
+   info - The imported package 'image' isn't a dependency of the importing package - get_color.dart:2:8 - depend_on_referenced_packages
    info - Don't invoke 'print' in production code - get_color.dart:11:3 - avoid_print
+   info - Don't invoke 'print' in production code - get_color.dart:11:3 - avoid_print
+   info - Don't invoke 'print' in production code - get_color.dart:15:3 - avoid_print
    info - Don't invoke 'print' in production code - get_color.dart:15:3 - avoid_print
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\configs\motion_tokens.dart:59:36 - deprecated_member_use
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\configs\motion_tokens.dart:65:36 - deprecated_member_use
@@ -23,9 +26,12 @@ warning - The value of the field '_currentFolder' isn't used - lib\pages\recall.
    info - Parameter 'key' could be a super parameter - lib\pages\recall\top_summary_card.dart:10:9 - use_super_parameters
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\recall\top_summary_card.dart:22:75 - deprecated_member_use
    info - The import of 'dart:ui' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\pages\record.dart:4:8 - unnecessary_import
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\pages\record.dart:427:56 - use_build_context_synchronously
-warning - The declaration '_getTaskTypeLabel' isn't referenced - lib\pages\task_list.dart:347:10 - unused_element
-   info - The private field _expandedStatus could be 'final' - lib\pages\task_list.dart:389:21 - prefer_final_fields
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\pages\record.dart:518:56 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\record\record_hud_painter.dart:19:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\record\record_hud_painter.dart:20:26 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\record\record_hud_painter.dart:44:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\record\record_hud_painter.dart:45:26 - deprecated_member_use
+   info - The private field _expandedStatus could be 'final' - lib\pages\task_list.dart:403:21 - prefer_final_fields
    info - Don't invoke 'print' in production code - lib\pages\video_submit.dart:120:9 - avoid_print
    info - Statements in an if should be enclosed in a block - lib\pages\webgl_viewer.dart:144:11 - curly_braces_in_flow_control_structures
    info - Statements in an if should be enclosed in a block - lib\pages\webgl_viewer.dart:146:11 - curly_braces_in_flow_control_structures

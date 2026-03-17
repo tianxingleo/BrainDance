@@ -23,6 +23,7 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -123,7 +124,7 @@ const toggleFocalSettings = () => {
   showFocalSettings.value = !showFocalSettings.value;
   if (showFocalSettings.value && !manualFocalPx.value) {
     manualFocalPx.value = Number(
-      (currentViewFocalPx.value || sceneMetadata.value.fl_y || 500).toFixed(1)
+      (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
     );
   }
 };
@@ -557,6 +558,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     const config = getViewerConfig();
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
+    manualFocalPx.value = DEFAULT_FOCAL_PX;
 
     // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
     console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
@@ -619,12 +621,18 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
           // 首次加载按拍摄焦距初始化查看相机
           if (sceneMetadata.value.fl_y && sceneMetadata.value.h) {
             applyFocalLengthPx(sceneMetadata.value.fl_y);
+          } else {
+            applyFocalLengthPx(DEFAULT_FOCAL_PX);
           }
         } else {
           cameraPoses.value = data; // 兼容旧格式
+          applyFocalLengthPx(DEFAULT_FOCAL_PX);
         }
       })
-      .catch(err => console.error("加载位姿失败:", err));
+      .catch(err => {
+        console.error("加载位姿失败:", err);
+        applyFocalLengthPx(DEFAULT_FOCAL_PX);
+      });
 
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false;
@@ -915,8 +923,43 @@ onBeforeUnmount(async () => {
     @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
     @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>
-    <div v-if="isLoading" class="loading-overlay">正在处理...</div>
-    <div class="fps-counter" v-if="currentFps > 0">FPS: {{ currentFps }}</div>
+    <div class="viewer-vignette"></div>
+
+    <div class="top-hud">
+      <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+        <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
+          class="search-input" />
+        <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
+      </div>
+
+      <div class="top-actions">
+        <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
+        </button>
+        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
+      </div>
+    </div>
+
+    <div v-if="isLoading" class="loading-overlay">
+      <div class="loading-card">
+        <div class="loading-dot"></div>
+        <div class="loading-title">场景正在展开</div>
+        <div class="loading-copy">模型与参考镜头正在同步到工作台。</div>
+      </div>
+    </div>
+
+    <div v-if="loadError" class="error-overlay">
+      <div class="error-card">
+        <div class="eyebrow">Load Failed</div>
+        <div class="error-title">模型未能正常打开</div>
+        <div class="error-msg">{{ loadError }}</div>
+        <button class="archive-btn archive-btn--solid" @click="initViewer(currentPlyUrl, currentPosesUrl, null)">
+          重新载入
+        </button>
+      </div>
+    </div>
+
     <div class="controls-ui" v-if="false">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
@@ -926,17 +969,9 @@ onBeforeUnmount(async () => {
       </button>
     </div>
 
-    <!-- 搜索功能 -->
-    <div class="search-panel">
-      <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="搜索想要的视角 (如: 正面特写...)"
-        class="search-input" />
-      <button @click="searchAndFly" class="search-btn">🔍 搜索视角</button>
-    </div>
-
-    <button class="focal-settings-toggle" @click="toggleFocalSettings"
-      @mousedown.stop @touchstart.stop @touchend.stop>焦距设置</button>
     <div class="focal-settings-panel" v-if="showFocalSettings"
       @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+      <div class="eyebrow">Lens Control</div>
       <div class="focal-title">镜头焦距</div>
       <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
         @input="onManualFocalChange" />
@@ -951,7 +986,7 @@ onBeforeUnmount(async () => {
       <div class="focal-row">
         <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
       </div>
-      <button class="focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
+      <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -996,23 +1031,27 @@ onBeforeUnmount(async () => {
     <!-- 镜头轨道小功能 -->
     <div class="camera-track" v-if="filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
       @touchend.stop>
+      <div class="camera-track-header">
+        <div class="eyebrow">Shot Strip</div>
+        <div class="camera-track-copy">{{ searchQuery ? '按当前检索结果排序' : '优先显示已打标签镜头' }}</div>
+      </div>
       <div v-for="(pose, index) in filteredPoses" :key="pose.id" class="camera-btn"
         :class="{ active: activeImage === pose.image_url }" @click.stop="flyToImage(pose)">
         <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
         <div v-if="pose.tag" class="camera-tag-overlay">
-          <div class="camera-title-mini">镜 {{ pose.id.split('.')[0].replace('frame_', '') }}</div>
           <div class="camera-tag-text">{{ pose.tag }}</div>
         </div>
-        <span v-else-if="!pose.image_url">镜头 {{ index + 1 }}</span>
+        <span v-else-if="!pose.image_url">未命名视角</span>
       </div>
     </div>
 
     <!-- 参考图对比悬浮窗 -->
     <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
+      <div class="eyebrow">Reference Still</div>
       <div class="ref-title">参考原图</div>
       <img :src="activeImage" class="ref-img" />
       <div class="ref-info" v-if="activeTag">
-        <span class="info-tag" style="color: #4CAF50;">{{ activeTag }}</span>
+        <span class="info-tag info-tag--accent">{{ activeTag }}</span>
       </div>
       <div class="ref-info" v-if="sceneMetadata.fl_y">
         <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
@@ -1030,13 +1069,99 @@ onBeforeUnmount(async () => {
   position: relative;
   width: 100vw;
   height: 100vh;
-  background-color: #000000;
+  background:
+    radial-gradient(circle at top left, rgba(228, 232, 237, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(107, 122, 143, 0.14), transparent 28%),
+    linear-gradient(180deg, #f4f3ee 0%, #e6e3db 100%);
   overflow: hidden;
+  color: #1e1e20;
+  font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
 .viewer-container {
   width: 100%;
   height: 100%;
+}
+
+.viewer-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(30, 30, 32, 0.12), transparent 18%, transparent 78%, rgba(30, 30, 32, 0.2)),
+    radial-gradient(circle at center, transparent 55%, rgba(30, 30, 32, 0.14) 100%);
+  z-index: 1;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6b7a8f;
+}
+
+.archive-card {
+  background: rgba(249, 249, 248, 0.84);
+  border: 1px solid rgba(107, 122, 143, 0.16);
+  border-radius: 22px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.top-hud {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 120;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.archive-btn {
+  appearance: none;
+  border-radius: 14px;
+  border: 1px solid rgba(107, 122, 143, 0.2);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease-out,
+    background-color 180ms ease-out,
+    border-color 180ms ease-out,
+    box-shadow 180ms ease-out;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.archive-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+}
+
+.archive-btn--ghost {
+  background: rgba(249, 249, 248, 0.84);
+  color: #1e1e20;
+}
+
+.archive-btn--solid {
+  background: #6b7a8f;
+  border-color: #6b7a8f;
+  color: #f9f9f8;
+}
+
+.archive-btn--solid:hover {
+  background: #5e6d81;
+  border-color: #5e6d81;
 }
 
 .controls-ui {
@@ -1052,71 +1177,75 @@ onBeforeUnmount(async () => {
 .loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
+  background: rgba(30, 30, 32, 0.24);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 200;
+  backdrop-filter: blur(8px);
+}
+
+.loading-card,
+.error-card {
+  min-width: min(84vw, 320px);
+  padding: 22px 20px;
+  border-radius: 24px;
+  background: rgba(249, 249, 248, 0.92);
+  border: 1px solid rgba(107, 122, 143, 0.18);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+.loading-dot {
+  width: 12px;
+  height: 12px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: #6d8260;
+  box-shadow: 0 0 0 10px rgba(109, 130, 96, 0.12);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.loading-title {
   font-size: 20px;
+  font-weight: 600;
+}
+
+.loading-copy {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(30, 30, 32, 0.66);
 }
 
 .error-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10, 10, 10, 0.92);
-  color: white;
+  background: rgba(30, 30, 32, 0.18);
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
   z-index: 210;
   padding: 24px;
-  text-align: center;
-}
-
-.error-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+  backdrop-filter: blur(10px);
 }
 
 .error-title {
   font-size: 20px;
-  font-weight: bold;
-  margin-bottom: 8px;
-  color: #ff6b6b;
+  font-weight: 600;
+  margin: 8px 0;
+  color: #8b4747;
 }
 
 .error-msg {
   font-size: 13px;
-  color: #ccc;
+  color: rgba(30, 30, 32, 0.68);
   max-width: 320px;
   word-break: break-all;
   margin-bottom: 20px;
 }
 
-.error-retry {
-  background: #333;
-  color: white;
-  border: 1px solid #555;
-  padding: 8px 24px;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.error-retry:hover {
-  background: #555;
-}
-
 button {
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 10px 20px;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: 0.3s;
+  font-family: inherit;
 }
 
 button.active {
@@ -1127,51 +1256,80 @@ button.active {
 /* 镜头轨道样式 */
 .camera-track {
   position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 18px;
+  left: 18px;
+  right: 18px;
   display: flex;
+  align-items: stretch;
   gap: 16px;
   overflow-x: auto;
-  max-width: 90vw;
-  padding: 16px 20px;
-  background: rgba(255, 255, 255, 0.85);
+  padding: 16px 18px;
+  background: rgba(249, 249, 248, 0.84);
   backdrop-filter: blur(12px);
-  border-radius: 16px;
+  border-radius: 22px;
   z-index: 100;
-  border: 1px solid rgba(255, 255, 255, 1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(107, 122, 143, 0.16);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
+}
+
+.camera-track-header {
+  min-width: 144px;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.camera-track-copy {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(30, 30, 32, 0.68);
 }
 
 .camera-btn {
   width: 100px;
   height: 70px;
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
   cursor: pointer;
   overflow: hidden;
-  border: 2px solid transparent;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: 1px solid rgba(107, 122, 143, 0.12);
+  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #333;
   position: relative;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.04);
+  outline: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .camera-btn.active {
-  border-color: #71838F;
-  transform: translateY(-4px);
-  box-shadow: 0 8px 16px rgba(113, 131, 143, 0.25);
+  border-color: rgba(107, 122, 143, 0.12);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 20px rgba(107, 122, 143, 0.12);
+}
+
+.camera-btn:focus,
+.camera-btn:focus-visible,
+.camera-btn:active {
+  outline: none;
+  box-shadow: 0 10px 20px rgba(107, 122, 143, 0.12);
 }
 
 .btn-thumb {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.85;
+  opacity: 0.88;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .camera-btn:hover .btn-thumb {
@@ -1188,19 +1346,18 @@ button.active {
   bottom: 0;
   left: 0;
   width: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: linear-gradient(180deg, transparent, rgba(30, 30, 32, 0.72));
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   color: #fff;
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  padding: 10px 8px 8px;
   align-items: center;
   pointer-events: none;
-}
-
-.camera-title-mini {
-  font-size: 10px;
-  opacity: 0.8;
+  border-radius: 0 0 16px 16px;
+  overflow: hidden;
+  clip-path: inset(0 round 0 0 16px 16px);
 }
 
 .camera-tag-text {
@@ -1214,149 +1371,148 @@ button.active {
 
 /* 搜索栏样式 */
 .search-panel {
-  position: absolute;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
+  position: static;
+  z-index: auto;
+  width: min(520px, 100%);
+  max-width: 520px;
   display: flex;
-  gap: 10px;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 10px;
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 18px;
 }
 
 .search-input {
-  width: 250px;
-  padding: 10px 15px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(107, 122, 143, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
   outline: none;
-  font-size: 14px;
+  font-size: 13px;
+  color: #1e1e20;
+}
+
+.search-input:focus {
+  border-color: rgba(107, 122, 143, 0.5);
+  box-shadow: 0 0 0 4px rgba(107, 122, 143, 0.08);
 }
 
 .search-btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 6px;
-  background: #71838F;
-  color: white;
-  cursor: pointer;
-  font-weight: bold;
-}
-
-.search-btn:hover {
-  background: #5A6A74;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
 }
 
 .focal-settings-toggle {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  z-index: 120;
-  padding: 8px 14px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.65);
+  position: static;
+  z-index: auto;
 }
 
 .focal-settings-panel {
   position: absolute;
-  top: 62px;
-  right: 20px;
+  top: 74px;
+  right: 18px;
   z-index: 120;
-  width: 220px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 10px;
-  padding: 10px;
+  width: 236px;
+  background: rgba(249, 249, 248, 0.9);
+  color: #1e1e20;
+  border: 1px solid rgba(107, 122, 143, 0.16);
+  border-radius: 20px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(16px);
 }
 
 .focal-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .focal-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   font-size: 12px;
+  color: rgba(30, 30, 32, 0.72);
 }
 
 .focal-number-input {
   width: 100px;
-  border-radius: 6px;
-  border: 1px solid #555;
-  padding: 4px 6px;
-  background: rgba(255, 255, 255, 0.95);
+  border-radius: 10px;
+  border: 1px solid rgba(107, 122, 143, 0.16);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.86);
 }
 
 .focal-reset-btn {
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: #71838F;
-  border: none;
+  width: 100%;
 }
 
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 16px;
-  width: 28vw;
-  min-width: 110px;
-  max-width: 180px;
-  background: rgba(0, 0, 0, 0.7);
+  top: 76px;
+  right: 18px;
+  width: min(22vw, 148px);
+  min-width: 112px;
+  background: rgba(249, 249, 248, 0.9);
   padding: 8px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  border: 1px solid rgba(107, 122, 143, 0.14);
   z-index: 150;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(16px);
 }
 
 .ref-title {
-  font-size: 10px;
-  color: #aaa;
-  margin-bottom: 6px;
-  text-align: center;
+  font-size: 12px;
+  color: #1e1e20;
+  margin: 2px 0 6px;
+  font-weight: 600;
 }
 
 .ref-img {
   width: 100%;
-  border-radius: 4px;
-  border: 1px solid #444;
+  border-radius: 10px;
+  border: 1px solid rgba(107, 122, 143, 0.12);
   margin-bottom: 6px;
 }
 
 .ref-info {
   font-size: 9px;
-  color: #ddd;
+  color: rgba(30, 30, 32, 0.7);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  justify-content: center;
   margin-bottom: 4px;
 }
 
 .info-tag {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 2px 4px;
-  border-radius: 4px;
+  background: rgba(228, 232, 237, 0.78);
+  padding: 3px 6px;
+  border-radius: 999px;
+}
+
+.info-tag--accent {
+  color: #6d8260;
 }
 
 .ref-hint {
-  font-size: 8px;
-  color: #666;
-  text-align: center;
-  margin-top: 4px;
+  font-size: 9px;
+  color: rgba(30, 30, 32, 0.48);
+  margin-top: 2px;
 }
 
 /* 调试面板 */
@@ -1408,17 +1564,79 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  color: #d8f4ff;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(216, 244, 255, 0.35);
-  border-radius: 6px;
-  padding: 3px 7px;
+  color: #1e1e20;
+  background: rgba(249, 249, 248, 0.84);
+  border: 1px solid rgba(107, 122, 143, 0.16);
+  border-radius: 12px;
+  padding: 8px 10px;
   font-family: monospace;
   font-size: 12px;
-  z-index: 1000;
   pointer-events: none;
+}
+
+input[type='range'] {
+  accent-color: #6b7a8f;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.75;
+  }
+}
+
+@media (max-width: 768px) {
+  .top-hud {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    gap: 8px;
+  }
+
+  .top-actions {
+    gap: 8px;
+  }
+
+  .search-panel {
+    width: auto;
+    max-width: none;
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .search-input {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .search-btn {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .reference-overlay {
+    top: 60px;
+    right: 12px;
+    width: 112px;
+    min-width: 112px;
+    padding: 7px;
+  }
+
+  .camera-track {
+    padding-top: 14px;
+  }
+
+  .camera-track-header {
+    min-width: 116px;
+  }
+
+  .camera-btn {
+    width: 92px;
+    height: 66px;
+  }
 }
 </style>
