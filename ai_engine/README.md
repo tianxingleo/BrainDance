@@ -144,16 +144,24 @@ patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.
 5. **配置环境变量**
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填入Supabase和AI服务的API密钥
+# 编辑 .env 文件，填入 Supabase 和 AI 服务的 API 密钥
+# 如需调整训练参数、仓库路径、交付格式，编辑 ai_engine/3dgs/config/default.toml
 ```
 
 必要配置项：
 - `SUPABASE_URL`: Supabase项目URL
 - `SUPABASE_KEY`: Supabase服务角色密钥
 - `DASHSCOPE_API_KEY`: 阿里云DashScope API密钥（用于Qwen-VL和embedding）
-- `MAX_IMAGES`: 单次处理最大图片数量（默认500）
-- `TRAINING_ITERATIONS`: 训练迭代次数（默认15000）
-- `MIN_QUALITY_SCORE`: AI质检最低分（默认40）
+
+默认工程参数位置：
+- `ai_engine/3dgs/config/default.toml`: 仓库共享的非敏感默认配置
+- `ai_engine/3dgs/config/local.toml`: 本机覆盖配置（可自行创建）
+
+常见可调参数：
+- `training.max_images`: 单次处理最大图片数量
+- `training.training_iterations`: 训练迭代次数
+- `training.min_quality_score`: AI 质检最低分
+- `training.mapper_type`: 默认重建路线
 
 ### Supabase配置
 1. 启动本地Supabase环境

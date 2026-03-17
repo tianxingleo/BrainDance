@@ -3,9 +3,9 @@
 # 实现：调用阿里云Qwen-VL大模型，分析图像质量并生成场景描述
 # 逻辑：1. 随机抽选图像 2. 调用Qwen-VL进行分析 3. 生成质量评分和场景描述 4. 返回分析结果
 # 包含：SceneAnalyzer类、图像编码方法、场景分析方法、质量评估算法
-import os
 import base64
 import json
+import os
 import random
 import re
 import ast
@@ -18,13 +18,26 @@ from src.config import PipelineConfig
 
 class SceneAnalyzer:
     def __init__(self, cfg: PipelineConfig):
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
         self.cfg = cfg
-        self.api_key = self.cfg.dashscope_api_key or os.getenv("DASHSCOPE_API_KEY")
-        self.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        self.api_key = self.cfg.dashscope_api_key
+        self.base_url = self.cfg.dashscope_base_url
         # 优先使用视觉模型，避免误用文本模型导致“未提供任何图片”。
-        self.model = os.getenv("DASHSCOPE_VL_MODEL", "qwen3-vl-plus")
+        self.model = self.cfg.dashscope_vl_model
+        self.request_timeout = float(getattr(self.cfg, "dashscope_timeout_seconds", 45.0) or 45.0)
+        self._client = None
+
+    def _get_client(self):
+        if OpenAI is None:
+            raise RuntimeError("OpenAI client not available in environment")
+        if self._client is None:
+            # 显式设置超时与重试，避免网络抖动时长时间卡住。
+            self._client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=self.request_timeout,
+                max_retries=1,
+            )
+        return self._client
 
     def _encode_image(self, image_path):
         with open(image_path, "rb") as image_file:
@@ -71,17 +84,14 @@ class SceneAnalyzer:
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                *[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(os.path.join(images_dir, f))}"}} for f in selected_files]
+                *[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(str(Path(images_dir) / f))}"}} for f in selected_files]
             ]}
         ]
 
         try:
             if log_callback: log_callback("🤖 [Qwen-VL] 正在进行场景评分与打标...")
             
-            if OpenAI is None:
-                raise RuntimeError("OpenAI client not available in environment")
-
-            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            client = self._get_client()
             completion = client.chat.completions.create(
                 model=self.model, messages=messages, temperature=0.1
             )
@@ -179,10 +189,7 @@ class SceneAnalyzer:
             if log_callback:
                 log_callback(f"🤖 [Qwen-VL] 正在分析单张图片: {image_path}")
 
-            if OpenAI is None:
-                raise RuntimeError("OpenAI client not available in environment")
-
-            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            client = self._get_client()
             completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
 
             resp = completion.choices[0].message.content
@@ -306,10 +313,7 @@ class SceneAnalyzer:
             if len(messages[1]["content"]) == 1:
                 return 0, "没有有效候选图片，回退第一帧"
 
-            if OpenAI is None:
-                raise RuntimeError("OpenAI client not available in environment")
-
-            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            client = self._get_client()
             completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
 
             resp = str(completion.choices[0].message.content).strip()

@@ -2,7 +2,6 @@
 # 功能：实现空间语义锚点提取，将3DGS位姿与多模态语义结合存入向量数据库
 # 实现：读取位姿数据，转换为WebGL坐标系，抽样关键帧，调用Qwen-VL打标，生成Embedding并存入Supabase
 # 逻辑：1. 读取transforms 2. 坐标系转换 3. 抽样打标 4. 向量化 5. 存入数据库
-import os
 import json
 import random
 import numpy as np
@@ -18,7 +17,7 @@ class SpatialAnchorExtractor:
         self.cfg = cfg
         self.supabase = supabase_client
         self.scene_analyzer = SceneAnalyzer(cfg)
-        self.rag_memory = RagMemory(supabase_client)
+        self.rag_memory = RagMemory(supabase_client, cfg)
 
     def extract_and_save(self, scene_id: str, user_id: Optional[str] = None, log_callback=None):
         """执行空间语义锚点提取并保存到数据库"""
@@ -90,7 +89,7 @@ class SpatialAnchorExtractor:
                 if log_callback: log_callback(f"⚠️ 自动补建模型记录失败，跳过锚点提取")
                 return False
             
-        bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
+        bucket = self.cfg.supabase_bucket
         user_id = fallback_user_id
         try:
             response = self.supabase.table("model_assets").select("user_id").eq("id", model_id).execute()

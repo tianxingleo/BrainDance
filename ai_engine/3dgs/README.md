@@ -43,6 +43,8 @@
 BrainDance/
 ├── main.py                    # [入口] 程序启动入口 (模式选择器)
 ├── .env                       # [配置] 环境变量 (Supabase Key 等敏感信息)
+├── config/
+│   └── default.toml           # [配置] 非敏感默认工程参数
 ├── src/
 │   ├── config.py              # [配置] PipelineConfig 配置类定义
 │   ├── core/                  # [核心逻辑]
@@ -112,20 +114,52 @@ python -c "import nerfstudio, pathlib; print(pathlib.Path(nerfstudio.__file__).r
 # 预期路径包含: ai_engine/3dgs/src/libs/nerfstudio
 ```
 
-### 3. 环境变量配置 (.env)
+### 3. 配置文件说明
 
-在项目根目录下新建 `.env` 文件，填入你的 Supabase 配置：
+当前配置分为两层：
+
+1. `.env`
+   存放密钥和少量部署差异，例如 `SUPABASE_KEY`、`DASHSCOPE_API_KEY`
+2. `config/default.toml`
+   存放可版本化的默认工程参数，例如训练步数、最大图片数、仓库路径、交付格式
+
+推荐初始化方式：
+
+```bash
+cp .env.example .env
+# 如需修改默认工程参数，编辑 config/default.toml
+# 如需保留个人机器差异，新增 config/local.toml（不会被仓库默认覆盖）
+```
+
+`.env` 最小示例：
 
 ```ini
-# Supabase 连接信息
+# 密钥与部署变量
 SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_KEY=your_service_role_key_here
-
-# 存储桶与表名配置
-SUPABASE_BUCKET=braindance-assets
-SUPABASE_TABLE=processing_tasks
-
+DASHSCOPE_API_KEY=your_dashscope_key_here
 ```
+
+`config/default.toml` 示例片段：
+
+```toml
+[training]
+training_iterations = 15000
+max_images = 300
+mapper_type = "glomap"
+
+[supabase]
+bucket = "braindance-assets"
+table = "processing_tasks"
+```
+
+配置优先级：
+
+1. `config/default.toml`
+2. `config/local.toml`
+3. `.env` / 系统环境变量
+
+也就是说，环境变量会覆盖 `TOML` 中的默认值。
 
 ## 💾 数据库设计 (Supabase)
 
@@ -223,9 +257,10 @@ python main.py /path/to/your/video.mp4
 ### 3) `sparse2dgs`（Sparse2DGS）
 
 - 用途：少量图片输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，输出 2DGS。
-- 输入：`{user_id}/{scene_id}/raw/images.zip`
+- 输入：优先 `{user_id}/{scene_id}/raw/images.zip`，若不存在则回退 `{user_id}/{scene_id}/raw/video.mp4`
 - 最低要求：至少 3 张有效图片（少于 3 张会直接失败）。
 - 典型场景：照片数量有限，但希望比常规少图流程有更强几何约束。
+- 视频输入行为：从视频中随机抽取若干帧，再复用同一套 COLMAP + Sparse2DGS 流程。
 
 常用参数（写入 `task_params`）：
 
@@ -239,6 +274,10 @@ python main.py /path/to/your/video.mp4
 | `sparse2dgs_repo_path` | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
 | `colmap_matcher` | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
 | `colmap_mapper` | `mapper` | COLMAP mapper（失败时会回退 `mapper`） |
+| `video_sample_count` | `12` | 视频输入时随机抽取的帧数 |
+| `video_random_seed` | `42` | 视频随机抽帧种子，便于复现 |
+| `min_video_frame_gap` | `3` | 随机抽帧时的最小帧间隔 |
+| `video_max_edge` | `0` | 视频抽帧后缩放长边上限，`0` 表示不缩放 |
 
 ### 选型建议（实战）
 

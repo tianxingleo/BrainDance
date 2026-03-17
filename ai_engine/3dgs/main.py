@@ -15,6 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.config import PipelineConfig
 from src.core.local_runner import (
     LOCAL_TASK_TYPE_CHOICES,
     SLOW_PIPELINE_CHOICES,
@@ -24,10 +25,9 @@ from src.core.worker import CloudWorker
 
 load_dotenv()
 
-
 def run_cloud_mode():
     """云端监听模式"""
-    worker = CloudWorker()
+    worker = CloudWorker(PipelineConfig())
     worker.start()
 
 

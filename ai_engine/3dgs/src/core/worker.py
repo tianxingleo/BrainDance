@@ -5,28 +5,40 @@
 # 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
 import time
 import os
+import re
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional, Tuple
+from urllib.parse import urlparse, unquote
+from urllib.request import urlopen, Request
 
-# 引入 Supabase 客户端库，用于连接云数据库和存储
 from supabase import create_client, Client
-# 引入 python-dotenv 库，用于加载本地 .env 文件中的环境变量（保护密钥安全）
-from dotenv import load_dotenv
 
-# 引入项目内部配置类和核心管线函数
-from src.core.factory import PipelineFactory  # 🟢 引入工厂
-from src.modules.rag_memory import RagMemory # 🟢 引入新模块
-from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
-from src.modules.scene_analyzer import SceneAnalyzer
 from src.config import PipelineConfig
+from src.core.factory import PipelineFactory
+from src.modules.knowledge_base import KnowledgeBase
+from src.modules.rag_memory import RagMemory
+from src.modules.scene_analyzer import SceneAnalyzer
 from src.utils.ply_utils import compress_model_for_delivery
 
-# [初始化] 加载当前目录下的 .env 文件
-# 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
-load_dotenv()
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
+    "\u2600-\u26FF"
+    "\u2700-\u27BF"
+    "]"
+)
 
 class CloudWorker:
     """
@@ -39,22 +51,16 @@ class CloudWorker:
     4. 汇报：实时同步日志到数据库，并将最终结果上传回云存储。
     """
 
-    def __init__(self):
+    def __init__(self, config: Optional[PipelineConfig] = None):
         """
         初始化 Worker：连接 Supabase，准备本地缓存目录。
         """
-        # --- 1. 读取环境变量配置 ---
-        # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
-        self.SUPABASE_URL = os.getenv("SUPABASE_URL")
-        if self.SUPABASE_URL and not self.SUPABASE_URL.endswith('/'):
-            self.SUPABASE_URL += '/'
-            
-        self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-        self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
-        self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
-        
-        # --- 2. 防御性检查 ---
-        # 如果关键配置缺失，直接报错停止，避免后续出现莫名其妙的连接错误
+        self.cfg = config or PipelineConfig()
+        self.SUPABASE_URL = self.cfg.supabase_url
+        self.SUPABASE_KEY = self.cfg.supabase_key
+        self.BUCKET_NAME = self.cfg.supabase_bucket
+        self.TABLE_NAME = self.cfg.supabase_table
+
         if not self.SUPABASE_URL or not self.SUPABASE_KEY:
             raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
 
@@ -72,8 +78,8 @@ class CloudWorker:
         self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
         
         # 🟢 初始化记忆模块
-        self.memory = RagMemory(self.supabase)
-        self.kb = KnowledgeBase(self.supabase) # 🟢 实例化知识库
+        self.memory = RagMemory(self.supabase, self.cfg)
+        self.kb = KnowledgeBase(self.supabase, self.cfg)
 
         # --- 4. 准备本地工作区 ---
         # 🟢 [修改后] 找回原来的 "braindance_workspace"，实现路径归一化
@@ -91,6 +97,22 @@ class CloudWorker:
         # 每次有新日志，append 进这里，然后把整个列表覆盖上传到云端。
         self.current_task_logs = []
 
+    @staticmethod
+    def _contains_emoji(message: str) -> bool:
+        """仅将带 emoji 的日志同步到云端，普通进度日志只留在本地终端。"""
+        return bool(EMOJI_PATTERN.search(message or ""))
+
+    def _record_cloud_log(self, task_id: str, message: str) -> None:
+        """按规则写入云端日志缓冲区。"""
+        if not self._contains_emoji(message):
+            return
+
+        self.current_task_logs.append({
+            "ts": int(time.time()),
+            "msg": message,
+        })
+        self._sync_log(task_id)
+
     def _sync_log(self, task_id):
         """
         🔄 [内部方法] 日志同步器
@@ -107,6 +129,145 @@ class CloudWorker:
             # ⚠️ 注意：日志同步失败属于“非致命错误”。
             # 如果网络抖动导致日志没发出去，不应该中断核心训练任务，所以这里只打印不抛出异常。
             print(f"⚠️ [网络抖动] 日志同步跳过: {e}")
+
+    def _normalize_storage_key(self, raw_value: object) -> Optional[str]:
+        """把 task 中各种可能的路径/URL 统一转成 bucket 内对象 key。"""
+        if raw_value is None:
+            return None
+        value = str(raw_value).strip().strip('"').strip("'")
+        if not value:
+            return None
+
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.netloc:
+            value = unquote(parsed.path or "").lstrip("/")
+            bucket = self.BUCKET_NAME
+            url_prefixes = [
+                f"storage/v1/object/public/{bucket}/",
+                f"storage/v1/object/sign/{bucket}/",
+                f"storage/v1/object/authenticated/{bucket}/",
+                f"storage/v1/render/image/public/{bucket}/",
+                f"storage/v1/render/image/authenticated/{bucket}/",
+            ]
+            for prefix in url_prefixes:
+                if value.startswith(prefix):
+                    value = value[len(prefix):]
+                    break
+        else:
+            value = value.lstrip("/")
+
+        if value.startswith(f"{self.BUCKET_NAME}/"):
+            value = value[len(self.BUCKET_NAME) + 1:]
+
+        value = value.strip("/")
+        return value or None
+
+    def _build_single_image_candidates(self, task: dict, task_params: dict, user_id: str, scene_id: str) -> list[str]:
+        image_exts = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".heic"]
+        candidates: list[str] = []
+        direct_urls: list[str] = []
+
+        def add(raw: object) -> None:
+            if raw is None:
+                return
+            raw_str = str(raw).strip()
+            parsed = urlparse(raw_str)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                direct_urls.append(raw_str)
+            key = self._normalize_storage_key(raw_str)
+            if key:
+                candidates.append(key)
+
+        # 1) 明确字段（task_params + 任务顶层）
+        direct_keys = [
+            "storage_path",
+            "input_storage_path",
+            "image_path",
+            "image_storage_path",
+            "input_path",
+            "file_path",
+            "source_path",
+            "path",
+            "image_url",
+            "input_url",
+            "url",
+            "public_url",
+            "asset_url",
+        ]
+        for key in direct_keys:
+            add(task_params.get(key))
+            add(task.get(key))
+
+        # 2) 常见嵌套结构
+        for container_key in ("input", "image", "source", "asset"):
+            payload = task_params.get(container_key)
+            if isinstance(payload, dict):
+                for key in direct_keys:
+                    add(payload.get(key))
+        for list_key in ("images", "files", "assets", "inputs"):
+            payload = task_params.get(list_key)
+            if isinstance(payload, list):
+                for item in payload:
+                    if isinstance(item, dict):
+                        for key in direct_keys:
+                            add(item.get(key))
+                    else:
+                        add(item)
+
+        # 3) 标准与兼容目录模式
+        for ext in image_exts:
+            candidates.extend(
+                [
+                    f"{user_id}/{scene_id}/raw/image{ext}",
+                    f"{user_id}/{scene_id}/raw/{scene_id}{ext}",
+                    f"{user_id}/{scene_id}/image{ext}",
+                    f"{user_id}/{scene_id}/{scene_id}{ext}",
+                    f"{scene_id}/raw/image{ext}",
+                    f"{scene_id}/raw/{scene_id}{ext}",
+                ]
+            )
+
+        # 4) 目录探测：自动补充真实存在的对象名（服务端 key 可列目录）
+        def list_image_keys(prefix: str, max_depth: int = 2) -> list[str]:
+            found: list[str] = []
+            queue: list[tuple[str, int]] = [(prefix.strip("/"), 0)]
+            while queue:
+                current, depth = queue.pop(0)
+                if not current:
+                    continue
+                try:
+                    rows = self.supabase.storage.from_(self.BUCKET_NAME).list(current)
+                except Exception:
+                    continue
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    name = str(row.get("name", "")).strip()
+                    if not name:
+                        continue
+                    suffix = Path(name).suffix.lower()
+                    child_key = f"{current}/{name}".strip("/")
+                    if suffix in image_exts:
+                        found.append(child_key)
+                    elif depth < max_depth:
+                        # list() 返回目录时通常没有后缀，继续向下探测
+                        queue.append((child_key, depth + 1))
+            return found
+
+        try:
+            probe_dirs = [
+                f"{user_id}/{scene_id}/raw",
+                f"{user_id}/{scene_id}",
+                f"{scene_id}/raw",
+                scene_id,
+            ]
+            for prefix in probe_dirs:
+                candidates.extend(list_image_keys(prefix, max_depth=2))
+        except Exception:
+            pass
+
+        # 去重并保持顺序
+        return list(dict.fromkeys(direct_urls + candidates))
 
     def start(self):
         """
@@ -447,18 +608,8 @@ class CloudWorker:
         # --- 3. 定义回调函数 (闭包) ---
         # 这个函数会传给 pipeline.py，让核心引擎在深层代码里也能发日志
         def on_pipeline_log(message):
-            # A. 构造标准日志对象 (时间戳 + 消息)
-            log_entry = {
-                "ts": int(time.time()), # 当前秒级时间戳
-                "msg": message
-            }
-            # B. 写入本地内存 (操作极快，绝对不丢数据)
-            self.current_task_logs.append(log_entry)
-            
-            # C. 触发云端同步
-            self._sync_log(task_id)
-            
-            # D. 输出到终端，方便本地排查问题
+            # 只把带 emoji 的关键信息同步到云端，终端仍然打印完整日志。
+            self._record_cloud_log(task_id, message)
             print(f"[{scene_id}] {message}")
 
         try:
@@ -476,30 +627,107 @@ class CloudWorker:
             task_type = task.get('task_type', 'video_3dgs')
             task_params = self._parse_task_params(task)
             print(f"🔧 检测到任务类型: {task_type}")
-
+            storage_path: Optional[str] = None
             if task_type in ('single_image_sam3d', 'single_image_sharp'):
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
-                storage_path = f"{user_id}/{scene_id}/raw/image.png"
+                single_image_candidates = self._build_single_image_candidates(
+                    task=task,
+                    task_params=task_params,
+                    user_id=user_id,
+                    scene_id=scene_id,
+                )
                 on_pipeline_log("下载单张图片...")
             elif task_type in ('sparse2dgs',):
-                input_path = self.CACHE_DIR / f"{scene_id}_images.zip"
-                storage_path = f"{user_id}/{scene_id}/raw/images.zip"
-                on_pipeline_log("下载多图压缩包 (images.zip)...")
+                sparse2dgs_tmpdir = tempfile.TemporaryDirectory(prefix=f"{scene_id}_sparse2dgs_")
+                sparse2dgs_tmpdir_path = Path(sparse2dgs_tmpdir.name)
+                sparse2dgs_candidates = [
+                    (
+                        sparse2dgs_tmpdir_path / "images.zip",
+                        f"{user_id}/{scene_id}/raw/images.zip",
+                        "下载多图压缩包 (images.zip)...",
+                    ),
+                    (
+                        sparse2dgs_tmpdir_path / "video.mp4",
+                        f"{user_id}/{scene_id}/raw/video.mp4",
+                        "未找到 images.zip，回退下载视频 (video.mp4)...",
+                    ),
+                ]
+                storage_path = sparse2dgs_candidates[0][1]
             else:
                 input_path = self.CACHE_DIR / f"{scene_id}.mp4"
                 storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
                 on_pipeline_log("下载视频...")
 
             try:
-                with open(input_path, 'wb') as f:
-                    res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
-                    f.write(res)
+                if task_type in ('sparse2dgs',):
+                    last_error = None
+                    for candidate_input_path, candidate_storage_path, download_message in sparse2dgs_candidates:
+                        on_pipeline_log(download_message)
+                        try:
+                            with open(candidate_input_path, 'wb') as f:
+                                res = self.supabase.storage.from_(self.BUCKET_NAME).download(candidate_storage_path)
+                                f.write(res)
+                            input_path = candidate_input_path
+                            storage_path = candidate_storage_path
+                            break
+                        except Exception as e:
+                            last_error = e
+                            if candidate_input_path.exists():
+                                try:
+                                    candidate_input_path.unlink()
+                                except OSError:
+                                    pass
+                    else:
+                        raise RuntimeError(
+                            f"既找不到 {user_id}/{scene_id}/raw/images.zip，也找不到 {user_id}/{scene_id}/raw/video.mp4: {last_error}"
+                        )
+                else:
+                    if task_type in ('single_image_sam3d', 'single_image_sharp'):
+                        last_error = None
+                        for candidate_storage_path in single_image_candidates:
+                            storage_path = candidate_storage_path
+                            parsed = urlparse(candidate_storage_path)
+                            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                                candidate_suffix = Path(unquote(parsed.path)).suffix.lower()
+                            else:
+                                candidate_suffix = Path(candidate_storage_path).suffix.lower()
+                            if candidate_suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+                                candidate_suffix = ".png"
+                            candidate_input_path = self.CACHE_DIR / f"{scene_id}{candidate_suffix}"
+                            try:
+                                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                                    req = Request(candidate_storage_path, headers={"User-Agent": "BrainDance-Worker/1.0"})
+                                    with urlopen(req, timeout=30) as resp:
+                                        content = resp.read()
+                                    with open(candidate_input_path, 'wb') as f:
+                                        f.write(content)
+                                else:
+                                    with open(candidate_input_path, 'wb') as f:
+                                        res = self.supabase.storage.from_(self.BUCKET_NAME).download(candidate_storage_path)
+                                        f.write(res)
+                                input_path = candidate_input_path
+                                storage_path = candidate_storage_path
+                                break
+                            except Exception as e:
+                                last_error = e
+                                if candidate_input_path.exists():
+                                    try:
+                                        candidate_input_path.unlink()
+                                    except OSError:
+                                        pass
+                        else:
+                            raise RuntimeError(
+                                f"单图素材下载失败，已尝试路径: {single_image_candidates}，最后错误: {last_error}"
+                            )
+                    else:
+                        with open(input_path, 'wb') as f:
+                            res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
+                            f.write(res)
             except Exception as e:
-                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
-
+                failed_path = storage_path or "unknown"
+                raise RuntimeError(f"资源下载失败 (路径: {failed_path}): {e}") from e
             task_output_dir = self.CACHE_DIR / user_id / scene_id / "output"
             task_output_dir.mkdir(parents=True, exist_ok=True)
-
             if task_type == "video_dual_chain":
                 self._run_video_dual_chain(
                     task=task,
@@ -533,8 +761,7 @@ class CloudWorker:
             
             # 1. 尝试将错误信息记录到云端日志，让用户知道死在哪一步了
             try:
-                self.current_task_logs.append({"ts": int(time.time()), "msg": f"❌ 严重错误: {str(e)}"})
-                self._sync_log(task_id)
+                self._record_cloud_log(task_id, f"❌ 严重错误: {str(e)}")
             except:
                 pass # 如果这时候连网都断了，就放弃写日志
             
@@ -560,6 +787,12 @@ class CloudWorker:
                     print(f"🗑️ 已清空任务工作区: {task_output_dir.name}")
                 except Exception as e:
                     print(f"⚠️ 清理工作区失败: {e}")
+
+            if 'sparse2dgs_tmpdir' in locals():
+                try:
+                    sparse2dgs_tmpdir.cleanup()
+                except Exception as e:
+                    print(f"⚠️ 清理 sparse2dgs 临时下载目录失败: {e}")
 
             # 3. 重置日志
             self.current_task_logs = []
