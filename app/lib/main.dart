@@ -10,10 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
-import 'pages/record.dart';
-import 'pages/generate.dart';
+import 'pages/time_peeling.dart';
 import 'pages/community.dart';
-import 'pages/settings.dart';
+import 'pages/create_guide.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -394,13 +393,11 @@ class MainScreen extends ConsumerWidget {
       case 0:
         return RecallPage(); // 页面0: 主页：过往回忆
       case 1:
-        return RecordPage(); // 页面1: 相机记录
+        return const TimePeelingPage(); // 页面1: 时间切片（占位）
       case 2:
-        return GeneratePage(); // 页面2: 图文生成
+        return const CommunityPage(); // 页面2: 社区
       case 3:
-        return const CommunityPage(); // 页面3: 社区
-      case 4:
-        return SettingsPage(homeRef: ref); // 页面4: 设置
+        return const CreateGuidePage(); // 页面3: 创作引导
     }
     return RecallPage();
   }
@@ -413,7 +410,6 @@ class MainScreen extends ConsumerWidget {
     return Scaffold(
       extendBody: true,
       body: BDPageBackdrop(
-        darken: pageIndex == 1,
         child: isLoading
             ? const Center(child: CircularProgressIndicator())
             : Stack(
@@ -451,20 +447,17 @@ class MainScreen extends ConsumerWidget {
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
-                          icon: Icons.camera_rounded,
-                          label: textLocalize("record"),
-                        ),
-                        NavIslandItem(
-                          icon: Icons.auto_awesome_rounded,
-                          label: textLocalize("generate"),
+                          icon: Icons.layers_rounded,
+                          label: textLocalize("timepeeling"),
                         ),
                         NavIslandItem(
                           icon: Icons.public_rounded,
                           label: textLocalize("community"),
                         ),
                         NavIslandItem(
-                          icon: Icons.settings_rounded,
-                          label: textLocalize("settings"),
+                          icon: Icons.add_rounded,
+                          label: textLocalize("create"),
+                          isLarge: true,
                         ),
                       ],
                     ),

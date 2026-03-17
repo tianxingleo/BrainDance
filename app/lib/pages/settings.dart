@@ -9,15 +9,14 @@ import 'package:braindance/pages/settabs/settab3.dart';
 import 'package:braindance/pages/settabs/settab4.dart';
 import '../widgets/bd_surfaces.dart';
 
-class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.homeRef});
-  final WidgetRef homeRef;
+class SettingsPage extends ConsumerStatefulWidget {
+  const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState(); // 创建状态
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage>
+class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
   late final ScrollController scrollController;
@@ -84,20 +83,33 @@ class _SettingsPageState extends State<SettingsPage>
       body: BDPageBackdrop(
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.only(bottom: 96),
+            padding: const EdgeInsets.only(bottom: 24),
             child: Column(
               children: [
                 BDPageHeader(
                   title: textLocalize("settings"),
                   subtitle: '调整账户、偏好和本地设备行为，保持整套界面一致。',
-                  trailing: BDStatusPill(
-                    label: isDark ? 'NIGHT' : 'DAY',
-                    icon: isDark
-                        ? Icons.dark_mode_rounded
-                        : Icons.wb_sunny_rounded,
-                    color: isDark
-                        ? BDDesign.colorMutedBlueLight
-                        : BDDesign.colorMutedBlue,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      BDStatusPill(
+                        label: isDark ? 'NIGHT' : 'DAY',
+                        icon: isDark
+                            ? Icons.dark_mode_rounded
+                            : Icons.wb_sunny_rounded,
+                        color: isDark
+                            ? BDDesign.colorMutedBlueLight
+                            : BDDesign.colorMutedBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: textColor,
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
                   ),
                 ),
                 Padding(
@@ -152,7 +164,7 @@ class _SettingsPageState extends State<SettingsPage>
                       key: ValueKey<int>(tabController.index),
                       controller: tabController,
                       children: [
-                        setTab1(onUpdate, widget.homeRef),
+                        setTab1(onUpdate, ref),
                         setTab2(onUpdate, context),
                         setTab3(context),
                         setTab4(context, scrollController),
