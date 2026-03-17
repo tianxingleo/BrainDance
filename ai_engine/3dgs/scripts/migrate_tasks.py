@@ -18,9 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from supabase import create_client
 
-# 本地 Supabase 配置（被注释的配置）
-LOCAL_URL = "http://127.0.0.1:54321"
-LOCAL_KEY = "sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz"
+# 本地 Supabase 配置（允许环境变量覆盖）
+LOCAL_URL = os.getenv("LOCAL_SUPABASE_URL", "http://127.0.0.1:54321")
+LOCAL_KEY = os.getenv("LOCAL_SUPABASE_SERVICE_ROLE_KEY", "")
 
 # 批量插入大小
 BATCH_SIZE = 100
@@ -68,12 +68,16 @@ def migrate_tasks():
     print("\n📡 连接 Supabase...")
 
     try:
+        load_dotenv()
+        if not LOCAL_KEY:
+            print("❌ 缺少 LOCAL_SUPABASE_SERVICE_ROLE_KEY，请在环境变量或 .env 中配置")
+            return False
+
         # 本地连接
         local_client = create_client(LOCAL_URL, LOCAL_KEY)
         print(f"✅ 本地连接成功：{LOCAL_URL}")
 
         # 远程连接（从 .env 读取）
-        load_dotenv()
         remote_url = os.getenv("SUPABASE_URL")
         remote_key = os.getenv("SUPABASE_KEY")
 
