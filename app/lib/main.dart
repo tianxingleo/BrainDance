@@ -19,7 +19,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
-import 'services/notification_service.dart';
+import 'services/task_notification_service.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
@@ -422,7 +422,6 @@ class MainScreen extends ConsumerWidget {
               switchOutCurve: Curves.easeInCubic,
               child: Container(
                 key: ValueKey<int>(pageIndex),
-                child: getPage(pageIndex, ref),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(32),
                   gradient: LinearGradient(
@@ -434,6 +433,7 @@ class MainScreen extends ConsumerWidget {
                     end: Alignment.bottomRight,
                   ),
                 ),
+                child: getPage(pageIndex, ref),
               ),
             ),
       bottomNavigationBar: isRecording

@@ -90,8 +90,24 @@ class SupabaseConfig {
 |---|------|---------|
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `da3_feed_forward_3dgs` | 视频转3DGS（前馈快速生成） | `video.mp4` |
+| `da3_sugar` / `da3+sugar` | SuGaR 使用 mesh/SDF 约束 3DGS（质量更高、速度更慢） | `video.mp4` |
+| `da3_2dgs` / `da3+2dgs` | Nerfstudio 3DGS 的替代路线（输出 2DGS） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
+| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `images.zip` |
+
+**task_params 字段说明 (sparse2dgs):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `iterations` | int | 7000 | Sparse2DGS 训练迭代数 |
+| `resolution` | int | 2 | 对应 `train.py -r`，值越小分辨率越高 |
+| `depth_ratio` | float | 1.0 | 深度损失权重比例参数 |
+| `lambda_dist` | float | 1000 | 几何约束损失权重 |
+| `conda_env` | string | `Braindance` | 运行 Sparse2DGS 的 Conda 环境名 |
+| `sparse2dgs_repo_path` | string | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
+| `colmap_matcher` | string | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
+| `colmap_mapper` | string | `mapper` | COLMAP 解算器（可选 `global_mapper`） |
 
 **task_params 字段说明 (single_image_sam3d):**
 
@@ -105,6 +121,48 @@ class SupabaseConfig {
 |-----|------|--------|------|
 | `frame_interval` | int | 5 | 前馈生成时的帧间隔，值越小使用帧数越多（1=使用全部帧） |
 | `conf_threshold` | float | 0.5 | 深度置信度阈值，值越高过滤越严格 |
+
+**task_params 字段说明 (da3_sugar / da3+sugar):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `regularization` | string | `dn_consistency` | SuGaR正则化：`dn_consistency` / `density` / `sdf` |
+| `refinement_time` | string | `short` | 精炼时长：`short` / `medium` / `long` |
+| `high_poly` | bool | `false` | 完整流程时是否高面数mesh |
+| `fast_mode` | bool | `true` | 是否走fast模式（仅coarse，通常输出PLY更快） |
+| `gpu_index` | int | 环境默认 | 绑定GPU索引（会转成 `CUDA_VISIBLE_DEVICES`） |
+| `sugar_repo_path` | string | 自动探测 | SuGaR仓库路径 |
+| `da3_repo_path` | string | 自动探测 | DA3仓库路径 |
+| `sugar_scene_name` | string | `scene_id` | 覆盖SuGaR内部场景名 |
+
+**task_params 字段说明 (da3_2dgs / da3+2dgs):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `iterations` | int | 30000 | 2DGS 训练迭代数（高质量建议 30000） |
+| `gpu_index` | int | 1 | 绑定 GPU 索引（默认第二张卡） |
+| `extract_fps` | float | 2.0 | 抽帧帧率（每秒抽取图片数） |
+| `max_edge` | int | 1920 | 抽帧后最长边限制 |
+| `blur_keep_ratio` | float | 0.85 | 去模糊筛选后保留比例 |
+| `max_images` | int | `MAX_IMAGES` | 参与重建的最大图片数（超出会均匀采样） |
+| `min_images` | int | 24 | 最小有效帧数门槛（低于此值直接失败） |
+| `enable_scene_analysis` | bool | false | 是否启用 AI 质检 |
+| `render_after_train` | bool | false | 训练后是否执行 render.py |
+| `dgs_repo_path` | string | 自动探测 | 2DGS 仓库路径（可覆盖） |
+
+**论文 Pipeline 选型建议（重点）:**
+
+| task_type | 适合什么场景 | 输入要求 | 推荐起步参数 |
+|---|---|---|---|
+| `da3_sugar` / `da3+sugar` | 质量优先且可接受更慢速度（mesh/SDF 约束 3DGS） | `raw/video.mp4` | `regularization=dn_consistency`, `refinement_time=short`, `fast_mode=true` |
+| `da3_2dgs` / `da3+2dgs` | 希望替代 Nerfstudio 3DGS 并输出 2DGS | `raw/video.mp4`（建议连续走拍视频） | `iterations=30000`, `extract_fps=2.0`, `min_images=24` |
+| `sparse2dgs` | 少量图片直接生成 2DGS | `raw/images.zip`（至少 3 张） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
+
+**上传约定（非常关键）:**
+
+1. `da3_2dgs` / `da3+2dgs` 必须上传视频到 `{user_id}/{scene_id}/raw/video.mp4`。
+2. `sparse2dgs` 使用 `images.zip` 到 `{user_id}/{scene_id}/raw/images.zip`。
+3. `da3_2dgs` 不支持单图或少量图片回退。
 
 **创建视频任务示例 (Dart):**
 ```dart
@@ -127,6 +185,57 @@ final res = await supabase.from('processing_tasks').insert({
   'task_params': {
     'frame_interval': 2,  // 使用更多帧以提高质量
     'conf_threshold': 0.5  // 深度置信度阈值
+  },
+  'status': 'pending'
+}).select();
+```
+
+**创建 DA3+SuGaR 视频任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_sugar_001',
+  'display_name': '客厅漫游-DA3+SuGaR',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'da3_sugar',
+  'task_params': {
+    'regularization': 'dn_consistency',
+    'refinement_time': 'short',
+    'fast_mode': true,
+    'high_poly': false
+  },
+  'status': 'pending'
+}).select();
+```
+
+**创建 DA3+2DGS 视频任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_2dgs_001',
+  'display_name': '室内走拍-DA3+2DGS',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'da3_2dgs',
+  'task_params': {
+    'iterations': 30000,
+    'gpu_index': 1,
+    'extract_fps': 2.0,
+    'min_images': 24
+  },
+  'status': 'pending'
+}).select();
+```
+
+**创建 Sparse2DGS 多图任务示例 (Dart):**
+```dart
+final res = await supabase.from('processing_tasks').insert({
+  'scene_id': 'scene_20260313_sparse2dgs_001',
+  'display_name': '展柜小场景-Sparse2DGS',
+  'user_id': supabase.auth.currentUser!.id,
+  'task_type': 'sparse2dgs',
+  'task_params': {
+    'iterations': 7000,
+    'resolution': 2,
+    'depth_ratio': 1.0,
+    'lambda_dist': 1000
   },
   'status': 'pending'
 }).select();
@@ -203,6 +312,7 @@ graph TD
     C --> E[processed/ 抽帧图片]
     C --> F[output/ 训练结果]
     D --> G[video.mp4<br/>视频任务<br/>task_type: video_3dgs]
+    D --> N[video.mp4<br/>视频任务<br/>task_type: da3_2dgs]
     D --> H[image.png<br/>单图任务<br/>task_type: single_image_sam3d]
     E --> I[frame_001.jpg]
     E --> J[frame_002.jpg]

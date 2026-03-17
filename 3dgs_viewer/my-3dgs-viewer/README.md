@@ -1,42 +1,69 @@
 # my-3dgs-viewer
 
-This template should help get you started developing with Vue 3 in Vite.
+`my-3dgs-viewer/` 是 BrainDance 当前使用的 Web 端 3DGS 查看器，基于 `Vue 3 + Vite + Three.js`，核心组件是 `src/components/GaussianViewer.vue`。
 
-## Recommended IDE Setup
+## 当前能力
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+结合现有代码，查看器已经包含：
 
-## Recommended Browser Setup
+- 3D Gaussian Splatting 场景加载
+- Arcball 交互控制
+- 镜头位姿读取与飞跃
+- 基于标签的简单搜索与跳转
+- 自动旋转
+- 调试信息与手动相机微调
+- 焦距面板
+- WebXR / VR 入口检测
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd) 
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+入口文件：
 
-## Type Support for `.vue` Imports in TS
+- `src/App.vue`
+- `src/components/GaussianViewer.vue`
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
+## 依赖
 
-## Customize configuration
+项目当前关键依赖见 `package.json`：
 
-See [Vite Configuration Reference](https://vite.dev/config/).
+- `vue`
+- `three`
+- `@mkkellogg/gaussian-splats-3d`
+- `gsap`
+- `@sparkjsdev/spark`
 
-## Project Setup
+## 本地运行
 
-```sh
+```bash
+cd 3dgs_viewer/my-3dgs-viewer
 npm install
-```
-
-### Compile and Hot-Reload for Development
-
-```sh
 npm run dev
 ```
 
-### Type-Check, Compile and Minify for Production
+生产构建：
 
-```sh
+```bash
 npm run build
 ```
+
+预览构建结果：
+
+```bash
+npm run preview
+```
+
+## 模型文件位置
+
+查看器默认从 `public/models/` 读取相关资源，当前仓库里已经包含示例文件：
+
+- `public/models/webgl_poses.json`
+- `public/models/webgl_poses_with_tags.json`
+- `public/models/transforms.json`
+
+如果要接入新的模型资源，通常需要同步以下内容：
+
+- 高斯模型文件
+- 位姿 JSON
+- 可选的参考图片与标签数据
+
+## 说明
+
+这个目录只负责 Web 端查看器本身。完整的模型生成、位姿导出和同步脚本位于上级目录 [3dgs_viewer/README.md](/home/ltx/projects/BrainDance/3dgs_viewer/README.md)。

@@ -199,6 +199,10 @@ class CloudWorker:
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
                 storage_path = f"{user_id}/{scene_id}/raw/image.png"
                 on_pipeline_log("下载单张图片...")
+            elif task_type in ('sparse2dgs',):
+                input_path = self.CACHE_DIR / f"{scene_id}_images.zip"
+                storage_path = f"{user_id}/{scene_id}/raw/images.zip"
+                on_pipeline_log("下载多图压缩包 (images.zip)...")
             else:
                 # video_3dgs 默认路径
                 input_path = self.CACHE_DIR / f"{scene_id}.mp4"
@@ -211,7 +215,7 @@ class CloudWorker:
                     res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
                     f.write(res)
             except Exception as e:
-                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}")
+                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
 
             # =================== 阶段 C: 执行引擎 ===================
             # 1. 获取任务类型和参数
