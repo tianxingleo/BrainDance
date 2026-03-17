@@ -110,11 +110,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           request.response.headers.add('Access-Control-Allow-Origin', '*');
           if (filePath.endsWith('.ply') ||
               filePath.endsWith('.splat') ||
-              filePath.endsWith('.ksplat'))
+              filePath.endsWith('.ksplat')) {
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
             );
+          }
           await request.response.addStream(file.openRead());
           await request.response.close();
           return;
@@ -137,9 +138,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final List<int> bytes = data.buffer.asUint8List();
 
         String contentType = 'text/plain';
-        if (path.endsWith('.html'))
+        if (path.endsWith('.html')) {
           contentType = 'text/html; charset=utf-8';
-        else if (path.endsWith('.js'))
+        } else if (path.endsWith('.js'))
           contentType = 'application/javascript; charset=utf-8';
         else if (path.endsWith('.css'))
           contentType = 'text/css; charset=utf-8';

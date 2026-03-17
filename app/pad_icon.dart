@@ -12,7 +12,11 @@ void main() {
   int transparent = 0, opaque = 0;
   for (int y = 0; y < image.height; y += 5) {
     for (int x = 0; x < image.width; x += 5) {
-      if (image.getPixel(x, y).a < 128) transparent++; else opaque++;
+      if (image.getPixel(x, y).a < 128) {
+        transparent++;
+      } else {
+        opaque++;
+      }
     }
   }
   print('transparent pixels: $transparent, opaque pixels: $opaque');

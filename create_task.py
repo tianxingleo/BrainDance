@@ -46,12 +46,16 @@ def create_3dgs_task(user_id: str, scene_id: str, video_path: str = None):
         "user_id": user_id,
         "scene_id": scene_id,
         "status": "pending",
-        "task_type": "video_3dgs",
-        "task_params": {}
+        "task_type": "video_dual_chain",
+        "task_params": {
+            "slow_pipeline": "video_3dgs",
+            "sam3d_vram_threshold_gb": 25,
+            "best_frame_sample_count": 8,
+        }
     }
     
     print("📝 正在向 processing_tasks 表插入任务数据...")
-    response = supabase.table("processing_tasks").insert(task_data).execute()
+    response = supabase.table(os.getenv("SUPABASE_TABLE", "processing_tasks")).insert(task_data).execute()
     
     if response.data:
         task_id = response.data[0]['id']

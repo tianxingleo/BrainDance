@@ -841,7 +841,9 @@ class _RecallPageState extends State<RecallPage> {
                         final transformMatrix = frame['transform_matrix'];
                         final frameSim = frame['similarity'] as double?;
 
-                        final imageUrl = "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
+                        final imageUrl = Supabase.instance.client.storage
+                            .from('braindance-assets')
+                            .getPublicUrl('$userId/$sceneId/output/images/$imageName');
 
                         return GestureDetector(
                           onTap: () {
@@ -853,30 +855,49 @@ class _RecallPageState extends State<RecallPage> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8.0),
                               color: isDark ? darkInput : theme.grayColor3,
-                              image: DecorationImage(
-                                image: NetworkImage(imageUrl),
-                                fit: BoxFit.cover,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8.0),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.network(
+                                    imageUrl,
+                                    fit: BoxFit.cover,
+                                    loadingBuilder: (context, child, loadingProgress) {
+                                      if (loadingProgress == null) return child;
+                                      return Center(
+                                        child: CircularProgressIndicator(
+                                          value: loadingProgress.expectedTotalBytes != null
+                                              ? loadingProgress.cumulativeBytesLoaded /
+                                                  loadingProgress.expectedTotalBytes!
+                                              : null,
+                                        ),
+                                      );
+                                    },
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return const Center(child: Icon(Icons.broken_image, color: Colors.grey));
+                                    },
+                                  ),
+                                  if (frameSim != null)
+                                    Positioned(
+                                      bottom: 4,
+                                      left: 4,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withAlpha(100),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          '${(frameSim * 100).toStringAsFixed(1)}%',
+                                          style: const TextStyle(color: Colors.white, fontSize: 10),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                            child: frameSim != null ? Stack(
-                              children: [
-                                Positioned(
-                                  bottom: 4,
-                                  left: 4,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withAlpha(100),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      '${(frameSim * 100).toStringAsFixed(1)}%',
-                                      style: const TextStyle(color: Colors.white, fontSize: 10),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ) : null,
                           ),
                         );
                       },

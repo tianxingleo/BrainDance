@@ -69,11 +69,11 @@ class DA3FeedForwardPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
 
-        self.log("    -> 正在进行 FFmpeg 抽帧 (1 FPS, 最长边限制 1920px, Lanczos 超采样)...")
+        self.log("    -> 正在进行 FFmpeg 抽帧 (5 FPS, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-vf", "fps=5,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
                 "-q:v", "2",
                 "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
                 str(temp_dir / "frame_%05d.jpg")

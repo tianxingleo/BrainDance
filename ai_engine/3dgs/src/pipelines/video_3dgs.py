@@ -2,7 +2,6 @@
 # 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
 # 逻辑：1. 视频抽帧与预处理 2. AI质检 3. 位姿解算 4. AI语义分割 5. 3DGS训练与导出
 # 包含：run主函数、各模块实例化、流程控制逻辑、日志回调机制
-import os
 import time
 import shutil
 import subprocess
@@ -51,7 +50,7 @@ class Video3DGSPipeline(BasePipeline):
         cfg = PipelineConfig(
             project_name=self.scene_id,  # 传入场景名
             video_path=video_path_obj,   # 传入视频路径
-            mapper_type=params.get('mapper_type', os.getenv("MAPPER_TYPE", "glomap"))
+            mapper_type=params.get('mapper_type', PipelineConfig().mapper_type)
         )
         
         # 单独设置工作目录 (因为 PipelineConfig 可能默认计算的是别的路径)
@@ -65,6 +64,7 @@ class Video3DGSPipeline(BasePipeline):
             #    如果字典里没有这个 key，它会返回 None (不会报错)，条件不成立。
 
             cfg.iterations = 7000 
+            cfg.training_iterations = 7000
             # 2. 修改配置 (cfg)。
             #    cfg 是全局配置对象，默认 iterations 可能设的是 30000 (标准质量)。
             #    这里直接把它改为 7000，意味着训练步数减少，速度变快，但质量会下降。
@@ -123,11 +123,11 @@ class Video3DGSPipeline(BasePipeline):
         temp_dir = cfg.project_dir / "temp_extract"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
-        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=1, 最长边限制 1920px, Lanczos 超采样)...")
+        self.log(f"    -> 正在进行 FFmpeg 抽帧 (FPS=5, 最长边限制 1920px, Lanczos 超采样)...")
         try:
             subprocess.run([
                 "ffmpeg", "-y", "-i", str(dest_video_path),
-                "-vf", "fps=1,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
+                "-vf", "fps=5,scale=1920:1920:force_original_aspect_ratio=decrease:flags=lanczos",
                 "-q:v", "2",
                 "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
                 str(temp_dir / "frame_%05d.jpg")
@@ -217,7 +217,7 @@ class Video3DGSPipeline(BasePipeline):
         # ==========================================
         # Step 4: 3DGS 训练与导出
         # ==========================================
-        self.log(f"🧠 [4/4] 开始 3DGS 训练 (迭代次数: {cfg.iterations})...")
+        self.log(f"🧠 [4/4] 开始 3DGS 训练 (迭代次数: {cfg.training_iterations})...")
         try:
             # 开始训练
             nerf_engine.train()
@@ -234,7 +234,11 @@ class Video3DGSPipeline(BasePipeline):
             supabase_client = self.context.get('supabase')
             if supabase_client:
                 anchor_extractor = SpatialAnchorExtractor(cfg, supabase_client)
-                anchor_extractor.extract_and_save(self.scene_id, log_callback=self.log)
+                anchor_extractor.extract_and_save(
+                    self.scene_id,
+                    user_id=self.context.get("user_id"),
+                    log_callback=self.log
+                )
             else:
                 self.log("⚠️ 未找到 Supabase 客户端，跳过空间语义锚点提取")
 

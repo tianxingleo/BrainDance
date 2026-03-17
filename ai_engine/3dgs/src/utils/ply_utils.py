@@ -81,7 +81,6 @@ def compress_ply_to_splat(
     required = {
         "x", "y", "z",
         "opacity",
-        "scale_0", "scale_1", "scale_2",
         "f_dc_0", "f_dc_1", "f_dc_2",
         "rot_0", "rot_1", "rot_2", "rot_3",
     }
@@ -89,15 +88,23 @@ def compress_ply_to_splat(
     if missing:
         raise RuntimeError(f"PLY 字段不完整，缺失: {', '.join(missing)}")
 
+    scale_fields = sorted([name for name in fields if name.startswith("scale_")], key=lambda x: int(x.split("_")[-1]))
+    if len(scale_fields) < 2:
+        raise RuntimeError(f"PLY 缺少必要的 scale 字段，当前仅有: {', '.join(scale_fields) or '无'}")
+
     opacities = 1.0 / (1.0 + np.exp(-vertex["opacity"]))
     mask = opacities > float(opacity_threshold)
     vertex = vertex[mask]
     opacities = opacities[mask]
 
     positions = np.vstack((vertex["x"], vertex["y"], vertex["z"])).T.astype(np.float32)
-    scales = np.exp(
-        np.vstack((vertex["scale_0"], vertex["scale_1"], vertex["scale_2"])).T
-    ).astype(np.float32)
+    scale_values = [np.asarray(vertex[name], dtype=np.float32) for name in scale_fields]
+    if len(scale_values) == 2:
+        # Sparse2DGS / 2DGS 只导出二维尺度。为兼容 .splat 交付格式，补一个保守的厚度轴。
+        scale_values.append(np.minimum(scale_values[0], scale_values[1]))
+    elif len(scale_values) > 3:
+        scale_values = scale_values[:3]
+    scales = np.exp(np.vstack(scale_values).T).astype(np.float32)
 
     sh_c0 = 0.28209479177387814
     colors = (0.5 + sh_c0 * np.vstack((vertex["f_dc_0"], vertex["f_dc_1"], vertex["f_dc_2"])).T) * 255.0
@@ -122,6 +129,61 @@ def compress_ply_to_splat(
             f.write(rots_uint8[i].tobytes())
 
     return str(output)
+
+
+def rotate_gaussian_ply_x180(
+    ply_path: str,
+    output_path: Optional[str] = None,
+) -> str:
+    """
+    将高斯 PLY 整体绕 X 轴旋转 180 度。
+
+    这个变换等价于:
+    - 位置: (x, y, z) -> (x, -y, -z)
+    - 旋转: 左乘 qx180 = (w, x, y, z) = (0, 1, 0, 0)
+
+    适用于“前后反了且上下倒了”的整体朝向纠正。
+    """
+    if not HAS_PLYFILE:
+        raise RuntimeError("缺少 plyfile 依赖，无法执行 PLY 旋转修正")
+
+    in_path = Path(ply_path)
+    out_path = Path(output_path) if output_path else in_path
+
+    plydata = PlyData.read(str(in_path))
+    vertex = plydata["vertex"]
+    fields = set(vertex.data.dtype.names or [])
+    rotated = vertex.data.copy()
+
+    if {"x", "y", "z"}.issubset(fields):
+        rotated["y"] = -rotated["y"]
+        rotated["z"] = -rotated["z"]
+
+    if {"nx", "ny", "nz"}.issubset(fields):
+        rotated["ny"] = -rotated["ny"]
+        rotated["nz"] = -rotated["nz"]
+
+    if {"rot_0", "rot_1", "rot_2", "rot_3"}.issubset(fields):
+        w = np.asarray(rotated["rot_0"], dtype=np.float32)
+        x = np.asarray(rotated["rot_1"], dtype=np.float32)
+        y = np.asarray(rotated["rot_2"], dtype=np.float32)
+        z = np.asarray(rotated["rot_3"], dtype=np.float32)
+
+        # q' = qx180 * q, qx180 = (0, 1, 0, 0)
+        rotated["rot_0"] = -x
+        rotated["rot_1"] = w
+        rotated["rot_2"] = -z
+        rotated["rot_3"] = y
+
+    elements = []
+    for element in plydata.elements:
+        if element.name == "vertex":
+            elements.append(PlyElement.describe(rotated, "vertex"))
+        else:
+            elements.append(element)
+
+    PlyData(elements, text=plydata.text, byte_order=plydata.byte_order).write(str(out_path))
+    return str(out_path)
 
 
 def convert_ply_to_ksplat(
@@ -189,3 +251,73 @@ def compress_model_for_delivery(
         str(out_path),
         opacity_threshold=opacity_threshold,
     )
+
+
+def _rotation_matrix_from_euler_deg(rx: float, ry: float, rz: float) -> np.ndarray:
+    """按 XYZ 欧拉角（度）生成旋转矩阵。"""
+    rx_r = np.deg2rad(rx)
+    ry_r = np.deg2rad(ry)
+    rz_r = np.deg2rad(rz)
+
+    cx, sx = np.cos(rx_r), np.sin(rx_r)
+    cy, sy = np.cos(ry_r), np.sin(ry_r)
+    cz, sz = np.cos(rz_r), np.sin(rz_r)
+
+    rx_m = np.array(
+        [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]],
+        dtype=np.float64,
+    )
+    ry_m = np.array(
+        [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]],
+        dtype=np.float64,
+    )
+    rz_m = np.array(
+        [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+
+    return rz_m @ ry_m @ rx_m
+
+
+def rotate_ply_vertices_euler(
+    ply_path: str,
+    rx_deg: float = -90.0,
+    ry_deg: float = 0.0,
+    rz_deg: float = 0.0,
+    output_path: Optional[str] = None,
+) -> str:
+    """
+    对 PLY 顶点坐标做欧拉角旋转（默认 X 轴 -90°）。
+    用于修正单图 SAM3D 模型朝向，保证查看视角更接近输入图片。
+    """
+    if not HAS_PLYFILE:
+        raise RuntimeError("缺少 plyfile 依赖，无法执行 PLY 旋转")
+
+    src = Path(ply_path)
+    dst = Path(output_path) if output_path else src
+
+    plydata = PlyData.read(str(src))
+    vertex = plydata["vertex"]
+    fields = set(vertex.data.dtype.names or ())
+    for axis in ("x", "y", "z"):
+        if axis not in fields:
+            raise RuntimeError(f"PLY 缺少坐标字段: {axis}")
+
+    pts = np.stack([vertex["x"], vertex["y"], vertex["z"]], axis=1).astype(np.float64)
+    rot = _rotation_matrix_from_euler_deg(rx_deg, ry_deg, rz_deg)
+    pts_rot = (pts @ rot.T).astype(vertex["x"].dtype)
+
+    vertex_data = vertex.data.copy()
+    vertex_data["x"] = pts_rot[:, 0]
+    vertex_data["y"] = pts_rot[:, 1]
+    vertex_data["z"] = pts_rot[:, 2]
+
+    elements = []
+    for el in plydata.elements:
+        if el.name == "vertex":
+            elements.append(PlyElement.describe(vertex_data, "vertex"))
+        else:
+            elements.append(el)
+
+    PlyData(elements, text=plydata.text, byte_order=plydata.byte_order).write(str(dst))
+    return str(dst)

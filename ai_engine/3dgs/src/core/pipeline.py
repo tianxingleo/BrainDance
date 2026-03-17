@@ -1,8 +1,3 @@
-import os
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
-os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
-
 # src/core/pipeline.py
 # 功能：实现3DGS生成主流水线，协调各模块完成完整3D重建流程
 # 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
