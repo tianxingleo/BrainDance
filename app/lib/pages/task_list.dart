@@ -661,7 +661,7 @@ class _TaskListPageState extends State<TaskListPage> {
       return priorityA.compareTo(priorityB);
     });
 
-    return sortedStatuses.map((status) {
+    return sortedStatuses.map<Widget>((status) {
       final category = statusCategories.firstWhere(
         (c) => c.status == status,
         orElse: () => StatusCategory(
@@ -681,7 +681,6 @@ class _TaskListPageState extends State<TaskListPage> {
         tasks: _tasksByStatus[status]!,
         taskLogs: _taskLogs,
         initiallyExpanded: _expandedStatus[status] ?? true,
-        status: status,
         isDark: isDark,
         textColor: textColor,
         onTaskTap: (task) => _onTaskTap(task),

@@ -20,6 +20,7 @@ import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
 import 'services/task_notification_service.dart';
+import 'floating_nav_bar.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
@@ -416,129 +417,54 @@ class MainScreen extends ConsumerWidget {
       extendBody: true,
       body: isLoading
           ? Center(child: CircularProgressIndicator())
-          : AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              child: Container(
-                key: ValueKey<int>(pageIndex),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(32),
-                  gradient: LinearGradient(
-                    colors: [
-                      TDTheme.of(context).brandColor1,
-                      TDTheme.of(context).brandColor4,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+          : Stack(
+              children: [
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 320),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: Container(
+                    key: ValueKey<int>(pageIndex),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(32),
+                      gradient: LinearGradient(
+                        colors: [
+                          TDTheme.of(context).brandColor1,
+                          TDTheme.of(context).brandColor4,
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: getPage(pageIndex, ref),
                   ),
                 ),
-                child: getPage(pageIndex, ref),
-              ),
-            ),
-      bottomNavigationBar: isRecording
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 18, left: 18, right: 18),
-              child: PhysicalModel(
-                color: Colors.transparent,
-                elevation: 16,
-                borderRadius: BorderRadius.circular(32),
-                shadowColor: Colors.black.withOpacity(0.70),
-                clipBehavior: Clip.antiAlias,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppConfig.isNightMode
-                        ? const Color(0xFF18181C)
-                        : const Color(0xFF23232A),
-                    borderRadius: BorderRadius.circular(32),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 24,
-                        offset: Offset(16, 16),
+                if (!isRecording)
+                  FloatingNavBar(
+                    currentIndex: pageIndex,
+                    onTap: (index) {
+                      ref.read(pageIndexProvider.notifier).state = index;
+                    },
+                    items: [
+                      NavIslandItem(
+                        icon: Icons.history_edu_rounded,
+                        label: textLocalize("recall"),
+                      ),
+                      NavIslandItem(
+                        icon: Icons.camera_rounded,
+                        label: textLocalize("record"),
+                      ),
+                      NavIslandItem(
+                        icon: Icons.auto_awesome_rounded,
+                        label: textLocalize("generate"),
+                      ),
+                      NavIslandItem(
+                        icon: Icons.settings_rounded,
+                        label: textLocalize("settings"),
                       ),
                     ],
                   ),
-                  child: TDBottomTabBar(
-                    TDBottomTabBarBasicType.iconText,
-                    componentType: TDBottomTabBarComponentType.normal,
-                    useVerticalDivider: false,
-                    centerDistance: 0,
-                    barHeight: 90,
-                    navigationTabs: [
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("recall"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.home_rounded,
-                          size: selectedSize,
-                          color: brandColor,
-                        ),
-                        unselectedIcon: Icon(
-                          Icons.home_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 0,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("record"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.videocam_rounded,
-                          size: selectedSize,
-                          color: brandColor,
-                        ),
-                        unselectedIcon: Icon(
-                          Icons.videocam_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 1,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("generate"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.image_rounded,
-                          size: selectedSize,
-                          color: brandColor,
-                        ),
-                        unselectedIcon: Icon(
-                          Icons.image_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 2,
-                      ),
-                      TDBottomTabBarTabConfig(
-                        tabText: textLocalize("settings"),
-                        selectTabTextStyle: selectedTextStyle,
-                        unselectTabTextStyle: unselectedTextStyle,
-                        selectedIcon: Icon(
-                          Icons.settings_rounded,
-                          size: selectedSize,
-                          color: brandColor,
-                        ),
-                        unselectedIcon: Icon(
-                          Icons.settings_outlined,
-                          size: unselectedSize,
-                          color: lightBrandColor,
-                        ),
-                        onTap: () =>
-                            ref.read(pageIndexProvider.notifier).state = 3,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              ],
             ),
     );
   }
