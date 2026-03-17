@@ -61,63 +61,91 @@ class FloatingNavBar extends StatelessWidget {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: List.generate(items.length, (index) {
-                final isSelected = currentIndex == index;
-                final item = items[index];
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 420;
 
-                return GestureDetector(
-                  onTap: () => onTap(index),
-                  behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: BDMotion.durationNormal,
-                    curve: BDMotion.curveFluid,
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isSelected ? 18.0 : 12.0,
-                      vertical: 8.0,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? selectedBackground
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(22.0),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedScale(
-                          scale: isSelected ? 1.1 : 1.0,
-                          duration: BDMotion.durationNormal,
-                          curve: BDMotion.curveFluid,
-                          child: Icon(
-                            item.icon,
-                            color: isSelected ? selectedColor : unselectedColor,
-                            size: 22,
-                          ),
-                        ),
-                        AnimatedSize(
-                          duration: BDMotion.durationNormal,
-                          curve: BDMotion.curveFluid,
-                          child: isSelected
-                              ? Padding(
-                                  padding: const EdgeInsets.only(left: 8.0),
-                                  child: Text(
-                                    item.label,
-                                    style: TextStyle(
-                                      color: selectedColor,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
+                return Row(
+                  children: List.generate(items.length, (index) {
+                    final isSelected = currentIndex == index;
+                    final item = items[index];
+
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                        child: GestureDetector(
+                          onTap: () => onTap(index),
+                          behavior: HitTestBehavior.opaque,
+                          child: AnimatedContainer(
+                            duration: BDMotion.durationNormal,
+                            curve: BDMotion.curveFluid,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact
+                                  ? (isSelected ? 8.0 : 6.0)
+                                  : (isSelected ? 12.0 : 8.0),
+                              vertical: 8.0,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? selectedBackground
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(22.0),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                AnimatedScale(
+                                  scale: isSelected ? 1.1 : 1.0,
+                                  duration: BDMotion.durationNormal,
+                                  curve: BDMotion.curveFluid,
+                                  child: Icon(
+                                    item.icon,
+                                    color: isSelected
+                                        ? selectedColor
+                                        : unselectedColor,
+                                    size: 22,
+                                  ),
+                                ),
+                                if (isSelected) const SizedBox(width: 6.0),
+                                if (isSelected)
+                                  Expanded(
+                                    child: AnimatedSwitcher(
+                                      duration: BDMotion.durationNormal,
+                                      switchInCurve: BDMotion.curveFluid,
+                                      switchOutCurve: BDMotion.curveFluid,
+                                      transitionBuilder: (child, animation) {
+                                        return FadeTransition(
+                                          opacity: animation,
+                                          child: SizeTransition(
+                                            sizeFactor: animation,
+                                            axis: Axis.horizontal,
+                                            child: child,
+                                          ),
+                                        );
+                                      },
+                                      child: Text(
+                                        item.label,
+                                        key: ValueKey<String>(item.label),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: false,
+                                        style: TextStyle(
+                                          color: selectedColor,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: compact ? 11.0 : 12.0,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                )
-                              : const SizedBox.shrink(),
+                              ],
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  }),
                 );
-              }),
+              },
             ),
           ),
         ),

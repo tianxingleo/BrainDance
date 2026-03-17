@@ -12,6 +12,7 @@ import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
 import 'pages/record.dart';
 import 'pages/generate.dart';
+import 'pages/community.dart';
 import 'pages/settings.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
@@ -397,7 +398,9 @@ class MainScreen extends ConsumerWidget {
       case 2:
         return GeneratePage(); // 页面2: 图文生成
       case 3:
-        return SettingsPage(homeRef: ref); // 页面3: 设置
+        return const CommunityPage(); // 页面3: 社区
+      case 4:
+        return SettingsPage(homeRef: ref); // 页面4: 设置
     }
     return RecallPage();
   }
@@ -454,6 +457,10 @@ class MainScreen extends ConsumerWidget {
                         NavIslandItem(
                           icon: Icons.auto_awesome_rounded,
                           label: textLocalize("generate"),
+                        ),
+                        NavIslandItem(
+                          icon: Icons.public_rounded,
+                          label: textLocalize("community"),
                         ),
                         NavIslandItem(
                           icon: Icons.settings_rounded,
