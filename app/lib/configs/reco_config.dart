@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 
 class RecoConfig {
@@ -7,9 +8,6 @@ class RecoConfig {
   //程序
   static late final bool cameraEnabled;
   static late final List<CameraDescription> cameras;
-  static List<CameraDescription> frontCameras = List.empty(growable: true);
-  static List<CameraDescription> backCameras = List.empty(growable: true);
-  static List<CameraDescription> externalCameras = List.empty(growable: true);
   static CameraController? cameraController;
   //可变
   static int camNum = 0;
@@ -25,6 +23,14 @@ class RecoConfig {
     return suc;
   }
 
+  static Future<void> trySwitchCameraDescription(int index) async {
+    if (cameraController != null && cameraController!.value.isInitialized) {
+      camNum = index;
+      await cameraController!.setDescription(cameras[camNum]);
+      onUpdate?.call();
+    }
+  }
+
   static Future<void> cameraSwitch() async {
     camNum++;
     if (camNum == cameras.length) {
@@ -33,7 +39,7 @@ class RecoConfig {
     if ((cameraController == null) || !cameraController!.value.isInitialized) {
       await cameraInitialize();
     } else {
-      cameraController!.setDescription(cameras[camNum]);
+      await cameraController!.setDescription(cameras[camNum]);
     }
     onUpdate?.call();
   }
