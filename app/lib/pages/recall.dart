@@ -3,8 +3,10 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
+import '../configs/motion_tokens.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
+import 'recall/top_summary_card.dart';
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -223,158 +225,157 @@ class _RecallPageState extends State<RecallPage> {
     final isDark = AppConfig.isNightMode;
     final textColor = isDark
         ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
+        : BDDesign.colorInkBlack;
     final iconColor = isDark
         ? const Color(0xFFEEEEEE)
-        : const Color(0xFF333333);
+        : BDDesign.colorMutedBlue;
     return Scaffold(
-      backgroundColor: isDark ? darkBg : theme.grayColor1,
-      appBar: AppBar(
-        backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
-        centerTitle: true,
-        title: TDText(
-          textLocalize("home_page"),
-          font: theme.fontHeadlineSmall,
-          fontWeight: FontWeight.w600,
-          textColor: textColor,
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.task_alt, color: iconColor),
-            tooltip: textLocalize("task_list_title"),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const TaskListPage()),
-              );
-            },
-          ),
-          IconButton(
-            icon: AnimatedRotation(
-              turns: _isLoading ? 1 : 0,
-              duration: const Duration(milliseconds: 600),
-              child: Icon(Icons.refresh, color: iconColor),
-            ),
-            tooltip: textLocalize("recall_refresh"),
-            onPressed: () {
-              setState(() {
-                _isLoading = true;
-              });
-              _fetchModels();
-            },
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: isDark
-                ? [darkBg, darkCard]
-                : [theme.grayColor1, theme.whiteColor1],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Stack(
-          alignment: Alignment.center,
+      backgroundColor: isDark ? const Color(0xFF101014) : BDDesign.colorAshGray,
+      body: SafeArea(
+        child: Column(
           children: [
-            Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 15.0,
-                    vertical: 10.0,
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(32.0),
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      style: TextStyle(
-                        color: isDark
-                            ? const Color(0xFFFFFFFF)
-                            : const Color(0xFF333333),
-                        fontSize: 16,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: textLocalize("recall_search_hint"),
-                        hintStyle: TextStyle(
-                          color: isDark
-                              ? const Color(0xFF888888)
-                              : theme.fontGyColor3,
-                          fontSize: 16,
-                        ),
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: isDark
-                              ? const Color(0xFF888888)
-                              : theme.fontGyColor3,
-                        ),
-                        filled: true,
-                        fillColor: Colors.transparent,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 20,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(32.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(32.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(32.0),
-                          borderSide: isDark
-                              ? const BorderSide(
-                                  color: Color(0xFF4582FF),
-                                  width: 1.5,
-                                )
-                              : BorderSide(
-                                  color: theme.brandColor7,
-                                  width: 1.5,
-                                ),
-                        ),
-                      ),
-                      onSubmitted: (value) => _searchModels(value),
-                      onChanged: (value) {
-                        if (value.isEmpty) _searchModels('');
-                      },
+            // 自定义顶部面板（取代传统 AppBar）
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    textLocalize("home_page"),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
                     ),
                   ),
-                ),
-                // Processing 任务区域
-                if (_processingTasks.isNotEmpty) _buildProcessingSection(theme, isDark, textColor),
-                Expanded(
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      if (!_isLoading && _models.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: 108.0,
-                          ), // 留出 main.dart 的 BottomNavigationBar 和间距高度 (90 height + 18 padding)
-                          child: _buildEmptyState(theme, isDark),
-                        ),
-                      if (_isLoading)
-                        const Center(
-                          child: TDLoading(
-                            size: TDLoadingSize.large,
-                            icon: TDLoadingIcon.circle,
-                          ),
-                        )
-                      else if (_models.isNotEmpty)
-                        _buildModelGrid(theme, isDark),
-                    ],
+                  IconButton(
+                    icon: AnimatedRotation(
+                      turns: _isLoading ? 1 : 0,
+                      duration: const Duration(milliseconds: 600),
+                      child: Icon(Icons.sync_rounded, color: iconColor),
+                    ),
+                    tooltip: textLocalize("recall_refresh"),
+                    onPressed: () {
+                      setState(() {
+                        _isLoading = true;
+                      });
+                      _fetchModels();
+                    },
                   ),
+                ],
+              ),
+            ),
+            
+            // 空间概览流水卡片
+            TopSummaryCard(
+              recordCount: _models.length > 0 ? 1 : 0, // Mock for today's new
+              completedCount: _models.length,
+              isDark: isDark,
+              onTaskTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const TaskListPage()),
+                );
+              },
+            ),
+
+            // 搜索框
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 8.0,
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF18181C) : BDDesign.colorPaperWhite,
+                  borderRadius: BorderRadius.circular(16.0),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF2A2A30) : Colors.transparent,
+                  ),
+                  boxShadow: [
+                    if (!isDark) BDDesign.shadowLight
+                  ],
                 ),
-              ],
+                child: TextField(
+                  controller: _searchController,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: textLocalize("recall_search_hint"),
+                    hintStyle: TextStyle(
+                      color: isDark
+                          ? const Color(0xFF888888)
+                          : BDDesign.colorMutedBlue.withOpacity(0.6),
+                      fontSize: 15,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: isDark
+                          ? const Color(0xFF888888)
+                          : BDDesign.colorMutedBlue,
+                    ),
+                    filled: true,
+                    fillColor: Colors.transparent,
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 16,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16.0),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16.0),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16.0),
+                      borderSide: isDark
+                          ? const BorderSide(
+                              color: Color(0xFF4582FF),
+                              width: 1.5,
+                            )
+                          : BorderSide(
+                              color: BDDesign.colorMutedBlue,
+                              width: 1.5,
+                            ),
+                    ),
+                  ),
+                  onSubmitted: (value) => _searchModels(value),
+                  onChanged: (value) {
+                    if (value.isEmpty) _searchModels('');
+                  },
+                ),
+              ),
+            ),
+            
+            // Processing 任务区域
+            if (_processingTasks.isNotEmpty) _buildProcessingSection(theme, isDark, textColor),
+            
+            Expanded(
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if (!_isLoading && _models.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        bottom: 40.0, // main.dart 底部已经被设置为悬浮，预留些空间
+                      ),
+                      child: _buildEmptyState(theme, isDark),
+                    ),
+                  if (_isLoading)
+                    const Center(
+                      child: TDLoading(
+                        size: TDLoadingSize.large,
+                        icon: TDLoadingIcon.circle,
+                      ),
+                    )
+                  else if (_models.isNotEmpty)
+                    _buildModelGrid(theme, isDark),
+                ],
+              ),
             ),
           ],
         ),
@@ -778,20 +779,27 @@ class _RecallPageState extends State<RecallPage> {
           final userId = model['user_id'] ?? '';
           final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
 
-          return Container(
-            margin: const EdgeInsets.only(bottom: 16.0),
-            decoration: BoxDecoration(
-              color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-              borderRadius: BorderRadius.circular(theme.radiusLarge),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(20),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+          return TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: BDMotion.durationNormal + Duration(milliseconds: (index * 50).clamp(0, 400)),
+            curve: BDMotion.curveEnter,
+            builder: (context, value, child) {
+              return Transform.translate(
+                offset: Offset(0, 20 * (1 - value)),
+                child: Opacity(opacity: value, child: child),
+              );
+            },
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 16.0),
+              decoration: BoxDecoration(
+                color: isDark ? darkCard : BDDesign.colorPaperWhite,
+                borderRadius: BDDesign.radiusLarge,
+                boxShadow: isDark ? [] : [BDDesign.shadowLight],
+                border: Border.all(
+                  color: isDark ? const Color(0xFF2A2A30) : Colors.transparent,
                 ),
-              ],
-            ),
-            child: Column(
+              ),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Top header: Model Info
@@ -905,10 +913,11 @@ class _RecallPageState extends State<RecallPage> {
                   ),
               ],
             ),
-          );
-        },
-      );
-    }
+          ),
+        );
+      },
+    );
+  }
 
     return GridView.builder(
       padding: const EdgeInsets.only(
@@ -932,11 +941,11 @@ class _RecallPageState extends State<RecallPage> {
 
         return TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
-          duration: Duration(milliseconds: 400 + (index * 100).clamp(0, 600)),
-          curve: Curves.easeOutCubic,
+          duration: BDMotion.durationNormal + Duration(milliseconds: (index * 50).clamp(0, 400)),
+          curve: BDMotion.curveEnter,
           builder: (context, value, child) {
             return Transform.translate(
-              offset: Offset(0, 50 * (1 - value)),
+              offset: Offset(0, 20 * (1 - value)),
               child: Opacity(opacity: value, child: child),
             );
           },
