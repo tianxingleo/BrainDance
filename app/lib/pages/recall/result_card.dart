@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:braindance/configs/app_config.dart';
 import '../webgl_viewer.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
@@ -30,7 +31,7 @@ class SearchResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sceneId = model['scene_id'] ?? 'Unknown Scene';
-    final desc = model['description'] ?? '没有描述信息';
+    final desc = model['description'] ?? textLocalize('recall_no_desc');
     final similarity = model['similarity'] as double?;
     final userId = model['user_id'] ?? '';
     final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];

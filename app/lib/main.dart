@@ -385,11 +385,20 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
 }
 
 //主屏幕
-class MainScreen extends ConsumerWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
   static const double unselectedSize = 30;
   static const double selectedSize = 34;
-  Widget getPage(int pageIndex, WidgetRef ref) {
+
+  @override
+  ConsumerState<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends ConsumerState<MainScreen> {
+  int _previousIndex = 0;
+  int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
+
+  Widget getPage(int pageIndex) {
     switch (pageIndex) {
       case 0:
         return RecallPage(); // 页面0: 主页：过往回忆
@@ -406,10 +415,17 @@ class MainScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
+
+    // Update slide direction when page changes
+    if (pageIndex != _previousIndex) {
+      _slideDirection = pageIndex > _previousIndex ? 1 : -1;
+      _previousIndex = pageIndex;
+    }
+
     return Scaffold(
       extendBody: true,
       body: BDPageBackdrop(
@@ -423,11 +439,17 @@ class MainScreen extends ConsumerWidget {
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeInCubic,
                     transitionBuilder: (child, animation) {
+                      // Determine if this is the incoming or outgoing child
+                      final isIncoming =
+                          child.key == ValueKey<int>(pageIndex);
+                      final beginOffset = isIncoming
+                          ? Offset(0.15 * _slideDirection, 0)
+                          : Offset(-0.15 * _slideDirection, 0);
                       return FadeTransition(
                         opacity: animation,
                         child: SlideTransition(
                           position: Tween<Offset>(
-                            begin: const Offset(0.0, 0.025),
+                            begin: beginOffset,
                             end: Offset.zero,
                           ).animate(animation),
                           child: child,
@@ -436,7 +458,7 @@ class MainScreen extends ConsumerWidget {
                     },
                     child: KeyedSubtree(
                       key: ValueKey<int>(pageIndex),
-                      child: getPage(pageIndex, ref),
+                      child: getPage(pageIndex),
                     ),
                   ),
                   if (!isRecording)

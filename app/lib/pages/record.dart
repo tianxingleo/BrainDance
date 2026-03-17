@@ -79,8 +79,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _peakLinearAccel = 0;
   double _accelDelta = 0;
   double _motionMeter = 0;
-  String _motionHint = '保持缓慢移动';
-  String _motionDetail = '把手机当作滑轨，沿目标外圈匀速平移';
+  String _motionHint = textLocalize('reco_motion_steady');
+  String _motionDetail = textLocalize('reco_motion_detail');
   int _lastFastToastTime = 0;
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
@@ -165,7 +165,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             RecoConfig.disposeCamera();
             if (mounted) {
               setState(() {});
-              TDToast.showText(context: context, '应用切换导致录像中断，已保存录制内容');
+              TDToast.showText(context: context, textLocalize('reco_app_switch'));
             }
           });
         } else {
@@ -210,13 +210,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
     var file = await controller.stopVideoRecording();
 
     if (showToast && mounted) {
-      TDToast.showText('录制完成', context: context);
+      TDToast.showText(textLocalize('reco_done'), context: context);
     }
 
     final permissionState = await PhotoManager.requestPermissionExtend();
     if (!permissionState.isAuth) {
       if (showToast && mounted) {
-        TDToast.showText('无法保存视频到相册。视频文件暂存于缓存中，注意缓存清理。', context: context);
+        TDToast.showText(textLocalize('reco_save_fail'), context: context);
       }
     } else {
       try {
@@ -229,11 +229,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
         if (savedFile != null) {
           file = XFile(savedFile.path);
         } else if (mounted) {
-          TDToast.showText('保存视频到相册时发生错误', context: context);
+          TDToast.showText(textLocalize('reco_save_error'), context: context);
         }
       } catch (_) {
         if (mounted) {
-          TDToast.showText('保存视频到相册时发生错误', context: context);
+          TDToast.showText(textLocalize('reco_save_error'), context: context);
         }
       }
     }
@@ -340,16 +340,16 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final currentWarning = now < _warningEndTime;
     final effectiveState = currentWarning ? _MotionState.danger : nextState;
     final nextHint = switch (effectiveState) {
-      _MotionState.steady => '开始缓慢移动',
-      _MotionState.ideal => '速度合适，继续匀速扫描',
-      _MotionState.caution => '稍微有点快，再慢一点',
-      _MotionState.danger => '移动过快，请立刻放慢',
+      _MotionState.steady => textLocalize('reco_hint_steady'),
+      _MotionState.ideal => textLocalize('reco_hint_ideal'),
+      _MotionState.caution => textLocalize('reco_hint_caution'),
+      _MotionState.danger => textLocalize('reco_hint_danger'),
     };
     final nextDetail = switch (effectiveState) {
-      _MotionState.steady => '不要停太久，缓慢平移能让采样更连续',
-      _MotionState.ideal => '沿着目标外圈平滑移动，避免突然转向',
-      _MotionState.caution => '把步幅减小一些，尽量保持手腕稳定',
-      _MotionState.danger => '检测到明显抖动或突发加速，请像滑轨一样慢慢移动',
+      _MotionState.steady => textLocalize('reco_detail_steady'),
+      _MotionState.ideal => textLocalize('reco_detail_ideal'),
+      _MotionState.caution => textLocalize('reco_detail_caution'),
+      _MotionState.danger => textLocalize('reco_detail_danger'),
     };
 
     if (currentWarning != _isMovingTooFast) {
@@ -362,7 +362,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (_isMovingTooFast && mounted && now - _lastFastToastTime > 1800) {
       _lastFastToastTime = now;
-      TDToast.showText(context: context, '检测到加速度过大，请缓慢移动手机');
+      TDToast.showText(context: context, textLocalize('reco_accel_warning'));
     }
 
     _syncMotionHaptics(effectiveState);
@@ -515,8 +515,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _peakLinearAccel = 0;
         _accelDelta = 0;
         _motionMeter = 0;
-        _motionHint = '保持缓慢移动';
-        _motionDetail = '把手机当作滑轨，沿目标外圈匀速平移';
+        _motionHint = textLocalize('reco_motion_steady');
+        _motionDetail = textLocalize('reco_motion_detail');
         _motionState = _MotionState.steady;
         _isMovingTooFast = false;
         _warningEndTime = 0;
@@ -541,7 +541,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _setGlobalRecording(_isArSampling);
 
     if (mounted) {
-      TDToast.showText(_isArSampling ? '开始扫描覆盖' : '已暂停扫描', context: context);
+      TDToast.showText(_isArSampling ? textLocalize('reco_scan_start') : textLocalize('reco_scan_pause'), context: context);
     }
   }
 
@@ -621,7 +621,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                     await RecoConfig.trySwitchCameraDescription(i);
                   } catch (_) {
                     if (context.mounted) {
-                      TDToast.showText('录像中无法直接切换传感器', context: context);
+                      TDToast.showText(textLocalize('reco_no_switch'), context: context);
                     }
                   }
                   return;
@@ -985,9 +985,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       children: [
                         Row(
                           children: [
-                            const Expanded(
+                            Expanded(
                               child: Text(
-                                '扫描提示',
+                                textLocalize('reco_scan_tip'),
                                 style: TextStyle(
                                   color: BDDesign.colorPaperWhite,
                                   fontSize: 20,
@@ -1034,7 +1034,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                           children: [
                             Expanded(
                               child: Text(
-                                '先把手机当作滑轨，再开始采集。',
+                                textLocalize('reco_scan_before'),
                                 style: TextStyle(
                                   color: Colors.white.withAlpha(168),
                                   fontSize: 12.5,
@@ -1050,7 +1050,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                                   _showTips = false;
                                 });
                               },
-                              text: '知道了',
+                              text: textLocalize('reco_scan_ok'),
                               style: TDButtonStyle(
                                 backgroundColor: BDDesign.colorMutedBlue,
                                 textColor: Colors.white,
@@ -1298,10 +1298,10 @@ class _MotionGuidanceCard extends StatelessWidget {
       _MotionState.danger => BDDesign.colorDarkRed,
     };
     final stateLabel = switch (motionState) {
-      _MotionState.steady => '偏静止',
-      _MotionState.ideal => '平稳',
-      _MotionState.caution => '稍快',
-      _MotionState.danger => '过快',
+      _MotionState.steady => textLocalize('reco_state_steady'),
+      _MotionState.ideal => textLocalize('reco_state_ideal'),
+      _MotionState.caution => textLocalize('reco_state_caution'),
+      _MotionState.danger => textLocalize('reco_state_danger'),
     };
 
     return Container(

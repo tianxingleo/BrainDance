@@ -11,7 +11,7 @@ Widget setTab3(BuildContext context) {
     child: ListView(
       children: [
         Text(
-          '关于与存储',
+          textLocalize('set_tab3_title'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -22,7 +22,7 @@ Widget setTab3(BuildContext context) {
         ),
         const SizedBox(height: 8),
         Text(
-          '保留版本信息、本地缓存和清理入口，用更像档案页的方式展示。',
+          textLocalize('set_tab3_desc'),
           style: TextStyle(
             fontSize: 13,
             height: 1.45,

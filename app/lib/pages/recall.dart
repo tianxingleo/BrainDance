@@ -278,7 +278,7 @@ class _RecallPageState extends State<RecallPage> {
               children: [
                 BDPageHeader(
                   title: textLocalize("home_page"),
-                  subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
+                  subtitle: textLocalize('recall_subtitle'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -322,13 +322,13 @@ class _RecallPageState extends State<RecallPage> {
                       children: [
                         Expanded(
                           child: _RecallMetric(
-                            label: '空间',
+                            label: textLocalize('recall_label_space'),
                             value: _allModels.length.toString(),
                           ),
                         ),
                         Expanded(
                           child: _RecallMetric(
-                            label: '处理中',
+                            label: textLocalize('recall_label_processing'),
                             value: _processingTasks.length.toString(),
                           ),
                         ),
@@ -887,7 +887,7 @@ class _RecallPageState extends State<RecallPage> {
       return List<Map<String, dynamic>>.from(data['results'] ?? []);
     }
 
-    final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
+    final errMsg = (data is Map) ? (data['error'] ?? textLocalize('recall_unknown_error')) : textLocalize('recall_server_error');
     throw Exception(errMsg);
   }
 
@@ -1121,7 +1121,7 @@ class _RecallPageState extends State<RecallPage> {
         itemBuilder: (context, index) {
           final model = _models[index];
           final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
+          final desc = model['description'] ?? textLocalize('recall_no_desc');
           final similarity = model['similarity'] as double?;
           final userId = model['user_id'] ?? '';
           final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
@@ -1563,7 +1563,7 @@ class _RecallPageState extends State<RecallPage> {
     if (!mounted) {
       return;
     }
-    TDToast.showText(context: context, '已发布到社区');
+    TDToast.showText(context: context, textLocalize('recall_published'));
   }
 
   Future<void> _showModelActions(Map<String, dynamic> model) async {
@@ -1578,7 +1578,7 @@ class _RecallPageState extends State<RecallPage> {
         final hintColor = isDark
             ? Colors.white.withValues(alpha: 0.62)
             : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-        final sceneId = model['scene_id']?.toString() ?? '未命名模型';
+        final sceneId = model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model');
         final desc =
             model['description']?.toString() ?? textLocalize("recall_no_desc");
 
@@ -1611,8 +1611,8 @@ class _RecallPageState extends State<RecallPage> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.public_rounded),
-                    title: const Text('分享到社区'),
-                    subtitle: const Text('为这段记忆补上地点并发布到社区流'),
+                    title: Text(textLocalize('recall_share_to_community')),
+                    subtitle: Text(textLocalize('recall_share_subtitle')),
                     onTap: () => Navigator.pop(context, 'share'),
                   ),
                 ],
@@ -1637,7 +1637,7 @@ class _RecallPageState extends State<RecallPage> {
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['scene_id']?.toString() ?? '未命名模型',
+      sceneId: model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model'),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'

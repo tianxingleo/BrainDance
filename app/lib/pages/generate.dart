@@ -122,10 +122,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final uploadLabel = _isGenerating
         ? textLocalize('gen_text_generating')
         : _isUploading
-        ? '上传 ${(_uploadProgress * 100).toStringAsFixed(0)}%'
+        ? textLocalize('gen_upload_progress').replaceAll('%s', (_uploadProgress * 100).toStringAsFixed(0))
         : currentSelectionCount == 0
-        ? '等待素材'
-        : '可提交';
+        ? textLocalize('gen_waiting_material')
+        : textLocalize('gen_ready_submit');
 
     final List<Widget> tabContents = [
       Padding(
@@ -216,7 +216,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '图像输入',
+                  title: textLocalize('gen_section_image'),
                   description: textLocalize('gen_tip_pic'),
                 ),
                 const SizedBox(height: 18),
@@ -252,7 +252,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '文本草稿',
+                  title: textLocalize('gen_section_text'),
                   description: textLocalize('gen_tip_text'),
                 ),
                 const SizedBox(height: 18),
@@ -331,7 +331,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '视频采集',
+                  title: textLocalize('gen_section_video'),
                   description: textLocalize('gen_tip_video'),
                 ),
                 const SizedBox(height: 18),
@@ -387,7 +387,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 children: [
                   BDPageHeader(
                     title: textLocalize('gen_top'),
-                    subtitle: '把素材、状态和提交动作压进同一条生成流程里，不再像旧表单页。',
+                    subtitle: textLocalize('gen_subtitle'),
                     trailing: BDStatusPill(
                       label: uploadLabel,
                       icon: _isUploading || _isGenerating
@@ -406,19 +406,19 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                         children: [
                           Expanded(
                             child: _GenerateMetric(
-                              label: '模式',
+                              label: textLocalize('gen_label_mode'),
                               value: modeLabel,
                             ),
                           ),
                           Expanded(
                             child: _GenerateMetric(
-                              label: '素材',
+                              label: textLocalize('gen_label_material'),
                               value: currentSelectionCount.toString(),
                             ),
                           ),
                           Expanded(
                             child: _GenerateMetric(
-                              label: '状态',
+                              label: textLocalize('gen_label_status'),
                               value: uploadLabel,
                             ),
                           ),
@@ -454,7 +454,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                       text: (_isUploading || _isGenerating)
                           ? (_isGenerating
                                 ? textLocalize('gen_text_generating')
-                                : '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%')
+                                : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%')
                           : textLocalize('gen_button'),
                     ),
                   ),

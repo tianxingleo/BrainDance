@@ -26,7 +26,7 @@ Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
     child: ListView(
       children: [
         Text(
-          '界面与账户',
+          textLocalize('set_tab1_title'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -37,7 +37,7 @@ Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
         ),
         const SizedBox(height: 8),
         Text(
-          '把常用偏好收在一个面板里，避免设置页重新掉回默认工具样式。',
+          textLocalize('set_tab1_desc'),
           style: TextStyle(
             fontSize: 13,
             height: 1.45,
@@ -99,7 +99,7 @@ Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
         const SizedBox(height: 18),
         if (!SupabaseConfig.isAdminMode)
           TDButton(
-            text: "退出登录",
+            text: textLocalize("set_logout"),
             type: TDButtonType.outline,
             theme: TDButtonTheme.danger,
             isBlock: true,
@@ -113,7 +113,7 @@ Widget setTab1(VoidCallback onUpdate, WidgetRef homeRef) {
           ),
         if (SupabaseConfig.isAdminMode)
           TDButton(
-            text: "管理员模式已启用",
+            text: textLocalize("set_admin_enabled"),
             type: TDButtonType.outline,
             theme: TDButtonTheme.primary,
             isBlock: true,

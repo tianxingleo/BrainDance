@@ -42,6 +42,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
   String? _localModelPath;
+  bool _downloadCancelled = false;
 
   @override
   void initState() {
@@ -66,6 +67,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   @override
   void dispose() {
+    _downloadCancelled = true;
     _localServer?.close();
     super.dispose();
   }
@@ -188,6 +190,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           _localModelPath = localFile.path;
           if (mounted) _initWebView();
         } else {
+          // 使用临时文件下载，完成后再重命名，避免部分下载被当作完整文件
+          final tmpFile = File('${localFile.path}.tmp');
           debugPrint('Starting download from: $originalUrl');
           setState(() {
             _isDownloading = true;
@@ -212,26 +216,39 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           final totalBytes = response.contentLength;
           int receivedBytes = 0;
 
-          final sink = localFile.openWrite();
-          await response
-              .map((chunk) {
-                receivedBytes += chunk.length;
-                if (totalBytes > 0 && mounted) {
-                  setState(() {
-                    _downloadProgress = receivedBytes / totalBytes;
-                  });
-                }
-                return chunk;
-              })
-              .pipe(sink);
+          final sink = tmpFile.openWrite();
+          try {
+            await for (final chunk in response) {
+              if (_downloadCancelled) {
+                await sink.close();
+                if (await tmpFile.exists()) await tmpFile.delete();
+                return;
+              }
+              sink.add(chunk);
+              receivedBytes += chunk.length;
+              if (totalBytes > 0 && mounted) {
+                setState(() {
+                  _downloadProgress = receivedBytes / totalBytes;
+                });
+              }
+            }
+            await sink.close();
 
-          debugPrint('Download complete: ${localFile.path}');
-          _localModelPath = localFile.path;
-          if (mounted) {
-            setState(() {
-              _isDownloading = false;
-            });
-            _initWebView();
+            // 下载完成，将临时文件重命名为正式文件
+            await tmpFile.rename(localFile.path);
+            debugPrint('Download complete: ${localFile.path}');
+            _localModelPath = localFile.path;
+            if (mounted) {
+              setState(() {
+                _isDownloading = false;
+              });
+              _initWebView();
+            }
+          } catch (e) {
+            await sink.close();
+            // 下载失败，清理临时文件
+            if (await tmpFile.exists()) await tmpFile.delete();
+            rethrow;
           }
         }
       } catch (e) {
@@ -386,7 +403,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ),
                     const SizedBox(height: 16),
                     TDText(
-                      '当前平台不支持内嵌网页',
+                      textLocalize('platform_webview_unsupported'),
                       font: theme.fontTitleLarge,
                       fontWeight: FontWeight.w600,
                       textColor: textColor,

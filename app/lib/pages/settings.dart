@@ -89,7 +89,7 @@ class _SettingsPageState extends State<SettingsPage>
               children: [
                 BDPageHeader(
                   title: textLocalize("settings"),
-                  subtitle: '调整账户、偏好和本地设备行为，保持整套界面一致。',
+                  subtitle: textLocalize('set_subtitle'),
                   trailing: BDStatusPill(
                     label: isDark ? 'NIGHT' : 'DAY',
                     icon: isDark
@@ -108,13 +108,13 @@ class _SettingsPageState extends State<SettingsPage>
                       children: [
                         Expanded(
                           child: _SettingsMetric(
-                            label: '界面',
+                            label: textLocalize('set_label_ui'),
                             value: isDark ? 'Night mode' : 'Paper mode',
                           ),
                         ),
                         Expanded(
                           child: _SettingsMetric(
-                            label: '语言',
+                            label: textLocalize('set_label_lang'),
                             value: AppConfig.langMap['locale'] == 'en_US'
                                 ? 'English'
                                 : '简体中文',
@@ -122,7 +122,7 @@ class _SettingsPageState extends State<SettingsPage>
                         ),
                         Expanded(
                           child: _SettingsMetric(
-                            label: '风格',
+                            label: textLocalize('set_label_style'),
                             value: 'Archive UI',
                             accent: textColor,
                           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
 
 class TopSummaryCard extends StatelessWidget {
@@ -52,7 +53,7 @@ class TopSummaryCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  "空间档案概览",
+                  textLocalize("recall_summary_title"),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -66,7 +67,7 @@ class TopSummaryCard extends StatelessWidget {
                     color: isDark ? const Color(0xFFA0AAB5) : BDDesign.colorMutedBlue,
                     size: 20,
                   ),
-                  tooltip: "任务列表",
+                  tooltip: textLocalize("recall_task_list"),
                   splashRadius: 20,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -76,9 +77,9 @@ class TopSummaryCard extends StatelessWidget {
             const SizedBox(height: 16),
             Row(
               children: [
-                _buildStatItem("近日新增", recordCount.toString(), textColor, subTextColor),
+                _buildStatItem(textLocalize("recall_recent_added"), recordCount.toString(), textColor, subTextColor),
                 const SizedBox(width: 48),
-                _buildStatItem("已就绪空间", completedCount.toString(), textColor, subTextColor),
+                _buildStatItem(textLocalize("recall_ready_spaces"), completedCount.toString(), textColor, subTextColor),
               ],
             ),
           ],
