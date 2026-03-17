@@ -5,10 +5,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import '../configs/motion_tokens.dart';
+import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
+import 'community.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
 import 'recall/top_summary_card.dart';
+
+enum _RecallSearchMode { local, cloud }
 
 class RecallPage extends StatefulWidget {
   const RecallPage({super.key});
@@ -19,13 +23,19 @@ class RecallPage extends StatefulWidget {
 
 class _RecallPageState extends State<RecallPage> {
   List<Map<String, dynamic>> _models = [];
+  List<Map<String, dynamic>> _allModels = [];
   List<Map<String, dynamic>> _processingTasks = [];
   Map<String, List<String>> _taskAllLogs = {}; // taskId -> all log msgs
   final Set<String> _expandedTaskLogs = {}; // 展开的任务ID集合
   bool _isLoading = true;
+  bool _isLocalIndexing = false;
   bool _isProcessingExpanded = true;
   final TextEditingController _searchController = TextEditingController();
+  final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
+  Timer? _searchDebounce;
+  LocalRagIndexStats? _indexStats;
+  _RecallSearchMode _searchMode = _RecallSearchMode.local;
 
   @override
   void initState() {
@@ -37,6 +47,7 @@ class _RecallPageState extends State<RecallPage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _realtimeChannel?.unsubscribe();
     super.dispose();
@@ -178,35 +189,29 @@ class _RecallPageState extends State<RecallPage> {
       final response = await Supabase.instance.client
           .from('model_assets')
           .select(
-            'id, scene_id, description, ply_path, preview_img_path, meta_info, created_at',
+            'id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at',
           )
           .order('created_at', ascending: false);
 
+      final models = List<Map<String, dynamic>>.from(response);
+      if (models.isEmpty) {
+        models.add(_buildDemoModel());
+      }
+
       if (mounted) {
         setState(() {
-          _models = List<Map<String, dynamic>>.from(response);
-          if (_models.isEmpty) {
-            _models.add({
-              'id': 'local_demo',
-              'scene_id': textLocalize('recall_demo_title'),
-              'description': textLocalize('recall_demo_desc'),
-              'ply_path': '',
-            });
-          }
+          _allModels = models;
+          _models = models;
           _isLoading = false;
         });
       }
+      await _syncLocalIndex(models);
     } catch (e) {
+      final demoModels = [_buildDemoModel()];
       if (mounted) {
         setState(() {
-          _models = [
-            {
-              'id': 'local_demo',
-              'scene_id': textLocalize('recall_demo_title'),
-              'description': textLocalize('recall_demo_desc'),
-              'ply_path': '',
-            },
-          ];
+          _allModels = demoModels;
+          _models = demoModels;
           _isLoading = false;
         });
         TDToast.showText(
@@ -214,6 +219,41 @@ class _RecallPageState extends State<RecallPage> {
           context: context,
         );
       }
+      await _syncLocalIndex(demoModels);
+    }
+  }
+
+  Map<String, dynamic> _buildDemoModel() {
+    return {
+      'id': 'local_demo',
+      'scene_id': textLocalize('recall_demo_title'),
+      'description': textLocalize('recall_demo_desc'),
+      'tags': const ['offline', 'demo'],
+      'objects': const ['3dgs', 'memory'],
+      'ply_path': '',
+      'meta_info': {'search_summary': textLocalize('recall_demo_desc')},
+    };
+  }
+
+  Future<void> _syncLocalIndex(List<Map<String, dynamic>> models) async {
+    if (mounted) {
+      setState(() {
+        _isLocalIndexing = true;
+      });
+    }
+
+    try {
+      final stats = await _localRagIndex.syncModels(models);
+      if (!mounted) return;
+      setState(() {
+        _indexStats = stats;
+        _isLocalIndexing = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLocalIndexing = false;
+      });
     }
   }
 
@@ -283,7 +323,7 @@ class _RecallPageState extends State<RecallPage> {
                         Expanded(
                           child: _RecallMetric(
                             label: '空间',
-                            value: _models.length.toString(),
+                            value: _allModels.length.toString(),
                           ),
                         ),
                         Expanded(
@@ -294,10 +334,11 @@ class _RecallPageState extends State<RecallPage> {
                         ),
                         Expanded(
                           child: _RecallMetric(
-                            label: '检索',
-                            value: _searchController.text.trim().isEmpty
-                                ? '全部'
-                                : '筛选中',
+                            label: 'RAG',
+                            value: _isLocalIndexing
+                                ? '...'
+                                : (_indexStats?.totalItems ?? _allModels.length)
+                                      .toString(),
                             accent: textColor,
                           ),
                         ),
@@ -306,8 +347,8 @@ class _RecallPageState extends State<RecallPage> {
                   ),
                 ),
                 TopSummaryCard(
-                  recordCount: _models.isNotEmpty ? 1 : 0,
-                  completedCount: _models.length,
+                  recordCount: _allModels.isNotEmpty ? 1 : 0,
+                  completedCount: _allModels.length,
                   isDark: isDark,
                   onTaskTap: () {
                     Navigator.push(
@@ -320,71 +361,161 @@ class _RecallPageState extends State<RecallPage> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                  child: BDPanelCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      style: TextStyle(color: textColor, fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: textLocalize("recall_search_hint"),
-                        hintStyle: TextStyle(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.45)
-                              : BDDesign.colorMutedBlue.withValues(alpha: 0.78),
-                          fontSize: 15,
+                  child: Column(
+                    children: [
+                      BDPanelCard(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
                         ),
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.5)
-                              : BDDesign.colorMutedBlue,
-                        ),
-                        suffixIcon: _searchController.text.trim().isEmpty
-                            ? null
-                            : IconButton(
-                                onPressed: () {
-                                  _searchController.clear();
-                                  _searchModels('');
-                                  setState(() {});
-                                },
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.5)
-                                      : BDDesign.colorMutedBlue,
-                                ),
+                        child: TextField(
+                          controller: _searchController,
+                          style: TextStyle(color: textColor, fontSize: 15),
+                          decoration: InputDecoration(
+                            hintText: textLocalize("recall_search_hint"),
+                            hintStyle: TextStyle(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.45)
+                                  : BDDesign.colorMutedBlue.withValues(
+                                      alpha: 0.78,
+                                    ),
+                              fontSize: 15,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.5)
+                                  : BDDesign.colorMutedBlue,
+                            ),
+                            suffixIcon: _searchController.text.trim().isEmpty
+                                ? null
+                                : IconButton(
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      _searchDebounce?.cancel();
+                                      _searchModels('');
+                                      setState(() {});
+                                    },
+                                    icon: Icon(
+                                      Icons.close_rounded,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.5)
+                                          : BDDesign.colorMutedBlue,
+                                    ),
+                                  ),
+                            filled: true,
+                            fillColor: Colors.transparent,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 16,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16.0),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16.0),
+                              borderSide: BorderSide.none,
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16.0),
+                              borderSide: const BorderSide(
+                                color: BDDesign.colorMutedBlue,
+                                width: 1.5,
                               ),
-                        filled: true,
-                        fillColor: Colors.transparent,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 16,
+                            ),
+                          ),
+                          onSubmitted: _searchModels,
+                          onChanged: _onSearchChanged,
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16.0),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16.0),
-                          borderSide: const BorderSide(
-                            color: BDDesign.colorMutedBlue,
-                            width: 1.5,
+                      ),
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 8),
+                          child: Text(
+                            textLocalize('recall_search_mode'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.58)
+                                  : BDDesign.colorMutedBlue,
+                            ),
                           ),
                         ),
                       ),
-                      onSubmitted: (value) => _searchModels(value),
-                      onChanged: (value) {
-                        setState(() {});
-                        if (value.isEmpty) _searchModels('');
-                      },
-                    ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSearchModeChip(
+                              isDark: isDark,
+                              label: textLocalize('recall_local_rag'),
+                              icon: Icons.privacy_tip_rounded,
+                              mode: _RecallSearchMode.local,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildSearchModeChip(
+                              isDark: isDark,
+                              label: textLocalize('recall_cloud_rag'),
+                              icon: Icons.cloud_rounded,
+                              mode: _RecallSearchMode.cloud,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      BDPanelCard(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _isLocalIndexing
+                                  ? Icons.memory_rounded
+                                  : Icons.privacy_tip_rounded,
+                              size: 18,
+                              color: isDark
+                                  ? BDDesign.colorPaperWhite
+                                  : BDDesign.colorInkBlack,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _searchMode == _RecallSearchMode.local
+                                    ? (_isLocalIndexing
+                                          ? textLocalize(
+                                              'recall_local_indexing',
+                                            )
+                                          : '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}')
+                                    : textLocalize('recall_cloud_scope'),
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.72)
+                                      : BDDesign.colorMutedBlue,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                            if (_searchMode == _RecallSearchMode.local &&
+                                _indexStats != null &&
+                                !_isLocalIndexing)
+                              BDStatusPill(
+                                label:
+                                    '${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}',
+                                icon: Icons.storage_rounded,
+                                color: BDDesign.colorMutedBlue,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (_processingTasks.isNotEmpty)
@@ -402,7 +533,9 @@ class _RecallPageState extends State<RecallPage> {
                 else if (_models.isEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 16.0),
-                    child: _buildEmptyState(theme, isDark),
+                    child: _searchController.text.trim().isEmpty
+                        ? _buildEmptyState(theme, isDark)
+                        : _buildSearchEmptyState(theme, isDark),
                   )
                 else
                   _buildModelGrid(theme, isDark),
@@ -707,10 +840,11 @@ class _RecallPageState extends State<RecallPage> {
 
   Future<void> _searchModels(String query) async {
     if (query.trim().isEmpty) {
+      if (!mounted) return;
       setState(() {
-        _isLoading = true;
+        _models = List<Map<String, dynamic>>.from(_allModels);
+        _isLoading = false;
       });
-      _fetchModels();
       return;
     }
 
@@ -719,43 +853,14 @@ class _RecallPageState extends State<RecallPage> {
     });
 
     try {
-      final response = await Supabase.instance.client.functions.invoke(
-        'search-models',
-        body: {'query': query},
-      );
-
-      final data = response.data;
-      if (data is Map && data['success'] == true) {
-        if (mounted) {
-          setState(() {
-            _models = List<Map<String, dynamic>>.from(data['results'] ?? []);
-            _isLoading = false;
-          });
-        }
-      } else {
-        final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
-        throw Exception(errMsg);
-      }
-    } on FunctionException catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        // 从 details 里提取 Edge Function 返回的真实错误信息
-        String errMsg;
-        final details = e.details;
-        if (details is Map && details['error'] != null) {
-          errMsg = details['error'].toString();
-        } else if (details is String && details.isNotEmpty) {
-          errMsg = details;
-        } else {
-          errMsg = 'HTTP ${e.status}';
-        }
-        TDToast.showText(
-          '${textLocalize("recall_error_search")}$errMsg',
-          context: context,
-        );
-      }
+      final results = _searchMode == _RecallSearchMode.local
+          ? await _localRagIndex.search(query)
+          : await _searchModelsFromCloud(query);
+      if (!mounted) return;
+      setState(() {
+        _models = results;
+        _isLoading = false;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -767,6 +872,103 @@ class _RecallPageState extends State<RecallPage> {
         );
       }
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _searchModelsFromCloud(
+    String query,
+  ) async {
+    final response = await Supabase.instance.client.functions.invoke(
+      'search-models',
+      body: {'query': query},
+    );
+
+    final data = response.data;
+    if (data is Map && data['success'] == true) {
+      return List<Map<String, dynamic>>.from(data['results'] ?? []);
+    }
+
+    final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
+    throw Exception(errMsg);
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() {});
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      _searchModels(value);
+    });
+  }
+
+  Widget _buildSearchModeChip({
+    required bool isDark,
+    required String label,
+    required IconData icon,
+    required _RecallSearchMode mode,
+  }) {
+    final selected = _searchMode == mode;
+    return GestureDetector(
+      onTap: () {
+        if (_searchMode == mode) return;
+        setState(() {
+          _searchMode = mode;
+        });
+        final keyword = _searchController.text.trim();
+        if (keyword.isNotEmpty) {
+          _searchModels(keyword);
+        }
+      },
+      child: AnimatedContainer(
+        duration: BDMotion.durationFast,
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? BDDesign.colorMutedBlue.withValues(alpha: isDark ? 0.22 : 0.12)
+              : (isDark ? darkCard : BDDesign.colorPaperWhite),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? BDDesign.colorMutedBlue
+                : (isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : BDDesign.colorMutedBlue.withValues(alpha: 0.18)),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: selected
+                  ? BDDesign.colorMutedBlue
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.72)
+                        : BDDesign.colorMutedBlue),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? (isDark
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorInkBlack)
+                      : (isDark
+                            ? Colors.white.withValues(alpha: 0.78)
+                            : BDDesign.colorInkBlack),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark) {
@@ -852,6 +1054,54 @@ class _RecallPageState extends State<RecallPage> {
     );
   }
 
+  Widget _buildSearchEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.travel_explore_rounded,
+              size: 56,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.8)
+                  : BDDesign.colorMutedBlue,
+            ),
+            const SizedBox(height: 18),
+            TDText(
+              textLocalize('recall_local_rag'),
+              font: theme.fontTitleLarge,
+              textColor: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            TDText(
+              _searchMode == _RecallSearchMode.local
+                  ? textLocalize('recall_local_empty')
+                  : textLocalize('recall_cloud_empty'),
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildModelGrid(TDThemeData theme, bool isDark) {
     final textColor = isDark
         ? const Color(0xFFFFFFFF)
@@ -906,6 +1156,7 @@ class _RecallPageState extends State<RecallPage> {
                     onTap: () {
                       _navigateToViewer(model, null);
                     },
+                    onLongPress: () => _showModelActions(model),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
                       child: Row(
@@ -1102,6 +1353,7 @@ class _RecallPageState extends State<RecallPage> {
             onTap: () {
               _navigateToViewer(model, null);
             },
+            onLongPress: () => _showModelActions(model),
             child: Container(
               decoration: BoxDecoration(
                 color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
@@ -1293,6 +1545,105 @@ class _RecallPageState extends State<RecallPage> {
           );
         },
       ),
+    );
+  }
+
+  Future<void> _shareModelToCommunity(Map<String, dynamic> model) async {
+    final draft = await showCommunityComposerSheet(
+      context,
+      models: [_modelToCommunityOption(model)],
+      initialModelId: model['id']?.toString(),
+    );
+
+    if (draft == null) {
+      return;
+    }
+
+    await CommunityRepository().createPost(draft);
+    if (!mounted) {
+      return;
+    }
+    TDToast.showText(context: context, '已发布到社区');
+  }
+
+  Future<void> _showModelActions(Map<String, dynamic> model) async {
+    final selectedAction = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final textColor = isDark
+            ? BDDesign.colorPaperWhite
+            : BDDesign.colorInkBlack;
+        final hintColor = isDark
+            ? Colors.white.withValues(alpha: 0.62)
+            : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+        final sceneId = model['scene_id']?.toString() ?? '未命名模型';
+        final desc =
+            model['description']?.toString() ?? textLocalize("recall_no_desc");
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    sceneId,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    desc,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: hintColor, height: 1.35),
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.public_rounded),
+                    title: const Text('分享到社区'),
+                    subtitle: const Text('为这段记忆补上地点并发布到社区流'),
+                    onTap: () => Navigator.pop(context, 'share'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (selectedAction == 'share') {
+      await _shareModelToCommunity(model);
+    }
+  }
+
+  CommunityModelOption _modelToCommunityOption(Map<String, dynamic> model) {
+    final plyPath = model['ply_path']?.toString() ?? '';
+    final preview = model['preview_img_path']?.toString();
+    return CommunityModelOption(
+      id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
+      sceneId: model['scene_id']?.toString() ?? '未命名模型',
+      description: model['description']?.toString() ?? '',
+      modelUrl: plyPath.isEmpty
+          ? './models/scene_auto_sync_raw.ply'
+          : _toPublicUrl(plyPath),
+      posesUrl: _toPosesUrl(plyPath),
+      coverUrl: preview,
     );
   }
 }
