@@ -61,6 +61,7 @@
 
 | 值 | 说明 | 输入文件 |
 |---|------|---------|
+| `video_dual_chain` | 视频快慢双链（快链先交付，慢链自动接续） | `video.mp4` |
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `da3_feed_forward_3dgs` | 视频转3DGS（前馈快速生成） | `video.mp4` |
 | `da3_sugar` / `da3+sugar` | SuGaR 使用 mesh/SDF 约束 3DGS（质量更高、速度更慢） | `video.mp4` |
@@ -94,6 +95,14 @@
 |-----|------|--------|------|
 | `frame_interval` | int | 5 | 前馈生成时的帧间隔，值越小使用帧数越多（1=使用全部帧） |
 | `conf_threshold` | float | 0.5 | 深度置信度阈值，值越高过滤越严格 |
+
+**task_params 字段说明 (video_dual_chain):**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `slow_pipeline` | string | `video_3dgs` | 慢链类型：`video_3dgs` / `da3_feed_forward_3dgs`（每次仅跑 1 条慢链） |
+| `sam3d_vram_threshold_gb` | int | 25 | SAM3D 显存门槛（GB），低于阈值会降级为 SHARP |
+| `best_frame_sample_count` | int | 8 | 从视频抽样候选帧数量，用于快链最佳帧挑选 |
 
 **task_params 字段说明 (da3_sugar / da3+sugar):**
 
@@ -154,7 +163,12 @@ final res = await supabase.from('processing_tasks').insert({
   'scene_id': 'scene_20260118_001',
   'display_name': '客厅模型-第一版',
   'user_id': supabase.auth.currentUser!.id,
-  'task_type': 'video_3dgs',
+  'task_type': 'video_dual_chain',
+  'task_params': {
+    'slow_pipeline': 'video_3dgs',
+    'sam3d_vram_threshold_gb': 25,
+    'best_frame_sample_count': 8
+  },
   'status': 'pending'
 }).select();
 ```

@@ -333,6 +333,8 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     switch (taskType) {
       case 'video_3dgs':
         return Icons.videocam;
+      case 'video_dual_chain':
+        return Icons.hub;
       case 'single_image_sam3d':
         return Icons.image;
       case 'single_image_sharp':
@@ -348,6 +350,8 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     switch (taskType) {
       case 'video_3dgs':
         return 'Video 3DGS';
+      case 'video_dual_chain':
+        return 'Dual Chain';
       case 'single_image_sam3d':
         return 'SAM3D';
       case 'single_image_sharp':

@@ -5,7 +5,11 @@
 # 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
 import time
 import os
+import json
+import shutil
+import subprocess
 from pathlib import Path
+from typing import Dict, Any, Tuple
 
 # 引入 Supabase 客户端库，用于连接云数据库和存储
 from supabase import create_client, Client
@@ -16,6 +20,8 @@ from dotenv import load_dotenv
 from src.core.factory import PipelineFactory  # 🟢 引入工厂
 from src.modules.rag_memory import RagMemory # 🟢 引入新模块
 from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
+from src.modules.scene_analyzer import SceneAnalyzer
+from src.config import PipelineConfig
 from src.utils.ply_utils import compress_model_for_delivery
 
 # [初始化] 加载当前目录下的 .env 文件
@@ -145,6 +151,283 @@ class CloudWorker:
             print(f"\n⚠️ 轮询错误: {e}")
             time.sleep(5)
 
+    def _parse_task_params(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        task_params_raw = task.get('task_params') if isinstance(task, dict) else None
+        try:
+            if isinstance(task_params_raw, str) and task_params_raw:
+                task_params = json.loads(task_params_raw)
+            elif isinstance(task_params_raw, dict):
+                task_params = task_params_raw
+            else:
+                task_params = {}
+        except Exception:
+            task_params = {}
+        if task_params is None:
+            task_params = {}
+        if isinstance(task, dict) and task.get('mapper_type'):
+            task_params['mapper_type'] = task['mapper_type']
+        return task_params
+
+    def _sync_task_metadata(self, task_id: str, task: Dict[str, Any], metadata: Dict[str, Any], on_pipeline_log):
+        if not metadata:
+            return
+        update_data = {}
+        if "ai_score" in metadata:
+            update_data["quality_score"] = metadata["ai_score"]
+        if "ai_tags" in metadata:
+            update_data["tags"] = metadata["ai_tags"]
+        if "ai_reason" in metadata:
+            update_data["quality_reason"] = metadata["ai_reason"]
+        if update_data:
+            self.supabase.table(self.TABLE_NAME).update(update_data).eq("id", task_id).execute()
+            on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
+        if "ai_description" in metadata:
+            on_pipeline_log("🧠 正在生成场景记忆 (Embedding)...")
+            self.memory.save_to_knowledge_base(
+                task_data=task,
+                description=metadata["ai_description"],
+                objects=metadata.get("ai_objects", [])
+            )
+
+    def _compress_if_needed(self, model_path_obj: Path, task_params: Dict[str, Any], on_pipeline_log) -> Path:
+        delivery_format = str(
+            task_params.get("delivery_format") or os.getenv("MODEL_DELIVERY_FORMAT", "splat")
+        ).lower()
+        opacity_threshold = float(
+            task_params.get("compression_opacity_threshold", os.getenv("COMPRESSION_OPACITY_THRESHOLD", "0.05"))
+        )
+        ksplat_alpha_threshold = int(
+            task_params.get("ksplat_alpha_threshold", os.getenv("KSPLAT_ALPHA_THRESHOLD", "1"))
+        )
+        if model_path_obj.suffix.lower() == ".ply" and delivery_format in ("splat", "ksplat"):
+            try:
+                compressed_path = compress_model_for_delivery(
+                    model_path=str(model_path_obj),
+                    output_format=delivery_format,
+                    opacity_threshold=opacity_threshold,
+                    ksplat_script_path=os.getenv("KSPLAT_SCRIPT_PATH", ""),
+                    alpha_removal_threshold=ksplat_alpha_threshold,
+                    log_callback=on_pipeline_log,
+                )
+                model_path_obj = Path(compressed_path)
+                on_pipeline_log(f"✅ 模型压缩完成: {model_path_obj.name}")
+            except Exception as e:
+                on_pipeline_log(f"⚠️ 模型压缩失败，回退原始文件上传: {e}")
+        return model_path_obj
+
+    def _upload_and_upsert_assets(
+        self,
+        task: Dict[str, Any],
+        model_path_obj: Path,
+        metadata: Dict[str, Any],
+        user_id: str,
+        scene_id: str,
+        task_output_dir: Path,
+        on_pipeline_log,
+    ) -> str:
+        on_pipeline_log("训练完成，正在上传结果到云端...")
+        model_suffix = model_path_obj.suffix.lower() or ".ply"
+        upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud{model_suffix}"
+        with open(model_path_obj, 'rb') as f:
+            self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                path=upload_ply_key,
+                file=f,
+                file_options={"content-type": "application/octet-stream", "x-upsert": "true", "upsert": "true"}
+            )
+
+        transforms_file = task_output_dir / "data" / "transforms.json"
+        if transforms_file.exists():
+            upload_json_key = f"{user_id}/{scene_id}/output/transforms.json"
+            with open(transforms_file, 'rb') as f:
+                self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                    path=upload_json_key,
+                    file=f,
+                    file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
+                )
+            on_pipeline_log("上传 transforms.json 成功")
+
+        if metadata and metadata.get("preview_img_path") and Path(metadata["preview_img_path"]).exists():
+            upload_img_key = f"{user_id}/{scene_id}/output/preview.jpg"
+            with open(metadata["preview_img_path"], 'rb') as f:
+                self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                    path=upload_img_key,
+                    file=f,
+                    file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
+                )
+            remote_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(upload_img_key)
+            metadata["preview_img_path"] = remote_url
+            on_pipeline_log("上传预览图成功")
+
+        try:
+            model_assets_row = {
+                "scene_id": scene_id,
+                "user_id": user_id,
+                "ply_path": upload_ply_key,
+            }
+            if metadata:
+                if "ai_description" in metadata:
+                    model_assets_row["description"] = metadata.get("ai_description", "")
+                if "ai_tags" in metadata:
+                    model_assets_row["tags"] = metadata.get("ai_tags", [])
+                if "ai_objects" in metadata:
+                    model_assets_row["objects"] = metadata.get("ai_objects", [])
+                if "preview_img_path" in metadata:
+                    model_assets_row["preview_img_path"] = metadata.get("preview_img_path", "")
+            self.supabase.table("model_assets").upsert(
+                model_assets_row,
+                on_conflict="scene_id"
+            ).execute()
+        except Exception as e:
+            on_pipeline_log(f"⚠️ 同步 model_assets 路径失败: {e}")
+
+        if metadata and "ai_description" in metadata:
+            on_pipeline_log("📚 正在将资产存入知识库...")
+            self.kb.add_asset(task_data=task, metadata=metadata, ply_path=upload_ply_key)
+        return upload_ply_key
+
+    def _run_pipeline_once(
+        self,
+        task: Dict[str, Any],
+        task_type: str,
+        input_path: Path,
+        task_params: Dict[str, Any],
+        work_dir: Path,
+        on_pipeline_log,
+    ) -> Tuple[Path, Dict[str, Any]]:
+        task_id = task['id']
+        scene_id = task['scene_id']
+        user_id = task.get('user_id', 'default_user')
+
+        context = {
+            "task_id": task_id,
+            "scene_id": scene_id,
+            "user_id": user_id,
+            "work_root": work_dir,
+            "log_callback": on_pipeline_log,
+            "shared_model_dir": self.MODELS_DIR,
+            "supabase": self.supabase
+        }
+
+        on_pipeline_log(f"正在加载流水线: {task_type}")
+        pipeline = PipelineFactory.get_pipeline(task_type, context)
+        final_model_path, metadata = pipeline.run(str(input_path), task_params)
+        self._sync_task_metadata(task_id, task, metadata, on_pipeline_log)
+
+        if not final_model_path or not Path(final_model_path).exists():
+            raise RuntimeError("Pipeline 执行结束，但未生成有效的模型文件，请检查训练日志。")
+
+        model_path_obj = self._compress_if_needed(Path(final_model_path), task_params, on_pipeline_log)
+        self._upload_and_upsert_assets(task, model_path_obj, metadata, user_id, scene_id, work_dir, on_pipeline_log)
+        return model_path_obj, metadata
+
+    def _detect_total_vram_gb(self) -> float:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                total_mem = torch.cuda.get_device_properties(0).total_memory
+                return float(total_mem) / (1024 ** 3)
+        except Exception:
+            pass
+        return 0.0
+
+    def _extract_candidate_frames(self, video_path: Path, out_dir: Path, sample_count: int, on_pipeline_log) -> list[Path]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        on_pipeline_log("🖼️ 正在提取候选帧用于快链...")
+        frame_pattern = out_dir / "frame_%05d.jpg"
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(video_path),
+            "-vf", "fps=5,scale=1280:1280:force_original_aspect_ratio=decrease:flags=lanczos",
+            "-q:v", "2",
+            str(frame_pattern),
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        frames = sorted(out_dir.glob("frame_*.jpg"))
+        if not frames:
+            raise RuntimeError("未能从视频提取候选帧")
+        if sample_count <= 1:
+            return [frames[0]]
+        if len(frames) <= sample_count:
+            return frames
+        step = (len(frames) - 1) / float(sample_count - 1)
+        picked = [frames[int(round(i * step))] for i in range(sample_count)]
+        return sorted(set(picked))
+
+    def _run_video_dual_chain(self, task: Dict[str, Any], video_path: Path, task_params: Dict[str, Any], task_output_dir: Path, on_pipeline_log):
+        scene_id = task['scene_id']
+        sample_count = int(task_params.get("best_frame_sample_count", 8))
+        slow_pipeline = str(task_params.get("slow_pipeline", "video_3dgs")).strip() or "video_3dgs"
+        if slow_pipeline not in ("video_3dgs", "da3_feed_forward_3dgs"):
+            slow_pipeline = "video_3dgs"
+        vram_threshold = float(task_params.get("sam3d_vram_threshold_gb", 25))
+
+        frames_dir = task_output_dir / "_dual_chain_frames"
+        fast_work_dir = task_output_dir / "fast_chain"
+        slow_work_dir = task_output_dir / "slow_chain"
+        fast_work_dir.mkdir(parents=True, exist_ok=True)
+        slow_work_dir.mkdir(parents=True, exist_ok=True)
+
+        cfg = PipelineConfig()
+        analyzer = SceneAnalyzer(cfg)
+        fast_ok = False
+        slow_ok = False
+        fast_error = None
+        slow_error = None
+
+        candidate_frames = self._extract_candidate_frames(video_path, frames_dir, sample_count, on_pipeline_log)
+        best_idx, best_reason = analyzer.select_best_image([str(p) for p in candidate_frames], log_callback=on_pipeline_log)
+        best_image = candidate_frames[max(0, min(best_idx, len(candidate_frames) - 1))]
+        on_pipeline_log(f"✅ 最佳帧已选定: {best_image.name}（{best_reason}）")
+
+        classify_label, classify_reason = analyzer.classify_scene_or_object(str(best_image), log_callback=on_pipeline_log)
+        on_pipeline_log(f"🔍 快链目标判定: {classify_label}（{classify_reason}）")
+
+        fast_params = dict(task_params)
+        fast_params["scene_id"] = scene_id
+        fast_task_type = "single_image_sharp"
+        if classify_label == "object":
+            total_vram_gb = self._detect_total_vram_gb()
+            if total_vram_gb >= vram_threshold:
+                fast_task_type = "single_image_sam3d"
+                on_pipeline_log(f"🧠 显存 {total_vram_gb:.1f}GB >= {vram_threshold}GB，快链使用 SAM3D")
+            else:
+                on_pipeline_log(f"⚠️ 显存 {total_vram_gb:.1f}GB < {vram_threshold}GB，快链降级为 SHARP")
+        else:
+            on_pipeline_log("🏞️ 判定为场景，快链使用 SHARP")
+
+        try:
+            self._run_pipeline_once(
+                task=task,
+                task_type=fast_task_type,
+                input_path=best_image,
+                task_params=fast_params,
+                work_dir=fast_work_dir,
+                on_pipeline_log=on_pipeline_log,
+            )
+            fast_ok = True
+            on_pipeline_log("⚡ 快链完成")
+        except Exception as e:
+            fast_error = e
+            on_pipeline_log(f"⚠️ 快链失败，将继续执行慢链: {e}")
+
+        slow_params = dict(task_params)
+        slow_params["scene_id"] = scene_id
+        try:
+            self._run_pipeline_once(
+                task=task,
+                task_type=slow_pipeline,
+                input_path=video_path,
+                task_params=slow_params,
+                work_dir=slow_work_dir,
+                on_pipeline_log=on_pipeline_log,
+            )
+            slow_ok = True
+            on_pipeline_log("🐢 慢链完成")
+        except Exception as e:
+            slow_error = e
+            on_pipeline_log(f"⚠️ 慢链失败: {e}")
+
+        if not fast_ok and not slow_ok:
+            raise RuntimeError(f"快慢双链均失败 | fast={fast_error} | slow={slow_error}")
+
     def _process_task(self, task):
         """
         ⚙️ [核心逻辑] 处理单个任务
@@ -189,12 +472,11 @@ class CloudWorker:
 
             # =================== 阶段 B: 下载资源 ===================
             on_pipeline_log("正在从云端下载资源...")
-            
-            # 获取任务类型：直接使用 task_type 字段，默认 video_3dgs
+
             task_type = task.get('task_type', 'video_3dgs')
+            task_params = self._parse_task_params(task)
             print(f"🔧 检测到任务类型: {task_type}")
-            
-            # 根据任务类型确定下载路径
+
             if task_type in ('single_image_sam3d', 'single_image_sharp'):
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
                 storage_path = f"{user_id}/{scene_id}/raw/image.png"
@@ -204,12 +486,10 @@ class CloudWorker:
                 storage_path = f"{user_id}/{scene_id}/raw/images.zip"
                 on_pipeline_log("下载多图压缩包 (images.zip)...")
             else:
-                # video_3dgs 默认路径
                 input_path = self.CACHE_DIR / f"{scene_id}.mp4"
                 storage_path = f"{user_id}/{scene_id}/raw/video.mp4"
                 on_pipeline_log("下载视频...")
-            
-            # 下载文件流并写入本地
+
             try:
                 with open(input_path, 'wb') as f:
                     res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
@@ -217,194 +497,26 @@ class CloudWorker:
             except Exception as e:
                 raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
 
-            # =================== 阶段 C: 执行引擎 ===================
-            # 1. 获取任务类型和参数
-            task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
-            
-            # task_params 可能是 JSON 字符串，需要解析
-            task_params_raw = task.get('task_params') if isinstance(task, dict) else None
-            
-            try:
-                import json
-                if isinstance(task_params_raw, str) and task_params_raw:
-                    task_params = json.loads(task_params_raw)
-                elif isinstance(task_params_raw, dict):
-                    task_params = task_params_raw
-                else:
-                    task_params = {}
-            except Exception:
-                task_params = {}
-            
-            # 确保 task_params 始终是一个字典，不是 None
-            if task_params is None:
-                task_params = {}
-
-            # 🟢 [新增] 支持从 Supabase 任务表顶层字段直接读取 mapper_type
-            if isinstance(task, dict) and task.get('mapper_type'):
-                task_params['mapper_type'] = task['mapper_type']
-            
-            # 准备输出目录: 修改为 user_id/scene_id/output 格式
             task_output_dir = self.CACHE_DIR / user_id / scene_id / "output"
             task_output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 2. 准备上下文 (把通用的东西打包)
-            context = {
-                "task_id": task_id,
-                "scene_id": scene_id,
-                "user_id": user_id,
-                "work_root": task_output_dir,
-                "log_callback": on_pipeline_log,
-                "shared_model_dir": self.MODELS_DIR,
-                "supabase": self.supabase
-            }
 
-            # 3. [核心修改] 通过工厂实例化 Pipeline
-            on_pipeline_log(f"正在加载流水线: {task_type}")
-            pipeline = PipelineFactory.get_pipeline(task_type, context)
-            
-            # 4. [核心修改] 执行多态的 run 方法
-            # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
-            
-            final_model_path, metadata = pipeline.run(str(input_path), task_params)
-
-            # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
-            # 不管训练是否成功，只要有分析结果，都应该存下来
-            if metadata:
-                update_data = {}
-                
-                # 1. 同步分数
-                if "ai_score" in metadata:
-                    update_data["quality_score"] = metadata["ai_score"]
-                
-                # 2. 同步标签
-                if "ai_tags" in metadata:
-                    update_data["tags"] = metadata["ai_tags"]
-                
-                # 3. 同步评价原因 (新!)
-                if "ai_reason" in metadata:
-                    update_data["quality_reason"] = metadata["ai_reason"]
-                
-                # 执行更新
-                if update_data:
-                    self.supabase.table(self.TABLE_NAME)\
-                        .update(update_data)\
-                        .eq("id", task_id)\
-                        .execute()
-                    on_pipeline_log(f"✅ AI 评分已同步: {metadata.get('ai_score')}分")
-                
-                # 🟢 2. [新增] 存入 RAG 向量库 (只有当包含描述信息时才存)
-                if "ai_description" in metadata:
-                    on_pipeline_log("🧠 正在生成场景记忆 (Embedding)...")
-                    self.memory.save_to_knowledge_base(
-                        task_data=task,
-                        description=metadata["ai_description"],
-                        objects=metadata.get("ai_objects", [])
-                    )
-
-            # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
-            if not final_model_path or not Path(final_model_path).exists():
-                raise RuntimeError("Pipeline 执行结束，但未生成有效的模型文件，请检查训练日志。")
-
-            model_path_obj = Path(final_model_path)
-            delivery_format = str(
-                task_params.get("delivery_format") or os.getenv("MODEL_DELIVERY_FORMAT", "splat")
-            ).lower()
-            opacity_threshold = float(
-                task_params.get("compression_opacity_threshold", os.getenv("COMPRESSION_OPACITY_THRESHOLD", "0.05"))
-            )
-            ksplat_alpha_threshold = int(
-                task_params.get("ksplat_alpha_threshold", os.getenv("KSPLAT_ALPHA_THRESHOLD", "1"))
-            )
-
-            if model_path_obj.suffix.lower() == ".ply" and delivery_format in ("splat", "ksplat"):
-                try:
-                    compressed_path = compress_model_for_delivery(
-                        model_path=str(model_path_obj),
-                        output_format=delivery_format,
-                        opacity_threshold=opacity_threshold,
-                        ksplat_script_path=os.getenv("KSPLAT_SCRIPT_PATH", ""),
-                        alpha_removal_threshold=ksplat_alpha_threshold,
-                        log_callback=on_pipeline_log,
-                    )
-                    model_path_obj = Path(compressed_path)
-                    on_pipeline_log(f"✅ 模型压缩完成: {model_path_obj.name}")
-                except Exception as e:
-                    on_pipeline_log(f"⚠️ 模型压缩失败，回退原始文件上传: {e}")
-
-            # =================== 阶段 D: 上传结果 ===================
-            on_pipeline_log("训练完成，正在上传结果到云端...")
-            
-            # 1. 上传模型文件（支持 .ply / .splat / .ksplat）
-            model_suffix = model_path_obj.suffix.lower() or ".ply"
-            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud{model_suffix}"
-            with open(model_path_obj, 'rb') as f:
-                self.supabase.storage.from_(self.BUCKET_NAME).upload(
-                    path=upload_ply_key, 
-                    file=f, 
-                    # x-upsert=true 和 upsert=true 表示如果文件已存在则覆盖
-                    file_options={"content-type": "application/octet-stream", "x-upsert": "true", "upsert": "true"}
+            if task_type == "video_dual_chain":
+                self._run_video_dual_chain(
+                    task=task,
+                    video_path=input_path,
+                    task_params=task_params,
+                    task_output_dir=task_output_dir,
+                    on_pipeline_log=on_pipeline_log,
                 )
-
-            # 2. 上传 transforms.json (用于网页预览)
-            # 假设该文件在 PLY 同级目录或配置指定的目录
-            transforms_file = task_output_dir / "data" / "transforms.json"
-            if transforms_file.exists():
-                upload_json_key = f"{user_id}/{scene_id}/output/transforms.json"
-                with open(transforms_file, 'rb') as f:
-                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
-                        path=upload_json_key,
-                        file=f,
-                        file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
-                    )
-                on_pipeline_log("上传 transforms.json 成功")
-
-            # 3. 上传预览图 preview_img_path (如果存在)
-            if metadata and metadata.get("preview_img_path") and Path(metadata["preview_img_path"]).exists():
-                upload_img_key = f"{user_id}/{scene_id}/output/preview.jpg" # 假设是 jpg
-                with open(metadata["preview_img_path"], 'rb') as f:
-                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
-                        path=upload_img_key,
-                        file=f,
-                        file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
-                    )
-                # 替换为远程 URL
-                remote_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(upload_img_key)
-                metadata["preview_img_path"] = remote_url
-                on_pipeline_log("上传预览图成功")
-
-            # 3.5 强制同步 model_assets 的模型路径，保证客户端总能拿到最新后缀
-            try:
-                model_assets_row = {
-                    "scene_id": scene_id,
-                    "user_id": user_id,
-                    "ply_path": upload_ply_key,
-                }
-                if metadata:
-                    if "ai_description" in metadata:
-                        model_assets_row["description"] = metadata.get("ai_description", "")
-                    if "ai_tags" in metadata:
-                        model_assets_row["tags"] = metadata.get("ai_tags", [])
-                    if "ai_objects" in metadata:
-                        model_assets_row["objects"] = metadata.get("ai_objects", [])
-                    if "preview_img_path" in metadata:
-                        model_assets_row["preview_img_path"] = metadata.get("preview_img_path", "")
-                self.supabase.table("model_assets").upsert(
-                    model_assets_row,
-                    on_conflict="scene_id"
-                ).execute()
-            except Exception as e:
-                on_pipeline_log(f"⚠️ 同步 model_assets 路径失败: {e}")
-
-            # =================== 🟢 [RAG 集成] 资产入库 ===================
-            # 只有当 AI 成功生成了描述，才存入知识库
-            if metadata and "ai_description" in metadata:
-                on_pipeline_log("📚 正在将资产存入知识库...")
-                self.kb.add_asset(
-                    task_data=task,
-                    metadata=metadata,
-                    ply_path=upload_ply_key  # 记录云端路径
+            else:
+                self._run_pipeline_once(
+                    task=task,
+                    task_type=task_type,
+                    input_path=input_path,
+                    task_params=task_params,
+                    work_dir=task_output_dir,
+                    on_pipeline_log=on_pipeline_log,
                 )
-            # =============================================================
 
             # =================== 阶段 E: 完结撒花 ===================
             # 更新状态为 'completed'
@@ -431,8 +543,6 @@ class CloudWorker:
         
         finally:
             # =================== 🧹 清理工作 (新增逻辑) ===================
-            import shutil # 确保引入 shutil
-
             # 1. 删除源文件 (视频或图片)
             if 'input_path' in locals() and input_path.exists():
                 try:

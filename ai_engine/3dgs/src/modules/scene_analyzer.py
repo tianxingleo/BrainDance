@@ -355,3 +355,154 @@ class SceneAnalyzer:
             if log_callback:
                 log_callback(f"⚠️ 挑选封面失败: {e}，回退到第一帧")
             return 0, f"挑选失败: {e}"
+
+    def select_best_image(self, image_paths: list[str], log_callback=None) -> tuple[int, str]:
+        """
+        从一组图片路径里选出“最适合快速重建”的单张图。
+        返回: (index, reason)。
+        """
+        if not image_paths:
+            return 0, "无候选图片，默认第 0 张"
+        if len(image_paths) == 1:
+            return 0, "仅 1 张候选图，默认选中"
+        if not self.api_key:
+            if log_callback:
+                log_callback("⚠️ [SceneAnalyzer] 未配置 API Key，最佳帧选择回退到第一张")
+            return 0, "未配置 API Key，回退第一张"
+
+        prompt = f"""
+        你是 3D 重建数据筛选助手。请从以下候选图中选择最适合做“快速重建输入”的一张。
+        判断标准：
+        1) 画面清晰、主体完整、无遮挡、无明显运动模糊；
+        2) 如果是单物体，优先“正面、摆正、主体占比适中”的图；
+        3) 如果是场景，优先“构图完整、能看到整体空间结构”的图。
+
+        仅输出 JSON：
+        {{
+          "index": 0,
+          "reason": "一句话理由"
+        }}
+        index 必须是 0 到 {len(image_paths) - 1} 的整数。
+        """
+
+        try:
+            if OpenAI is None:
+                raise RuntimeError("OpenAI client not available in environment")
+
+            content = [{"type": "text", "text": prompt}]
+            for path in image_paths:
+                if os.path.exists(path):
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(path)}"}
+                    })
+
+            if len(content) == 1:
+                return 0, "无有效候选图，回退第一张"
+
+            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": content},
+                ],
+                temperature=0.1,
+            )
+
+            resp = str(completion.choices[0].message.content).strip()
+            cleaned = resp.replace("```json", "").replace("```", "").strip()
+            m = re.search(r"(\{.*\})", cleaned, flags=re.S)
+            json_text = m.group(1) if m else cleaned
+
+            idx = None
+            reason = ""
+            try:
+                result = json.loads(json_text)
+                idx = int(result.get("index"))
+                reason = str(result.get("reason", "")).strip()
+            except Exception:
+                m_idx = re.search(r"\d+", cleaned)
+                if m_idx:
+                    idx = int(m_idx.group(0))
+                m_reason = re.search(r"(?:reason|理由)\s*[:：]\s*(.+)", cleaned, flags=re.I)
+                if m_reason:
+                    reason = m_reason.group(1).strip()
+
+            if idx is not None and 0 <= idx < len(image_paths):
+                return idx, (reason or "模型未提供明确理由")
+
+            return 0, "无法解析模型输出，回退第一张"
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ 最佳帧选择失败: {e}，回退第一张")
+            return 0, f"选择失败: {e}"
+
+    def classify_scene_or_object(self, image_path: str, log_callback=None) -> tuple[str, str]:
+        """
+        判定输入图是“场景(scene)”还是“单物体(object)”。
+        返回: (label, reason)，label ∈ {'scene', 'object'}。
+        """
+        if not image_path or not os.path.exists(image_path):
+            return "scene", "输入图不存在，默认按场景处理"
+        if not self.api_key:
+            return "scene", "未配置 API Key，默认按场景处理"
+
+        prompt = """
+        你是视觉分类助手。请判断图片更适合以下哪一类 3D 重建目标：
+        - scene: 空间/房间/场景整体（可看到较大环境范围）
+        - object: 单个主体物体（主体集中且应优先做单物体重建）
+
+        仅输出 JSON：
+        {
+          "label": "scene",
+          "reason": "一句话理由"
+        }
+        label 只能是 scene 或 object。
+        """
+
+        try:
+            if OpenAI is None:
+                raise RuntimeError("OpenAI client not available in environment")
+
+            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(image_path)}"}},
+                    ]},
+                ],
+                temperature=0.1,
+            )
+
+            resp = str(completion.choices[0].message.content).strip()
+            cleaned = resp.replace("```json", "").replace("```", "").strip()
+            m = re.search(r"(\{.*\})", cleaned, flags=re.S)
+            json_text = m.group(1) if m else cleaned
+
+            label = "scene"
+            reason = ""
+            try:
+                result = json.loads(json_text)
+                label = str(result.get("label", "scene")).strip().lower()
+                reason = str(result.get("reason", "")).strip()
+            except Exception:
+                low = cleaned.lower()
+                if "object" in low:
+                    label = "object"
+                if "scene" in low:
+                    label = "scene" if "object" not in low else label
+                m_reason = re.search(r"(?:reason|理由)\s*[:：]\s*(.+)", cleaned, flags=re.I)
+                if m_reason:
+                    reason = m_reason.group(1).strip()
+
+            if label not in ("scene", "object"):
+                label = "scene"
+            return label, (reason or "模型未提供明确理由")
+        except Exception as e:
+            if log_callback:
+                log_callback(f"⚠️ 场景/物体判定失败: {e}，默认按场景处理")
+            return "scene", f"判定失败: {e}"
