@@ -400,7 +400,7 @@ class _TaskListPageState extends State<TaskListPage> {
   List<String> _parseLogMsgs(dynamic logs) {
     if (logs == null) return [];
     if (logs is! List) return [];
-    
+
     try {
       final List<String> result = [];
       for (final log in logs) {
@@ -432,22 +432,22 @@ class _TaskListPageState extends State<TaskListPage> {
   void _listenAuthChanges() {
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
       if (event.event == AuthChangeEvent.signedOut) {
-        // 用户登出时清空数据
+        _refreshTimer?.cancel();
+        _refreshTimer = null;
         setState(() {
           _tasksByStatus = {};
           _error = textLocalize('error_not_logged_in');
         });
       } else if (event.event == AuthChangeEvent.signedIn) {
-        // 用户登录时刷新数据
         _fetchTasks();
+        _setupAutoRefresh();
       }
     });
   }
 
   void _setupAutoRefresh() {
-    // 每5秒自动刷新一次，实现类似realtime的效果
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      // 调试阶段：不检查登录状态
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted) {
         _fetchTasksSilent();
       }
@@ -457,45 +457,54 @@ class _TaskListPageState extends State<TaskListPage> {
     });
   }
 
+  /// 查询 processing_tasks 并分组，返回分组结果和日志映射
+  Future<({Map<String, List<Map<String, dynamic>>> grouped, Map<String, List<String>> logMap})> _queryAndGroupTasks() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) throw Exception(textLocalize('error_not_logged_in'));
+
+    final response = await Supabase.instance.client
+        .from('processing_tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', ascending: false);
+
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    final Map<String, List<String>> logMap = {};
+
+    for (final task in response) {
+      final status = task['status']?.toString() ?? 'pending';
+      final taskId = task['id'].toString();
+
+      grouped.putIfAbsent(status, () => []);
+      grouped[status]!.add(Map<String, dynamic>.from(task));
+
+      final logs = task['logs'];
+      if (logs is List) {
+        final parsedLogs = _parseLogMsgs(logs);
+        if (parsedLogs.isNotEmpty) {
+          logMap[taskId] = parsedLogs;
+        }
+      }
+    }
+
+    return (grouped: grouped, logMap: logMap);
+  }
+
   Future<void> _fetchTasksSilent() async {
     try {
-      final response = await Supabase.instance.client
-          .from('processing_tasks')
-          .select('*')
-          .order('created_at', ascending: false);
+      final result = await _queryAndGroupTasks();
 
       if (mounted) {
-        final Map<String, List<Map<String, dynamic>>> grouped = {};
-        final Map<String, List<String>> logMap = {};
-        
-        for (final task in response) {
-          final status = task['status']?.toString() ?? 'pending';
-          final taskId = task['id'].toString();
-          
-          grouped.putIfAbsent(status, () => []);
-          grouped[status]!.add(Map<String, dynamic>.from(task));
-          
-          // 解析 logs
-          final logs = task['logs'];
-          if (logs is List) {
-            final parsedLogs = _parseLogMsgs(logs);
-            if (parsedLogs.isNotEmpty) {
-              logMap[taskId] = parsedLogs;
-            }
-          }
-        }
-
-        for (final status in grouped.keys) {
+        for (final status in result.grouped.keys) {
           _expandedStatus.putIfAbsent(status, () => true);
         }
 
         setState(() {
-          _tasksByStatus = grouped;
-          _taskLogs = logMap;
+          _tasksByStatus = result.grouped;
+          _taskLogs = result.logMap;
         });
 
-        // 标记所有任务为已通知（更新缓存）
-        final allTasks = grouped.values.expand((list) => list).toList();
+        final allTasks = result.grouped.values.expand((list) => list).toList();
         taskNotificationService.markAllTasksAsNotified(allTasks);
       }
     } catch (e) {
@@ -510,45 +519,20 @@ class _TaskListPageState extends State<TaskListPage> {
     });
 
     try {
-      final response = await Supabase.instance.client
-          .from('processing_tasks')
-          .select('*')
-          .order('created_at', ascending: false);
+      final result = await _queryAndGroupTasks();
 
       if (mounted) {
-        final Map<String, List<Map<String, dynamic>>> grouped = {};
-        final Map<String, List<String>> logMap = {};
-        
-        for (final task in response) {
-          final status = task['status']?.toString() ?? 'pending';
-          final taskId = task['id'].toString();
-          
-          grouped.putIfAbsent(status, () => []);
-          grouped[status]!.add(Map<String, dynamic>.from(task));
-          
-          // 解析 logs
-          final logs = task['logs'];
-          if (logs is List) {
-            final parsedLogs = _parseLogMsgs(logs);
-            if (parsedLogs.isNotEmpty) {
-              logMap[taskId] = parsedLogs;
-            }
-          }
-        }
-
-        // 初始化展开状态
-        for (final status in grouped.keys) {
+        for (final status in result.grouped.keys) {
           _expandedStatus.putIfAbsent(status, () => true);
         }
 
         setState(() {
-          _tasksByStatus = grouped;
-          _taskLogs = logMap;
+          _tasksByStatus = result.grouped;
+          _taskLogs = result.logMap;
           _isLoading = false;
         });
 
-        // 标记所有任务为已通知（更新缓存）
-        final allTasks = grouped.values.expand((list) => list).toList();
+        final allTasks = result.grouped.values.expand((list) => list).toList();
         taskNotificationService.markAllTasksAsNotified(allTasks);
       }
     } catch (e) {
@@ -697,6 +681,7 @@ class _TaskListPageState extends State<TaskListPage> {
         tasks: _tasksByStatus[status]!,
         taskLogs: _taskLogs,
         initiallyExpanded: _expandedStatus[status] ?? true,
+        status: status,
         isDark: isDark,
         textColor: textColor,
         onTaskTap: (task) => _onTaskTap(task),

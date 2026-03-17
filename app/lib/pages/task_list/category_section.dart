@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import '../../configs/app_config.dart';
 
 /// 可展开收起的分类组件
 class ExpandableCategorySection extends StatefulWidget {
@@ -9,6 +10,7 @@ class ExpandableCategorySection extends StatefulWidget {
   final List<Map<String, dynamic>> tasks;
   final Map<String, List<String>> taskLogs; // taskId -> logs
   final bool initiallyExpanded;
+  final String status; // 状态标识
   final Function(Map<String, dynamic>)? onTaskTap;
   final Color? textColor;
   final bool isDark;
@@ -21,6 +23,7 @@ class ExpandableCategorySection extends StatefulWidget {
     required this.tasks,
     this.taskLogs = const {},
     this.initiallyExpanded = true,
+    required this.status,
     this.onTaskTap,
     this.textColor,
     required this.isDark,
@@ -198,7 +201,7 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     final taskTypeIcon = _getTaskTypeIcon(taskType);
 
     // 判断是否为 processing 状态（显示加载动画）
-    final isProcessing = widget.color == Colors.blue;
+    final isProcessing = widget.status == 'processing';
     
     // 获取当前任务的logs展开状态
     final isLogsExpanded = _logsExpanded[taskId] ?? false;
@@ -315,8 +318,8 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                     const SizedBox(width: 4),
                     Text(
                       isLogsExpanded 
-                          ? '收起日志 (${allLogs.length})' 
-                          : '展开日志 (${allLogs.length})',
+                          ? '${textLocalize('logs_collapse')} (${allLogs.length})'
+                          : '${textLocalize('logs_expand')} (${allLogs.length})',
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
