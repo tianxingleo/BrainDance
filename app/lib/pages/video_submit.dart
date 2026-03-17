@@ -49,6 +49,12 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     final client = Supabase.instance.client;
     var user = client.auth.currentUser;
     if (user == null) {
+      if (SupabaseConfig.isAdminMode) {
+        if (mounted) {
+          TDToast.showText('当前为管理员浏览模式，未绑定用户，暂不支持上传任务。', context: context);
+        }
+        return;
+      }
       if (mounted) {
         TDToast.showText('未登录，即将跳转登录页面...', context: context);
         await Navigator.pushNamed(context, '/login');
@@ -84,7 +90,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           headers: {
             'Authorization':
                 'Bearer ${client.auth.currentSession?.accessToken}',
-            'apikey': SupabaseConfig.anonKey,
+            'apikey': SupabaseConfig.apiKey,
             'Content-Type': 'video/mp4',
             'Content-Length': fileSize.toString(),
           },

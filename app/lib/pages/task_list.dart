@@ -3,6 +3,8 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
+import '../configs/supabase_config.dart';
+import '../configs/motion_tokens.dart';
 import '../services/task_notification_service.dart';
 import 'webgl_viewer.dart';
 
@@ -29,28 +31,28 @@ const List<StatusCategory> statusCategories = [
     status: 'pending',
     labelKey: 'status_pending',
     icon: Icons.schedule,
-    color: Colors.orange,
+    color: BDDesign.colorMutedBlue,
     priority: 1,
   ),
   StatusCategory(
     status: 'processing',
     labelKey: 'status_processing',
     icon: Icons.sync,
-    color: Colors.blue,
+    color: BDDesign.colorMutedBlue,
     priority: 2,
   ),
   StatusCategory(
     status: 'completed',
     labelKey: 'status_completed',
     icon: Icons.check_circle,
-    color: Colors.green,
+    color: BDDesign.colorFadedOlive,
     priority: 3,
   ),
   StatusCategory(
     status: 'failed',
     labelKey: 'status_failed',
     icon: Icons.error,
-    color: Colors.red,
+    color: BDDesign.colorDarkRed,
     priority: 4,
   ),
 ];
@@ -81,7 +83,8 @@ class ExpandableCategorySection extends StatefulWidget {
   });
 
   @override
-  State<ExpandableCategorySection> createState() => _ExpandableCategorySectionState();
+  State<ExpandableCategorySection> createState() =>
+      _ExpandableCategorySectionState();
 }
 
 class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
@@ -99,12 +102,14 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
       duration: const Duration(milliseconds: 200),
       vsync: this,
     );
-    _iconTurns = Tween<double>(begin: 0.0, end: 0.5).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-    _heightFactor = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _iconTurns = Tween<double>(
+      begin: 0.0,
+      end: 0.5,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _heightFactor = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
     if (_isExpanded) {
       _controller.value = 1.0;
     }
@@ -130,24 +135,17 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
   @override
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
-    final darkCard = const Color(0xFF18181C);
-    final darkInput = const Color(0xFF23232A);
+    final darkCard = BDDesign.colorInkBlack;
+    final darkInput = BDDesign.colorInkBlack.withAlpha(200);
     final bgColor = widget.isDark ? darkCard : theme.whiteColor1.withAlpha(220);
-    final borderColor = widget.isDark ? const Color(0xFF333333) : theme.grayColor3;
+    final borderColor = widget.color.withAlpha(80);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(15),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor, width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -155,36 +153,34 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
           // 标题栏（可点击展开/收起）
           InkWell(
             onTap: _toggleExpand,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: widget.color.withAlpha(30),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      widget.icon,
-                      size: 20,
-                      color: widget.color,
-                    ),
+                    padding: const EdgeInsets.all(4),
+                    color: Colors.transparent,
+                    child: Icon(widget.icon, size: 20, color: widget.color),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.title,
+                      '[ ${widget.title.toUpperCase()} ]',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: widget.textColor,
+                        fontFamily: 'Courier',
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: widget.color,
+                        letterSpacing: 1.2,
                       ),
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: widget.color.withAlpha(20),
                       borderRadius: BorderRadius.circular(12),
@@ -203,7 +199,9 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                     turns: _iconTurns,
                     child: Icon(
                       Icons.keyboard_arrow_down,
-                      color: widget.isDark ? const Color(0xFF888888) : theme.fontGyColor3,
+                      color: widget.isDark
+                          ? const Color(0xFF888888)
+                          : theme.fontGyColor3,
                     ),
                   ),
                 ],
@@ -215,14 +213,16 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
             animation: _controller,
             builder: (context, child) {
               return ClipRect(
-                child: Align(
-                  heightFactor: _heightFactor.value,
-                  child: child,
-                ),
+                child: Align(heightFactor: _heightFactor.value, child: child),
               );
             },
             child: Column(
-              children: widget.tasks.map((task) => _buildTaskItem(task, theme, widget.isDark, darkInput)).toList(),
+              children: widget.tasks
+                  .map(
+                    (task) =>
+                        _buildTaskItem(task, theme, widget.isDark, darkInput),
+                  )
+                  .toList(),
             ),
           ),
         ],
@@ -230,7 +230,12 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     );
   }
 
-  Widget _buildTaskItem(Map<String, dynamic> task, TDThemeData theme, bool isDark, Color darkInput) {
+  Widget _buildTaskItem(
+    Map<String, dynamic> task,
+    TDThemeData theme,
+    bool isDark,
+    Color darkInput,
+  ) {
     final taskId = task['id'].toString();
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
     final description = task['description']?.toString() ?? '';
@@ -239,91 +244,124 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
         ? DateTime.tryParse(task['created_at'].toString())
         : null;
     final taskType = task['task_type']?.toString() ?? 'video_3dgs';
-    
-    // 获取该任务的 logs
+
     final allLogs = widget.taskLogs[taskId] ?? [];
     final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
-
-    // 任务类型图标映射
     final taskTypeIcon = _getTaskTypeIcon(taskType);
-
-    // 判断是否为 processing 状态（显示加载动画）
-    final isProcessing = widget.color == Colors.blue;
+    final isProcessing = widget.color == BDDesign.colorMutedBlue;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isDark ? darkInput : theme.grayColor1,
-        borderRadius: BorderRadius.circular(12),
+        color: isDark ? BDDesign.colorInkBlack : BDDesign.colorPaperWhite,
+        border: Border(
+          left: BorderSide(color: widget.color, width: 4),
+          bottom: BorderSide(
+            color: isDark
+                ? BDDesign.colorAshGray.withAlpha(20)
+                : BDDesign.colorInkBlack.withAlpha(20),
+            width: 1,
+          ),
+        ),
       ),
       child: InkWell(
         onTap: widget.onTaskTap != null ? () => widget.onTaskTap!(task) : null,
-        borderRadius: BorderRadius.circular(12),
-        child: Row(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: widget.color.withAlpha(20),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: isProcessing
-                  ? const Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 2),
+                child: isProcessing
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            widget.color,
+                          ),
+                        ),
+                      )
+                    : Icon(taskTypeIcon, color: widget.color, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            displayName ?? sceneId,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? BDDesign.colorPaperWhite
+                                  : BDDesign.colorInkBlack,
+                              letterSpacing: 0.5,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (createdAt != null)
+                          Text(
+                            _formatDate(createdAt),
+                            style: TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 11,
+                              color: BDDesign.colorMutedBlue,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'JOB_ID: ${taskId.length > 8 ? taskId.substring(0, 8) : taskId} | TYPE: ${_getTaskTypeLabel(taskType)}',
+                      style: TextStyle(
+                        fontFamily: 'Courier',
+                        fontSize: 11,
+                        color: isDark
+                            ? BDDesign.colorAshGray
+                            : BDDesign.colorInkBlack.withAlpha(150),
+                      ),
+                    ),
+                    if (latestLog != null || description.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? BDDesign.colorAshGray.withAlpha(10)
+                              : BDDesign.colorAshGray,
+                          border: Border.all(color: widget.color.withAlpha(50)),
+                        ),
+                        child: Text(
+                          '> ${latestLog ?? description}',
+                          style: TextStyle(
+                            fontFamily: 'Courier',
+                            fontSize: 11,
+                            color: widget.color,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    )
-                  : Icon(
-                      taskTypeIcon,
-                      color: widget.color,
-                      size: 24,
-                    ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayName ?? sceneId,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: widget.textColor,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  // 显示最新日志或描述
-                  Text(
-                    latestLog ?? (description.isNotEmpty ? description : ''),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            if (createdAt != null)
-              Text(
-                _formatDate(createdAt),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isDark ? const Color(0xFF666666) : theme.fontGyColor4,
+                    ],
+                  ],
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -430,7 +468,13 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
   void _listenAuthChanges() {
-    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+    if (SupabaseConfig.isAdminMode) {
+      return;
+    }
+
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
+      event,
+    ) {
       if (event.event == AuthChangeEvent.signedOut) {
         _refreshTimer?.cancel();
         _refreshTimer = null;
@@ -458,15 +502,24 @@ class _TaskListPageState extends State<TaskListPage> {
   }
 
   /// 查询 processing_tasks 并分组，返回分组结果和日志映射
-  Future<({Map<String, List<Map<String, dynamic>>> grouped, Map<String, List<String>> logMap})> _queryAndGroupTasks() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) throw Exception(textLocalize('error_not_logged_in'));
+  Future<
+    ({
+      Map<String, List<Map<String, dynamic>>> grouped,
+      Map<String, List<String>> logMap,
+    })
+  >
+  _queryAndGroupTasks() async {
+    final query = Supabase.instance.client.from('processing_tasks').select('*');
 
-    final response = await Supabase.instance.client
-        .from('processing_tasks')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', ascending: false);
+    final response = SupabaseConfig.isAdminMode
+        ? await query.order('created_at', ascending: false)
+        : await query
+              .eq(
+                'user_id',
+                Supabase.instance.client.auth.currentUser?.id ??
+                    (throw Exception(textLocalize('error_not_logged_in'))),
+              )
+              .order('created_at', ascending: false);
 
     final Map<String, List<Map<String, dynamic>>> grouped = {};
     final Map<String, List<String>> logMap = {};
@@ -560,32 +613,80 @@ class _TaskListPageState extends State<TaskListPage> {
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
     final isDark = AppConfig.isNightMode;
-    final textColor = isDark ? const Color(0xFFFFFFFF) : const Color(0xFF333333);
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
 
     return Scaffold(
-      backgroundColor: isDark ? darkBg : theme.grayColor1,
-      appBar: AppBar(
-        backgroundColor: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
-        centerTitle: true,
-        title: Text(
-          textLocalize('task_list_title'),
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            color: textColor,
+      backgroundColor: isDark
+          ? BDDesign.colorInkBlack
+          : BDDesign.colorPaperWhite,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildTerminalHeader(isDark, textColor),
+            Expanded(child: _buildBody(theme, isDark, textColor)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTerminalHeader(bool isDark, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: isDark
+                ? BDDesign.colorAshGray.withAlpha(40)
+                : BDDesign.colorInkBlack.withAlpha(40),
+            width: 1,
           ),
         ),
-        actions: [
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'SYSTEM.TASKS',
+                style: TextStyle(
+                  fontFamily: 'Courier',
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: BDDesign.colorMutedBlue,
+                  letterSpacing: 2.0,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                textLocalize('task_list_title'),
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: isDark
+                      ? BDDesign.colorPaperWhite
+                      : BDDesign.colorInkBlack,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
           IconButton(
             icon: AnimatedRotation(
               turns: _isLoading ? 1 : 0,
               duration: const Duration(milliseconds: 600),
               child: Icon(
                 Icons.refresh,
-                color: isDark ? const Color(0xFFEEEEEE) : const Color(0xFF333333),
+                color: isDark
+                    ? BDDesign.colorPaperWhite
+                    : BDDesign.colorInkBlack,
+                size: 20,
               ),
             ),
             tooltip: textLocalize('refresh'),
@@ -593,28 +694,13 @@ class _TaskListPageState extends State<TaskListPage> {
           ),
         ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: isDark
-                ? [darkBg, darkCard]
-                : [theme.grayColor1, theme.whiteColor1],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: _buildBody(theme, isDark, textColor),
-      ),
     );
   }
 
   Widget _buildBody(TDThemeData theme, bool isDark, Color textColor) {
     if (_isLoading) {
       return const Center(
-        child: TDLoading(
-          size: TDLoadingSize.large,
-          icon: TDLoadingIcon.circle,
-        ),
+        child: TDLoading(size: TDLoadingSize.large, icon: TDLoadingIcon.circle),
       );
     }
 
@@ -635,40 +721,49 @@ class _TaskListPageState extends State<TaskListPage> {
     );
   }
 
-  List<Widget> _buildCategorySections(TDThemeData theme, bool isDark, Color textColor) {
+  List<Widget> _buildCategorySections(
+    TDThemeData theme,
+    bool isDark,
+    Color textColor,
+  ) {
     // 按优先级排序状态
-    final sortedStatuses = _tasksByStatus.keys.toList()..sort((a, b) {
-      final priorityA = statusCategories.firstWhere(
-        (c) => c.status == a,
-        orElse: () => StatusCategory(
-          status: a,
-          labelKey: a,
-          icon: Icons.folder,
-          color: Colors.grey,
-          priority: 99,
-        ),
-      ).priority;
-      final priorityB = statusCategories.firstWhere(
-        (c) => c.status == b,
-        orElse: () => StatusCategory(
-          status: b,
-          labelKey: b,
-          icon: Icons.folder,
-          color: Colors.grey,
-          priority: 99,
-        ),
-      ).priority;
-      return priorityA.compareTo(priorityB);
-    });
+    final sortedStatuses = _tasksByStatus.keys.toList()
+      ..sort((a, b) {
+        final priorityA = statusCategories
+            .firstWhere(
+              (c) => c.status == a,
+              orElse: () => StatusCategory(
+                status: a,
+                labelKey: a,
+                icon: Icons.folder,
+                color: BDDesign.colorAshGray,
+                priority: 99,
+              ),
+            )
+            .priority;
+        final priorityB = statusCategories
+            .firstWhere(
+              (c) => c.status == b,
+              orElse: () => StatusCategory(
+                status: b,
+                labelKey: b,
+                icon: Icons.folder,
+                color: BDDesign.colorAshGray,
+                priority: 99,
+              ),
+            )
+            .priority;
+        return priorityA.compareTo(priorityB);
+      });
 
-    return sortedStatuses.map((status) {
+    return sortedStatuses.map<Widget>((status) {
       final category = statusCategories.firstWhere(
         (c) => c.status == status,
         orElse: () => StatusCategory(
           status: status,
           labelKey: status,
           icon: Icons.folder,
-          color: Colors.grey,
+          color: BDDesign.colorAshGray,
           priority: 99,
         ),
       );
@@ -681,7 +776,6 @@ class _TaskListPageState extends State<TaskListPage> {
         tasks: _tasksByStatus[status]!,
         taskLogs: _taskLogs,
         initiallyExpanded: _expandedStatus[status] ?? true,
-        status: status,
         isDark: isDark,
         textColor: textColor,
         onTaskTap: (task) => _onTaskTap(task),
@@ -692,7 +786,7 @@ class _TaskListPageState extends State<TaskListPage> {
   void _onTaskTap(Map<String, dynamic> task) {
     final status = task['status']?.toString();
     final sceneId = task['scene_id']?.toString();
-    
+
     // 只有completed状态的任务才能查看
     if (status == 'completed' && sceneId != null) {
       Navigator.push(
@@ -778,7 +872,7 @@ class _TaskListPageState extends State<TaskListPage> {
             Icon(
               Icons.error_outline,
               size: 64,
-              color: Colors.red.withAlpha(180),
+              color: BDDesign.colorDarkRed.withAlpha(180),
             ),
             const SizedBox(height: 16),
             Text(
