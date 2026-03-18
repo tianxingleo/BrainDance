@@ -44,12 +44,10 @@ class RecallModelGrid extends StatelessWidget {
         models.isNotEmpty && models.first.containsKey('matched_frames');
 
     if (isSearchWithFrames) {
-      return ListView.builder(
+      return SliverPadding(
         padding: const EdgeInsets.fromLTRB(16.0, 6.0, 16.0, 16.0),
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: models.length,
-        itemBuilder: (context, index) {
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
           final model = models[index];
           final cardKey = modelCardKeyFor(model);
           final isActionTarget = isSameModel(activeModelAction, model);
@@ -59,256 +57,239 @@ class RecallModelGrid extends StatelessWidget {
           final userId = model['user_id'] ?? '';
           final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
 
-          return TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.0, end: 1.0),
-            duration:
-                BDMotion.durationNormal +
-                Duration(milliseconds: (index * 50).clamp(0, 400)),
-            curve: BDMotion.curveEnter,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(
-                  opacity: isActionTarget ? 0.0 : value,
-                  child: child,
-                ),
-              );
-            },
+          return RepaintBoundary(
             child: IgnorePointer(
               ignoring: isActionTarget,
-              child: Container(
-                key: cardKey,
-                margin: const EdgeInsets.only(bottom: 16.0),
-                decoration: BoxDecoration(
-                  color: isDark ? darkCard : BDDesign.colorPaperWhite,
-                  borderRadius: BDDesign.radiusLarge,
-                  boxShadow: isDark ? [] : [BDDesign.shadowLight],
-                  border: Border.all(
-                    color: isDark
-                        ? const Color(0xFF2A2A30)
-                        : Colors.transparent,
+              child: Opacity(
+                opacity: isActionTarget ? 0.0 : 1.0,
+                child: Container(
+                  key: cardKey,
+                  margin: const EdgeInsets.only(bottom: 16.0),
+                  decoration: BoxDecoration(
+                    color: isDark ? darkCard : BDDesign.colorPaperWhite,
+                    borderRadius: BDDesign.radiusLarge,
+                    boxShadow: isDark ? [] : [BDDesign.shadowLight],
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF2A2A30)
+                          : Colors.transparent,
+                    ),
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    GestureDetector(
-                      onTap: () => onNavigateToViewer(model, null),
-                      onLongPressStart: (_) => onShowModelActions(model),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  TDText(
-                                    sceneId,
-                                    font: theme.fontTitleMedium,
-                                    fontWeight: FontWeight.w600,
-                                    maxLines: 1,
-                                    textColor: textColor,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GestureDetector(
+                        onTap: () => onNavigateToViewer(model, null),
+                        onLongPressStart: (_) => onShowModelActions(model),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    TDText(
+                                      sceneId,
+                                      font: theme.fontTitleMedium,
+                                      fontWeight: FontWeight.w600,
+                                      maxLines: 1,
+                                      textColor: textColor,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    TDText(
+                                      desc,
+                                      font: theme.fontBodySmall,
+                                      textColor: hintTextColor,
+                                      maxLines: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (similarity != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
                                   ),
-                                  const SizedBox(height: 4),
-                                  TDText(
-                                    desc,
+                                  decoration: BoxDecoration(
+                                    color: theme.brandColor4.withAlpha(220),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: TDText(
+                                    '${(similarity * 100).toStringAsFixed(1)}%',
                                     font: theme.fontBodySmall,
-                                    textColor: hintTextColor,
-                                    maxLines: 2,
+                                    textColor: isDark
+                                        ? const Color(0xFFFFFFFF)
+                                        : Colors.white,
                                   ),
-                                ],
-                              ),
-                            ),
-                            if (similarity != null)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: theme.brandColor4.withAlpha(220),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: TDText(
-                                  '${(similarity * 100).toStringAsFixed(1)}%',
-                                  font: theme.fontBodySmall,
-                                  textColor: isDark
-                                      ? const Color(0xFFFFFFFF)
-                                      : Colors.white,
-                                ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                    if (matchedFrames.isNotEmpty)
-                      SizedBox(
-                        height: 120,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16.0,
-                          ).copyWith(bottom: 16.0),
-                          itemCount: matchedFrames.length,
-                          itemBuilder: (context, frameIndex) {
-                            final frame = matchedFrames[frameIndex];
-                            final imageName = frame['image_name'];
-                            final transformMatrix = frame['transform_matrix'];
-                            final frameSim = frame['similarity'] as double?;
+                      if (matchedFrames.isNotEmpty)
+                        SizedBox(
+                          height: 120,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16.0,
+                            ).copyWith(bottom: 16.0),
+                            itemCount: matchedFrames.length,
+                            itemBuilder: (context, frameIndex) {
+                              final frame = matchedFrames[frameIndex];
+                              final imageName = frame['image_name'];
+                              final transformMatrix = frame['transform_matrix'];
+                              final frameSim = frame['similarity'] as double?;
 
-                            final imageUrl = Supabase.instance.client.storage
-                                .from('braindance-assets')
-                                .getPublicUrl(
-                                  '$userId/$sceneId/output/images/$imageName',
-                                );
+                              final imageUrl = Supabase.instance.client.storage
+                                  .from('braindance-assets')
+                                  .getPublicUrl(
+                                    '$userId/$sceneId/output/images/$imageName',
+                                  );
 
-                            return GestureDetector(
-                              onTap: () =>
-                                  onNavigateToViewer(model, transformMatrix),
-                              child: Container(
-                                width: 140,
-                                margin: const EdgeInsets.only(right: 12.0),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  color: isDark ? darkInput : theme.grayColor3,
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.network(
-                                        imageUrl,
-                                        fit: BoxFit.cover,
-                                        loadingBuilder: (context, child, loadingProgress) {
-                                          if (loadingProgress == null) {
-                                            return child;
-                                          }
-                                          return Center(
-                                            child: CircularProgressIndicator(
-                                              value:
-                                                  loadingProgress
-                                                          .expectedTotalBytes !=
-                                                      null
-                                                  ? loadingProgress
-                                                            .cumulativeBytesLoaded /
-                                                        loadingProgress
-                                                            .expectedTotalBytes!
-                                                  : null,
-                                            ),
-                                          );
-                                        },
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                              return const Center(
-                                                child: Icon(
-                                                  Icons.broken_image,
-                                                  color: Colors.grey,
+                              return GestureDetector(
+                                onTap: () =>
+                                    onNavigateToViewer(model, transformMatrix),
+                                child: Container(
+                                  width: 140,
+                                  margin: const EdgeInsets.only(right: 12.0),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8.0),
+                                    color: isDark
+                                        ? darkInput
+                                        : theme.grayColor3,
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8.0),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        Image.network(
+                                          imageUrl,
+                                          fit: BoxFit.cover,
+                                          loadingBuilder:
+                                              (
+                                                context,
+                                                child,
+                                                loadingProgress,
+                                              ) {
+                                                if (loadingProgress == null) {
+                                                  return child;
+                                                }
+                                                return const Center(
+                                                  child: SizedBox(
+                                                    width: 18,
+                                                    height: 18,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  ),
+                                                );
+                                              },
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return const Center(
+                                                  child: Icon(
+                                                    Icons.broken_image,
+                                                    color: Colors.grey,
+                                                  ),
+                                                );
+                                              },
+                                        ),
+                                        if (frameSim != null)
+                                          Positioned(
+                                            bottom: 4,
+                                            left: 4,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 4,
+                                                    vertical: 2,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withAlpha(
+                                                  100,
                                                 ),
-                                              );
-                                            },
-                                      ),
-                                      if (frameSim != null)
-                                        Positioned(
-                                          bottom: 4,
-                                          left: 4,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 4,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.black.withAlpha(
-                                                100,
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              '${(frameSim * 100).toStringAsFixed(1)}%',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 10,
+                                              child: Text(
+                                                '${(frameSim * 100).toStringAsFixed(1)}%',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 10,
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           );
-        },
+          }, childCount: models.length, addAutomaticKeepAlives: false),
+        ),
       );
     }
 
-    return GridView.builder(
+    return SliverPadding(
       padding: const EdgeInsets.only(
         left: 16.0,
         right: 16.0,
         top: 14.0,
         bottom: 16.0,
       ),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16.0,
-        mainAxisSpacing: 16.0,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: models.length,
-      itemBuilder: (context, index) {
+      sliver: SliverGrid(
+        delegate: SliverChildBuilderDelegate((context, index) {
         final model = models[index];
         final cardKey = modelCardKeyFor(model);
         final isActionTarget = isSameModel(activeModelAction, model);
 
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration:
-              BDMotion.durationNormal +
-              Duration(milliseconds: (index * 50).clamp(0, 400)),
-          curve: BDMotion.curveEnter,
-          builder: (context, value, child) {
-            return Transform.translate(
-              offset: Offset(0, 20 * (1 - value)),
-              child: Opacity(
-                opacity: isActionTarget ? 0.0 : value,
-                child: child,
-              ),
-            );
-          },
+        return RepaintBoundary(
           child: IgnorePointer(
             ignoring: isActionTarget,
-            child: GestureDetector(
-              onTap: () => onNavigateToViewer(model, null),
-              onLongPressStart: (_) => onShowModelActions(model),
-              child: Container(
-                key: cardKey,
-                child: RecallModelTile(
-                  model: model,
-                  theme: theme,
-                  isDark: isDark,
-                  darkCard: darkCard,
-                  darkInput: darkInput,
-                  textColor: textColor,
-                  hintTextColor: hintTextColor,
+            child: Opacity(
+              opacity: isActionTarget ? 0.0 : 1.0,
+              child: GestureDetector(
+                onTap: () => onNavigateToViewer(model, null),
+                onLongPressStart: (_) => onShowModelActions(model),
+                child: Container(
+                  key: cardKey,
+                  child: RecallModelTile(
+                    model: model,
+                    theme: theme,
+                    isDark: isDark,
+                    darkCard: darkCard,
+                    darkInput: darkInput,
+                    textColor: textColor,
+                    hintTextColor: hintTextColor,
+                  ),
                 ),
               ),
             ),
           ),
         );
-      },
+        }, childCount: models.length, addAutomaticKeepAlives: false),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 16.0,
+          mainAxisSpacing: 16.0,
+          childAspectRatio: 0.85,
+        ),
+      ),
     );
   }
 }
@@ -322,7 +303,10 @@ class RecallModelActionOverlay extends StatelessWidget {
   final Rect rect;
   final VoidCallback onDismiss;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final Future<void> Function(Map<String, dynamic>) onShowModelDetails;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
+  final Future<void> Function(Map<String, dynamic>) onRenameModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
 
   const RecallModelActionOverlay({
     super.key,
@@ -334,14 +318,17 @@ class RecallModelActionOverlay extends StatelessWidget {
     required this.rect,
     required this.onDismiss,
     required this.onNavigateToViewer,
+    required this.onShowModelDetails,
     required this.onShareModelToCommunity,
+    required this.onRenameModel,
+    required this.onDeleteLocalModel,
   });
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     const horizontalGap = 12.0;
-    const actionWidth = 112.0;
+    const actionWidth = 128.0;
     final actionLeft =
         (rect.right + horizontalGap + actionWidth <= screenWidth - 16)
         ? rect.right + horizontalGap
@@ -421,8 +408,9 @@ class RecallModelActionOverlay extends StatelessWidget {
                 duration: const Duration(milliseconds: 260),
                 curve: Curves.easeOutBack,
                 builder: (context, value, child) {
+                  final safeOpacity = value.clamp(0.0, 1.0);
                   return Opacity(
-                    opacity: value,
+                    opacity: safeOpacity,
                     child: Transform.translate(
                       offset: Offset(18 * (1 - value), 0),
                       child: child,
@@ -464,30 +452,97 @@ class RecallModelActionOverlay extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.public_rounded,
-                            size: 18,
-                            color: isDark
-                                ? BDDesign.colorPaperWhite
-                                : BDDesign.colorInkBlack,
+                          _ActionMenuItem(
+                            icon: Icons.info_outline_rounded,
+                            label: '查看详情',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onShowModelDetails(model);
+                            },
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            '分享到社区',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              height: 1.2,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? BDDesign.colorPaperWhite
-                                  : BDDesign.colorInkBlack,
-                            ),
+                          _ActionMenuItem(
+                            icon: Icons.edit_rounded,
+                            label: '重命名',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onRenameModel(model);
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          _ActionMenuItem(
+                            icon: Icons.delete_outline_rounded,
+                            label: '删除本地模型',
+                            isDark: isDark,
+                            destructive: true,
+                            onTap: () async {
+                              onDismiss();
+                              await onDeleteLocalModel(model);
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          _ActionMenuItem(
+                            icon: Icons.public_rounded,
+                            label: '分享到社区',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onShareModelToCommunity(model);
+                            },
                           ),
                         ],
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  final bool destructive;
+  final Future<void> Function() onTap;
+
+  const _ActionMenuItem({
+    required this.icon,
+    required this.label,
+    required this.isDark,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive
+        ? const Color(0xFFD34C4C)
+        : (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
                 ),
               ),
             ),
