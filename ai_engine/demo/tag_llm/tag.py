@@ -10,7 +10,7 @@ from openai import OpenAI
 # 【重要】请替换为你自己的阿里云百炼 API Key
 API_KEY = os.getenv("DASHSCOPE_API_KEY")
 API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-MODEL_NAME = "qwen-vl-max" # 或 qwen-vl-plus
+MODEL_NAME = "qwen-plus" # Qwen3.5-Plus：最新顶级多模态模型，支持文本+图像+视频，1M 上下文，效果超越 Qwen3 VL 系列
 
 INPUT_IMAGE_FOLDER = "image"           # 输入图片文件夹
 OUTPUT_DIR = "output_analyzed"         # 输出结果文件夹

@@ -22,8 +22,11 @@ class RagMemory:
         # 如果 openai SDK 不可用，self.client 会是 None，embed_text 需要被替换/mock
         if OpenAI is not None:
             try:
+                from dotenv import load_dotenv
+                load_dotenv(override=True)
+                api_key = os.getenv("DASHSCOPE_API_KEY")
                 self.client = OpenAI(
-                    api_key=os.getenv("DASHSCOPE_API_KEY"),
+                    api_key=api_key,
                     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
                 )
             except Exception:

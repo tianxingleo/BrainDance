@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:camera/camera.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,25 +10,45 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
-import 'pages/record.dart';
-import 'pages/generate.dart';
-import 'pages/settings.dart';
+import 'pages/time_peeling.dart';
+import 'pages/community.dart';
+import 'pages/create_guide.dart';
+import 'pages/login.dart';
+import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/gen_config.dart';
+import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'services/task_notification_service.dart';
+import 'floating_nav_bar.dart';
+import 'widgets/bd_surfaces.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
 //MainScreen
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
+final isRecordingProvider = StateProvider((ref) => false);
+
+// 全局 NavigatorKey
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
-  await Supabase.initialize(url: 'any', anonKey: 'any');//Supabase
+  await dotenv.load(fileName: ".env");
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.apiKey,
+  ); //Supabase
+
+  // 初始化全局任务通知服务
+  taskNotificationService.setNavigatorKey(navigatorKey);
+  await taskNotificationService.init();
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
@@ -72,10 +94,10 @@ class MyApp extends StatelessWidget with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.inactive:
-        RecoConfig.disposeCamera();
+        // Handled by RecordPage locally to prevent recording interruption
         break;
       case AppLifecycleState.resumed:
-        RecoConfig.refreshCamera();
+        // Handled by RecordPage locally
         break;
       case AppLifecycleState.paused: // 应用进入后台（例如用户按了Home键、切换到其他应用）
         GenConfig.saveUploadedAssets();
@@ -102,108 +124,349 @@ class Home extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
+
+    // 启动时检查是否有会话
+    final hasSession = Supabase.instance.client.auth.currentSession != null;
+    final canEnterApp = SupabaseConfig.isAdminMode || hasSession;
+
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
-      theme: themeData.systemThemeDataLight?.copyWith(
+      theme: AppTheme.buildLightTheme(themeData).copyWith(
         textTheme: themeData.systemThemeDataLight?.textTheme.apply(
           fontFamily: AppConfig.fontFamily,
         ),
       ),
-      darkTheme: themeData.systemThemeDataDark?.copyWith(
+      darkTheme: AppTheme.buildDarkTheme(themeData).copyWith(
         textTheme: themeData.systemThemeDataDark?.textTheme.apply(
           fontFamily: AppConfig.fontFamily,
         ),
       ),
       themeMode: themeModeAsync,
-      initialRoute: '/', // 初始路由路径
+      initialRoute: canEnterApp
+          ? '/'
+          : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
       routes: {
         // 路由表：路径 -> 页面构建器
         '/': (context) {
           loadSettings(ref);
           return MainScreen();
         }, // 根路径对应主屏幕
+        '/login': (context) => const LoginPage(), // 登录页
         '/example': (context) => RecallPage(), // "/example"路径对应....
+        '/tasks': (context) => const TaskListPage(), // 任务列表页
+      },
+      // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
+      builder: (context, child) {
+        return Stack(
+          children: [
+            child!,
+            // 全局通知 Overlay 层
+            const GlobalNotificationOverlay(),
+          ],
+        );
       },
     );
   }
 }
 
-//主屏幕
-class MainScreen extends ConsumerWidget {
-  const MainScreen({super.key});
-  static const TextStyle selectedTextStyle = TextStyle(fontSize: 10);
-  static const double unselectedSize = 32;
-  static const double selectedSize = 36;
-  Widget getPage(int pageIndex, WidgetRef ref) {
-    switch (pageIndex) {
-      case 0:
-        return RecallPage(); // 页面0: 主页：过往回忆
-      case 1:
-        return RecordPage(); // 页面1: 相机记录
-      case 2:
-        return GeneratePage(); // 页面2: 图文生成
-      case 3:
-        return SettingsPage(homeRef: ref); // 页面3: 设置
-    }
-    return RecallPage();
+/// 全局通知 Overlay 层
+/// 使用 ListenableBuilder 监听通知状态变化
+class GlobalNotificationOverlay extends StatefulWidget {
+  const GlobalNotificationOverlay({super.key});
+
+  @override
+  State<GlobalNotificationOverlay> createState() =>
+      _GlobalNotificationOverlayState();
+}
+
+class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
+    with TickerProviderStateMixin {
+  late AnimationController _showController;
+  late AnimationController _hideController;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+  Timer? _autoHideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // 显示动画控制器 (300ms)
+    _showController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    // 隐藏动画控制器 (1秒逐渐消失)
+    _hideController = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    );
+
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero).animate(
+          CurvedAnimation(parent: _showController, curve: Curves.easeOutCubic),
+        );
+
+    // 淡出动画：从1.0到0.0
+    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _hideController, curve: Curves.easeInOut),
+    );
+
+    // 监听隐藏动画完成
+    _hideController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        taskNotificationService.hideNotification();
+      }
+    });
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bool isLoading = ref.watch(loadingProvider); //加载状态
+  void dispose() {
+    _autoHideTimer?.cancel();
+    _showController.dispose();
+    _hideController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: taskNotificationService,
+      builder: (context, child) {
+        final notification = taskNotificationService.currentNotification;
+        if (notification == null) {
+          // 重置动画控制器
+          _showController.reset();
+          _hideController.reset();
+          _autoHideTimer?.cancel();
+          return const SizedBox.shrink();
+        }
+
+        // 检查当前路由是否允许显示通知
+        final currentRoute = taskNotificationService.currentRoute;
+        if (!taskNotificationService.isNotificationEnabledForRoute(
+          currentRoute,
+        )) {
+          return const SizedBox.shrink();
+        }
+
+        // 显示动画：滑入
+        _showController.forward();
+
+        // 启动1秒后开始淡出动画（总显示时间约2秒）
+        _autoHideTimer?.cancel();
+        _autoHideTimer = Timer(const Duration(seconds: 1), () {
+          // 等待显示动画完成后，开始1秒淡出动画
+          if (mounted && taskNotificationService.currentNotification != null) {
+            _hideController.forward(from: 0);
+          }
+        });
+
+        return _buildNotificationWidget(notification);
+      },
+    );
+  }
+
+  Widget _buildNotificationWidget(TaskNotificationData notification) {
+    final isDark = AppConfig.isNightMode;
+    final hasCompleted = notification.completedCount > 0;
+    final hasFailed = notification.failedCount > 0;
+
+    // 构建通知内容
+    String message = '';
+    IconData icon = Icons.check_circle;
+    Color iconColor = Colors.green;
+
+    if (hasCompleted && hasFailed) {
+      message =
+          '${notification.completedCount} ${textLocalize('task_completed')}，${notification.failedCount} ${textLocalize('task_failed')}';
+      icon = Icons.info;
+      iconColor = Colors.orange;
+    } else if (hasCompleted) {
+      message =
+          '${notification.completedCount} ${textLocalize('task_notification_completed')}';
+      icon = Icons.check_circle;
+      iconColor = Colors.green;
+    } else if (hasFailed) {
+      message =
+          '${notification.failedCount} ${textLocalize('task_notification_failed')}';
+      icon = Icons.error;
+      iconColor = Colors.red;
+    }
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: Material(
+              color: Colors.transparent,
+              child: Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2A2A30) : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(30),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF3A3A40)
+                          : const Color(0xFFE0E0E0),
+                      width: 1,
+                    ),
+                  ),
+                  child: InkWell(
+                    onTap: () => taskNotificationService.navigateToTaskList(),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: iconColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(icon, color: iconColor, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF333333),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(
+                          Icons.keyboard_arrow_right,
+                          color: isDark
+                              ? const Color(0xFF888888)
+                              : const Color(0xFF999999),
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+//主屏幕
+class MainScreen extends ConsumerStatefulWidget {
+  const MainScreen({super.key});
+
+  @override
+  ConsumerState<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends ConsumerState<MainScreen> {
+  final List<Widget?> _pageCache = List<Widget?>.filled(4, null);
+
+  Widget _buildPage(int pageIndex) {
+    switch (pageIndex) {
+      case 0:
+        return const RecallPage(); // 页面0: 主页：过往回忆
+      case 1:
+        return const TimePeelingPage(); // 页面1: 时间切片（占位）
+      case 2:
+        return const CommunityPage(); // 页面2: 社区
+      case 3:
+        return const CreateGuidePage(); // 页面3: 创作引导
+    }
+    return const RecallPage();
+  }
+
+  Widget _getOrCreatePage(int pageIndex) {
+    return _pageCache[pageIndex] ??= _buildPage(pageIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
+    final bool isRecording = ref.watch(isRecordingProvider);
+    _getOrCreatePage(pageIndex);
+
     return Scaffold(
-      body: isLoading
-          ? Scaffold(body: Center(child: Text('Now Loading...')))
-          : getPage(pageIndex, ref),
-      bottomNavigationBar: TDBottomTabBar(
-        // 底部导航栏
-        TDBottomTabBarBasicType.iconText,
-        componentType: TDBottomTabBarComponentType.normal,
-        useVerticalDivider: false,
-        centerDistance: 4,
-        navigationTabs: [
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("recall"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.home_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.home, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 0, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("record"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.camera_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.camera, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 1, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("generate"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.file_word_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.file_word, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 2, // 点击切换索引并更新状态
-          ),
-          TDBottomTabBarTabConfig(
-            tabText: textLocalize("settings"),
-            selectTabTextStyle: selectedTextStyle,
-            unselectTabTextStyle: selectedTextStyle,
-            selectedIcon: Icon(TDIcons.setting_1_filled, size: selectedSize),
-            unselectedIcon: Icon(TDIcons.setting_1, size: unselectedSize),
-            onTap: () =>
-                ref.read(pageIndexProvider.notifier).state = 3, // 点击切换索引并更新状态
-          ),
-        ],
-        //backgroundColor: AppConfig.primaryColor,
-        currentIndex: pageIndex, // 当前选中索引
-        barHeight: 74,
+      extendBody: true,
+      body: BDPageBackdrop(
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Stack(
+                children: [
+                  IndexedStack(
+                    index: pageIndex,
+                    children: List<Widget>.generate(4, (index) {
+                      final page = _pageCache[index] ?? const SizedBox.shrink();
+                      return TickerMode(
+                        enabled: index == pageIndex,
+                        child: KeyedSubtree(
+                          key: ValueKey<int>(index),
+                          child: page,
+                        ),
+                      );
+                    }),
+                  ),
+                  if (!isRecording)
+                    FloatingNavBar(
+                      currentIndex: pageIndex,
+                      onTap: (index) {
+                        ref.read(pageIndexProvider.notifier).state = index;
+                      },
+                      items: [
+                        NavIslandItem(
+                          icon: Icons.history_edu_rounded,
+                          label: textLocalize("recall"),
+                        ),
+                        NavIslandItem(
+                          icon: Icons.layers_rounded,
+                          label: textLocalize("timepeeling"),
+                        ),
+                        NavIslandItem(
+                          icon: Icons.public_rounded,
+                          label: textLocalize("community"),
+                        ),
+                        NavIslandItem(
+                          icon: Icons.add_rounded,
+                          label: textLocalize("create"),
+                          isLarge: true,
+                        ),
+                      ],
+                    ),
+                ],
+              ),
       ),
     );
   }

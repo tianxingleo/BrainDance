@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from src.core.factory import PipelineFactory  # 🟢 引入工厂
 from src.modules.rag_memory import RagMemory # 🟢 引入新模块
 from src.modules.knowledge_base import KnowledgeBase # 🟢 引入
+from src.utils.ply_utils import compress_model_for_delivery
 
 # [初始化] 加载当前目录下的 .env 文件
 # 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
@@ -39,6 +40,9 @@ class CloudWorker:
         # --- 1. 读取环境变量配置 ---
         # 使用 os.getenv 读取 .env 文件中的配置，第二个参数是默认值
         self.SUPABASE_URL = os.getenv("SUPABASE_URL")
+        if self.SUPABASE_URL and not self.SUPABASE_URL.endswith('/'):
+            self.SUPABASE_URL += '/'
+            
         self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
         self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
         self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
@@ -49,6 +53,15 @@ class CloudWorker:
             raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
 
         # --- 3. 建立连接 ---
+        # 修复 HTTPX 对 no_proxy 的 CIDR 解析不兼容的问题，强制把目标 IP 塞入 no_proxy
+        import urllib.parse
+        if self.SUPABASE_URL:
+            parsed = urllib.parse.urlparse(self.SUPABASE_URL)
+            if parsed.hostname:
+                no_proxy = os.environ.get("no_proxy", "")
+                if parsed.hostname not in no_proxy:
+                    os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
+
         # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
         self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
         
@@ -161,6 +174,9 @@ class CloudWorker:
             
             # C. 触发云端同步
             self._sync_log(task_id)
+            
+            # D. 输出到终端，方便本地排查问题
+            print(f"[{scene_id}] {message}")
 
         try:
             # =================== 阶段 A: 锁定任务 ===================
@@ -183,6 +199,10 @@ class CloudWorker:
                 input_path = self.CACHE_DIR / f"{scene_id}.png"
                 storage_path = f"{user_id}/{scene_id}/raw/image.png"
                 on_pipeline_log("下载单张图片...")
+            elif task_type in ('sparse2dgs',):
+                input_path = self.CACHE_DIR / f"{scene_id}_images.zip"
+                storage_path = f"{user_id}/{scene_id}/raw/images.zip"
+                on_pipeline_log("下载多图压缩包 (images.zip)...")
             else:
                 # video_3dgs 默认路径
                 input_path = self.CACHE_DIR / f"{scene_id}.mp4"
@@ -195,33 +215,47 @@ class CloudWorker:
                     res = self.supabase.storage.from_(self.BUCKET_NAME).download(storage_path)
                     f.write(res)
             except Exception as e:
-                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}")
+                raise RuntimeError(f"资源下载失败 (路径: {storage_path}): {e}") from e
 
             # =================== 阶段 C: 执行引擎 ===================
             # 1. 获取任务类型和参数
             task_type = task.get('task_type', 'video_3dgs') if isinstance(task, dict) else 'video_3dgs'
             
             # task_params 可能是 JSON 字符串，需要解析
-            task_params_raw = task.get('task_params', '{}') if isinstance(task, dict) else '{}'
+            task_params_raw = task.get('task_params') if isinstance(task, dict) else None
+            
             try:
                 import json
-                if isinstance(task_params_raw, str):
-                    task_params = json.loads(task_params_raw) if task_params_raw else {}
-                else:
+                if isinstance(task_params_raw, str) and task_params_raw:
+                    task_params = json.loads(task_params_raw)
+                elif isinstance(task_params_raw, dict):
                     task_params = task_params_raw
+                else:
+                    task_params = {}
             except Exception:
                 task_params = {}
             
-            # 准备输出目录
-            task_output_dir = self.CACHE_DIR / scene_id  # 直接用场景名做目录
+            # 确保 task_params 始终是一个字典，不是 None
+            if task_params is None:
+                task_params = {}
+
+            # 🟢 [新增] 支持从 Supabase 任务表顶层字段直接读取 mapper_type
+            if isinstance(task, dict) and task.get('mapper_type'):
+                task_params['mapper_type'] = task['mapper_type']
+            
+            # 准备输出目录: 修改为 user_id/scene_id/output 格式
+            task_output_dir = self.CACHE_DIR / user_id / scene_id / "output"
+            task_output_dir.mkdir(parents=True, exist_ok=True)
             
             # 2. 准备上下文 (把通用的东西打包)
             context = {
                 "task_id": task_id,
                 "scene_id": scene_id,
+                "user_id": user_id,
                 "work_root": task_output_dir,
                 "log_callback": on_pipeline_log,
-                "shared_model_dir": self.MODELS_DIR
+                "shared_model_dir": self.MODELS_DIR,
+                "supabase": self.supabase
             }
 
             # 3. [核心修改] 通过工厂实例化 Pipeline
@@ -231,7 +265,7 @@ class CloudWorker:
             # 4. [核心修改] 执行多态的 run 方法
             # input_path 可能是视频路径，也可能是图片路径，根据 task_type 决定下载逻辑
             
-            final_ply_path, metadata = pipeline.run(str(input_path), task_params)
+            final_model_path, metadata = pipeline.run(str(input_path), task_params)
 
             # 🟢 [修改点 2] 立即同步 AI 分析结果到数据库
             # 不管训练是否成功，只要有分析结果，都应该存下来
@@ -268,20 +302,47 @@ class CloudWorker:
                     )
 
             # 校验结果：如果 pipeline 返回 None 或者文件不存在，说明训练挂了
-            if not final_ply_path or not Path(final_ply_path).exists():
-                raise RuntimeError("Pipeline 执行结束，但未生成有效的 PLY 文件，请检查训练日志。")
+            if not final_model_path or not Path(final_model_path).exists():
+                raise RuntimeError("Pipeline 执行结束，但未生成有效的模型文件，请检查训练日志。")
+
+            model_path_obj = Path(final_model_path)
+            delivery_format = str(
+                task_params.get("delivery_format") or os.getenv("MODEL_DELIVERY_FORMAT", "splat")
+            ).lower()
+            opacity_threshold = float(
+                task_params.get("compression_opacity_threshold", os.getenv("COMPRESSION_OPACITY_THRESHOLD", "0.05"))
+            )
+            ksplat_alpha_threshold = int(
+                task_params.get("ksplat_alpha_threshold", os.getenv("KSPLAT_ALPHA_THRESHOLD", "1"))
+            )
+
+            if model_path_obj.suffix.lower() == ".ply" and delivery_format in ("splat", "ksplat"):
+                try:
+                    compressed_path = compress_model_for_delivery(
+                        model_path=str(model_path_obj),
+                        output_format=delivery_format,
+                        opacity_threshold=opacity_threshold,
+                        ksplat_script_path=os.getenv("KSPLAT_SCRIPT_PATH", ""),
+                        alpha_removal_threshold=ksplat_alpha_threshold,
+                        log_callback=on_pipeline_log,
+                    )
+                    model_path_obj = Path(compressed_path)
+                    on_pipeline_log(f"✅ 模型压缩完成: {model_path_obj.name}")
+                except Exception as e:
+                    on_pipeline_log(f"⚠️ 模型压缩失败，回退原始文件上传: {e}")
 
             # =================== 阶段 D: 上传结果 ===================
             on_pipeline_log("训练完成，正在上传结果到云端...")
             
-            # 1. 上传 PLY 模型文件
-            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud.ply"
-            with open(final_ply_path, 'rb') as f:
+            # 1. 上传模型文件（支持 .ply / .splat / .ksplat）
+            model_suffix = model_path_obj.suffix.lower() or ".ply"
+            upload_ply_key = f"{user_id}/{scene_id}/output/point_cloud{model_suffix}"
+            with open(model_path_obj, 'rb') as f:
                 self.supabase.storage.from_(self.BUCKET_NAME).upload(
                     path=upload_ply_key, 
                     file=f, 
-                    # x-upsert=true 表示如果文件已存在则覆盖
-                    file_options={"content-type": "application/octet-stream", "x-upsert": "true"}
+                    # x-upsert=true 和 upsert=true 表示如果文件已存在则覆盖
+                    file_options={"content-type": "application/octet-stream", "x-upsert": "true", "upsert": "true"}
                 )
 
             # 2. 上传 transforms.json (用于网页预览)
@@ -293,9 +354,46 @@ class CloudWorker:
                     self.supabase.storage.from_(self.BUCKET_NAME).upload(
                         path=upload_json_key,
                         file=f,
-                        file_options={"content-type": "application/json", "x-upsert": "true"}
+                        file_options={"content-type": "application/json", "x-upsert": "true", "upsert": "true"}
                     )
                 on_pipeline_log("上传 transforms.json 成功")
+
+            # 3. 上传预览图 preview_img_path (如果存在)
+            if metadata and metadata.get("preview_img_path") and Path(metadata["preview_img_path"]).exists():
+                upload_img_key = f"{user_id}/{scene_id}/output/preview.jpg" # 假设是 jpg
+                with open(metadata["preview_img_path"], 'rb') as f:
+                    self.supabase.storage.from_(self.BUCKET_NAME).upload(
+                        path=upload_img_key,
+                        file=f,
+                        file_options={"content-type": "image/jpeg", "x-upsert": "true", "upsert": "true"}
+                    )
+                # 替换为远程 URL
+                remote_url = self.supabase.storage.from_(self.BUCKET_NAME).get_public_url(upload_img_key)
+                metadata["preview_img_path"] = remote_url
+                on_pipeline_log("上传预览图成功")
+
+            # 3.5 强制同步 model_assets 的模型路径，保证客户端总能拿到最新后缀
+            try:
+                model_assets_row = {
+                    "scene_id": scene_id,
+                    "user_id": user_id,
+                    "ply_path": upload_ply_key,
+                }
+                if metadata:
+                    if "ai_description" in metadata:
+                        model_assets_row["description"] = metadata.get("ai_description", "")
+                    if "ai_tags" in metadata:
+                        model_assets_row["tags"] = metadata.get("ai_tags", [])
+                    if "ai_objects" in metadata:
+                        model_assets_row["objects"] = metadata.get("ai_objects", [])
+                    if "preview_img_path" in metadata:
+                        model_assets_row["preview_img_path"] = metadata.get("preview_img_path", "")
+                self.supabase.table("model_assets").upsert(
+                    model_assets_row,
+                    on_conflict="scene_id"
+                ).execute()
+            except Exception as e:
+                on_pipeline_log(f"⚠️ 同步 model_assets 路径失败: {e}")
 
             # =================== 🟢 [RAG 集成] 资产入库 ===================
             # 只有当 AI 成功生成了描述，才存入知识库

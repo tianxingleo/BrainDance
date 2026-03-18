@@ -36,11 +36,19 @@ dependencies:
   tdesign_flutter: ^0.2.7
   video_thumbnail_pro: ^0.7.3
   image_picker: ^1.1.2
-  camera: ^0.11.3
+  camera: ^0.12.0
   photo_manager: ^3.8.3
   supabase_flutter: ^2.12.0
   webview_flutter: ^4.13.1
   flutter_riverpod: ^3.2.0
+  flutter_dotenv: ^5.1.0
+  sensors_plus: ^6.1.1
+  shared_preferences: ^2.3.5
+  wakelock_plus: ^1.4.0
+  cross_file: ^0.3.5+2
+  dio: ^5.9.2
+  sqflite: ^2.2.5
+  llamadart: ^0.6.6
 
 dev_dependencies:
   flutter_test:
@@ -52,6 +60,42 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+  image: any
+  supabase: any
+
+flutter_native_splash:
+  color: "#ffffff"
+  color_dark: "#121212"
+  image: "assets/icon_square_opaque.png"
+  image_dark: "assets/icon_square_dark.png"
+  android: true
+  ios: true
+  web: false
+  android_12:
+    image: "assets/icon_square_opaque.png"
+    icon_background_color: "#ffffff"
+    image_dark: "assets/icon_square_dark.png"
+    icon_background_color_dark: "#121212"
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon_square_transparent.png"
+  min_sdk_android: 21 # android min sdk min:16, default 21
+  web:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
+    icon_size: 48 # min:48, max:256, default 48
+  macos:
+    generate: true
+    image_path: "assets/icon_square_transparent.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -81,8 +125,16 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   assets:
+    - .env
+    - assets/icon.png
+    - assets/icon_square_transparent.png
+    - assets/icon_square_opaque.png
+    - assets/icon_square_dark.png
     - assets/fonts/
     - assets/sprites/
+    - assets/webgl/
+    - assets/webgl/models/
+    - assets/webgl/assets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:

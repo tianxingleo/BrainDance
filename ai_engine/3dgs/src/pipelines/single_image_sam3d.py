@@ -56,7 +56,7 @@ class SingleImageSAM3DPipeline(BasePipeline):
         except Exception as e:
             self.log(f"    -> ⚠️ RAG 分析失败，已跳过: {e}", level="WARN")
 
-        metadata = {"engine": "sam3d", "original_image": input_path}
+        metadata = {"engine": "sam3d", "original_image": input_path, "preview_img_path": input_path}
         metadata.update(rag_meta)
 
         # 使用基类的 helper 进行 RAG 语义注入与上传（封装了 supabase 的容错）

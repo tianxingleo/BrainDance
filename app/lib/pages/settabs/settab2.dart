@@ -1,23 +1,59 @@
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/widgets/bd_surfaces.dart';
 
 Widget setTab2(VoidCallback onUpdate, BuildContext context) {
-  return TDCellGroup(
-    cells: [
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest1',
-        pickerIndex: 0,
-      ),
-      Picker.buildPicker(
-        onUpdate: onUpdate,
-        context,
-        pickerTitle: 'PickerTest2',
-        pickerIndex: 1,
-      ),
-    ],
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+    child: ListView(
+      children: [
+        Text(
+          '实验选项',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? BDDesign.colorPaperWhite
+                : BDDesign.colorInkBlack,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '把调试项和试验参数集中放在一个区块里，避免和主流程混在一起。',
+          style: TextStyle(
+            fontSize: 13,
+            height: 1.45,
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white.withValues(alpha: 0.62)
+                : BDDesign.colorMutedBlue,
+          ),
+        ),
+        const SizedBox(height: 14),
+        BDPanelCard(
+          child: ClipRRect(
+            borderRadius: BDDesign.radiusLarge,
+            child: TDCellGroup(
+              cells: [
+                Picker.buildPicker(
+                  context,
+                  onUpdate: onUpdate,
+                  pickerTitle: 'PickerTest1',
+                  pickerIndex: 0,
+                ),
+                Picker.buildPicker(
+                  context,
+                  onUpdate: onUpdate,
+                  pickerTitle: 'PickerTest2',
+                  pickerIndex: 1,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
   );
 }
 

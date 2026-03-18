@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "BrainDance (Supabase Dev)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "app",
+      "args": [
+        "--dart-define",
+        "SUPABASE_URL=http://192.168.1.31:54321",
+        "--dart-define",
+        "SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
+      ]
+    },
+    {
+      "name": "BrainDance (Localhost)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "app",
+      "args": [
+        "--dart-define",
+        "SUPABASE_URL=http://127.0.0.1:54321",
+        "--dart-define",
+        "SUPABASE_ANON_KEY=sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
+      ]
+    }
+  ]
+}
