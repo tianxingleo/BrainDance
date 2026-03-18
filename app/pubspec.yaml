@@ -48,6 +48,7 @@ dependencies:
   cross_file: ^0.3.5+2
   dio: ^5.9.2
   sqflite: ^2.2.5
+  llamadart: ^0.6.6
 
 dev_dependencies:
   flutter_test:
@@ -61,6 +62,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.7
+  image: any
+  supabase: any
 
 flutter_native_splash:
   color: "#ffffff"

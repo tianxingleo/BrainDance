@@ -123,7 +123,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
     } catch (e) {
       if (mounted) {
-        print(e);
+        debugPrint(e.toString());
         TDToast.showText('提交失败: $e', context: context);
       }
     } finally {

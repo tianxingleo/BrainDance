@@ -1,6 +1,11 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:dio/dio.dart';
+import 'package:llamadart/llamadart.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
@@ -22,6 +27,12 @@ class RecallPage extends StatefulWidget {
 }
 
 class _RecallPageState extends State<RecallPage> {
+  static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
+  static const String _defaultModelDownloadUrl =
+      'https://hf-mirror.com/jc-builds/Qwen3-1.7B-Q4_K_M-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true';
+  static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
+  static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
+
   List<Map<String, dynamic>> _models = [];
   List<Map<String, dynamic>> _allModels = [];
   List<Map<String, dynamic>> _processingTasks = [];
@@ -31,15 +42,35 @@ class _RecallPageState extends State<RecallPage> {
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = true;
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _localModelPathController =
+      TextEditingController();
+  final TextEditingController _localModelUrlController = TextEditingController(
+    text: _defaultModelDownloadUrl,
+  );
+  final TextEditingController _localQuestionController =
+      TextEditingController();
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
   Timer? _searchDebounce;
   LocalRagIndexStats? _indexStats;
   _RecallSearchMode _searchMode = _RecallSearchMode.local;
+  LlamaEngine? _localQnaModel;
+  StreamSubscription<dynamic>? _llamaStreamSubscription;
+  String _localAnswer = '';
+  String _localAnswerStatus = 'Qwen3-1.7B 端侧模型未加载';
+  String _localContextPreview = '';
+  bool _isLocalModelLoading = false;
+  bool _isLocalModelReady = false;
+  bool _isLocalAnswering = false;
+  bool _isModelDownloading = false;
+  double? _modelDownloadProgress;
+  int _modelDownloadedBytes = 0;
+  int? _modelDownloadTotalBytes;
 
   @override
   void initState() {
     super.initState();
+    _restoreLocalModelPath();
     _fetchModels();
     _fetchProcessingTasks();
     _setupRealtimeListener();
@@ -49,8 +80,485 @@ class _RecallPageState extends State<RecallPage> {
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _localModelPathController.dispose();
+    _localModelUrlController.dispose();
+    _localQuestionController.dispose();
     _realtimeChannel?.unsubscribe();
+    unawaited(_disposeLocalQnaModel());
     super.dispose();
+  }
+
+  Future<void> _restoreLocalModelPath() async {
+    final defaultPath = await _getDefaultPrivateModelPath();
+    final prefs = await SharedPreferences.getInstance();
+    final savedPath = prefs.getString(_localModelPathPrefKey)?.trim();
+    final savedUrl = prefs.getString(_localModelUrlPrefKey)?.trim();
+    if (!mounted) return;
+    setState(() {
+      _localModelPathController.text = (savedPath == null || savedPath.isEmpty)
+          ? defaultPath
+          : savedPath;
+      if (savedUrl != null && savedUrl.isNotEmpty) {
+        _localModelUrlController.text = savedUrl;
+      }
+    });
+  }
+
+  Future<void> _persistLocalModelPath(String modelPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_localModelPathPrefKey, modelPath);
+  }
+
+  Future<void> _persistLocalModelUrl(String modelUrl) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_localModelUrlPrefKey, modelUrl);
+  }
+
+  Future<String> _getDefaultPrivateModelPath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/$_defaultModelFileName';
+  }
+
+  Future<void> _downloadModelToPrivateDir() async {
+    final modelUrl = _localModelUrlController.text.trim();
+    if (modelUrl.isEmpty) {
+      TDToast.showText(context: context, '请先填写模型下载链接');
+      return;
+    }
+
+    final modelPath = await _getDefaultPrivateModelPath();
+    setState(() {
+      _isModelDownloading = true;
+      _modelDownloadProgress = 0;
+      _modelDownloadedBytes = 0;
+      _modelDownloadTotalBytes = null;
+      _localAnswerStatus = '正在下载模型到应用私有目录...';
+      _localModelPathController.text = modelPath;
+    });
+
+    try {
+      await _persistLocalModelUrl(modelUrl);
+      await _persistLocalModelPath(modelPath);
+
+      await Dio().download(
+        modelUrl,
+        modelPath,
+        deleteOnError: true,
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: true,
+          receiveTimeout: const Duration(minutes: 30),
+          sendTimeout: const Duration(minutes: 2),
+        ),
+        onReceiveProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            _modelDownloadedBytes = received;
+            _modelDownloadTotalBytes = total > 0 ? total : null;
+            _modelDownloadProgress = total > 0 ? received / total : null;
+          });
+        },
+      );
+
+      final fileSize = await File(modelPath).length();
+      if (!mounted) return;
+      setState(() {
+        _isModelDownloading = false;
+        _modelDownloadProgress = 1;
+        _modelDownloadedBytes = fileSize;
+        _modelDownloadTotalBytes = fileSize;
+        _localAnswerStatus =
+            '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
+      });
+      TDToast.showText(context: context, '模型已下载到应用私有目录');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isModelDownloading = false;
+        _modelDownloadProgress = null;
+        _modelDownloadedBytes = 0;
+        _modelDownloadTotalBytes = null;
+        _localAnswerStatus = '模型下载失败：$e';
+      });
+      TDToast.showText(context: context, '模型下载失败：$e');
+    }
+  }
+
+  Future<void> _disposeLocalQnaModel() async {
+    await _llamaStreamSubscription?.cancel();
+    _llamaStreamSubscription = null;
+
+    final model = _localQnaModel;
+    _localQnaModel = null;
+    if (model != null) {
+      try {
+        await model.dispose();
+      } catch (_) {
+        // 忽略释放阶段异常，避免影响页面退出
+      }
+    }
+  }
+
+  Future<void> _loadLocalQnaModel() async {
+    final modelPath = _localModelPathController.text.trim();
+    if (modelPath.isEmpty) {
+      TDToast.showText(context: context, '请先填写 GGUF 模型路径');
+      return;
+    }
+
+    setState(() {
+      _isLocalModelLoading = true;
+      _isLocalModelReady = false;
+      _isLocalAnswering = false;
+      _localAnswer = '';
+      _localAnswerStatus = '正在加载 Qwen3-1.7B 端侧模型...';
+    });
+
+    try {
+      await _disposeLocalQnaModel();
+      await _persistLocalModelPath(modelPath);
+
+      final modelFile = File(modelPath);
+      final exists = await modelFile.exists();
+      if (!exists) {
+        throw Exception('模型文件不存在：$modelPath');
+      }
+      final modelSize = await modelFile.length();
+      if (modelSize < 100 * 1024 * 1024) {
+        throw Exception(
+          '模型文件体积异常：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB，可能不是完整 GGUF',
+        );
+      }
+
+      final llama = LlamaEngine(LlamaBackend());
+      var backendSummary = 'CPU';
+      try {
+        await llama.loadModel(
+          modelPath,
+          modelParams: const ModelParams(
+            contextSize: 2048,
+            gpuLayers: 24,
+            preferredBackend: GpuBackend.vulkan,
+            numberOfThreads: 4,
+            numberOfThreadsBatch: 4,
+            batchSize: 256,
+            microBatchSize: 256,
+          ),
+        );
+        final backendName = await llama.getBackendName();
+        backendSummary = '$backendName (GPU 优先)';
+      } catch (_) {
+        await llama.dispose();
+        final fallbackLlama = LlamaEngine(LlamaBackend());
+        await fallbackLlama.loadModel(
+          modelPath,
+          modelParams: const ModelParams(
+            contextSize: 2048,
+            gpuLayers: 0,
+            preferredBackend: GpuBackend.cpu,
+            numberOfThreads: 4,
+            numberOfThreadsBatch: 4,
+            batchSize: 256,
+            microBatchSize: 256,
+          ),
+        );
+        final backendName = await fallbackLlama.getBackendName();
+        if (!mounted) {
+          await fallbackLlama.dispose();
+          return;
+        }
+        await fallbackLlama.setNativeLogLevel(LlamaLogLevel.info);
+        setState(() {
+          _localQnaModel = fallbackLlama;
+          _isLocalModelLoading = false;
+          _isLocalModelReady = true;
+          _localAnswerStatus =
+              'Qwen3-1.7B 已加载，当前后端：$backendName（已从 GPU 回退到 CPU），模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+        });
+        return;
+      }
+      await llama.setNativeLogLevel(LlamaLogLevel.info);
+
+      if (!mounted) {
+        await llama.dispose();
+        return;
+      }
+
+      setState(() {
+        _localQnaModel = llama;
+        _isLocalModelLoading = false;
+        _isLocalModelReady = true;
+        _localAnswerStatus =
+            'Qwen3-1.7B 已加载，当前后端：$backendSummary，模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+      });
+    } catch (e) {
+      await _disposeLocalQnaModel();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLocalModelLoading = false;
+        _isLocalModelReady = false;
+        _isLocalAnswering = false;
+        _localAnswerStatus = '模型加载失败：$e';
+      });
+      TDToast.showText(context: context, '端侧模型加载失败：$e');
+    }
+  }
+
+  Future<void> _askLocalQuestion() async {
+    final userQuestion = _localQuestionController.text.trim();
+    if (userQuestion.isEmpty) {
+      TDToast.showText(context: context, '请输入要提问的问题');
+      return;
+    }
+    if (_localQnaModel == null || !_isLocalModelReady) {
+      TDToast.showText(context: context, '请先加载本地 GGUF 模型');
+      return;
+    }
+
+    final memoryContext = await _buildMemoryContext(userQuestion);
+    var streamedAnswer = '';
+    var lockedAnswer = false;
+    final prompt =
+        '''
+请根据下面的记忆片段，直接回答问题。
+如果记忆片段没有明确答案，再简短回答不知道。
+不要解释规则，不要重复题目。
+
+记忆片段：
+$memoryContext
+
+问题：
+$userQuestion
+
+回答：
+''';
+
+    setState(() {
+      _localAnswer = '';
+      _localContextPreview = memoryContext;
+      _isLocalAnswering = true;
+      _localAnswerStatus = '正在根据本地记忆片段生成回答...';
+    });
+
+    try {
+      _localQnaModel!.cancelGeneration();
+      await _llamaStreamSubscription?.cancel();
+      _llamaStreamSubscription = _localQnaModel!
+          .generate(
+            prompt,
+            params: const GenerationParams(
+              maxTokens: 64,
+              temp: 0.1,
+              topK: 20,
+              topP: 0.85,
+              penalty: 1.12,
+              stopSequences: ['【说明】', '\n答案：', '\n问题：', '\n记忆片段：'],
+            ),
+          )
+          .listen(
+            (token) {
+              if (!mounted) {
+                return;
+              }
+              if (token.isEmpty) {
+                return;
+              }
+              final nextAnswer = _sanitizeLocalAnswer(streamedAnswer + token);
+              if (lockedAnswer) {
+                if (nextAnswer != streamedAnswer) {
+                  _localQnaModel!.cancelGeneration();
+                }
+                return;
+              }
+              final shouldStop = nextAnswer == streamedAnswer;
+              if (nextAnswer.isNotEmpty) {
+                streamedAnswer = nextAnswer;
+              }
+              lockedAnswer = _shouldLockAnswer(streamedAnswer);
+              setState(() {
+                _localAnswer = streamedAnswer;
+              });
+              if (shouldStop || lockedAnswer) {
+                _localQnaModel!.cancelGeneration();
+              }
+            },
+            onError: (Object error) {
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                _isLocalAnswering = false;
+                _localAnswerStatus = '端侧问答失败：$error';
+              });
+            },
+            onDone: () {
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                if (_localAnswer.trim().isEmpty) {
+                  _localAnswer = '我不知道';
+                }
+                _isLocalAnswering = false;
+                _localAnswerStatus = '端侧回答完成';
+              });
+            },
+            cancelOnError: true,
+          );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLocalAnswering = false;
+        _localAnswerStatus = '端侧问答失败：$e';
+      });
+      TDToast.showText(context: context, '端侧问答失败：$e');
+    }
+  }
+
+  Future<String> _buildMemoryContext(String question) async {
+    List<Map<String, dynamic>> matches = [];
+    try {
+      matches = await _localRagIndex.search(question, limit: 3, minScore: 0.08);
+    } catch (_) {
+      matches = const [];
+    }
+
+    if (matches.isEmpty) {
+      final fallbackModels = (_models.isNotEmpty ? _models : _allModels)
+          .take(3)
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      matches = fallbackModels;
+    }
+
+    if (matches.isEmpty) {
+      return '暂无可用记忆片段。';
+    }
+
+    return matches
+        .asMap()
+        .entries
+        .map((entry) {
+          return _formatMemorySnippet(entry.key + 1, entry.value);
+        })
+        .join('\n\n');
+  }
+
+  String _formatMemorySnippet(int index, Map<String, dynamic> model) {
+    final metaInfo = _toMap(model['meta_info']);
+    final tags = _joinList(model['tags']);
+    final objects = _joinList(model['objects']);
+    final summary = _collectStrings(metaInfo)
+        .take(6)
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .join('；');
+
+    final parts = <String>[
+      '片段$index',
+      '场景：${model['scene_id']?.toString() ?? '未知场景'}',
+      '描述：${model['description']?.toString() ?? '暂无描述'}',
+      if (tags.isNotEmpty) '标签：$tags',
+      if (objects.isNotEmpty) '对象：$objects',
+      if (summary.isNotEmpty) '摘要：$summary',
+    ];
+
+    return parts.join('\n');
+  }
+
+  String _sanitizeLocalAnswer(String raw) {
+    final original = raw.trim();
+    var cleaned = raw;
+    const cutMarkers = ['【说明】', '\n问题：', '\n用户：', '\n系统：'];
+    for (final marker in cutMarkers) {
+      final index = cleaned.indexOf(marker);
+      if (index >= 0) {
+        cleaned = cleaned.substring(0, index);
+      }
+    }
+
+    final answerIndex = cleaned.lastIndexOf('答案：');
+    if (answerIndex >= 0) {
+      cleaned = cleaned.substring(answerIndex + 3);
+    }
+
+    cleaned = cleaned.trim();
+
+    if (cleaned.isEmpty && original.isNotEmpty) {
+      return original;
+    }
+
+    if (cleaned.length >= 8) {
+      final half = cleaned.length ~/ 2;
+      final first = cleaned.substring(0, half).trim();
+      final second = cleaned.substring(half).trim();
+      if (first.isNotEmpty && first == second) {
+        cleaned = first;
+      }
+    }
+
+    return cleaned;
+  }
+
+  bool _shouldLockAnswer(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    if (trimmed.length >= 8 &&
+        (trimmed.endsWith('。') ||
+            trimmed.endsWith('！') ||
+            trimmed.endsWith('？') ||
+            trimmed.endsWith('.') ||
+            trimmed.endsWith('!') ||
+            trimmed.endsWith('?'))) {
+      return true;
+    }
+    return false;
+  }
+
+  String _joinList(dynamic rawList) {
+    if (rawList is! List) {
+      return '';
+    }
+    return rawList
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .join('、');
+  }
+
+  Map<String, dynamic> _toMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, item) => MapEntry(key.toString(), item));
+    }
+    return const <String, dynamic>{};
+  }
+
+  List<String> _collectStrings(dynamic value) {
+    if (value == null) {
+      return const [];
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      return trimmed.isEmpty ? const [] : [trimmed];
+    }
+    if (value is num || value is bool) {
+      return [value.toString()];
+    }
+    if (value is List) {
+      return value.expand(_collectStrings).toList();
+    }
+    if (value is Map) {
+      return value.values.expand(_collectStrings).toList();
+    }
+    return const [];
   }
 
   /// 设置 Realtime 监听 processing_tasks 表的变化
@@ -515,6 +1023,8 @@ class _RecallPageState extends State<RecallPage> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      _buildLocalQnaPanel(theme, isDark, textColor),
                     ],
                   ),
                 ),
@@ -967,6 +1477,271 @@ class _RecallPageState extends State<RecallPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLocalQnaPanel(TDThemeData theme, bool isDark, Color textColor) {
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue;
+    final answerText = _localAnswer.trim();
+    final contextPreview = _localContextPreview.trim();
+
+    return BDPanelCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.memory_rounded,
+                size: 18,
+                color: isDark
+                    ? BDDesign.colorPaperWhite
+                    : BDDesign.colorInkBlack,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Qwen3-1.7B 端侧问答',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              BDStatusPill(
+                label: _isLocalModelReady ? 'READY' : 'OFFLINE',
+                icon: _isLocalModelReady
+                    ? Icons.check_circle_rounded
+                    : Icons.offline_bolt_rounded,
+                color: _isLocalModelReady
+                    ? BDDesign.colorMutedBlue
+                    : BDDesign.colorDarkRed,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '把手机上的 Qwen3-1.7B GGUF 路径填进来，当前问题会先走本地 RAG 检索，再把记忆片段喂给端侧模型。',
+            style: TextStyle(color: hintColor, fontSize: 12.5, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _localModelUrlController,
+            style: TextStyle(color: textColor, fontSize: 14),
+            minLines: 2,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: '模型下载链接',
+              hintText: _defaultModelDownloadUrl,
+              filled: true,
+              fillColor: Colors.transparent,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isModelDownloading
+                  ? null
+                  : _downloadModelToPrivateDir,
+              icon: _isModelDownloading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: isDark
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorInkBlack,
+                      ),
+                    )
+                  : const Icon(Icons.download_rounded),
+              label: Text(_isModelDownloading ? '下载中...' : '下载到应用私有目录'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+                backgroundColor: isDark
+                    ? const Color(0xFF243042)
+                    : const Color(0xFF24415E),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          if (_isModelDownloading || _modelDownloadProgress != null) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(
+              value: _modelDownloadProgress,
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _modelDownloadTotalBytes == null
+                  ? '已下载：${(_modelDownloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB'
+                  : '下载进度：${(_modelDownloadProgress! * 100).toStringAsFixed(1)}% · ${(_modelDownloadedBytes / 1024 / 1024).toStringAsFixed(1)} / ${(_modelDownloadTotalBytes! / 1024 / 1024).toStringAsFixed(1)} MB',
+              style: TextStyle(color: hintColor, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _localModelPathController,
+            style: TextStyle(color: textColor, fontSize: 14),
+            decoration: InputDecoration(
+              labelText: '模型绝对路径',
+              hintText: '应用私有目录中的本地路径',
+              filled: true,
+              fillColor: Colors.transparent,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isLocalModelLoading ? null : _loadLocalQnaModel,
+              icon: _isLocalModelLoading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: isDark
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorInkBlack,
+                      ),
+                    )
+                  : const Icon(Icons.play_arrow_rounded),
+              label: Text(_isLocalModelLoading ? '加载中...' : '加载端侧模型'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+                backgroundColor: BDDesign.colorMutedBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _localAnswerStatus,
+            style: TextStyle(color: hintColor, fontSize: 12, height: 1.35),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _localQuestionController,
+            style: TextStyle(color: textColor, fontSize: 14),
+            minLines: 2,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: '问一个和记忆相关的问题',
+              hintText: '例如：我上次重建的那个客厅场景里有什么物体？',
+              filled: true,
+              fillColor: Colors.transparent,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: (_isLocalAnswering || !_isLocalModelReady)
+                  ? null
+                  : _askLocalQuestion,
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: Text(_isLocalAnswering ? '回答中...' : '开始端侧问答'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(46),
+                backgroundColor: isDark
+                    ? const Color(0xFF1F2836)
+                    : const Color(0xFF111827),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          if (contextPreview.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              '本次喂给模型的记忆片段',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? darkInput : theme.grayColor3,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                contextPreview,
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 12.5,
+                  height: 1.45,
+                ),
+                maxLines: 10,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Text(
+            '模型回答',
+            style: TextStyle(
+              color: textColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(minHeight: 120),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isDark ? darkInput : theme.grayColor3,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(
+              answerText.isEmpty ? '模型回答会在这里流式出现。' : answerText,
+              style: TextStyle(
+                color: answerText.isEmpty ? hintColor : textColor,
+                fontSize: 13.5,
+                height: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '提示：优先点“下载到应用私有目录”，这样不需要 adb，也不用手动处理 Android/data 路径。',
+            style: TextStyle(
+              color: hintColor.withValues(alpha: 0.9),
+              fontSize: 11.5,
+              height: 1.35,
+            ),
+          ),
+        ],
       ),
     );
   }

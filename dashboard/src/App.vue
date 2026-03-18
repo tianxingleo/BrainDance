@@ -27,6 +27,18 @@ interface ProcessingTask {
   logs: unknown
 }
 
+interface UserActivitySummary {
+  userId: string
+  taskCount: number
+  assetCount: number
+  legacyTaskCount: number
+  totalActions: number
+  task24h: number
+  task7d: number
+  asset7d: number
+  lastSeenAt: string | null
+}
+
 interface BucketStat {
   id: string
   public: boolean
@@ -68,6 +80,7 @@ const lastUpdated = ref<string | null>(null)
 const taskRows = ref<ProcessingTask[]>([])
 const modelAssetCount = ref(0)
 const memoryPoseCount = ref(0)
+const userSummaries = ref<UserActivitySummary[]>([])
 
 const selectedStatus = ref<'all' | TaskStatus>('all')
 const selectedTaskType = ref('all')
@@ -105,6 +118,8 @@ const timeBasedStats = ref({
   tasks24h: 0,
   failed24h: 0,
   completed24h: 0,
+  totalUsers: 0,
+  activeUsers24h: 0,
   activeUsers7d: 0,
   assets7d: 0,
 })
@@ -203,6 +218,8 @@ const filteredTasks = computed(() => {
 
 const taskQueue = computed(() => filteredTasks.value.slice(0, 20))
 const failedTasks = computed(() => taskRows.value.filter((item) => item.status === 'failed').slice(0, 6))
+const topUsers = computed(() => userSummaries.value.slice(0, 6))
+const newlyActiveUsers = computed(() => userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).slice(0, 8))
 
 const totalStorageBytes = computed(() =>
   storageStats.value.reduce((sum, item) => sum + item.totalBytes, 0),
@@ -212,6 +229,7 @@ const edgeHealthyCount = computed(() => edgeChecks.value.filter((item) => item.s
 const queueCount = computed(() => pendingCount.value + processingCount.value)
 
 const refreshModeText = computed(() => (autoRefresh.value ? `${refreshSeconds.value}s 自动刷新` : '手动刷新'))
+const totalUserCount = computed(() => userSummaries.value.length)
 
 const storageModeText = computed(() => {
   if (storageProbeMode.value === 'bucket_list') return '列桶模式'
@@ -571,6 +589,14 @@ const overviewCards = computed(() => [
     tone: edgeSeverity.value,
   },
   {
+    key: 'users',
+    label: '用户总数',
+    value: `${totalUserCount.value}`,
+    note: `24h 活跃 ${timeBasedStats.value.activeUsers24h} / 7d 活跃 ${timeBasedStats.value.activeUsers7d}`,
+    icon: 'lucide:users',
+    tone: 'neutral' as const,
+  },
+  {
     key: 'assets',
     label: '模型资产',
     value: `${modelAssetCount.value}`,
@@ -642,6 +668,113 @@ const alertRows = computed(() => [
 const activeAlertCount = computed(() =>
   alertRows.value.filter((item) => item.tone === 'warn' || item.tone === 'bad').length,
 )
+
+const formatUserId = (userId: string) => {
+  if (userId.length <= 14) return userId
+  return `${userId.slice(0, 8)}...${userId.slice(-4)}`
+}
+
+const fetchAllRows = async <T,>(table: string, columns: string, orderColumn = 'created_at') => {
+  const pageSize = 1000
+  let from = 0
+  const rows: T[] = []
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order(orderColumn, { ascending: false })
+      .range(from, from + pageSize - 1)
+
+    if (error) {
+      console.warn(`[dashboard] failed to fetch rows from ${table}:`, error.message)
+      return rows
+    }
+
+    const chunk = (data ?? []) as T[]
+    rows.push(...chunk)
+
+    if (chunk.length < pageSize) break
+    from += pageSize
+  }
+
+  return rows
+}
+
+const buildUserSummaries = (
+  processingTaskUsers: Array<{ user_id: string; created_at: string }>,
+  assetUsers: Array<{ user_id: string | null; created_at: string }>,
+  legacyTaskUsers: Array<{ user_id: string; created_at: string }>,
+) => {
+  const now = dayjs()
+  const since24h = now.subtract(24, 'hour')
+  const since7d = now.subtract(7, 'day')
+  const map = new Map<string, UserActivitySummary>()
+
+  const ensureUser = (userId: string) => {
+    const normalized = userId.trim()
+    if (!normalized) return null
+
+    const existing = map.get(normalized)
+    if (existing) return existing
+
+    const next: UserActivitySummary = {
+      userId: normalized,
+      taskCount: 0,
+      assetCount: 0,
+      legacyTaskCount: 0,
+      totalActions: 0,
+      task24h: 0,
+      task7d: 0,
+      asset7d: 0,
+      lastSeenAt: null,
+    }
+    map.set(normalized, next)
+    return next
+  }
+
+  const bumpLastSeen = (summary: UserActivitySummary, createdAt: string) => {
+    if (!summary.lastSeenAt || dayjs(createdAt).isAfter(dayjs(summary.lastSeenAt))) {
+      summary.lastSeenAt = createdAt
+    }
+  }
+
+  processingTaskUsers.forEach((item) => {
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.taskCount += 1
+    summary.totalActions += 1
+    bumpLastSeen(summary, item.created_at)
+
+    const createdAt = dayjs(item.created_at)
+    if (createdAt.isAfter(since24h)) summary.task24h += 1
+    if (createdAt.isAfter(since7d)) summary.task7d += 1
+  })
+
+  assetUsers.forEach((item) => {
+    if (!item.user_id) return
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.assetCount += 1
+    summary.totalActions += 1
+    bumpLastSeen(summary, item.created_at)
+
+    const createdAt = dayjs(item.created_at)
+    if (createdAt.isAfter(since7d)) summary.asset7d += 1
+  })
+
+  legacyTaskUsers.forEach((item) => {
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.legacyTaskCount += 1
+    bumpLastSeen(summary, item.created_at)
+  })
+
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.totalActions !== a.totalActions) return b.totalActions - a.totalActions
+    return dayjs(b.lastSeenAt ?? 0).valueOf() - dayjs(a.lastSeenAt ?? 0).valueOf()
+  })
+}
 
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
   const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? ''
@@ -834,12 +967,25 @@ const refreshDashboard = async () => {
   const since24h = now.subtract(24, 'hour').toISOString()
   const since7d = now.subtract(7, 'day').toISOString()
 
-  const [tasksRes, assetCountRes, poseCountRes, ragCountRes, taskTableRes, task24hRes, asset7dRes] = await Promise.all([
+  const [
+    tasksRes,
+    processingTaskCountRes,
+    assetCountRes,
+    poseCountRes,
+    ragCountRes,
+    taskTableCountRes,
+    task24hRes,
+    asset7dRes,
+    processingTaskUsers,
+    assetUsers,
+    legacyTaskUsers,
+  ] = await Promise.all([
     supabase
       .from('processing_tasks')
       .select('id, display_name, scene_id, user_id, status, task_type, quality_score, created_at, updated_at, logs')
       .order('updated_at', { ascending: false })
       .limit(500),
+    supabase.from('processing_tasks').select('*', { count: 'exact', head: true }),
     supabase.from('model_assets').select('*', { count: 'exact', head: true }),
     supabase.from('memory_poses').select('*', { count: 'exact', head: true }),
     supabase.from('rag_docs').select('*', { count: 'exact', head: true }),
@@ -850,13 +996,23 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
+    fetchAllRows<{ user_id: string; created_at: string }>('processing_tasks', 'user_id, created_at'),
+    fetchAllRows<{ user_id: string | null; created_at: string }>('model_assets', 'user_id, created_at'),
+    fetchAllRows<{ user_id: string; created_at: string }>('tasks', 'user_id, created_at'),
   ])
 
-  if (tasksRes.error || assetCountRes.error || poseCountRes.error) {
-    errorMessage.value = tasksRes.error?.message || assetCountRes.error?.message || poseCountRes.error?.message || '数据读取失败'
+  if (tasksRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
+    errorMessage.value =
+      tasksRes.error?.message ||
+      processingTaskCountRes.error?.message ||
+      assetCountRes.error?.message ||
+      poseCountRes.error?.message ||
+      '数据读取失败'
   } else {
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
+    const summaries = buildUserSummaries(processingTaskUsers, assetUsers, legacyTaskUsers)
     taskRows.value = tasks
+    userSummaries.value = summaries
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
 
@@ -865,18 +1021,18 @@ const refreshDashboard = async () => {
       tasks24h: task24hRes.count ?? 0,
       failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
       completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
-      activeUsers7d: new Set(
-        tasks.filter((item) => dayjs(item.created_at).isAfter(dayjs(since7d))).map((item) => item.user_id),
-      ).size,
+      totalUsers: summaries.length,
+      activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
+      activeUsers7d: summaries.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
       assets7d: asset7dRes.count ?? 0,
     }
 
     dbCounts.value = {
-      processing_tasks: tasksRes.data?.length ?? 0,
+      processing_tasks: processingTaskCountRes.count ?? 0,
       model_assets: assetCountRes.count ?? 0,
       memory_poses: poseCountRes.count ?? 0,
       rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
-      tasks: taskTableRes.error ? 0 : (taskTableRes.count ?? 0),
+      tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
     }
 
     lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
@@ -1004,6 +1160,10 @@ onUnmounted(() => {
             <article class="phone-stat-card">
               <span>资产</span>
               <strong>{{ modelAssetCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>用户</span>
+              <strong>{{ totalUserCount }}</strong>
             </article>
           </div>
 
@@ -1333,6 +1493,14 @@ onUnmounted(() => {
                   <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
                 </div>
                 <div class="metric-item">
+                  <div class="metric-title">用户总数</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃用户</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
                   <div class="metric-title">7d 活跃</div>
                   <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
                 </div>
@@ -1342,6 +1510,94 @@ onUnmounted(() => {
                 </div>
               </div>
               <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--users">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户列表</div>
+                  <div class="header-meta">基于 `processing_tasks`、`model_assets`、`tasks` 的 user_id 聚合。</div>
+                </div>
+              </template>
+              <el-table :data="userSummaries" stripe height="360" empty-text="暂无用户数据">
+                <el-table-column label="用户" min-width="180">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatUserId(scope.row.userId) }}</div>
+                    <div class="task-sub">{{ scope.row.userId }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="任务数" width="90" align="right" prop="taskCount" />
+                <el-table-column label="资产数" width="90" align="right" prop="assetCount" />
+                <el-table-column label="24h 任务" width="100" align="right" prop="task24h" />
+                <el-table-column label="7d 活跃" width="100" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.task7d > 0 || scope.row.asset7d > 0 ? 'success' : 'info'">
+                      {{ scope.row.task7d > 0 || scope.row.asset7d > 0 ? '活跃' : '沉默' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="最近活动" min-width="170">
+                  <template #default="scope">
+                    {{ scope.row.lastSeenAt ? formatDateTime(scope.row.lastSeenAt) : '-' }}
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户活跃摘要</div>
+                  <div class="header-meta">最近活跃与高频使用者。</div>
+                </div>
+              </template>
+
+              <div class="db-metrics db-metrics--users">
+                <div class="metric-item">
+                  <div class="metric-title">总用户</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 活跃</div>
+                  <div class="metric-value ok">{{ timeBasedStats.activeUsers7d }}</div>
+                </div>
+              </div>
+
+              <div class="user-summary-block">
+                <div class="card-header-row user-summary-block__head">
+                  <div>
+                    <div class="card-header">Top 用户</div>
+                    <div class="header-meta">按业务动作总数排序。</div>
+                  </div>
+                </div>
+                <div class="alerts-list alerts-list--soft">
+                  <article v-for="item in topUsers" :key="item.userId" class="alert-item">
+                    <div class="alert-item-top">
+                      <div>
+                        <span class="alert-label">{{ formatUserId(item.userId) }}</span>
+                        <strong class="alert-value">{{ item.totalActions }}</strong>
+                      </div>
+                      <el-tag type="info">任务 {{ item.taskCount }}</el-tag>
+                    </div>
+                    <p class="alert-note">资产 {{ item.assetCount }}，最近活动 {{ item.lastSeenAt ? formatDateTime(item.lastSeenAt) : '-' }}</p>
+                  </article>
+                </div>
+              </div>
+
+              <el-divider />
+
+              <div class="user-chip-list">
+                <div v-for="item in newlyActiveUsers" :key="item.userId" class="user-chip">
+                  <span>{{ formatUserId(item.userId) }}</span>
+                  <strong>{{ item.task7d + item.asset7d }}</strong>
+                </div>
+              </div>
             </el-card>
           </section>
 
