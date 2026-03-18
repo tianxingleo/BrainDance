@@ -89,7 +89,7 @@ const autoRefresh = ref(true)
 const refreshSeconds = ref(60)
 const taskTrendRange = ref<'24h' | '7d' | '30d' | 'all'>('all')
 const isDarkTheme = ref(true)
-const accentColor = ref('#71839a')
+const accentColor = ref('#6b7a8f')
 
 const THEME_STORAGE_KEY = 'dashboard-theme-dark'
 const ACCENT_STORAGE_KEY = 'dashboard-theme-accent'
@@ -292,7 +292,7 @@ const chartTheme = computed(() => ({
   area: hexToRgba(accentColor.value, isDarkTheme.value ? 0.18 : 0.14),
   accentSoft: hexToRgba(accentColor.value, isDarkTheme.value ? 0.26 : 0.18),
   paper: isDarkTheme.value ? '#101722' : '#f4f8fc',
-  pie: ['#8aa0bb', accentColor.value, '#78b39d', '#d27070'],
+  pie: ['#a0aab5', accentColor.value, '#6d8260', '#8b4747'],
 }))
 
 const dbRowsChartOption = computed(() => ({
@@ -315,7 +315,7 @@ const dbRowsChartOption = computed(() => ({
       type: 'bar',
       barWidth: 14,
       itemStyle: { color: accentColor.value, borderRadius: [0, 10, 10, 0] },
-      emphasis: { itemStyle: { color: '#f2a33c' } },
+      emphasis: { itemStyle: { color: '#8393a8' } },
       data: [
         dbCounts.value.processing_tasks,
         dbCounts.value.model_assets,
@@ -446,7 +446,7 @@ const taskTrendOption = computed(() => {
         data: labels.map((key) => bucketMap[key]),
         symbolSize: 7,
         lineStyle: { width: 3, color: accentColor.value },
-        itemStyle: { color: '#f2a33c', borderColor: accentColor.value, borderWidth: 2 },
+        itemStyle: { color: '#e4e8ed', borderColor: accentColor.value, borderWidth: 2 },
         areaStyle: { color: chartTheme.value.area },
       },
     ],
@@ -1242,7 +1242,7 @@ onUnmounted(() => {
                 <Icon icon="lucide:paintbrush-2" />
                 <el-color-picker
                   v-model="accentColor"
-                  :predefine="['#71839a', '#5f86c2', '#86a8a1', '#8d9bc4', '#a0afc7']"
+                  :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
                 />
               </div>
             </div>
