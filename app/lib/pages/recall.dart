@@ -1,11 +1,15 @@
 import 'dart:async';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
+import '../services/download_event_bus.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
 import 'webgl_viewer.dart';
@@ -195,6 +199,37 @@ class _RecallPageState extends State<RecallPage> {
           .order('created_at', ascending: false);
 
       final models = List<Map<String, dynamic>>.from(response);
+
+      // 从 processing_tasks 获取 display_name 并合并
+      try {
+        final sceneIds = models
+            .map((m) => m['scene_id']?.toString())
+            .where((s) => s != null)
+            .toList();
+        if (sceneIds.isNotEmpty) {
+          final tasksResp = await Supabase.instance.client
+              .from('processing_tasks')
+              .select('scene_id, display_name')
+              .inFilter('scene_id', sceneIds);
+          final tasksList = List<Map<String, dynamic>>.from(tasksResp);
+          final displayNameMap = <String, String>{};
+          for (final t in tasksList) {
+            final dn = t['display_name']?.toString();
+            if (dn != null && dn.isNotEmpty) {
+              displayNameMap[t['scene_id'].toString()] = dn;
+            }
+          }
+          for (final m in models) {
+            final sid = m['scene_id']?.toString();
+            if (sid != null && displayNameMap.containsKey(sid)) {
+              m['display_name'] = displayNameMap[sid];
+            }
+          }
+        }
+      } catch (_) {
+        // display_name 获取失败不影响主流程
+      }
+
       if (models.isEmpty) {
         models.add(_buildDemoModel());
       }
@@ -1121,7 +1156,7 @@ class _RecallPageState extends State<RecallPage> {
         itemCount: _models.length,
         itemBuilder: (context, index) {
           final model = _models[index];
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
+          final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
           final desc = model['description'] ?? textLocalize('recall_no_desc');
           final similarity = model['similarity'] as double?;
           final userId = model['user_id'] ?? '';
@@ -1344,7 +1379,7 @@ class _RecallPageState extends State<RecallPage> {
       itemCount: _models.length,
       itemBuilder: (context, index) {
         final model = _models[index];
-        final sceneId = model['scene_id'] ?? 'Unknown Scene';
+        final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
         final desc = model['description'] ?? textLocalize("recall_no_desc");
         final similarity = model['similarity'] as double?;
         final plyPath = model['ply_path'] as String? ?? '';
@@ -1528,7 +1563,7 @@ class _RecallPageState extends State<RecallPage> {
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
 
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
@@ -1587,7 +1622,45 @@ class _RecallPageState extends State<RecallPage> {
     TDToast.showText(context: context, textLocalize('recall_published'));
   }
 
+  Future<String> _getLocalModelSizeLabel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) return '';
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        return '';
+      }
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName =
+          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+
+      int totalBytes = 0;
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
+      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
+
+      if (await localFile.exists()) totalBytes += await localFile.length();
+      if (await tmpFile.exists()) totalBytes += await tmpFile.length();
+      if (await metaFile.exists()) totalBytes += await metaFile.length();
+
+      if (totalBytes == 0) return '';
+      if (totalBytes < 1024 * 1024) {
+        return '(${(totalBytes / 1024).toStringAsFixed(0)}KB)';
+      }
+      return '(${(totalBytes / (1024 * 1024)).toStringAsFixed(1)}MB)';
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> _showModelActions(Map<String, dynamic> model) async {
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+
+    if (!mounted) return;
+
     final selectedAction = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1599,7 +1672,7 @@ class _RecallPageState extends State<RecallPage> {
         final hintColor = isDark
             ? Colors.white.withValues(alpha: 0.62)
             : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-        final sceneId = model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model');
+        final sceneId = model['display_name']?.toString() ?? model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model');
         final desc =
             model['description']?.toString() ?? textLocalize("recall_no_desc");
 
@@ -1631,6 +1704,20 @@ class _RecallPageState extends State<RecallPage> {
                   const SizedBox(height: 16),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.edit_rounded),
+                    title: Text(textLocalize('recall_rename_model')),
+                    subtitle: Text(textLocalize('recall_rename_subtitle')),
+                    onTap: () => Navigator.pop(context, 'rename'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.delete_outline_rounded),
+                    title: Text('${textLocalize('recall_delete_local')}$sizeLabel'),
+                    subtitle: Text(textLocalize('recall_delete_local_subtitle')),
+                    onTap: () => Navigator.pop(context, 'delete_local'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.public_rounded),
                     title: Text(textLocalize('recall_share_to_community')),
                     subtitle: Text(textLocalize('recall_share_subtitle')),
@@ -1648,8 +1735,167 @@ class _RecallPageState extends State<RecallPage> {
       return;
     }
 
-    if (selectedAction == 'share') {
-      await _shareModelToCommunity(model);
+    switch (selectedAction) {
+      case 'rename':
+        await _renameModel(model);
+        break;
+      case 'delete_local':
+        await _deleteLocalModel(model);
+        break;
+      case 'share':
+        await _shareModelToCommunity(model);
+        break;
+    }
+  }
+
+  Future<void> _renameModel(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    if (sceneId == null) return;
+
+    // 非法字符正则：禁止 / \ : * ? " < > |
+    final invalidChars = RegExp(r'[/\\:*?"<>|]');
+
+    final currentName = model['display_name']?.toString() ?? sceneId;
+    final controller = TextEditingController(text: currentName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: Text(textLocalize('recall_rename_model')),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: textLocalize('recall_rename_hint'),
+                  errorText: errorText,
+                ),
+                onChanged: (value) {
+                  if (invalidChars.hasMatch(value)) {
+                    setDialogState(() {
+                      errorText = textLocalize('recall_rename_invalid');
+                    });
+                  } else {
+                    setDialogState(() {
+                      errorText = null;
+                    });
+                  }
+                },
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(textLocalize('gen_cancel')),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final text = controller.text.trim();
+                    if (text.isEmpty || invalidChars.hasMatch(text)) return;
+                    Navigator.pop(ctx, text);
+                  },
+                  child: Text(textLocalize('gen_button')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    controller.dispose();
+
+    if (newName == null || newName.isEmpty || !mounted) return;
+
+    try {
+      await Supabase.instance.client
+          .from('processing_tasks')
+          .update({'display_name': newName})
+          .eq('scene_id', sceneId)
+          .select();
+
+      // 立即更新本地数据
+      if (mounted) {
+        setState(() {
+          for (final m in _allModels) {
+            if (m['scene_id'] == sceneId) {
+              m['display_name'] = newName;
+            }
+          }
+          for (final m in _models) {
+            if (m['scene_id'] == sceneId) {
+              m['display_name'] = newName;
+            }
+          }
+        });
+        TDToast.showText(textLocalize('recall_rename_success'), context: context);
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText('${textLocalize('recall_rename_fail')}: $e', context: context);
+      }
+    }
+  }
+
+  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) {
+      if (mounted) {
+        TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+      }
+      return;
+    }
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        if (mounted) {
+          TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+        }
+        return;
+      }
+
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName =
+          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
+      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
+
+      bool deleted = false;
+      if (await localFile.exists()) {
+        await localFile.delete();
+        deleted = true;
+      }
+      if (await tmpFile.exists()) {
+        await tmpFile.delete();
+        deleted = true;
+      }
+      if (await metaFile.exists()) {
+        await metaFile.delete();
+        deleted = true;
+      }
+
+      if (mounted) {
+        if (deleted) {
+          // 通知下载状态徽章重置为"未下载"
+          downloadEventBus.add(ModelDownloadEvent(
+            url: modelUrl,
+            progress: 0.0,
+            isDeleted: true,
+          ));
+          TDToast.showText(textLocalize('recall_delete_local_success'), context: context);
+        } else {
+          TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText('${textLocalize('recall_delete_local_fail')}: $e', context: context);
+      }
     }
   }
 
@@ -1658,7 +1904,7 @@ class _RecallPageState extends State<RecallPage> {
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model'),
+      sceneId: model['display_name']?.toString() ?? model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model'),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'

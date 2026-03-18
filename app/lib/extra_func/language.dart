@@ -257,6 +257,9 @@ enum Language {
       "login_cancelled": "登录已取消或未完成",
       "login_success_upload": "登录成功，开始上传",
       "platform_webview_unsupported": "当前平台不支持内嵌网页",
+      "viewer_downloading_title": "正在下载云端模型...",
+      "viewer_downloading_subtitle": "这只需下载一次，之后可离线查看",
+      "viewer_stop_download": "停止下载",
     },
   ),
   en(
@@ -525,6 +528,9 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "login_cancelled": "Login cancelled or incomplete",
       "login_success_upload": "Login successful, starting upload",
       "platform_webview_unsupported": "Embedded webview not supported on this platform",
+      "viewer_downloading_title": "Downloading cloud model...",
+      "viewer_downloading_subtitle": "Only needed once, then available offline",
+      "viewer_stop_download": "Stop",
     },
   );
 

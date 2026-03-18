@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../../configs/app_config.dart';
 import '../webgl_viewer.dart';
+import '../../services/download_event_bus.dart';
 
 /// 模型下载状态
 enum ModelDownloadStatus {
@@ -68,8 +70,9 @@ class _ModelCardState extends State<ModelCard> {
     try {
       final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
       final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName =
-          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
       final dir = await getApplicationDocumentsDirectory();
       final localFile = File('${dir.path}/$sanitizedFileName');
       final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
@@ -111,7 +114,7 @@ class _ModelCardState extends State<ModelCard> {
     final model = widget.model;
     final isDark = widget.isDark;
     final theme = widget.theme;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
 
@@ -129,9 +132,7 @@ class _ModelCardState extends State<ModelCard> {
         onTap: () => _navigateToViewer(context),
         child: Container(
           decoration: BoxDecoration(
-            color: isDark
-                ? widget.darkCard
-                : theme.whiteColor1.withAlpha(220),
+            color: isDark ? widget.darkCard : theme.whiteColor1.withAlpha(220),
             borderRadius: BorderRadius.circular(28.0),
             boxShadow: [
               BoxShadow(
@@ -156,7 +157,8 @@ class _ModelCardState extends State<ModelCard> {
                         ),
                       ),
                       clipBehavior: Clip.hardEdge,
-                      child: model['preview_img_path'] != null &&
+                      child:
+                          model['preview_img_path'] != null &&
                               model['preview_img_path'].toString().isNotEmpty
                           ? Image.network(
                               model['preview_img_path'],
@@ -248,9 +250,7 @@ class _ModelCardState extends State<ModelCard> {
             Icon(
               Icons.cloud_download_outlined,
               size: 14,
-              color: isDark
-                  ? const Color(0xFF888888)
-                  : const Color(0xFF999999),
+              color: isDark ? const Color(0xFF888888) : const Color(0xFF999999),
             ),
             const SizedBox(width: 4),
             TDText(
@@ -297,9 +297,7 @@ class _ModelCardState extends State<ModelCard> {
                     ? Colors.white.withAlpha(20)
                     : Colors.black.withAlpha(15),
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  isDark
-                      ? const Color(0xFFFFB74D)
-                      : const Color(0xFFF57C00),
+                  isDark ? const Color(0xFFFFB74D) : const Color(0xFFF57C00),
                 ),
               ),
             ),
@@ -313,9 +311,7 @@ class _ModelCardState extends State<ModelCard> {
             Icon(
               Icons.check_circle_outline,
               size: 14,
-              color: isDark
-                  ? const Color(0xFF666666)
-                  : const Color(0xFFBBBBBB),
+              color: isDark ? const Color(0xFF666666) : const Color(0xFFBBBBBB),
             ),
             const SizedBox(width: 4),
             TDText(
@@ -351,8 +347,7 @@ class _ModelCardState extends State<ModelCard> {
     // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
-      initialPose =
-          transformMatrix.map((e) => (e as num).toDouble()).toList();
+      initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
     }
 
     Navigator.push(
@@ -370,10 +365,7 @@ class _ModelCardState extends State<ModelCard> {
             opacity: animation,
             child: ScaleTransition(
               scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeOutCubic,
-                ),
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
               ),
               child: child,
             ),
@@ -408,11 +400,39 @@ class ModelDownloadBadge extends StatefulWidget {
 class _ModelDownloadBadgeState extends State<ModelDownloadBadge> {
   ModelDownloadStatus _status = ModelDownloadStatus.notDownloaded;
   double _progress = 0.0;
+  StreamSubscription<ModelDownloadEvent>? _sub;
 
   @override
   void initState() {
     super.initState();
     _checkDownloadStatus();
+    _sub = downloadEventBus.stream.listen((event) {
+      if (event.url == widget.modelUrl) {
+        if (mounted) {
+          setState(() {
+            if (event.isDeleted) {
+              _status = ModelDownloadStatus.notDownloaded;
+              _progress = 0.0;
+            } else if (event.isComplete) {
+              _status = ModelDownloadStatus.downloaded;
+            } else if (event.isCancelled) {
+              // 下载被取消，保留部分进度显示
+              _status = ModelDownloadStatus.partial;
+              _progress = event.progress;
+            } else {
+              _status = ModelDownloadStatus.partial;
+              _progress = event.progress;
+            }
+          });
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 
   Future<void> _checkDownloadStatus() async {
@@ -424,8 +444,9 @@ class _ModelDownloadBadgeState extends State<ModelDownloadBadge> {
     try {
       final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
       final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName =
-          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
       final dir = await getApplicationDocumentsDirectory();
       final localFile = File('${dir.path}/$sanitizedFileName');
       final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
@@ -468,9 +489,7 @@ class _ModelDownloadBadgeState extends State<ModelDownloadBadge> {
             Icon(
               Icons.cloud_download_outlined,
               size: 14,
-              color: isDark
-                  ? const Color(0xFF888888)
-                  : const Color(0xFF999999),
+              color: isDark ? const Color(0xFF888888) : const Color(0xFF999999),
             ),
             const SizedBox(width: 4),
             TDText(
@@ -517,9 +536,7 @@ class _ModelDownloadBadgeState extends State<ModelDownloadBadge> {
                     ? Colors.white.withAlpha(20)
                     : Colors.black.withAlpha(15),
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  isDark
-                      ? const Color(0xFFFFB74D)
-                      : const Color(0xFFF57C00),
+                  isDark ? const Color(0xFFFFB74D) : const Color(0xFFF57C00),
                 ),
               ),
             ),
@@ -533,9 +550,7 @@ class _ModelDownloadBadgeState extends State<ModelDownloadBadge> {
             Icon(
               Icons.check_circle_outline,
               size: 14,
-              color: isDark
-                  ? const Color(0xFF666666)
-                  : const Color(0xFFBBBBBB),
+              color: isDark ? const Color(0xFF666666) : const Color(0xFFBBBBBB),
             ),
             const SizedBox(width: 4),
             TDText(

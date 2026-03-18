@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:braindance/configs/app_config.dart';
+import '../services/download_event_bus.dart';
 
 // ============================================================
 // 开发/生产模式切换
@@ -41,6 +42,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   int _localPort = 0;
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
+  int _downloadedBytes = 0;
+  int _totalBytes = -1;
   String? _localModelPath;
   bool _downloadCancelled = false;
 
@@ -70,6 +73,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _downloadCancelled = true;
     _localServer?.close();
     super.dispose();
+  }
+
+  /// 用户主动停止下载
+  void _stopDownload() {
+    _downloadCancelled = true;
+    if (mounted) {
+      setState(() {
+        _isDownloading = false;
+      });
+    }
+  }
+
+  /// 格式化字节为人类可读的大小字符串
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   }
 
   Future<void> _startLocalServer() async {
@@ -204,6 +224,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           setState(() {
             _isDownloading = true;
             _downloadProgress = 0.0;
+            _downloadedBytes = 0;
+            _totalBytes = -1;
           });
 
           // 允许自托管 Supabase 的自签名或不被 Android 信任的证书
@@ -224,8 +246,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             String errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -252,9 +273,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           );
 
           // 如果有已下载的部分，立即更新进度条
-          if (existingBytes > 0 && totalBytes > 0 && mounted) {
+          if (mounted) {
             setState(() {
-              _downloadProgress = receivedBytes / totalBytes;
+              _downloadedBytes = receivedBytes;
+              _totalBytes = totalBytes;
+              _downloadProgress = totalBytes > 0
+                  ? receivedBytes / totalBytes
+                  : 0.0;
             });
           }
 
@@ -263,14 +288,29 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               if (_downloadCancelled) {
                 await sink.close();
                 // 断点续传：取消时保留临时文件，下次可继续
+                downloadEventBus.add(ModelDownloadEvent(
+                  url: originalUrl,
+                  progress: _downloadProgress,
+                  downloadedBytes: receivedBytes,
+                  totalBytes: totalBytes,
+                  isCancelled: true,
+                ));
                 return;
               }
               sink.add(chunk);
               receivedBytes += chunk.length;
               if (totalBytes > 0 && mounted) {
+                final progress = receivedBytes / totalBytes;
                 setState(() {
-                  _downloadProgress = receivedBytes / totalBytes;
+                  _downloadProgress = progress;
+                  _downloadedBytes = receivedBytes;
                 });
+                downloadEventBus.add(ModelDownloadEvent(
+                  url: originalUrl,
+                  progress: progress,
+                  downloadedBytes: receivedBytes,
+                  totalBytes: totalBytes,
+                ));
               }
             }
             await sink.close();
@@ -280,6 +320,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             if (await metaFile.exists()) await metaFile.delete();
             debugPrint('Download complete: ${localFile.path}');
             _localModelPath = localFile.path;
+            downloadEventBus.add(ModelDownloadEvent(
+              url: originalUrl,
+              progress: 1.0,
+              isComplete: true,
+              downloadedBytes: receivedBytes,
+              totalBytes: totalBytes,
+            ));
             if (mounted) {
               setState(() {
                 _isDownloading = false;
@@ -389,7 +436,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
       // 新版：同时传模型 URL、webgl_poses.json 公网 URL 以及可能的初始视角矩阵
       final payload = jsonEncode({
-        'ply': targetUrl, 
+        'ply': targetUrl,
         'poses': widget.posesUrl,
         if (widget.initialPose != null) 'matrix': widget.initialPose,
       });
@@ -471,18 +518,86 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                   ),
                 if (_isDownloading)
                   Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: iconColor),
-                        const SizedBox(height: 16),
-                        TDText(
-                          '正在下载云端模型...\n这只需下载一次，之后可离线查看。\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
-                          textAlign: TextAlign.center,
-                          font: theme.fontBodyMedium,
-                          textColor: hintTextColor,
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TDText(
+                            textLocalize('viewer_downloading_title'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodyMedium,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 4),
+                          TDText(
+                            textLocalize('viewer_downloading_subtitle'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor.withAlpha(150),
+                          ),
+                          const SizedBox(height: 24),
+                          // 百分比
+                          TDText(
+                            '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                            font: theme.fontTitleLarge,
+                            fontWeight: FontWeight.w600,
+                            textColor: textColor,
+                          ),
+                          const SizedBox(height: 8),
+                          // 进度条
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _downloadProgress,
+                              minHeight: 6,
+                              backgroundColor: isDark
+                                  ? Colors.white.withAlpha(20)
+                                  : Colors.black.withAlpha(15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                isDark
+                                    ? const Color(0xFF7AA2FF)
+                                    : AppConfig.primaryColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          // 已下载 / 总大小
+                          TDText(
+                            _totalBytes > 0
+                                ? '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}'
+                                : '${_formatBytes(_downloadedBytes)} / --',
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 20),
+                          // 停止下载按钮
+                          SizedBox(
+                            width: 140,
+                            child: OutlinedButton.icon(
+                              onPressed: _stopDownload,
+                              icon: const Icon(Icons.stop_rounded, size: 18),
+                              label: Text(textLocalize('viewer_stop_download')),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: isDark
+                                    ? const Color(0xFFFF6B6B)
+                                    : const Color(0xFFD32F2F),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFFFF6B6B)
+                                      : const Color(0xFFD32F2F),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 else if (!_isWebReady && _controller != null)
