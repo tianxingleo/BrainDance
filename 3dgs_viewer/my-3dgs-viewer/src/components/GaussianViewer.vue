@@ -24,6 +24,10 @@ const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
+const DRAG_ROTATE_SENSITIVITY = 0.05;
+const DRAG_PAN_SENSITIVITY = 0.0035;
+const WHEEL_ZOOM_STEP = 0.08;
+const PINCH_ZOOM_STEP = 1.0;
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -106,6 +110,30 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
     try { viewer.update(); viewer.render(); } catch (_) {}
     refreshCurrentFocalInfo();
   }
+};
+
+const clampFocalPx = (focalPx) => {
+  if (!Number.isFinite(focalPx)) return null;
+  return Math.min(focalMax.value, Math.max(focalMin.value, focalPx));
+};
+
+const getActiveFocalPx = () => {
+  const focal = Number(
+    manualFocalPx.value || currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX
+  );
+  return clampFocalPx(focal);
+};
+
+const zoomByFocalScale = (scaleFactor) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(scaleFactor) || scaleFactor <= 0) return;
+  const currentFocal = getActiveFocalPx();
+  if (!currentFocal) return;
+
+  const nextFocal = clampFocalPx(currentFocal * scaleFactor);
+  if (!nextFocal) return;
+
+  manualFocalPx.value = Number(nextFocal.toFixed(1));
+  applyFocalLengthPx(nextFocal);
 };
 
 const focalMin = computed(() => {
@@ -801,11 +829,22 @@ const checkProtocol = () => {
 
 const isDragging = ref(false);
 const lastMouse = { x: 0, y: 0 };
+const pinchState = {
+  active: false,
+  distance: 0
+};
 // const rotationDelta removed here
+
+const getTouchDistance = (touchA, touchB) => {
+  const dx = touchA.clientX - touchB.clientX;
+  const dy = touchA.clientY - touchB.clientY;
+  return Math.hypot(dx, dy);
+};
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
   isDragging.value = true;
+  pinchState.active = false;
   lastMouse.x = e.clientX;
   lastMouse.y = e.clientY;
 };
@@ -815,17 +854,15 @@ const onMouseMove = (e) => {
 
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
-  const sensitivity = 0.2;
 
   // 计算增量
-  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
-  const panSensitivity = 0.01; // 平移灵敏度，根据模型大小可能需要调整
+  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
 
   // X轴旋转 (俯仰) - 本地轴
   viewer.camera.rotateX(deltaPitch * Math.PI / 180);
 
   // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * panSensitivity);
+  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
 
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
@@ -834,11 +871,28 @@ const onMouseMove = (e) => {
   lastMouse.y = e.clientY;
 };
 
-const onMouseUp = () => { isDragging.value = false; };
+const onMouseUp = () => {
+  isDragging.value = false;
+  pinchState.active = false;
+};
+
+const onWheel = (e) => {
+  if (!viewer || !viewer.camera) return;
+  const direction = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
+  zoomByFocalScale(direction);
+};
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
-  if (e.touches.length > 0) {
+  if (e.touches.length >= 2) {
+    isDragging.value = false;
+    pinchState.active = true;
+    pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    return;
+  }
+
+  pinchState.active = false;
+  if (e.touches.length === 1) {
     isDragging.value = true;
     lastMouse.x = e.touches[0].clientX;
     lastMouse.y = e.touches[0].clientY;
@@ -846,20 +900,32 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
-  if (!isDragging.value || !viewer || !viewer.camera || e.touches.length === 0) return;
+  if (!viewer || !viewer.camera || e.touches.length === 0) return;
+
+  if (e.touches.length >= 2) {
+    const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
+    if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+      const scale = nextDistance / pinchState.distance;
+      zoomByFocalScale(1 + ((scale - 1) * PINCH_ZOOM_STEP));
+    }
+    pinchState.active = true;
+    pinchState.distance = nextDistance;
+    isDragging.value = false;
+    return;
+  }
+
+  if (!isDragging.value) return;
 
   const dx = e.touches[0].clientX - lastMouse.x;
   const dy = e.touches[0].clientY - lastMouse.y;
-  const sensitivity = 0.2;
 
-  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
-  const panSensitivity = 0.01; // 平移灵敏度
+  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
 
   rotationDelta.value.x += deltaPitch;
 
   viewer.camera.rotateX(deltaPitch * Math.PI / 180);
   // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * panSensitivity);
+  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
 
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
@@ -868,7 +934,24 @@ const onTouchMove = (e) => {
   lastMouse.y = e.touches[0].clientY;
 };
 
-const onTouchEnd = () => { isDragging.value = false; };
+const onTouchEnd = (e) => {
+  if (e.touches.length >= 2) {
+    pinchState.active = true;
+    pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    isDragging.value = false;
+    return;
+  }
+
+  pinchState.active = false;
+  pinchState.distance = 0;
+  isDragging.value = false;
+
+  if (e.touches.length === 1) {
+    lastMouse.x = e.touches[0].clientX;
+    lastMouse.y = e.touches[0].clientY;
+    isDragging.value = true;
+  }
+};
 
 onMounted(() => {
   if (containerRef.value) {
@@ -920,6 +1003,7 @@ onBeforeUnmount(async () => {
 
 <template>
   <div class="app-container" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
+    @wheel.prevent="onWheel"
     @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
     @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>

@@ -518,7 +518,7 @@ const applyTheme = () => {
 }
 
 const edgeFunctionNames = computed(() => {
-  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? 'search-models,test-timeout'
+  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? ''
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -526,6 +526,7 @@ const edgeFunctionNames = computed(() => {
 })
 
 const edgeStatusText = computed(() => {
+  if (!edgeFunctionNames.value.length) return '未配置探测'
   if (!edgeChecks.value.length) return '还没探测'
   if (edgeHealthyCount.value === edgeFunctionNames.value.length) return '全部在线'
   if (!edgeHealthyCount.value) return '全部失联'
@@ -842,6 +843,12 @@ const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
 }
 
 const refreshEdgeChecks = async () => {
+  if (!edgeFunctionNames.value.length) {
+    edgeChecks.value = []
+    edgeLoading.value = false
+    return
+  }
+
   edgeLoading.value = true
   const checks = await Promise.all(edgeFunctionNames.value.map((name) => checkEdgeFunction(name)))
   edgeChecks.value = checks

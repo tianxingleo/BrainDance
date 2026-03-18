@@ -74,14 +74,14 @@ class _RecallPageState extends State<RecallPage> {
   final Map<String, GlobalKey> _modelCardKeys = {};
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
+  bool _didBootstrap = false;
 
   @override
   void initState() {
     super.initState();
-    _restoreLocalModelPath();
-    _fetchModels();
-    _fetchProcessingTasks();
-    _setupRealtimeListener();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bootstrapPage();
+    });
   }
 
   @override
@@ -94,6 +94,17 @@ class _RecallPageState extends State<RecallPage> {
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
     super.dispose();
+  }
+
+  void _bootstrapPage() {
+    if (!mounted || _didBootstrap) {
+      return;
+    }
+    _didBootstrap = true;
+    unawaited(_restoreLocalModelPath());
+    unawaited(_fetchModels());
+    unawaited(_fetchProcessingTasks());
+    _setupRealtimeListener();
   }
 
   Future<void> _restoreLocalModelPath() async {
@@ -805,10 +816,12 @@ $userQuestion
         children: [
           BDPageBackdrop(
             child: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: 96.0),
-                child: Column(
-                  children: [
+              child: CustomScrollView(
+                cacheExtent: 1200,
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      children: [
                     BDPageHeader(
                       title: textLocalize("home_page"),
                       subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
@@ -864,22 +877,24 @@ $userQuestion
                         ],
                       ),
                     ),
-                    RecallOverviewCard(
-                      isDark: isDark,
-                      textColor: textColor,
-                      recentCount: _recentModelCount(),
-                      allModelCount: _allModels.length,
-                      processingTaskCount: _processingTasks.length,
-                      ragCount: _indexStats?.totalItems ?? _allModels.length,
-                      isLocalIndexing: _isLocalIndexing,
-                      onOpenTasks: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const TaskListPage(),
-                          ),
-                        );
-                      },
+                    RepaintBoundary(
+                      child: RecallOverviewCard(
+                        isDark: isDark,
+                        textColor: textColor,
+                        recentCount: _recentModelCount(),
+                        allModelCount: _allModels.length,
+                        processingTaskCount: _processingTasks.length,
+                        ragCount: _indexStats?.totalItems ?? _allModels.length,
+                        isLocalIndexing: _isLocalIndexing,
+                        onOpenTasks: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const TaskListPage(),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
@@ -909,31 +924,37 @@ $userQuestion
                                       ? Colors.white.withValues(alpha: 0.5)
                                       : BDDesign.colorMutedBlue,
                                 ),
-                                suffixIcon: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _buildSearchModeMenuButton(isDark),
-                                    if (_searchController.text
-                                        .trim()
-                                        .isNotEmpty)
-                                      IconButton(
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          _searchDebounce?.cancel();
-                                          _searchModels('');
-                                          setState(() {});
-                                        },
-                                        icon: Icon(
-                                          Icons.close_rounded,
-                                          color: isDark
-                                              ? Colors.white.withValues(
-                                                  alpha: 0.5,
-                                                )
-                                              : BDDesign.colorMutedBlue,
-                                        ),
-                                      ),
-                                  ],
-                                ),
+                                suffixIcon:
+                                    ValueListenableBuilder<TextEditingValue>(
+                                      valueListenable: _searchController,
+                                      builder: (context, value, _) {
+                                        final hasText = value.text
+                                            .trim()
+                                            .isNotEmpty;
+                                        return Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            _buildSearchModeMenuButton(isDark),
+                                            if (hasText)
+                                              IconButton(
+                                                onPressed: () {
+                                                  _searchController.clear();
+                                                  _searchDebounce?.cancel();
+                                                  _searchModels('');
+                                                },
+                                                icon: Icon(
+                                                  Icons.close_rounded,
+                                                  color: isDark
+                                                      ? Colors.white.withValues(
+                                                          alpha: 0.5,
+                                                        )
+                                                      : BDDesign.colorMutedBlue,
+                                                ),
+                                              ),
+                                          ],
+                                        );
+                                      },
+                                    ),
                                 filled: true,
                                 fillColor: Colors.transparent,
                                 contentPadding: const EdgeInsets.symmetric(
@@ -1042,32 +1063,39 @@ $userQuestion
                       ),
                     ),
                     if (_processingTasks.isNotEmpty)
-                      RecallProcessingSection(
-                        theme: theme,
-                        isDark: isDark,
-                        textColor: textColor,
-                        darkInput: darkInput,
-                        isExpanded: _isProcessingExpanded,
-                        processingTasks: _processingTasks,
-                        taskAllLogs: _taskAllLogs,
-                        expandedTaskLogs: _expandedTaskLogs,
-                        onToggleExpanded: () {
-                          setState(() {
-                            _isProcessingExpanded = !_isProcessingExpanded;
-                          });
-                        },
-                        onToggleTaskLogs: (taskId) {
-                          setState(() {
-                            if (_expandedTaskLogs.contains(taskId)) {
-                              _expandedTaskLogs.remove(taskId);
-                            } else {
-                              _expandedTaskLogs.add(taskId);
-                            }
-                          });
-                        },
+                      RepaintBoundary(
+                        child: RecallProcessingSection(
+                          theme: theme,
+                          isDark: isDark,
+                          textColor: textColor,
+                          darkInput: darkInput,
+                          isExpanded: _isProcessingExpanded,
+                          processingTasks: _processingTasks,
+                          taskAllLogs: _taskAllLogs,
+                          expandedTaskLogs: _expandedTaskLogs,
+                          onToggleExpanded: () {
+                            setState(() {
+                              _isProcessingExpanded = !_isProcessingExpanded;
+                            });
+                          },
+                          onToggleTaskLogs: (taskId) {
+                            setState(() {
+                              if (_expandedTaskLogs.contains(taskId)) {
+                                _expandedTaskLogs.remove(taskId);
+                              } else {
+                                _expandedTaskLogs.add(taskId);
+                              }
+                            });
+                          },
+                        ),
                       ),
-                    if (_isLoading)
-                      const Padding(
+                      ],
+                    ),
+                  ),
+                  if (_isLoading)
+                    const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Padding(
                         padding: EdgeInsets.symmetric(vertical: 96.0),
                         child: Center(
                           child: TDLoading(
@@ -1075,31 +1103,37 @@ $userQuestion
                             icon: TDLoadingIcon.circle,
                           ),
                         ),
-                      )
-                    else if (_models.isEmpty)
-                      Padding(
+                      ),
+                    )
+                  else if (_models.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Padding(
                         padding: const EdgeInsets.only(top: 16.0),
                         child: _searchController.text.trim().isEmpty
                             ? _buildEmptyState(theme, isDark)
                             : _buildSearchEmptyState(theme, isDark),
-                      )
-                    else
-                      RecallModelGrid(
-                        theme: theme,
-                        isDark: isDark,
-                        darkCard: darkCard,
-                        darkInput: darkInput,
-                        models: _models,
-                        activeModelAction: _activeModelAction,
-                        modelCardKeyFor: _modelCardKeyFor,
-                        isSameModel: _isSameModel,
-                        onNavigateToViewer: _navigateToViewer,
-                        onShowModelActions: (model) {
-                          unawaited(_showModelActions(model));
-                        },
                       ),
-                  ],
-                ),
+                    )
+                  else
+                    RecallModelGrid(
+                      theme: theme,
+                      isDark: isDark,
+                      darkCard: darkCard,
+                      darkInput: darkInput,
+                      models: _models,
+                      activeModelAction: _activeModelAction,
+                      modelCardKeyFor: _modelCardKeyFor,
+                      isSameModel: _isSameModel,
+                      onNavigateToViewer: _navigateToViewer,
+                      onShowModelActions: (model) {
+                        unawaited(_showModelActions(model));
+                      },
+                    ),
+                  const SliverToBoxAdapter(
+                    child: SizedBox(height: 96),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1113,7 +1147,10 @@ $userQuestion
               rect: _activeModelActionRect!,
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
+              onShowModelDetails: _showModelDetails,
               onShareModelToCommunity: _shareModelToCommunity,
+              onRenameModel: _renameModel,
+              onDeleteLocalModel: _deleteLocalModel,
             ),
         ],
       ),
@@ -1174,7 +1211,6 @@ $userQuestion
   }
 
   void _onSearchChanged(String value) {
-    setState(() {});
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 180), () {
       _searchModels(value);
@@ -1588,6 +1624,334 @@ $userQuestion
     TDToast.showText(context: context, '已发布到社区');
   }
 
+  Future<String> _getLocalModelSizeLabel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) {
+      return '';
+    }
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        return '';
+      }
+
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      if (!await localFile.exists()) {
+        return '';
+      }
+
+      final sizeBytes = await localFile.length();
+      if (sizeBytes <= 0) {
+        return '';
+      }
+
+      final sizeMb = sizeBytes / 1024 / 1024;
+      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)} MB';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _showModelDetails(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+
+    Map<String, dynamic>? taskInfo;
+    if (sceneId != null) {
+      try {
+        taskInfo = await Supabase.instance.client
+            .from('processing_tasks')
+            .select('created_at, updated_at, task_type, quality_score')
+            .eq('scene_id', sceneId)
+            .limit(1)
+            .maybeSingle();
+      } catch (_) {}
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+    final displayName =
+        model['display_name']?.toString() ??
+        model['scene_id']?.toString() ??
+        '未命名模型';
+
+    String formatDate(String? raw) {
+      if (raw == null || raw.isEmpty) {
+        return '未知';
+      }
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) {
+        return raw;
+      }
+      final local = dt.toLocal();
+      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    }
+
+    final createdAt = formatDate(
+      taskInfo?['created_at']?.toString() ?? model['created_at']?.toString(),
+    );
+    final updatedAt = formatDate(taskInfo?['updated_at']?.toString());
+    final taskType = taskInfo?['task_type']?.toString() ?? '未知';
+    final qualityScore = taskInfo?['quality_score'];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 22,
+                        color: textColor,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _DetailRow(
+                    icon: Icons.calendar_today_rounded,
+                    label: '创建时间',
+                    value: createdAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.update_rounded,
+                    label: '更新时间',
+                    value: updatedAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.category_rounded,
+                    label: '任务类型',
+                    value: taskType,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.star_rounded,
+                    label: '质量评分',
+                    value: qualityScore != null ? '$qualityScore / 100' : '未知',
+                    textColor: textColor,
+                    hintColor: hintColor,
+                    trailing: qualityScore != null
+                        ? _buildScoreBar(
+                            (qualityScore as num).toDouble(),
+                            isDark,
+                          )
+                        : null,
+                  ),
+                  if (sizeLabel.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _DetailRow(
+                      icon: Icons.storage_rounded,
+                      label: '本地占用',
+                      value: sizeLabel,
+                      textColor: textColor,
+                      hintColor: hintColor,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildScoreBar(double score, bool isDark) {
+    final ratio = (score / 100).clamp(0.0, 1.0);
+    final color = ratio >= 0.7
+        ? const Color(0xFF4CAF50)
+        : ratio >= 0.4
+        ? const Color(0xFFFFA726)
+        : const Color(0xFFEF5350);
+    return SizedBox(
+      width: 60,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: ratio,
+          minHeight: 6,
+          backgroundColor: isDark
+              ? Colors.white.withAlpha(20)
+              : Colors.black.withAlpha(15),
+          valueColor: AlwaysStoppedAnimation<Color>(color),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renameModel(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    if (sceneId == null) {
+      return;
+    }
+
+    final currentName = model['display_name']?.toString() ?? sceneId;
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameModelDialog(initialName: currentName),
+    );
+
+    if (newName == null || newName.isEmpty || !mounted) {
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('processing_tasks')
+          .update({'display_name': newName})
+          .eq('scene_id', sceneId)
+          .select();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        for (final item in _allModels) {
+          if (item['scene_id'] == sceneId) {
+            item['display_name'] = newName;
+          }
+        }
+        for (final item in _models) {
+          if (item['scene_id'] == sceneId) {
+            item['display_name'] = newName;
+          }
+        }
+      });
+      TDToast.showText(context: context, '模型名称已更新');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      TDToast.showText(context: context, '重命名失败：$e');
+    }
+  }
+
+  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('删除本地模型'),
+        content: const Text('只会删除当前设备上缓存的模型文件，不影响云端记录。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) {
+      return;
+    }
+
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) {
+      if (mounted) {
+        TDToast.showText(context: context, '未找到本地模型缓存');
+      }
+      return;
+    }
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        if (mounted) {
+          TDToast.showText(context: context, '未找到本地模型缓存');
+        }
+        return;
+      }
+
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
+      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
+
+      var deleted = false;
+      if (await localFile.exists()) {
+        await localFile.delete();
+        deleted = true;
+      }
+      if (await tmpFile.exists()) {
+        await tmpFile.delete();
+        deleted = true;
+      }
+      if (await metaFile.exists()) {
+        await metaFile.delete();
+        deleted = true;
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      TDToast.showText(context: context, deleted ? '本地模型已删除' : '未找到本地模型缓存');
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      TDToast.showText(context: context, '删除本地模型失败：$e');
+    }
+  }
+
   Future<void> _showModelActions(Map<String, dynamic> model) async {
     final key = _modelCardKeyFor(model);
     final cardContext = key.currentContext;
@@ -1631,6 +1995,107 @@ $userQuestion
           : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color textColor;
+  final Color hintColor;
+  final Widget? trailing;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.textColor,
+    required this.hintColor,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: hintColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+      ],
+    );
+  }
+}
+
+class _RenameModelDialog extends StatefulWidget {
+  final String initialName;
+
+  const _RenameModelDialog({required this.initialName});
+
+  @override
+  State<_RenameModelDialog> createState() => _RenameModelDialogState();
+}
+
+class _RenameModelDialogState extends State<_RenameModelDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('重命名模型'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: '输入新的模型名称'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('确定'),
+        ),
+      ],
     );
   }
 }
