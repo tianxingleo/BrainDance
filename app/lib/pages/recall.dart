@@ -13,10 +13,13 @@ import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
+import 'recall/local_ai_panel.dart';
+import 'recall/model_grid.dart';
+import 'recall/overview_card.dart';
+import 'recall/processing_section.dart';
 import 'settings.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
-import 'recall/top_summary_card.dart';
 
 enum _RecallSearchMode { local, cloud }
 
@@ -41,7 +44,7 @@ class _RecallPageState extends State<RecallPage> {
   final Set<String> _expandedTaskLogs = {}; // 展开的任务ID集合
   bool _isLoading = true;
   bool _isLocalIndexing = false;
-  bool _isProcessingExpanded = true;
+  bool _isProcessingExpanded = false;
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _localModelPathController =
       TextEditingController();
@@ -64,9 +67,13 @@ class _RecallPageState extends State<RecallPage> {
   bool _isLocalModelReady = false;
   bool _isLocalAnswering = false;
   bool _isModelDownloading = false;
+  bool _isLocalAiPanelOpen = false;
   double? _modelDownloadProgress;
   int _modelDownloadedBytes = 0;
   int? _modelDownloadTotalBytes;
+  final Map<String, GlobalKey> _modelCardKeys = {};
+  Map<String, dynamic>? _activeModelAction;
+  Rect? _activeModelActionRect;
 
   @override
   void initState() {
@@ -766,6 +773,21 @@ $userQuestion
     }
   }
 
+  int _recentModelCount({int days = 7}) {
+    final now = DateTime.now();
+    return _allModels.where((model) {
+      final rawCreatedAt = model['created_at']?.toString();
+      if (rawCreatedAt == null || rawCreatedAt.isEmpty) {
+        return false;
+      }
+      final createdAt = DateTime.tryParse(rawCreatedAt);
+      if (createdAt == null) {
+        return false;
+      }
+      return now.difference(createdAt.toLocal()).inDays < days;
+    }).length;
+  }
+
   // 更黑的夜间色值
   final darkBg = const Color(0xFF101014);
   final darkCard = const Color(0xFF18181C);
@@ -779,587 +801,319 @@ $userQuestion
     final textColor = isDark ? const Color(0xFFFFFFFF) : BDDesign.colorInkBlack;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: BDPageBackdrop(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 96.0),
-            child: Column(
-              children: [
-                BDPageHeader(
-                  title: textLocalize("home_page"),
-                  subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      BDStatusPill(
-                        label: SupabaseConfig.isAdminMode ? 'ADMIN' : 'RLS',
-                        icon: SupabaseConfig.isAdminMode
-                            ? Icons.admin_panel_settings_rounded
-                            : Icons.verified_user_rounded,
-                        color: SupabaseConfig.isAdminMode
-                            ? BDDesign.colorDarkRed
-                            : BDDesign.colorMutedBlue,
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: AnimatedRotation(
-                          turns: _isLoading ? 1 : 0,
-                          duration: const Duration(milliseconds: 600),
-                          child: Icon(
-                            Icons.sync_rounded,
-                            color: isDark
-                                ? BDDesign.colorPaperWhite
-                                : BDDesign.colorInkBlack,
+      body: Stack(
+        children: [
+          BDPageBackdrop(
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 96.0),
+                child: Column(
+                  children: [
+                    BDPageHeader(
+                      title: textLocalize("home_page"),
+                      subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          BDStatusPill(
+                            label: SupabaseConfig.isAdminMode ? 'ADMIN' : 'RLS',
+                            icon: SupabaseConfig.isAdminMode
+                                ? Icons.admin_panel_settings_rounded
+                                : Icons.verified_user_rounded,
+                            color: SupabaseConfig.isAdminMode
+                                ? BDDesign.colorDarkRed
+                                : BDDesign.colorMutedBlue,
                           ),
-                        ),
-                        tooltip: textLocalize("recall_refresh"),
-                        onPressed: () {
-                          setState(() {
-                            _isLoading = true;
-                          });
-                          _fetchModels();
-                        },
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.settings_rounded,
-                          color: isDark
-                              ? BDDesign.colorPaperWhite
-                              : BDDesign.colorInkBlack,
-                        ),
-                        tooltip: textLocalize("settings"),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SettingsPage(),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: BDPanelCard(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _RecallMetric(
-                            label: '空间',
-                            value: _allModels.length.toString(),
-                          ),
-                        ),
-                        Expanded(
-                          child: _RecallMetric(
-                            label: '处理中',
-                            value: _processingTasks.length.toString(),
-                          ),
-                        ),
-                        Expanded(
-                          child: _RecallMetric(
-                            label: 'RAG',
-                            value: _isLocalIndexing
-                                ? '...'
-                                : (_indexStats?.totalItems ?? _allModels.length)
-                                      .toString(),
-                            accent: textColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                TopSummaryCard(
-                  recordCount: _allModels.isNotEmpty ? 1 : 0,
-                  completedCount: _allModels.length,
-                  isDark: isDark,
-                  onTaskTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const TaskListPage(),
-                      ),
-                    );
-                  },
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                  child: Column(
-                    children: [
-                      BDPanelCard(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: TextField(
-                          controller: _searchController,
-                          style: TextStyle(color: textColor, fontSize: 15),
-                          decoration: InputDecoration(
-                            hintText: textLocalize("recall_search_hint"),
-                            hintStyle: TextStyle(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.45)
-                                  : BDDesign.colorMutedBlue.withValues(
-                                      alpha: 0.78,
-                                    ),
-                              fontSize: 15,
-                            ),
-                            prefixIcon: Icon(
-                              Icons.search_rounded,
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.5)
-                                  : BDDesign.colorMutedBlue,
-                            ),
-                            suffixIcon: _searchController.text.trim().isEmpty
-                                ? null
-                                : IconButton(
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      _searchDebounce?.cancel();
-                                      _searchModels('');
-                                      setState(() {});
-                                    },
-                                    icon: Icon(
-                                      Icons.close_rounded,
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.5)
-                                          : BDDesign.colorMutedBlue,
-                                    ),
-                                  ),
-                            filled: true,
-                            fillColor: Colors.transparent,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 16,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16.0),
-                              borderSide: BorderSide.none,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16.0),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16.0),
-                              borderSide: const BorderSide(
-                                color: BDDesign.colorMutedBlue,
-                                width: 1.5,
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: AnimatedRotation(
+                              turns: _isLoading ? 1 : 0,
+                              duration: const Duration(milliseconds: 600),
+                              child: Icon(
+                                Icons.sync_rounded,
+                                color: isDark
+                                    ? BDDesign.colorPaperWhite
+                                    : BDDesign.colorInkBlack,
                               ),
                             ),
+                            tooltip: textLocalize("recall_refresh"),
+                            onPressed: () {
+                              setState(() {
+                                _isLoading = true;
+                              });
+                              _fetchModels();
+                            },
                           ),
-                          onSubmitted: _searchModels,
-                          onChanged: _onSearchChanged,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 4, bottom: 8),
-                          child: Text(
-                            textLocalize('recall_search_mode'),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.58)
-                                  : BDDesign.colorMutedBlue,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildSearchModeChip(
-                              isDark: isDark,
-                              label: textLocalize('recall_local_rag'),
-                              icon: Icons.privacy_tip_rounded,
-                              mode: _RecallSearchMode.local,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _buildSearchModeChip(
-                              isDark: isDark,
-                              label: textLocalize('recall_cloud_rag'),
-                              icon: Icons.cloud_rounded,
-                              mode: _RecallSearchMode.cloud,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      BDPanelCard(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _isLocalIndexing
-                                  ? Icons.memory_rounded
-                                  : Icons.privacy_tip_rounded,
-                              size: 18,
+                          IconButton(
+                            icon: Icon(
+                              Icons.settings_rounded,
                               color: isDark
                                   ? BDDesign.colorPaperWhite
                                   : BDDesign.colorInkBlack,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                _searchMode == _RecallSearchMode.local
-                                    ? (_isLocalIndexing
-                                          ? textLocalize(
-                                              'recall_local_indexing',
-                                            )
-                                          : '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}')
-                                    : textLocalize('recall_cloud_scope'),
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.72)
-                                      : BDDesign.colorMutedBlue,
-                                  height: 1.35,
+                            tooltip: textLocalize("settings"),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const SettingsPage(),
                                 ),
-                              ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    RecallOverviewCard(
+                      isDark: isDark,
+                      textColor: textColor,
+                      recentCount: _recentModelCount(),
+                      allModelCount: _allModels.length,
+                      processingTaskCount: _processingTasks.length,
+                      ragCount: _indexStats?.totalItems ?? _allModels.length,
+                      isLocalIndexing: _isLocalIndexing,
+                      onOpenTasks: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TaskListPage(),
+                          ),
+                        );
+                      },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                      child: Column(
+                        children: [
+                          BDPanelCard(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                            if (_searchMode == _RecallSearchMode.local &&
-                                _indexStats != null &&
-                                !_isLocalIndexing)
-                              BDStatusPill(
-                                label:
-                                    '${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}',
-                                icon: Icons.storage_rounded,
-                                color: BDDesign.colorMutedBlue,
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _buildLocalQnaPanel(theme, isDark, textColor),
-                    ],
-                  ),
-                ),
-                if (_processingTasks.isNotEmpty)
-                  _buildProcessingSection(theme, isDark, textColor),
-                if (_isLoading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 96.0),
-                    child: Center(
-                      child: TDLoading(
-                        size: TDLoadingSize.large,
-                        icon: TDLoadingIcon.circle,
-                      ),
-                    ),
-                  )
-                else if (_models.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
-                    child: _searchController.text.trim().isEmpty
-                        ? _buildEmptyState(theme, isDark)
-                        : _buildSearchEmptyState(theme, isDark),
-                  )
-                else
-                  _buildModelGrid(theme, isDark),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 构建 Processing 任务区域（可展开收起）
-  Widget _buildProcessingSection(
-    TDThemeData theme,
-    bool isDark,
-    Color textColor,
-  ) {
-    final hintTextColor = isDark ? const Color(0xFF888888) : theme.fontGyColor3;
-
-    return BDPanelCard(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () {
-              setState(() {
-                _isProcessingExpanded = !_isProcessingExpanded;
-              });
-            },
-            borderRadius: BDDesign.radiusLarge,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: BDDesign.colorMutedBlue.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            BDDesign.colorMutedBlue,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          textLocalize('status_processing'),
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '这个场景还在重建，共 ${_processingTasks.length} 项任务正在推进。',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: hintTextColor,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  BDStatusPill(
-                    label: '${_processingTasks.length}',
-                    icon: Icons.motion_photos_on_rounded,
-                    color: BDDesign.colorMutedBlue,
-                  ),
-                  const SizedBox(width: 8),
-                  AnimatedRotation(
-                    turns: _isProcessingExpanded ? 0.5 : 0,
-                    duration: BDMotion.durationFast,
-                    child: Icon(
-                      Icons.keyboard_arrow_down,
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.56)
-                          : BDDesign.colorMutedBlue,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
-            secondChild: Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Column(
-                children: _processingTasks.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  final task = entry.value;
-                  return _buildProcessingTaskItem(
-                    task,
-                    theme,
-                    isDark,
-                    textColor,
-                    hintTextColor,
-                    isFirst: index == 0,
-                    isLast: index == _processingTasks.length - 1,
-                  );
-                }).toList(),
-              ),
-            ),
-            crossFadeState: _isProcessingExpanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: BDMotion.durationNormal,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 构建 processing 任务项
-  Widget _buildProcessingTaskItem(
-    Map<String, dynamic> task,
-    TDThemeData theme,
-    bool isDark,
-    Color textColor,
-    Color hintTextColor, {
-    required bool isFirst,
-    required bool isLast,
-  }) {
-    final taskId = task['id'].toString();
-    final sceneId = task['scene_id']?.toString() ?? 'Unknown';
-    final displayName = task['display_name']?.toString();
-    final allLogs = _taskAllLogs[taskId] ?? [];
-    final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
-    final isExpanded = _expandedTaskLogs.contains(taskId);
-
-    return Container(
-      margin: EdgeInsets.fromLTRB(12, isFirst ? 1 : 4, 12, isLast ? 12 : 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark
-            ? darkInput.withValues(alpha: 0.86)
-            : BDDesign.colorMutedBlueLight.withValues(alpha: 0.38),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.05)
-              : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: BDDesign.colorMutedBlue.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        BDDesign.colorMutedBlue,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      displayName ?? sceneId,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      latestLog ?? textLocalize('status_processing'),
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: hintTextColor,
-                        height: 1.35,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (allLogs.length > 1)
-                IconButton(
-                  icon: AnimatedRotation(
-                    turns: isExpanded ? 0.5 : 0,
-                    duration: BDMotion.durationFast,
-                    child: Icon(
-                      Icons.keyboard_arrow_down,
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.56)
-                          : BDDesign.colorMutedBlue,
-                      size: 20,
-                    ),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      if (isExpanded) {
-                        _expandedTaskLogs.remove(taskId);
-                      } else {
-                        _expandedTaskLogs.add(taskId);
-                      }
-                    });
-                  },
-                ),
-            ],
-          ),
-          if (allLogs.length > 1)
-            AnimatedCrossFade(
-              firstChild: const SizedBox.shrink(),
-              secondChild: Container(
-                margin: const EdgeInsets.only(top: 10),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF1A1A20).withValues(alpha: 0.94)
-                      : Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: allLogs.reversed
-                      .map(
-                        (log) => Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                margin: const EdgeInsets.only(top: 6, right: 8),
-                                width: 5,
-                                height: 5,
-                                decoration: BoxDecoration(
-                                  color: BDDesign.colorMutedBlue.withValues(
-                                    alpha: isDark ? 0.72 : 0.55,
-                                  ),
-                                  shape: BoxShape.circle,
+                            child: TextField(
+                              controller: _searchController,
+                              style: TextStyle(color: textColor, fontSize: 15),
+                              decoration: InputDecoration(
+                                hintText: textLocalize("recall_search_hint"),
+                                hintStyle: TextStyle(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.45)
+                                      : BDDesign.colorMutedBlue.withValues(
+                                          alpha: 0.78,
+                                        ),
+                                  fontSize: 15,
                                 ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  log,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.7)
-                                        : theme.fontGyColor2,
-                                    height: 1.35,
+                                prefixIcon: Icon(
+                                  Icons.search_rounded,
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.5)
+                                      : BDDesign.colorMutedBlue,
+                                ),
+                                suffixIcon: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildSearchModeMenuButton(isDark),
+                                    if (_searchController.text
+                                        .trim()
+                                        .isNotEmpty)
+                                      IconButton(
+                                        onPressed: () {
+                                          _searchController.clear();
+                                          _searchDebounce?.cancel();
+                                          _searchModels('');
+                                          setState(() {});
+                                        },
+                                        icon: Icon(
+                                          Icons.close_rounded,
+                                          color: isDark
+                                              ? Colors.white.withValues(
+                                                  alpha: 0.5,
+                                                )
+                                              : BDDesign.colorMutedBlue,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                filled: true,
+                                fillColor: Colors.transparent,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                  horizontal: 16,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16.0),
+                                  borderSide: BorderSide.none,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16.0),
+                                  borderSide: BorderSide.none,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16.0),
+                                  borderSide: const BorderSide(
+                                    color: BDDesign.colorMutedBlue,
+                                    width: 1.5,
                                   ),
                                 ),
                               ),
-                            ],
+                              onSubmitted: _searchModels,
+                              onChanged: _onSearchChanged,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          BDPanelCard(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _isLocalIndexing
+                                      ? Icons.memory_rounded
+                                      : Icons.privacy_tip_rounded,
+                                  size: 18,
+                                  color: isDark
+                                      ? BDDesign.colorPaperWhite
+                                      : BDDesign.colorInkBlack,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _searchMode == _RecallSearchMode.local
+                                        ? (_isLocalIndexing
+                                              ? textLocalize(
+                                                  'recall_local_indexing',
+                                                )
+                                              : '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}')
+                                        : textLocalize('recall_cloud_scope'),
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.72)
+                                          : BDDesign.colorMutedBlue,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                                if (_searchMode == _RecallSearchMode.local &&
+                                    _indexStats != null &&
+                                    !_isLocalIndexing)
+                                  BDStatusPill(
+                                    label:
+                                        '${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}',
+                                    icon: Icons.storage_rounded,
+                                    color: BDDesign.colorMutedBlue,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          RecallLocalAiPanel(
+                            theme: theme,
+                            isDark: isDark,
+                            textColor: textColor,
+                            darkInput: darkInput,
+                            isLocalAiPanelOpen: _isLocalAiPanelOpen,
+                            isLocalModelReady: _isLocalModelReady,
+                            isModelDownloading: _isModelDownloading,
+                            isLocalModelLoading: _isLocalModelLoading,
+                            isLocalAnswering: _isLocalAnswering,
+                            modelDownloadProgress: _modelDownloadProgress,
+                            modelDownloadedBytes: _modelDownloadedBytes,
+                            modelDownloadTotalBytes: _modelDownloadTotalBytes,
+                            localAnswer: _localAnswer,
+                            localAnswerStatus: _localAnswerStatus,
+                            localContextPreview: _localContextPreview,
+                            defaultModelDownloadUrl: _defaultModelDownloadUrl,
+                            localModelUrlController: _localModelUrlController,
+                            localModelPathController: _localModelPathController,
+                            localQuestionController: _localQuestionController,
+                            onToggleOpen: () {
+                              setState(() {
+                                _isLocalAiPanelOpen = !_isLocalAiPanelOpen;
+                              });
+                            },
+                            onDownloadModel: _downloadModelToPrivateDir,
+                            onLoadModel: _loadLocalQnaModel,
+                            onAskQuestion: _askLocalQuestion,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_processingTasks.isNotEmpty)
+                      RecallProcessingSection(
+                        theme: theme,
+                        isDark: isDark,
+                        textColor: textColor,
+                        darkInput: darkInput,
+                        isExpanded: _isProcessingExpanded,
+                        processingTasks: _processingTasks,
+                        taskAllLogs: _taskAllLogs,
+                        expandedTaskLogs: _expandedTaskLogs,
+                        onToggleExpanded: () {
+                          setState(() {
+                            _isProcessingExpanded = !_isProcessingExpanded;
+                          });
+                        },
+                        onToggleTaskLogs: (taskId) {
+                          setState(() {
+                            if (_expandedTaskLogs.contains(taskId)) {
+                              _expandedTaskLogs.remove(taskId);
+                            } else {
+                              _expandedTaskLogs.add(taskId);
+                            }
+                          });
+                        },
+                      ),
+                    if (_isLoading)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 96.0),
+                        child: Center(
+                          child: TDLoading(
+                            size: TDLoadingSize.large,
+                            icon: TDLoadingIcon.circle,
                           ),
                         ),
                       )
-                      .toList(),
+                    else if (_models.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16.0),
+                        child: _searchController.text.trim().isEmpty
+                            ? _buildEmptyState(theme, isDark)
+                            : _buildSearchEmptyState(theme, isDark),
+                      )
+                    else
+                      RecallModelGrid(
+                        theme: theme,
+                        isDark: isDark,
+                        darkCard: darkCard,
+                        darkInput: darkInput,
+                        models: _models,
+                        activeModelAction: _activeModelAction,
+                        modelCardKeyFor: _modelCardKeyFor,
+                        isSameModel: _isSameModel,
+                        onNavigateToViewer: _navigateToViewer,
+                        onShowModelActions: (model) {
+                          unawaited(_showModelActions(model));
+                        },
+                      ),
+                  ],
                 ),
               ),
-              crossFadeState: isExpanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: BDMotion.durationFast,
+            ),
+          ),
+          if (_activeModelAction != null && _activeModelActionRect != null)
+            RecallModelActionOverlay(
+              theme: theme,
+              isDark: isDark,
+              darkCard: darkCard,
+              darkInput: darkInput,
+              model: _activeModelAction!,
+              rect: _activeModelActionRect!,
+              onDismiss: _dismissModelActions,
+              onNavigateToViewer: _navigateToViewer,
+              onShareModelToCommunity: _shareModelToCommunity,
             ),
         ],
       ),
@@ -1427,341 +1181,197 @@ $userQuestion
     });
   }
 
-  Widget _buildSearchModeChip({
-    required bool isDark,
-    required String label,
-    required IconData icon,
-    required _RecallSearchMode mode,
-  }) {
-    final selected = _searchMode == mode;
-    return GestureDetector(
-      onTap: () {
-        if (_searchMode == mode) return;
-        setState(() {
-          _searchMode = mode;
-        });
-        final keyword = _searchController.text.trim();
-        if (keyword.isNotEmpty) {
-          _searchModels(keyword);
-        }
-      },
-      child: AnimatedContainer(
-        duration: BDMotion.durationFast,
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  void _setSearchMode(_RecallSearchMode mode) {
+    if (_searchMode == mode) {
+      return;
+    }
+    setState(() {
+      _searchMode = mode;
+    });
+    final keyword = _searchController.text.trim();
+    if (keyword.isNotEmpty) {
+      _searchModels(keyword);
+    }
+  }
+
+  Widget _buildSearchModeMenuButton(bool isDark) {
+    final selectedLocal = _searchMode == _RecallSearchMode.local;
+    final icon = selectedLocal
+        ? Icons.privacy_tip_rounded
+        : Icons.cloud_rounded;
+    final foreground = isDark
+        ? Colors.white.withValues(alpha: 0.82)
+        : BDDesign.colorInkBlack;
+
+    return IconButton(
+      tooltip: textLocalize('recall_search_mode'),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      onPressed: _showSearchModeSheet,
+      icon: Container(
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
-          color: selected
-              ? BDDesign.colorMutedBlue.withValues(alpha: isDark ? 0.22 : 0.12)
-              : (isDark ? darkCard : BDDesign.colorPaperWhite),
-          borderRadius: BorderRadius.circular(18),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected
-                ? BDDesign.colorMutedBlue
-                : (isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : BDDesign.colorMutedBlue.withValues(alpha: 0.18)),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
           ),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: selected
-                  ? BDDesign.colorMutedBlue
-                  : (isDark
-                        ? Colors.white.withValues(alpha: 0.72)
-                        : BDDesign.colorMutedBlue),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected
-                      ? (isDark
-                            ? BDDesign.colorPaperWhite
-                            : BDDesign.colorInkBlack)
-                      : (isDark
-                            ? Colors.white.withValues(alpha: 0.78)
-                            : BDDesign.colorInkBlack),
-                ),
-              ),
-            ),
-          ],
-        ),
+        child: Icon(icon, size: 16, color: foreground),
       ),
     );
   }
 
-  Widget _buildLocalQnaPanel(TDThemeData theme, bool isDark, Color textColor) {
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue;
-    final answerText = _localAnswer.trim();
-    final contextPreview = _localContextPreview.trim();
+  Future<void> _showSearchModeSheet() async {
+    final selected = await showModalBottomSheet<_RecallSearchMode>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isDark = AppConfig.isNightMode;
+        final textColor = isDark
+            ? BDDesign.colorPaperWhite
+            : BDDesign.colorInkBlack;
+        final hintColor = isDark
+            ? Colors.white.withValues(alpha: 0.62)
+            : BDDesign.colorMutedBlue;
 
-    return BDPanelCard(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.memory_rounded,
-                size: 18,
-                color: isDark
-                    ? BDDesign.colorPaperWhite
-                    : BDDesign.colorInkBlack,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Qwen3-1.7B 端侧问答',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              BDStatusPill(
-                label: _isLocalModelReady ? 'READY' : 'OFFLINE',
-                icon: _isLocalModelReady
-                    ? Icons.check_circle_rounded
-                    : Icons.offline_bolt_rounded,
-                color: _isLocalModelReady
-                    ? BDDesign.colorMutedBlue
-                    : BDDesign.colorDarkRed,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '把手机上的 Qwen3-1.7B GGUF 路径填进来，当前问题会先走本地 RAG 检索，再把记忆片段喂给端侧模型。',
-            style: TextStyle(color: hintColor, fontSize: 12.5, height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _localModelUrlController,
-            style: TextStyle(color: textColor, fontSize: 14),
-            minLines: 2,
-            maxLines: 3,
-            decoration: InputDecoration(
-              labelText: '模型下载链接',
-              hintText: _defaultModelDownloadUrl,
-              filled: true,
-              fillColor: Colors.transparent,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isModelDownloading
-                  ? null
-                  : _downloadModelToPrivateDir,
-              icon: _isModelDownloading
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: isDark
-                            ? BDDesign.colorPaperWhite
-                            : BDDesign.colorInkBlack,
-                      ),
-                    )
-                  : const Icon(Icons.download_rounded),
-              label: Text(_isModelDownloading ? '下载中...' : '下载到应用私有目录'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                backgroundColor: isDark
-                    ? const Color(0xFF243042)
-                    : const Color(0xFF24415E),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          if (_isModelDownloading || _modelDownloadProgress != null) ...[
-            const SizedBox(height: 10),
-            LinearProgressIndicator(
-              value: _modelDownloadProgress,
-              minHeight: 8,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _modelDownloadTotalBytes == null
-                  ? '已下载：${(_modelDownloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB'
-                  : '下载进度：${(_modelDownloadProgress! * 100).toStringAsFixed(1)}% · ${(_modelDownloadedBytes / 1024 / 1024).toStringAsFixed(1)} / ${(_modelDownloadTotalBytes! / 1024 / 1024).toStringAsFixed(1)} MB',
-              style: TextStyle(color: hintColor, fontSize: 12),
-            ),
-          ],
-          const SizedBox(height: 12),
-          TextField(
-            controller: _localModelPathController,
-            style: TextStyle(color: textColor, fontSize: 14),
-            decoration: InputDecoration(
-              labelText: '模型绝对路径',
-              hintText: '应用私有目录中的本地路径',
-              filled: true,
-              fillColor: Colors.transparent,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isLocalModelLoading ? null : _loadLocalQnaModel,
-              icon: _isLocalModelLoading
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: isDark
-                            ? BDDesign.colorPaperWhite
-                            : BDDesign.colorInkBlack,
-                      ),
-                    )
-                  : const Icon(Icons.play_arrow_rounded),
-              label: Text(_isLocalModelLoading ? '加载中...' : '加载端侧模型'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                backgroundColor: BDDesign.colorMutedBlue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _localAnswerStatus,
-            style: TextStyle(color: hintColor, fontSize: 12, height: 1.35),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _localQuestionController,
-            style: TextStyle(color: textColor, fontSize: 14),
-            minLines: 2,
-            maxLines: 4,
-            decoration: InputDecoration(
-              labelText: '问一个和记忆相关的问题',
-              hintText: '例如：我上次重建的那个客厅场景里有什么物体？',
-              filled: true,
-              fillColor: Colors.transparent,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: (_isLocalAnswering || !_isLocalModelReady)
-                  ? null
-                  : _askLocalQuestion,
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: Text(_isLocalAnswering ? '回答中...' : '开始端侧问答'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                backgroundColor: isDark
-                    ? const Color(0xFF1F2836)
-                    : const Color(0xFF111827),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          if (contextPreview.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text(
-              '本次喂给模型的记忆片段',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
+        Widget modeTile({
+          required _RecallSearchMode mode,
+          required IconData icon,
+          required String title,
+          required String subtitle,
+        }) {
+          final selected = _searchMode == mode;
+          return InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => Navigator.pop(context, mode),
+            child: AnimatedContainer(
+              duration: BDMotion.durationFast,
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: isDark ? darkInput : theme.grayColor3,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                contextPreview,
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12.5,
-                  height: 1.45,
+                color: selected
+                    ? BDDesign.colorMutedBlue.withValues(
+                        alpha: isDark ? 0.22 : 0.10,
+                      )
+                    : (isDark ? darkInput : const Color(0xFFF6F8FC)),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: selected
+                      ? BDDesign.colorMutedBlue
+                      : (isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
                 ),
-                maxLines: 10,
-                overflow: TextOverflow.ellipsis,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? BDDesign.colorMutedBlue.withValues(alpha: 0.18)
+                          : (isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.white),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(icon, color: textColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (selected)
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: BDDesign.colorMutedBlue,
+                    ),
+                ],
               ),
             ),
-          ],
-          const SizedBox(height: 14),
-          Text(
-            '模型回答',
-            style: TextStyle(
-              color: textColor,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(minHeight: 120),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isDark ? darkInput : theme.grayColor3,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Text(
-              answerText.isEmpty ? '模型回答会在这里流式出现。' : answerText,
-              style: TextStyle(
-                color: answerText.isEmpty ? hintColor : textColor,
-                fontSize: 13.5,
-                height: 1.5,
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    textLocalize('recall_search_mode'),
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '选择当前搜索栏要优先使用的检索方式。',
+                    style: TextStyle(
+                      color: hintColor,
+                      fontSize: 12.5,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  modeTile(
+                    mode: _RecallSearchMode.local,
+                    icon: Icons.privacy_tip_rounded,
+                    title: textLocalize('recall_local_rag'),
+                    subtitle: textLocalize('recall_local_scope'),
+                  ),
+                  const SizedBox(height: 10),
+                  modeTile(
+                    mode: _RecallSearchMode.cloud,
+                    icon: Icons.cloud_rounded,
+                    title: textLocalize('recall_cloud_rag'),
+                    subtitle: textLocalize('recall_cloud_scope'),
+                  ),
+                ],
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            '提示：优先点“下载到应用私有目录”，这样不需要 adb，也不用手动处理 Android/data 路径。',
-            style: TextStyle(
-              color: hintColor.withValues(alpha: 0.9),
-              fontSize: 11.5,
-              height: 1.35,
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
+
+    if (selected != null) {
+      _setSearchMode(selected);
+    }
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark) {
@@ -1895,403 +1505,22 @@ $userQuestion
     );
   }
 
-  Widget _buildModelGrid(TDThemeData theme, bool isDark) {
-    final textColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
-
-    // If it's search results and has matched_frames, use ListView
-    bool isSearchWithFrames =
-        _models.isNotEmpty && _models.first.containsKey('matched_frames');
-
-    if (isSearchWithFrames) {
-      return ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16.0, 6.0, 16.0, 16.0),
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: _models.length,
-        itemBuilder: (context, index) {
-          final model = _models[index];
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
-          final similarity = model['similarity'] as double?;
-          final userId = model['user_id'] ?? '';
-          final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
-
-          return TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.0, end: 1.0),
-            duration:
-                BDMotion.durationNormal +
-                Duration(milliseconds: (index * 50).clamp(0, 400)),
-            curve: BDMotion.curveEnter,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(opacity: value, child: child),
-              );
-            },
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 16.0),
-              decoration: BoxDecoration(
-                color: isDark ? darkCard : BDDesign.colorPaperWhite,
-                borderRadius: BDDesign.radiusLarge,
-                boxShadow: isDark ? [] : [BDDesign.shadowLight],
-                border: Border.all(
-                  color: isDark ? const Color(0xFF2A2A30) : Colors.transparent,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Top header: Model Info
-                  GestureDetector(
-                    onTap: () {
-                      _navigateToViewer(model, null);
-                    },
-                    onLongPress: () => _showModelActions(model),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                TDText(
-                                  sceneId,
-                                  font: theme.fontTitleMedium,
-                                  fontWeight: FontWeight.w600,
-                                  maxLines: 1,
-                                  textColor: textColor,
-                                ),
-                                const SizedBox(height: 4),
-                                TDText(
-                                  desc,
-                                  font: theme.fontBodySmall,
-                                  textColor: hintTextColor,
-                                  maxLines: 2,
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (similarity != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: theme.brandColor4.withAlpha(220),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: TDText(
-                                '${(similarity * 100).toStringAsFixed(1)}%',
-                                font: theme.fontBodySmall,
-                                textColor: isDark
-                                    ? const Color(0xFFFFFFFF)
-                                    : Colors.white,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Horizontal list of frames
-                  if (matchedFrames.isNotEmpty)
-                    SizedBox(
-                      height: 120,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                        ).copyWith(bottom: 16.0),
-                        itemCount: matchedFrames.length,
-                        itemBuilder: (context, frameIndex) {
-                          final frame = matchedFrames[frameIndex];
-                          final imageName = frame['image_name'];
-                          final transformMatrix = frame['transform_matrix'];
-                          final frameSim = frame['similarity'] as double?;
-
-                          final imageUrl = Supabase.instance.client.storage
-                              .from('braindance-assets')
-                              .getPublicUrl(
-                                '$userId/$sceneId/output/images/$imageName',
-                              );
-
-                          return GestureDetector(
-                            onTap: () {
-                              _navigateToViewer(model, transformMatrix);
-                            },
-                            child: Container(
-                              width: 140,
-                              margin: const EdgeInsets.only(right: 12.0),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8.0),
-                                color: isDark ? darkInput : theme.grayColor3,
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8.0),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Image.network(
-                                      imageUrl,
-                                      fit: BoxFit.cover,
-                                      loadingBuilder:
-                                          (context, child, loadingProgress) {
-                                            if (loadingProgress == null) {
-                                              return child;
-                                            }
-                                            return Center(
-                                              child: CircularProgressIndicator(
-                                                value:
-                                                    loadingProgress
-                                                            .expectedTotalBytes !=
-                                                        null
-                                                    ? loadingProgress
-                                                              .cumulativeBytesLoaded /
-                                                          loadingProgress
-                                                              .expectedTotalBytes!
-                                                    : null,
-                                              ),
-                                            );
-                                          },
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return const Center(
-                                              child: Icon(
-                                                Icons.broken_image,
-                                                color: Colors.grey,
-                                              ),
-                                            );
-                                          },
-                                    ),
-                                    if (frameSim != null)
-                                      Positioned(
-                                        bottom: 4,
-                                        left: 4,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withAlpha(100),
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '${(frameSim * 100).toStringAsFixed(1)}%',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
-
-    return GridView.builder(
-      padding: const EdgeInsets.only(
-        left: 16.0,
-        right: 16.0,
-        top: 14.0,
-        bottom: 16.0,
-      ),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16.0,
-        mainAxisSpacing: 16.0,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: _models.length,
-      itemBuilder: (context, index) {
-        final model = _models[index];
-        final sceneId = model['scene_id'] ?? 'Unknown Scene';
-        final desc = model['description'] ?? textLocalize("recall_no_desc");
-        final similarity = model['similarity'] as double?;
-
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration:
-              BDMotion.durationNormal +
-              Duration(milliseconds: (index * 50).clamp(0, 400)),
-          curve: BDMotion.curveEnter,
-          builder: (context, value, child) {
-            return Transform.translate(
-              offset: Offset(0, 20 * (1 - value)),
-              child: Opacity(opacity: value, child: child),
-            );
-          },
-          child: GestureDetector(
-            onTap: () {
-              _navigateToViewer(model, null);
-            },
-            onLongPress: () => _showModelActions(model),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-                borderRadius: BorderRadius.circular(28.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(20),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Container(
-                          decoration: BoxDecoration(
-                            color: isDark ? darkInput : theme.grayColor3,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(28.0),
-                            ),
-                          ),
-                          clipBehavior: Clip.hardEdge,
-                          child:
-                              model['preview_img_path'] != null &&
-                                  model['preview_img_path']
-                                      .toString()
-                                      .isNotEmpty
-                              ? Image.network(
-                                  model['preview_img_path'],
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      _buildModelMockCover(
-                                        isDark: isDark,
-                                        theme: theme,
-                                      ),
-                                  loadingBuilder:
-                                      (context, child, loadingProgress) {
-                                        if (loadingProgress == null) {
-                                          return child;
-                                        }
-                                        return const Center(
-                                          child: CircularProgressIndicator(),
-                                        );
-                                      },
-                                )
-                              : _buildModelMockCover(
-                                  isDark: isDark,
-                                  theme: theme,
-                                ),
-                        ),
-                        if (similarity != null)
-                          Positioned(
-                            top: 8,
-                            right: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: theme.brandColor4.withAlpha(220),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: TDText(
-                                '${(similarity * 100).toStringAsFixed(1)}%',
-                                font: theme.fontBodyExtraSmall,
-                                textColor: isDark
-                                    ? const Color(0xFFFFFFFF)
-                                    : Colors.white,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        TDText(
-                          sceneId,
-                          font: theme.fontTitleMedium,
-                          fontWeight: FontWeight.w600,
-                          maxLines: 1,
-                          textColor: textColor,
-                        ),
-                        const SizedBox(height: 4),
-                        TDText(
-                          desc,
-                          font: theme.fontBodySmall,
-                          textColor: hintTextColor,
-                          maxLines: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+  String _modelKey(Map<String, dynamic> model) {
+    return model['id']?.toString() ??
+        model['scene_id']?.toString() ??
+        model.hashCode.toString();
   }
 
-  Widget _buildModelMockCover({
-    required bool isDark,
-    required TDThemeData theme,
-  }) {
-    final accent = isDark ? const Color(0xFF7AA2FF) : BDDesign.colorMutedBlue;
+  GlobalKey _modelCardKeyFor(Map<String, dynamic> model) {
+    final key = _modelKey(model);
+    return _modelCardKeys.putIfAbsent(key, GlobalKey.new);
+  }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1E27) : const Color(0xFFF6F8FC),
-        border: Border.all(
-          color: isDark ? Colors.white.withAlpha(18) : accent.withAlpha(35),
-        ),
-      ),
-      child: Center(
-        child: Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withAlpha(6)
-                : Colors.white.withAlpha(190),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: isDark ? Colors.white.withAlpha(18) : accent.withAlpha(28),
-            ),
-          ),
-          child: Icon(
-            Icons.auto_awesome_mosaic_rounded,
-            size: 28,
-            color: accent.withAlpha(210),
-          ),
-        ),
-      ),
-    );
+  bool _isSameModel(Map<String, dynamic>? left, Map<String, dynamic>? right) {
+    if (left == null || right == null) {
+      return false;
+    }
+    return _modelKey(left) == _modelKey(right);
   }
 
   void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
@@ -2360,69 +1589,34 @@ $userQuestion
   }
 
   Future<void> _showModelActions(Map<String, dynamic> model) async {
-    final selectedAction = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        final textColor = isDark
-            ? BDDesign.colorPaperWhite
-            : BDDesign.colorInkBlack;
-        final hintColor = isDark
-            ? Colors.white.withValues(alpha: 0.62)
-            : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-        final sceneId = model['scene_id']?.toString() ?? '未命名模型';
-        final desc =
-            model['description']?.toString() ?? textLocalize("recall_no_desc");
+    final key = _modelCardKeyFor(model);
+    final cardContext = key.currentContext;
+    final renderBox = cardContext?.findRenderObject() as RenderBox?;
+    final overlayBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null || overlayBox == null) {
+      return;
+    }
 
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    sceneId,
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    desc,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: hintColor, height: 1.35),
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.public_rounded),
-                    title: const Text('分享到社区'),
-                    subtitle: const Text('为这段记忆补上地点并发布到社区流'),
-                    onTap: () => Navigator.pop(context, 'share'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+    final topLeft = renderBox.localToGlobal(Offset.zero, ancestor: overlayBox);
 
     if (!mounted) {
       return;
     }
 
-    if (selectedAction == 'share') {
-      await _shareModelToCommunity(model);
+    setState(() {
+      _activeModelAction = model;
+      _activeModelActionRect = topLeft & renderBox.size;
+    });
+  }
+
+  void _dismissModelActions() {
+    if (_activeModelAction == null && _activeModelActionRect == null) {
+      return;
     }
+    setState(() {
+      _activeModelAction = null;
+      _activeModelActionRect = null;
+    });
   }
 
   CommunityModelOption _modelToCommunityOption(Map<String, dynamic> model) {
@@ -2437,46 +1631,6 @@ $userQuestion
           : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,
-    );
-  }
-}
-
-class _RecallMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? accent;
-
-  const _RecallMetric({required this.label, required this.value, this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.58)
-                : BDDesign.colorMutedBlue,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color:
-                accent ??
-                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
-          ),
-        ),
-      ],
     );
   }
 }

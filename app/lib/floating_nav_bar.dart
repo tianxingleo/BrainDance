@@ -10,8 +10,8 @@ import 'package:braindance/configs/motion_tokens.dart';
 /// 保留 dev 分支的大按钮布局，并融合更细腻的选中 pill 与图标动效。
 
 const double _kCreateSize = 66.0;
-const double _kNavBarInnerHeight = 54.0;
-const double _kLargeSlotWidth = 72.0;
+const double _kNavBarInnerHeight = 60.0;
+const double _kCreateDockWidth = 88.0;
 
 class FloatingNavBar extends StatelessWidget {
   final int currentIndex;
@@ -36,21 +36,21 @@ class FloatingNavBar extends StatelessWidget {
         : BDDesign.colorMutedBlue.withValues(alpha: 0.10);
     final navShadow = Colors.black.withValues(alpha: isDark ? 0.22 : 0.05);
     final selectedBackground = isDark
-        ? const Color(0xFFAEBAC7).withValues(alpha: 0.16)
-        : BDDesign.colorMutedBlue.withValues(alpha: 0.12);
+        ? const Color(0xFFAEBAC7).withValues(alpha: 0.14)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.09);
     final selectedColor = isDark
         ? const Color(0xFFF4F7FA)
         : BDDesign.colorInkBlack;
     final unselectedColor = isDark
-        ? const Color(0xFF98A3AF)
-        : const Color(0xFF7F878D);
+        ? const Color(0xFFB4BEC9)
+        : const Color(0xFF9AA3AD);
 
     return Positioned(
       bottom: 20.0,
       left: 20.0,
       right: 20.0,
       child: SizedBox(
-        height: _kCreateSize / 2 + _kNavBarInnerHeight / 2 + 8.0,
+        height: _kCreateSize / 2 + _kNavBarInnerHeight / 2 + 12.0,
         child: Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.bottomCenter,
@@ -64,8 +64,9 @@ class FloatingNavBar extends StatelessWidget {
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
                   child: Container(
+                    height: _kNavBarInnerHeight,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 6.0,
+                      horizontal: 8.0,
                       vertical: 8.0,
                     ),
                     decoration: BoxDecoration(
@@ -83,8 +84,10 @@ class FloatingNavBar extends StatelessWidget {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final compact = constraints.maxWidth < 420;
+                        final contentWidth =
+                            constraints.maxWidth - _kCreateDockWidth;
                         final slotWidths = _buildSlotWidths(
-                          constraints.maxWidth,
+                          contentWidth,
                           items,
                         );
                         final selectedItem = items[currentIndex];
@@ -94,16 +97,28 @@ class FloatingNavBar extends StatelessWidget {
                         );
                         final selectedWidth = slotWidths[currentIndex];
                         final showSelectedPill = !selectedItem.isLarge;
-                        final pillWidth = math.max(
-                          compact ? 66.0 : 74.0,
-                          selectedWidth - 4.0,
+                        final labelStyle = TextStyle(
+                          color: selectedColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: compact ? 13.0 : 14.0,
+                          height: 1.0,
+                        );
+                        final measuredLabelWidth = _measureLabelWidth(
+                          text: selectedItem.label,
+                          style: labelStyle,
+                        );
+                        final minPillWidth =
+                            (compact ? 76.0 : 88.0) + measuredLabelWidth;
+                        final pillWidth = math.min(
+                          contentWidth - 8.0,
+                          math.max(
+                            minPillWidth,
+                            selectedWidth - (compact ? 8.0 : 10.0),
+                          ),
                         );
                         final pillLeft =
                             (selectedLeft + (selectedWidth - pillWidth) / 2)
-                                .clamp(
-                                  2.0,
-                                  constraints.maxWidth - pillWidth - 2.0,
-                                );
+                                .clamp(2.0, contentWidth - pillWidth - 2.0);
 
                         return Stack(
                           children: [
@@ -118,77 +133,92 @@ class FloatingNavBar extends StatelessWidget {
                                     duration: BDMotion.durationSlow,
                                     curve: Curves.easeOutCubic,
                                     builder: (context, animatedLeft, child) {
-                                      return Transform.translate(
-                                        offset: Offset(animatedLeft, 0.0),
-                                        child: SizedBox(
-                                          width: pillWidth,
-                                          height: double.infinity,
-                                          child: DecoratedBox(
-                                            decoration: BoxDecoration(
-                                              color: selectedBackground,
-                                              borderRadius:
-                                                  BorderRadius.circular(22.0),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: selectedColor
-                                                      .withValues(alpha: 0.05),
-                                                  blurRadius: 16,
-                                                  offset: const Offset(0, 6),
+                                      return Stack(
+                                        children: [
+                                          Positioned(
+                                            left: animatedLeft,
+                                            top: 0,
+                                            bottom: 0,
+                                            child: SizedBox(
+                                              width: pillWidth,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color: selectedBackground,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        22.0,
+                                                      ),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: selectedColor
+                                                          .withValues(
+                                                            alpha: 0.05,
+                                                          ),
+                                                      blurRadius: 16,
+                                                      offset: const Offset(
+                                                        0,
+                                                        6,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ],
-                                            ),
-                                            child: _SelectedPillContent(
-                                              item: selectedItem,
-                                              compact: compact,
-                                              color: selectedColor,
+                                                child: _SelectedPillContent(
+                                                  item: selectedItem,
+                                                  compact: compact,
+                                                  color: selectedColor,
+                                                ),
+                                              ),
                                             ),
                                           ),
-                                        ),
+                                        ],
                                       );
                                     },
                                   ),
                                 ),
                               ),
                             Row(
-                              children: List.generate(items.length, (index) {
-                                final item = items[index];
-                                final slotWidth = slotWidths[index];
-                                if (item.isLarge) {
-                                  return SizedBox(width: slotWidth);
-                                }
+                              children: [
+                                ...List.generate(items.length, (index) {
+                                  final item = items[index];
+                                  final slotWidth = slotWidths[index];
+                                  if (item.isLarge) {
+                                    return const SizedBox.shrink();
+                                  }
 
-                                final distance = (index - currentIndex).abs();
-                                final direction = index < currentIndex
-                                    ? -1.0
-                                    : 1.0;
-                                final shiftBase = compact ? 8.0 : 10.0;
-                                final visualShift = index == currentIndex
-                                    ? 0.0
-                                    : direction *
-                                          (distance == 1
-                                              ? shiftBase
-                                              : distance == 2
-                                              ? shiftBase * 0.42
-                                              : 0.0);
+                                  final distance = (index - currentIndex).abs();
+                                  final direction = index < currentIndex
+                                      ? -1.0
+                                      : 1.0;
+                                  final shiftBase = compact ? 5.0 : 6.0;
+                                  final visualShift = index == currentIndex
+                                      ? 0.0
+                                      : direction *
+                                            (distance == 1
+                                                ? shiftBase
+                                                : distance == 2
+                                                ? shiftBase * 0.28
+                                                : 0.0);
 
-                                return SizedBox(
-                                  width: slotWidth,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 2.0,
+                                  return SizedBox(
+                                    width: slotWidth,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 2.0,
+                                      ),
+                                      child: _FloatingNavBarItem(
+                                        item: item,
+                                        compact: compact,
+                                        isSelected: currentIndex == index,
+                                        visualShift: visualShift,
+                                        onTap: () => onTap(index),
+                                        selectedColor: selectedColor,
+                                        unselectedColor: unselectedColor,
+                                      ),
                                     ),
-                                    child: _FloatingNavBarItem(
-                                      item: item,
-                                      compact: compact,
-                                      isSelected: currentIndex == index,
-                                      visualShift: visualShift,
-                                      onTap: () => onTap(index),
-                                      selectedColor: selectedColor,
-                                      unselectedColor: unselectedColor,
-                                    ),
-                                  ),
-                                );
-                              }),
+                                  );
+                                }),
+                                const SizedBox(width: _kCreateDockWidth),
+                              ],
                             ),
                           ],
                         );
@@ -203,7 +233,7 @@ class FloatingNavBar extends StatelessWidget {
               if (!item.isLarge) return const SizedBox.shrink();
               return Positioned(
                 bottom: 0,
-                right: 8.0,
+                right: 12.0,
                 child: _CreateButton(
                   isSelected: currentIndex == index,
                   isDark: isDark,
@@ -218,16 +248,12 @@ class FloatingNavBar extends StatelessWidget {
   }
 
   List<double> _buildSlotWidths(double totalWidth, List<NavIslandItem> items) {
-    final largeCount = items.where((item) => item.isLarge).length;
-    final normalCount = items.length - largeCount;
-    final reservedWidth = _kLargeSlotWidth * largeCount;
+    final normalCount = items.where((item) => !item.isLarge).length;
     final normalWidth = normalCount <= 0
         ? 0.0
-        : math.max(0.0, (totalWidth - reservedWidth) / normalCount);
+        : math.max(0.0, totalWidth / normalCount);
 
-    return items
-        .map((item) => item.isLarge ? _kLargeSlotWidth : normalWidth)
-        .toList();
+    return items.map((item) => item.isLarge ? 0.0 : normalWidth).toList();
   }
 
   double _slotLeft(List<double> slotWidths, int index) {
@@ -236,6 +262,15 @@ class FloatingNavBar extends StatelessWidget {
       left += slotWidths[i];
     }
     return left;
+  }
+
+  double _measureLabelWidth({required String text, required TextStyle style}) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    return painter.width;
   }
 }
 
