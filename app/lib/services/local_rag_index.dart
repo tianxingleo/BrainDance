@@ -175,7 +175,7 @@ class LocalRagIndexService {
 
   String _buildSearchableText(Map<String, dynamic> model) {
     final parts = <String>[
-      model['scene_id']?.toString() ?? '',
+      model['display_name']?.toString() ?? model['scene_id'] ?? '',
       model['description']?.toString() ?? '',
       ..._stringList(model['tags']),
       ..._stringList(model['objects']),

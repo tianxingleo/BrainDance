@@ -114,7 +114,10 @@ class _ModelCardState extends State<ModelCard> {
     final model = widget.model;
     final isDark = widget.isDark;
     final theme = widget.theme;
-    final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
 
@@ -333,7 +336,10 @@ class _ModelCardState extends State<ModelCard> {
         ? widget.toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? widget.toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
 
     dynamic transformMatrix;
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
