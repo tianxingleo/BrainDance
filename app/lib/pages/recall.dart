@@ -1721,6 +1721,13 @@ $userQuestion
                   const SizedBox(height: 16),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.info_outline_rounded),
+                    title: Text(textLocalize('recall_detail_model')),
+                    subtitle: Text(textLocalize('recall_detail_subtitle')),
+                    onTap: () => Navigator.pop(context, 'detail'),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.edit_rounded),
                     title: Text(textLocalize('recall_rename_model')),
                     subtitle: Text(textLocalize('recall_rename_subtitle')),
@@ -1757,6 +1764,9 @@ $userQuestion
     }
 
     switch (selectedAction) {
+      case 'detail':
+        await _showModelDetails(model);
+        break;
       case 'rename':
         await _renameModel(model);
         break;
@@ -1767,6 +1777,172 @@ $userQuestion
         await _shareModelToCommunity(model);
         break;
     }
+  }
+
+  Future<void> _showModelDetails(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+
+    // 从 processing_tasks 表获取详细信息
+    Map<String, dynamic>? taskInfo;
+    if (sceneId != null) {
+      try {
+        final resp = await Supabase.instance.client
+            .from('processing_tasks')
+            .select(
+              'created_at, updated_at, task_type, quality_score',
+            )
+            .eq('scene_id', sceneId)
+            .limit(1)
+            .maybeSingle();
+        taskInfo = resp;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final isDark = AppConfig.isNightMode;
+    final textColor =
+        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+    final displayName = model['display_name']?.toString() ??
+        model['scene_id']?.toString() ??
+        textLocalize('recall_unnamed_model');
+
+    // 格式化日期
+    String formatDate(String? raw) {
+      if (raw == null || raw.isEmpty) return textLocalize('recall_detail_unknown');
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) return raw;
+      final local = dt.toLocal();
+      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}  ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    }
+
+    final createdAt = formatDate(
+      taskInfo?['created_at']?.toString() ??
+          model['created_at']?.toString(),
+    );
+    final updatedAt = formatDate(taskInfo?['updated_at']?.toString());
+    final taskType = taskInfo?['task_type']?.toString() ??
+        textLocalize('recall_detail_unknown');
+    final qualityScore = taskInfo?['quality_score'];
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 22,
+                        color: textColor,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _DetailRow(
+                    icon: Icons.calendar_today_rounded,
+                    label: textLocalize('recall_detail_created_at'),
+                    value: createdAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.update_rounded,
+                    label: textLocalize('recall_detail_updated_at'),
+                    value: updatedAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.category_rounded,
+                    label: textLocalize('recall_detail_task_type'),
+                    value: taskType,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.star_rounded,
+                    label: textLocalize('recall_detail_quality_score'),
+                    value: qualityScore != null
+                        ? '$qualityScore / 100'
+                        : textLocalize('recall_detail_unknown'),
+                    textColor: textColor,
+                    hintColor: hintColor,
+                    trailing: qualityScore != null
+                        ? _buildScoreBar(
+                            (qualityScore as num).toDouble(), isDark)
+                        : null,
+                  ),
+                  if (sizeLabel.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _DetailRow(
+                      icon: Icons.storage_rounded,
+                      label: textLocalize('recall_detail_local_size'),
+                      value: sizeLabel.replaceAll(RegExp(r'[()]'), ''),
+                      textColor: textColor,
+                      hintColor: hintColor,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildScoreBar(double score, bool isDark) {
+    final ratio = (score / 100).clamp(0.0, 1.0);
+    final color = ratio >= 0.7
+        ? const Color(0xFF4CAF50)
+        : ratio >= 0.4
+            ? const Color(0xFFFFA726)
+            : const Color(0xFFEF5350);
+    return SizedBox(
+      width: 60,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: ratio,
+          minHeight: 6,
+          backgroundColor: isDark
+              ? Colors.white.withAlpha(20)
+              : Colors.black.withAlpha(15),
+          valueColor: AlwaysStoppedAnimation<Color>(color),
+        ),
+      ),
+    );
   }
 
   Future<void> _renameModel(Map<String, dynamic> model) async {
@@ -1918,6 +2094,59 @@ $userQuestion
           : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color textColor;
+  final Color hintColor;
+  final Widget? trailing;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.textColor,
+    required this.hintColor,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: hintColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: hintColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null) trailing!,
+      ],
     );
   }
 }
