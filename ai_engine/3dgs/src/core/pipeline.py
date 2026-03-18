@@ -1,0 +1,173 @@
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
+os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
+
+# src/core/pipeline.py
+# 功能：实现3DGS生成主流水线，协调各模块完成完整3D重建流程
+# 实现：按顺序调用各个功能模块，处理从视频到3D模型的完整流程
+# 逻辑：1. 视频抽帧与预处理 2. AI质检 3. 位姿解算 4. AI语义分割 5. 3DGS训练与导出
+# 包含：run_pipeline主函数、各模块实例化、流程控制逻辑、日志回调机制
+import time
+import shutil
+import subprocess
+from pathlib import Path
+import numpy as np # 你的代码里用到了 np.linspace
+
+# 1. 引入配置
+from src.config import PipelineConfig
+
+# 2. 引入所有模块 (Worker)
+from src.modules.image_proc import ImageProcessor
+from src.modules.glomap_runner import GlomapRunner
+from src.modules.ai_segmentor import AISegmentor
+from src.modules.nerf_engine import NerfstudioEngine
+from src.modules.scene_analyzer import SceneAnalyzer # 🟢 引入新模块
+from src.modules.da3_runner import DA3Runner
+
+# 3. 引入辅助工具
+from src.utils.common import format_duration
+
+def run_pipeline(cfg: PipelineConfig, log_callback=None):
+    """
+    log_callback: 一个函数，接受字符串参数，例如 log_callback("Step 1: 开始处理...")
+    """
+    
+    # 定义一个内部辅助函数，同时打印到控制台和发送给回调
+    def log(message):
+        print(message) # 打印到本地终端
+        if log_callback:
+            # 加上时间戳让日志更专业
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            log_callback(f"[{timestamp}] {message}")
+
+    global_start_time = time.time()
+    project_name = cfg.project_name
+    log(f"🚀 [Pipeline] 启动任务: {project_name}")
+
+    # 初始化返回的元数据 (用于更新数据库)
+    pipeline_metadata = {} 
+    
+    # 1. 实例化所有模块
+    img_processor = ImageProcessor(cfg, log_callback=log)
+    scene_analyzer = SceneAnalyzer(cfg) # 🟢 实例化
+    
+    # 根据配置决定使用的跑图引擎
+    mapper_type = getattr(cfg, "mapper_type", "glomap")
+    if mapper_type == 'da3':
+        mapper_runner = DA3Runner(cfg, log_callback=log)
+    else:
+        mapper_runner = GlomapRunner(cfg)
+        
+    ai_segmentor = AISegmentor(cfg)
+    nerf_engine = NerfstudioEngine(cfg)
+
+    # ==========================================
+    # Step 1: 数据准备
+    # ==========================================
+    log(f"🎬 [1/4] 开始视频抽帧与图片预处理...")
+    # 初始化目录
+    if cfg.project_dir.exists(): shutil.rmtree(cfg.project_dir, ignore_errors=True)
+    cfg.project_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(cfg.video_path), str(cfg.project_dir / cfg.video_path.name))
+    
+    # 抽帧
+    temp_dir = cfg.project_dir / "temp_extract"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    log(f"    -> 正在进行 FFmpeg 抽帧...")
+    
+    # [修改] 捕获 FFmpeg 错误输出，以便排查抽帧失败的具体原因
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
+             "-vf", "fps=10", "-q:v", "2",
+             "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
+             str(temp_dir / "frame_%05d.jpg")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        log(f"    -> FFmpeg 抽帧完成")
+    except subprocess.CalledProcessError as e:
+        log(f"❌ FFmpeg 抽帧失败! 错误码: {e.returncode}")
+        log(f"❌ 错误详情: {e.stderr}")
+        raise RuntimeError(f"FFmpeg extraction failed: {e.stderr}")
+    
+    # 清洗
+    img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=0.85)
+    
+    # 移动图片到 raw_images
+    raw_images_dir = cfg.project_dir / "raw_images"
+    raw_images_dir.mkdir(parents=True, exist_ok=True)
+    all_imgs = sorted(list(temp_dir.glob("*")))
+    limit = cfg.max_images
+    if len(all_imgs) > limit:
+        indices = np.linspace(0, len(all_imgs)-1, limit, dtype=int)
+        all_imgs = [all_imgs[i] for i in sorted(list(set(indices)))]
+    for img in all_imgs: shutil.copy2(str(img), str(raw_images_dir / img.name))
+    shutil.rmtree(temp_dir)
+    log(f"    -> 图片准备完成，共 {len(all_imgs)} 张")
+
+    # ==========================================
+    # Step 1.5: AI 质检 (新增环节)
+    # ==========================================
+    if cfg.enable_scene_analysis:
+        log(f"🧐 [AI 质检] 阈值: {cfg.min_quality_score} 分")
+        
+        # 接收 6 个返回值
+        passed, score, reason, tags, description, objects = scene_analyzer.run(raw_images_dir, log_callback=log)
+        
+        # 🟢 记录日志
+        status_icon = "✅" if passed else "❌"
+        log(f"    -> 结果: {status_icon} {score}分 (评价: {reason})")
+        log(f"    -> 标签: {tags}")
+        
+        # 🟢 [关键] 将结果存入 metadata，准备传给 worker
+        pipeline_metadata["ai_score"] = score
+        pipeline_metadata["ai_tags"] = tags
+        pipeline_metadata["ai_reason"] = reason
+        pipeline_metadata["ai_description"] = description
+        pipeline_metadata["ai_objects"] = objects
+
+        if not passed:
+            err_msg = f"AI 质检不通过 ({score}分 < {cfg.min_quality_score}分): {reason}"
+            log(err_msg)
+            raise RuntimeError(err_msg)
+
+    # ==========================================
+    # Step 2: 位姿解算
+    # ==========================================
+    log(f"⚙️ [2/4] 正在进行位姿解算 ({mapper_type.upper()})...")
+    if log_callback: 
+        log_callback("提示: 解算过程可能较慢，请耐心等待...")
+    
+    if not mapper_runner.run():
+        log(f"❌ Pipeline 中断：{mapper_type.upper()} 失败")
+        return None, pipeline_metadata
+    log(f"    -> 位姿解算完成")
+
+    # ==========================================
+    # Step 3: AI
+    # ==========================================
+    log(f"🤖 [3/4] 正在进行 AI 语义分割...")
+    ai_segmentor.run()
+    log(f"    -> AI 处理完成")
+
+    # ==========================================
+    # Step 4: 训练
+    # ==========================================
+    log(f"🧠 [4/4] 开始 3DGS 训练...")
+    try:
+        nerf_engine.train()
+        log(f"    -> 训练完成，开始导出...")
+        final_ply_path = nerf_engine.export()
+        
+        log(f"💾 导出 PLY 完成: {final_ply_path}")
+        log(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
+        return str(final_ply_path), pipeline_metadata
+    except Exception as e:
+        log(f"❌ 训练/导出阶段失败: {e}")
+        return None, pipeline_metadata
+    
+    

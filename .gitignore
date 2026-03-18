@@ -20,6 +20,9 @@ $RECYCLE.BIN/
 !.vscode/extensions.json
 *.code-workspace
 
+# Claude Code
+.claude/
+
 # PyCharm / IntelliJ
 .idea/
 *.iml
@@ -31,6 +34,8 @@ $RECYCLE.BIN/
 # =========================
 .env
 .env.*
+!.env.example
+!**/.env.example
 *.pem
 *.key
 config.yaml
@@ -66,6 +71,12 @@ service_account.json
 /app/.flutter-plugins-dependencies
 /app/.pub-cache/
 /app/.pub/
+
+# Dart doc 生成的 API 文档
+doc/api/
+
+# Flutter web 构建产物
+/app/web/build/
 
 # Android 相关
 /app/android/.gradle
@@ -117,6 +128,34 @@ ai_engine/**/*.obj
 ai_engine/**/*.glb
 ai_engine/**/*.gltf
 
+# 忽略 app/assets/webgl/models 下的模型文件
+app/assets/webgl/models/*.ply
+app/assets/webgl/models/*.splat
+app/assets/webgl/models/*.obj
+app/assets/webgl/models/*.glb
+app/assets/webgl/models/*.gltf
+# 忽略 app/assets/webgl/models 下的图片文件
+app/assets/webgl/models/images/
+
+# 忽略 3dgs_viewer/ (WebGL Demo) 下的媒体文件
+3dgs_viewer/**/*.mp4
+3dgs_viewer/**/*.mov
+3dgs_viewer/**/*.avi
+3dgs_viewer/**/*.ply
+3dgs_viewer/**/*.splat
+3dgs_viewer/my-3dgs-viewer/public/models/images/
+app/assets/webgl/models/images/
+app/assets/webgl/models/*.jpg
+app/assets/webgl/models/*.jpeg
+app/assets/webgl/models/*.png
+app/assets/webgl/models/*.gif
+app/assets/webgl/models/*.webp
+
+# 忽略 WebGL 构建产物
+app/assets/webgl/assets/
+app/assets/webgl/dist/
+app/assets/webgl/.vite/
+
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
 ai_engine/exports/
@@ -146,6 +185,53 @@ faiss_index/
 .lancedb/
 *.lance/
 
-# Qdrant (本地存储)
-storage/
-qdrant_storage/
+# =========================
+# 7. BrainDance Specific: VS Code Tunnel & Binaries (VS Code隧道残留)
+# =========================
+# 根目录二进制文件
+bfg.jar
+code
+code\ \(deleted\)..update
+vscode_cli.tar.gz
+*.exe
+*.dll
+*.so
+*.dylib
+
+# VS Code Tunnel / Remote SSH 残留
+.vscode-server/
+.vscode-cli/
+
+# =========================
+# 8. OpenCode Configuration (OpenCode 配置)
+# =========================
+AGENTS.md
+.opencode.json
+.opencode/
+.sisyphus/
+
+# BFG Repo-Cleaner 报告目录
+bfg-report/
+.bfg-report/
+..bfg-report/
+
+# =========================
+# 9. Sensitive / Temporary Files (临时文件)
+# =========================
+PR_BODY.md
+create_pr.sh
+CLAUDE.md
+docs/old/idea.pdf
+repomix-output.xml
+
+# =========================
+# 10. Document Files (文档文件)
+# =========================
+*.doc
+*.docx
+*.docs
+# 备份文件超过100MB不应提交
+*.ply.bak
+*.mp4.bak
+3dgs_viewer/test.mp4.bak
+3dgs_viewer/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak

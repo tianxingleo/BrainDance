@@ -1,0 +1,24 @@
+*** Begin Patch
+*** Add File: ai_engine/3dgs/src/core/pipeline_base.py
++from abc import ABC, abstractmethod
++from pathlib import Path
++from typing import Tuple, Dict, Any
++
++class PipelineBase(ABC):
++    """抽象基类：所有具体 Pipeline 应继承自此类并实现 run 方法
++
++    run 返回 (final_ply_path, metadata)
++    """
++
++    def __init__(self, context: Dict[str, Any]):
++        self.context = context
++        self.task_id = context.get('task_id')
++        self.scene_id = context.get('scene_id')
++        self.work_root = Path(context.get('work_root'))
++        self.log = context.get('log_callback', lambda m: None)
++
++    @abstractmethod
++    def run(self, input_path: str, params: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
++        pass
+
+*** End Patch

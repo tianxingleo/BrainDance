@@ -34,13 +34,13 @@ except ImportError:
 # ================= 🔧 基础配置 =================
 # [工程化思路] 环境变量优先级管理
 # 很多服务器上系统自带的 colmap 版本较老，这里强制将用户编译的高版本路径提到 PATH 环境变量的最前面
-sys_path = "/usr/local/bin" # [变量] 指定高优先级二进制文件路径
-current_path = os.environ.get("PATH", "") # 获取当前 PATH
-# 检查 sys_path 是否已经在 PATH 的首位
-if sys_path not in current_path.split(os.pathsep)[0]:
-    print(f"⚡ [环境修正] 强制设置 PATH 优先级: {sys_path} -> Priority High")
-    # 拼接新的 PATH，将 sys_path 放在最前面
-    os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
+# sys_path = "/usr/local/bin" # [变量] 指定高优先级二进制文件路径
+# current_path = os.environ.get("PATH", "") # 获取当前 PATH
+# # 检查 sys_path 是否已经在 PATH 的首位
+# if sys_path not in current_path.split(os.pathsep)[0]:
+#     print(f"⚡ [环境修正] 强制设置 PATH 优先级: {sys_path} -> Priority High")
+#     # 拼接新的 PATH，将 sys_path 放在最前面
+#     os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
 
 # 设置日志级别
 # 屏蔽 nerfstudio 库中非 Error 级别的日志，防止控制台被刷屏
@@ -107,19 +107,14 @@ class PipelineConfig:
 
         # --- B. 环境修正 (对应原代码的 PATH 设置逻辑) ---
         # 把设置环境变量的逻辑搬到这里，保证 config 一加载，环境就是对的
-        sys_path = "/usr/local/bin"
-        current_path = os.environ.get("PATH", "")
-        if sys_path not in current_path.split(os.pathsep)[0]:
-            print(f"⚡ [Config] 自动优化 PATH 优先级: {sys_path}")
-            os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
+        # sys_path = "/usr/local/bin"
+        # current_path = os.environ.get("PATH", "")
+        # if sys_path not in current_path.split(os.pathsep)[0]:
+        #     print(f"⚡ [Config] 自动优化 PATH 优先级: {sys_path}")
+        #     os.environ["PATH"] = f"{sys_path}{os.pathsep}{current_path}"
             
         # 设置 Setuptools 修复 (对应原代码 env["SETUPTOOLS_USE_DISTUTILS"])
         os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
-
-
-
-
-
 
 # 检查 plyfile 库
 # plyfile 用于读写 .ply 点云文件
@@ -133,7 +128,7 @@ except ImportError:
 
 def get_central_object_prompt(images_dir: Path, sample_count=3):
     """
-    [Step 1.1] 使用 Qwen-VL-Plus 多图分析，提取中心物体的文本描述
+    [Step 1.1] 使用 Qwen3.5-Plus 多图分析，提取中心物体的文本描述
     
     参数:
         images_dir (Path): 图片文件夹路径
@@ -148,7 +143,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
         print("❌ 未设置 DASHSCOPE_API_KEY，无法调用大模型。")
         return None
 
-    print(f"\n🧠 [AI 分析] 正在调用 Qwen-VL-Plus 分析场景...")
+    print(f"\n🧠 [AI 分析] 正在调用 Qwen3.5-Plus 分析场景...")
     
     # [Python 进阶] 使用 glob 获取所有 jpg/png 图片，并排序确保顺序一致
     image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
@@ -178,9 +173,9 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
     messages = [{"role": "user", "content": content}]
 
     try:
-        # 调用阿里云 Qwen-VL-Plus 模型
+        # 调用阿里云 Qwen3.5-Plus 模型
         response = dashscope.MultiModalConversation.call(
-            model='qwen-vl-plus', 
+            model='qwen-plus', 
             messages=messages
         )
         
@@ -813,383 +808,510 @@ def perform_percentile_culling(ply_path, json_path, output_path, keep_percentile
 
 
 # ==============================================================================
-# 模块化：COLMAP 位姿解算类
+# 模块化：GLOMAP 位姿解算类 (环境隔离增强版)
 # ==============================================================================
-class ColmapRunner:
+class GlomapRunner:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        # 查找 colmap 可执行文件 (对应原来的 shutil.which 逻辑)
-        self.colmap_exe = shutil.which("colmap") or "/usr/local/bin/colmap"
-        # 这里的 vocab_tree_path 已经在 cfg 里定义好了
         
+        # 1. 查找 COLMAP (优先使用 Conda 环境自带的！)
+        self.colmap_exe = shutil.which("colmap")
+        if not self.colmap_exe:
+            if os.path.exists("/usr/local/bin/colmap"):
+                self.colmap_exe = "/usr/local/bin/colmap"
+        
+        # 2. 查找 GLOMAP
+        self.glomap_exe = shutil.which("glomap")
+        if not self.glomap_exe:
+            if os.path.exists("/usr/local/bin/glomap"):
+                self.glomap_exe = "/usr/local/bin/glomap"
+
+        if not self.colmap_exe or not self.glomap_exe:
+            raise FileNotFoundError("❌ 缺少 colmap 或 glomap 可执行文件")
+
+        print(f"    -> 🎯 锁定引擎: COLMAP={self.colmap_exe}")
+        print(f"    -> 🎯 锁定引擎: GLOMAP={self.glomap_exe}")
+        
+        self.env = os.environ.copy()
+        self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+
     def run(self):
-        """执行 COLMAP 完整流程 (含重试机制)"""
-        print(f"\n📐 [2/4] COLMAP 位姿解算 (增强版)")
-        
-        # 0. 准备工作：把清洗好的图片复制到 colmap 需要的目录
-        # COLMAP 这一步通常需要把 raw_images 复制到 data/images
-        # 你的 extracted_images_dir 应该是 cfg.project_dir / "raw_images"
+        """执行 GLOMAP 完整流程"""
+        print(f"\n📐 [2/4] GLOMAP 位姿解算 (Global Mapping)")
+
+        # 路径准备
         raw_images_dir = self.cfg.project_dir / "raw_images"
         dest_images_dir = self.cfg.images_dir
-        
         dest_images_dir.mkdir(parents=True, exist_ok=True)
-        # 增量复制，避免重复
         for img in raw_images_dir.glob("*"):
             if not (dest_images_dir / img.name).exists():
                 shutil.copy2(str(img), str(dest_images_dir / img.name))
 
-        # 1. 数据库路径
         colmap_output_dir = self.cfg.data_dir / "colmap"
         colmap_output_dir.mkdir(parents=True, exist_ok=True)
         database_path = colmap_output_dir / "database.db"
-        
-        # 2. 重试循环
-        max_retries = 3
-        for attempt in range(1, max_retries + 1):
-            print(f"\n🔄 [COLMAP] 正在执行第 {attempt} / {max_retries} 次尝试...")
-            
-            # 清理旧数据 (如果不是第一次)
-            if attempt > 1:
-                print("    🧹 [重试准备] 正在清理旧数据...")
-                if database_path.exists(): database_path.unlink()
-                sparse_dir = colmap_output_dir / "sparse"
-                if sparse_dir.exists(): shutil.rmtree(sparse_dir)
-                if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
+        sparse_dir = colmap_output_dir / "sparse"
 
-            try:
-                # --- Step 1: 特征提取 ---
-                self._run_cmd([
-                    self.colmap_exe, "feature_extractor",
-                    "--database_path", str(database_path),
-                    "--image_path", str(raw_images_dir),
-                    "--ImageReader.camera_model", "OPENCV",
-                    "--ImageReader.single_camera", "1"
-                ], "Step 1: 特征提取")
-                
-                # --- Step 2: 词汇树匹配 ---
-                # 检查词汇树是否存在 (这里用 self.cfg)
-                local_vocab = Path(__file__).parent / "vocab_tree_flickr100k_words.bin"
-                if not self.cfg.vocab_tree_path.exists():
-                    if local_vocab.exists():
-                        shutil.copy2(str(local_vocab), str(self.cfg.vocab_tree_path))
-                    else:
-                        raise FileNotFoundError(f"Missing vocab tree: {self.cfg.vocab_tree_path}")
+        try:
+            # 清理
+            if database_path.exists(): database_path.unlink()
+            if sparse_dir.exists(): shutil.rmtree(sparse_dir)
+            sparse_dir.mkdir(parents=True, exist_ok=True)
+            if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
 
-                self._run_cmd([
-                    self.colmap_exe, "vocab_tree_matcher",
-                    "--database_path", str(database_path),
-                    "--VocabTreeMatching.vocab_tree_path", str(self.cfg.vocab_tree_path),
-                    "--VocabTreeMatching.match_list_path", ""
-                ], "Step 2: 词汇树匹配")
-                
-                # --- Step 3: 稀疏重建 ---
-                sparse_dir = colmap_output_dir / "sparse"
-                sparse_dir.mkdir(parents=True, exist_ok=True)
-                self._run_cmd([
-                    self.colmap_exe, "mapper",
-                    "--database_path", str(database_path),
-                    "--image_path", str(raw_images_dir),
-                    "--output_path", str(sparse_dir)
-                ], "Step 3: 稀疏重建")
-                
-                # --- Step 4: 目录修正 (Auto-Fix) ---
-                self._fix_sparse_folder(sparse_dir)
-                
-                # --- Step 5: 生成 transforms.json ---
-                # 注意：ns-process-data 需要 images 目录
-                self._run_cmd([
-                    "ns-process-data", "images",
-                    "--data", str(dest_images_dir),
-                    "--output-dir", str(self.cfg.data_dir),
-                    "--skip-colmap",
-                    "--skip-image-processing",
-                    "--num-downscales", "0"
-                ], "生成 transforms.json")
-                
-                # --- Step 6: 质量检查 ---
-                if self._check_quality(raw_images_dir):
-                    print(f"    ✨ COLMAP 成功！")
-                    return True # 成功返回
-                    
-            except Exception as e:
-                print(f"    ❌ 第 {attempt} 次尝试失败: {e}")
-                if attempt < max_retries: time.sleep(3)
-        
-        print("❌ COLMAP 最终失败。")
+            # Step 1: 特征提取
+            self._run_cmd([
+                self.colmap_exe, "feature_extractor",
+                "--database_path", str(database_path),
+                "--image_path", str(raw_images_dir),
+                "--ImageReader.camera_model", "OPENCV",
+                "--ImageReader.single_camera", "1"
+            ], "Step 1: 特征提取 (COLMAP)")
+
+            # Step 2: 顺序匹配
+            self._run_cmd([
+                self.colmap_exe, "sequential_matcher",
+                "--database_path", str(database_path),
+                "--SequentialMatching.overlap", "25"
+            ], "Step 2: 顺序匹配 (COLMAP)")
+
+            # Step 3: 全局重建
+            print(f"    -> 🚀 启动 GLOMAP 引擎...")
+            self._run_cmd([
+                self.glomap_exe, "mapper",
+                "--database_path", str(database_path),
+                "--image_path", str(raw_images_dir),
+                "--output_path", str(sparse_dir)
+            ], "Step 3: 全局映射 (GLOMAP)")
+
+            # Step 4: 目录修正
+            self._fix_directory_structure(sparse_dir)
+
+            # Step 5: 生成 json
+            self._run_cmd([
+                "ns-process-data", "images",
+                "--data", str(dest_images_dir),
+                "--output-dir", str(self.cfg.data_dir),
+                "--skip-colmap",
+                "--skip-image-processing",
+                "--num-downscales", "0"
+            ], "生成 transforms.json")
+
+            # Step 6: 检查
+            if self._check_quality(raw_images_dir):
+                print(f"    ✨ GLOMAP 流程成功！")
+                return True
+
+        except Exception as e:
+            print(f"    ❌ GLOMAP 流程失败: {e}")
+            return False
         return False
 
     def _run_cmd(self, cmd, desc):
-        """内部工具：执行命令"""
+        """内部工具：执行命令 (含环境隔离逻辑)"""
         print(f"🚀 {desc}...")
-        # 为了简化，这里用了 check=True，你也可以用原来的 Popen 写法
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-    def _fix_sparse_folder(self, sparse_dir):
-        """内部工具：修正 sparse/0 文件夹结构"""
-        target_dir_0 = sparse_dir / "0"
-        target_dir_0.mkdir(parents=True, exist_ok=True)
-        required = ["cameras.bin", "images.bin", "points3D.bin"]
         
-        # 简单检查逻辑：如果文件不在 0 里面，就去子目录找并移动上来
-        if all((target_dir_0 / f).exists() for f in required): return
+        # 🔥 环境隔离逻辑 🔥
+        cmd_env = self.env.copy()
+        exe_path = cmd[0]
+        # 如果是系统程序 (/usr/local/bin/glomap)，清除 LD_LIBRARY_PATH 防止 Conda 干扰
+        if exe_path.startswith("/usr") or exe_path.startswith("/bin"):
+            if "LD_LIBRARY_PATH" in cmd_env:
+                del cmd_env["LD_LIBRARY_PATH"]
 
-        for root, dirs, files in os.walk(sparse_dir):
-            if all(f in files for f in required):
+        try:
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=cmd_env
+            )
+            for line in process.stdout:
+                if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs"]):
+                    print(f"    | {line.strip()}")
+            process.wait()
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, cmd)
+        except subprocess.CalledProcessError as e:
+            print(f"❌ 命令执行崩溃: {cmd[0]} (代码 {e.returncode})")
+            raise e
+
+    def _fix_directory_structure(self, sparse_root):
+        target_dir_0 = sparse_root / "0"
+        target_dir_0.mkdir(parents=True, exist_ok=True)
+        required_files = ["cameras.bin", "images.bin", "points3D.bin"]
+        required_files_txt = ["cameras.txt", "images.txt", "points3D.txt"]
+        model_found = False
+        for root, dirs, files in os.walk(sparse_root):
+            if all(f in files for f in required_files):
                 src = Path(root)
                 if src != target_dir_0:
-                    for f in required:
+                    for f in required_files:
                         if (target_dir_0/f).exists(): (target_dir_0/f).unlink()
                         shutil.move(str(src/f), str(target_dir_0/f))
+                model_found = True
                 break
+            if all(f in files for f in required_files_txt):
+                src = Path(root)
+                if src != target_dir_0:
+                    for f in required_files_txt:
+                        if (target_dir_0/f).exists(): (target_dir_0/f).unlink()
+                        shutil.move(str(src/f), str(target_dir_0/f))
+                model_found = True
+                break
+        if not model_found: raise RuntimeError("GLOMAP 未生成有效的稀疏模型文件！")
 
     def _check_quality(self, raw_images_dir):
-        """内部工具：检查匹配率"""
         if not self.cfg.transforms_file.exists(): return False
         with open(self.cfg.transforms_file, 'r') as f: meta = json.load(f)
-        
         reg_count = len(meta["frames"])
         total_count = len(list(raw_images_dir.glob("*.jpg")) + list(raw_images_dir.glob("*.png")))
         ratio = reg_count / total_count if total_count > 0 else 0
-        print(f"    📊 匹配率: {ratio:.2%}")
-        
-        if ratio < 0.35: raise RuntimeError(f"Low match ratio: {ratio:.2%}")
-        return True
+        print(f"    📊 匹配率: {ratio:.2%} ({reg_count}/{total_count})")
+        return ratio > 0.2
 
+# ==============================================================================
+# 模块化：AI 语义分割类
+# ==============================================================================
+class AISegmentor:
+    def __init__(self, cfg: PipelineConfig):
+        self.cfg = cfg
+        self.data_dir = cfg.data_dir
+        self.images_dir = cfg.images_dir
+        self.masks_dir = cfg.masks_dir
+
+    def run(self):
+        """执行 AI 分割总流水线 (对应原 run_ai_segmentation_pipeline)"""
+        if not HAS_AI or not self.cfg.enable_ai:
+            print("⏩ 跳过 AI 分割 (未启用或缺少依赖)")
+            return False
+            
+        if not self.cfg.transforms_file.exists():
+            print("⚠️ transforms.json 不存在，无法进行 AI 分割")
+            return False
+
+        print(f"\n✂️ [AI 分割] 正在初始化...")
+        self.masks_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. 获取提示词
+        text_prompt = self._get_prompt()
         
+        # 2. 加载模型
+        try:
+            # 自动迁移模型文件逻辑
+            self._ensure_model_exists("yolov8s-worldv2.pt")
+            self._ensure_model_exists("sam2.1_l.pt")
+            
+            yolo_path = self.cfg.work_root / "yolov8s-worldv2.pt"
+            sam_path = self.cfg.work_root / "sam2.1_l.pt"
+            
+            print("    -> 正在加载 AI 模型...")
+            det_model = YOLOWorld(str(yolo_path))
+            det_model.set_classes([text_prompt])
+            sam_model = SAM(str(sam_path))
+        except Exception as e:
+            print(f"❌ AI 模型加载失败: {e}")
+            return False
+
+        # 3. 读取元数据
+        with open(self.cfg.transforms_file, 'r') as f: meta = json.load(f)
+        frames_map = {Path(f["file_path"]).name: f for f in meta["frames"]}
+        
+        image_files = sorted(list(self.images_dir.glob("*.jpg")) + list(self.images_dir.glob("*.png")))
+        valid_frames_list = []
+        deleted_count = 0
+        
+        print(f"    -> 开始处理 {len(image_files)} 张图片...")
+
+        # 4. 循环处理
+        for i, img_path in enumerate(image_files):
+            try:
+                # YOLO 检测
+                det_results = det_model.predict(img_path, conf=0.05, verbose=False)
+                bboxes = det_results[0].boxes.xyxy.cpu()
+                
+                # 筛选中心框 (逻辑与之前相同，这里简化展示)
+                if len(bboxes) > 1:
+                    bboxes = self._pick_center_box(bboxes, det_results[0].orig_shape)
+                
+                # SAM 分割
+                if len(bboxes) == 0:
+                    # 中心点模式
+                    h, w = det_results[0].orig_shape[:2]
+                    cx, cy, margin = w / 2, h / 2, 5
+                    bboxes = [[cx-margin, cy-margin, cx+margin, cy+margin]]
+                
+                sam_results = sam_model(img_path, bboxes=bboxes, verbose=False)
+                
+                # 合并 Mask
+                if sam_results[0].masks is not None:
+                    final_mask = np.any(sam_results[0].masks.data.cpu().numpy(), axis=0).astype(np.uint8) * 255
+                else:
+                    final_mask = np.zeros(det_results[0].orig_shape[:2], dtype=np.uint8)
+
+                # 清洗 Mask (调用内部方法)
+                is_good, cleaned_mask, reason = self._clean_and_verify_mask(final_mask)
+                
+                if is_good:
+                    final_name = self._save_transparent_png(img_path, cleaned_mask)
+                    if img_path.name in frames_map:
+                        frame_data = frames_map[img_path.name]
+                        frame_data["file_path"] = f"images/{final_name}"
+                        valid_frames_list.append(frame_data)
+                else:
+                    print(f"       🗑️ [剔除] {img_path.name}: {reason}")
+                    img_path.unlink()
+                    deleted_count += 1
+
+            except Exception as e:
+                print(f"       ❌ 错误 {img_path.name}: {e}")
+                continue
+            
+            if i % 10 == 0: print(f"       进度: {i}/{len(image_files)}...", end="\r")
+
+        # 5. 更新 json
+        if valid_frames_list:
+            meta["frames"] = valid_frames_list
+            with open(self.cfg.transforms_file, 'w') as f: json.dump(meta, f, indent=4)
+            print(f"\n    ✅ AI 处理完成，剩余可用: {len(valid_frames_list)}")
+            return True
+        else:
+            print("\n❌ 错误：所有图片都被剔除了")
+            return False
+
+    def _get_prompt(self):
+        """原 get_central_object_prompt 的封装"""
+        # 这里你可以调用之前定义的全局函数 get_central_object_prompt(self.images_dir)
+        # 或者把那段代码搬进来。为了省事，建议直接调用现有的全局函数：
+        try:
+            prompt = get_central_object_prompt(self.images_dir)
+            return prompt if prompt else "central object"
+        except:
+            return "central object"
+
+    def _ensure_model_exists(self, model_name):
+        target = self.cfg.work_root / model_name
+        local = Path(__file__).parent / model_name
+        if not target.exists() and local.exists():
+            shutil.copy2(str(local), str(target))
+
+    def _pick_center_box(self, bboxes, img_shape):
+        """筛选最中心的框"""
+        import torch
+        img_h, img_w = img_shape[:2]
+        screen_center = torch.tensor([img_w / 2.0, img_h / 2.0])
+        min_dist = float('inf')
+        best_idx = 0
+        for idx, box in enumerate(bboxes):
+            cx = (box[0] + box[2]) / 2.0
+            cy = (box[1] + box[3]) / 2.0
+            dist = torch.sqrt((cx - screen_center[0])**2 + (cy - screen_center[1])**2)
+            if dist < min_dist:
+                min_dist = dist
+                best_idx = idx
+        return bboxes[best_idx].unsqueeze(0)
+
+    def _clean_and_verify_mask(self, mask):
+        """原 clean_and_verify_mask 的封装"""
+        # 直接调用之前的全局函数即可
+        return clean_and_verify_mask(mask)
+
+    def _save_transparent_png(self, img_path, mask):
+        """合成并保存 PNG"""
+        img = cv2.imread(str(img_path))
+        mask_blurred = cv2.GaussianBlur(mask, (5, 5), 0)
+        alpha = mask_blurred.astype(np.float32) / 255.0
+        img_float = img.astype(np.float32)
+        b, g, r = cv2.split(img_float)
+        img_bgra = cv2.merge([
+            (b * alpha).astype(np.uint8),
+            (g * alpha).astype(np.uint8),
+            (r * alpha).astype(np.uint8),
+            mask_blurred
+        ])
+        new_path = img_path.with_suffix('.png')
+        cv2.imwrite(str(new_path), img_bgra)
+        if img_path.suffix.lower() == '.jpg':
+            try: img_path.unlink()
+            except: pass
+        return new_path.name
+        
+
+# ==============================================================================
+# 模块化：Nerfstudio 训练引擎类
+# ==============================================================================
+class NerfstudioEngine:
+    def __init__(self, cfg: PipelineConfig):
+        self.cfg = cfg
+        self.output_dir = cfg.project_dir / "outputs"
+        # 准备环境变量
+        self.env = os.environ.copy()
+        self.env["QT_QPA_PLATFORM"] = "offscreen"
+        self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+
+    def train(self):
+        """执行 splatfacto 训练"""
+        print(f"\n🔥 [4/4] 开始训练 (Splatfacto)")
+        
+        # 1. 计算场景参数 (Collider) - 直接调用之前的全局函数
+        collider_args, scene_type = analyze_and_calculate_adaptive_collider(
+            self.cfg.transforms_file,
+            force_cull=self.cfg.force_spherical_culling,
+            radius_scale=self.cfg.scene_radius_scale
+        )
+        self.scene_type = scene_type # 存下来给导出步骤用
+
+        # 2. 组装命令
+        cmd = [
+            "ns-train", "splatfacto",
+            "--data", str(self.cfg.data_dir),
+            "--output-dir", str(self.output_dir),
+            "--experiment-name", self.cfg.project_name,
+            "--pipeline.model.random-init", "False",
+            "--pipeline.model.background-color", "random",
+            "--pipeline.model.cull-alpha-thresh", "0.05",
+            "--pipeline.model.stop-split-at", "10000",
+            *collider_args,
+            "--max-num-iterations", "15000",
+            "--vis", "viewer+tensorboard",
+            "--viewer.quit-on-train-completion", "True",
+            "nerfstudio-data",
+            "--downscale-factor", "1",
+            "--auto-scale-poses", "False"
+        ]
+        
+        # 3. 执行
+        subprocess.run(cmd, check=True, env=self.env)
+
+    def export(self):
+        """导出 ply 并进行后处理"""
+        print(f"\n💾 正在导出...")
+        # 找到最新的 config.yml
+        search_path = self.output_dir / self.cfg.project_name / "splatfacto"
+        try:
+            run_dirs = sorted(list(search_path.glob("*")))
+            config_path = run_dirs[-1] / "config.yml"
+        except IndexError:
+            print("❌ 未找到训练结果 config.yml")
+            return None
+
+        # 导出命令
+        subprocess.run([
+            "ns-export", "gaussian-splat",
+            "--load-config", str(config_path),
+            "--output-dir", str(self.cfg.project_dir)
+        ], check=True, env=self.env)
+
+        # 后处理：点云切割
+        raw_ply = self.cfg.project_dir / "point_cloud.ply"
+        if not raw_ply.exists(): raw_ply = self.cfg.project_dir / "splat.ply"
+        cleaned_ply = self.cfg.project_dir / "point_cloud_cleaned.ply"
+        final_ply = raw_ply
+
+        # 判断是否需要切割 (物体模式 or 强制切割)
+        need_cull = (self.scene_type == "object" or self.cfg.force_spherical_culling)
+        
+        if need_cull and raw_ply.exists():
+            # 调用之前的全局函数
+            success = perform_percentile_culling(
+                raw_ply, 
+                self.cfg.transforms_file, 
+                cleaned_ply,
+                keep_percentile=self.cfg.keep_percentile
+            )
+            if success:
+                final_ply = cleaned_ply
+
+        # 复制结果到 results 目录
+        results_dir = Path(__file__).parent / "results"
+        results_dir.mkdir(exist_ok=True)
+        target_path = results_dir / f"{self.cfg.project_name}.ply"
+        shutil.copy2(str(final_ply), str(target_path))
+        
+        return target_path
+
 # ================= 主流程 =================
-
 def run_pipeline(cfg: PipelineConfig):
-    """
-    [主函数] 完整的项目执行流水线
-    Step 1: 视频抽帧与清洗
-    Step 2: COLMAP 姿态解算 (含重试与修正)
-    Step 3: AI 语义分割
-    Step 4: Nerfstudio 训练
-    Step 5: 导出与后处理
-    """
     global_start_time = time.time()
-    print(f"\n🚀 [BrainDance Engine AI-Enhanced] 启动任务: {cfg.project_name}")
-    print(f"🕒 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\n🚀 [BrainDance Engine] 启动任务: {cfg.project_name}")
     
-
-    # 1. 实例化各个模块 (在这里创建 ImageProcessor 的实例)
-    # 这相当于招聘了一个“图片处理专员”，并把配置单(cfg)给他
+    # 1. 实例化所有模块
     img_processor = ImageProcessor(cfg)
-    colmap_runner = ColmapRunner(cfg) # 实例化，但先不跑
+    # colmap_runner = ColmapRunner(cfg)
+    glomap_runner = GlomapRunner(cfg) 
+    ai_segmentor = AISegmentor(cfg)
+    nerf_engine = NerfstudioEngine(cfg)
+
+    # ==========================================
+    # Step 1: 数据准备
+    # ==========================================
+    # 初始化目录
+    if cfg.project_dir.exists(): shutil.rmtree(cfg.project_dir, ignore_errors=True)
+    cfg.project_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(cfg.video_path), str(cfg.project_dir / cfg.video_path.name))
     
-
-    # 路径解析与工作区准备
-    video_src = Path(cfg.video_path).resolve()
-
-    # 路径解析 (直接从 cfg 获取)
-    work_dir = cfg.project_dir
-    data_dir = cfg.data_dir
-
-    output_dir = work_dir / "outputs"
-    # cfg.transforms_file = data_dir / "transforms.json"
-    
-    # [环境配置] 复制当前环境变量
-    env = os.environ.copy()
-    # 针对 Linux 服务器无头模式 (Headless)，防止 Qt 报错
-    env["QT_QPA_PLATFORM"] = "offscreen" 
-    # 【新增】修复 Python distutils 报错的关键环境变量 (针对 Setuptools 60+ 版本)
-    env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib" 
-
-    # [Step 1] 数据处理
-    step1_start = time.time()
-    
-    # 目录初始化：每次运行前清理旧数据，保证环境纯净
-    if work_dir.exists(): shutil.rmtree(work_dir, ignore_errors=True)
-    work_dir.mkdir(parents=True, exist_ok=True)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(str(video_src), str(work_dir / video_src.name))
-
-    print(f"\n🎥 [1/4] 数据准备与清洗")
-    temp_dir = work_dir / "temp_extract"
+    # 抽帧 (这里逻辑简单，直接写这里也行，或者封装进 ImageProcessor)
+    temp_dir = cfg.project_dir / "temp_extract"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    extracted_images_dir = work_dir / "raw_images"
-    extracted_images_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
+                    "-vf", "fps=10", "-q:v", "2", 
+                    str(temp_dir / "frame_%05d.jpg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # [外部调用] FFmpeg 抽帧
-    # -vf fps=10: 每秒抽 10 帧
-    # -q:v 2: 设置高质量 JPEG
-    try:
-        subprocess.run(["ffmpeg", "-y", "-i", str(work_dir / video_src.name), 
-                        "-vf", "fps=10", "-q:v", "2", 
-                        str(temp_dir / "frame_%05d.jpg")], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) 
-    except: pass
-    
-    # 调用之前的清洗函数
+    # 清洗
     img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=0.85)
     
-    # 迁移合格图片
-    all_candidates = sorted(list(temp_dir.glob("*.jpg")) + list(temp_dir.glob("*.png")))
-    final_images_list = []
-    # 如果图片还是太多，进行均匀采样
-    if len(all_candidates) > cfg.max_images:
-        indices = np.linspace(0, len(all_candidates) - 1, cfg.max_images, dtype=int)
-        indices = sorted(list(set(indices)))
-        for idx in indices: final_images_list.append(all_candidates[idx])
-    else:
-        final_images_list = all_candidates
+    # 移动图片到 raw_images
+    raw_images_dir = cfg.project_dir / "raw_images"
+    raw_images_dir.mkdir(parents=True, exist_ok=True)
+    # 简单的移动逻辑保留在这里，或者也可以移入 ImageProcessor
+    all_imgs = sorted(list(temp_dir.glob("*")))
+    limit = cfg.max_images
+    if len(all_imgs) > limit:
+        indices = np.linspace(0, len(all_imgs)-1, limit, dtype=int)
+        all_imgs = [all_imgs[i] for i in sorted(list(set(indices)))]
+    for img in all_imgs: shutil.copy2(str(img), str(raw_images_dir / img.name))
+    shutil.rmtree(temp_dir)
 
-    for img_path in final_images_list:
-        shutil.copy2(str(img_path), str(extracted_images_dir / img_path.name))
-    shutil.rmtree(temp_dir) # 删除临时目录
+    # ==========================================
+    # Step 2: GOLMAP
+    # ==========================================
+    if not glomap_runner.run():
+        print("❌ Pipeline 中断：GLOMAP 失败")
+        return
 
-    # COLMAP 流程 (增强版 - 包含自动修正)
-    # =================================================================
-    # Step 2: COLMAP 姿态解算 (这里开始使用新模块！)
-    # =================================================================
-    success = colmap_runner.run()
-    
-    if not success:
-        print("❌ COLMAP 流程失败，程序终止")
-        return # 熔断退出
+    # ==========================================
+    # Step 3: AI
+    # ==========================================
+    # 这里会自动判断是否开启，内部已处理异常
+    ai_segmentor.run()
 
-    # ================= 🔥 AI 介入点 (新增) =================
-    if HAS_AI:
-        print(f"\n🧠 [3/4] AI 智能分割介入 (Qwen + YOLO + SAM)")
-        # 调用之前定义的 AI 流程
-        ai_success = run_ai_segmentation_pipeline(data_dir)
-        if ai_success:
-            print("✨ AI 分割流程完成，Mask 已注入！")
-        else:
-            print("⚠️ AI 分割流程遇到问题，将使用原始图像训练。")
-    else:
-        print("\n⏩ 跳过 AI 分割 (未满足依赖)")
-    # ======================================================
+    # ==========================================
+    # Step 4 & 5: 训练与导出
+    # ==========================================
+    try:
+        nerf_engine.train()
+        final_path = nerf_engine.export()
+        print(f"\n🎉 任务完成！结果位于: {final_path}")
+    except Exception as e:
+        print(f"❌ 训练/导出阶段失败: {e}")
 
-    step1_duration = time.time() - step1_start
-    print(f"⏱️ [预处理完成] 耗时: {format_duration(step1_duration)}")
+    print(f"⏱️ 总耗时: {format_duration(time.time() - global_start_time)}")
 
-    # [Step 2] 训练
-    step2_start = time.time()
-    print(f"\n🔥 [4/4] 开始训练 (Splatfacto)")
-    
-    # 动态计算训练参数
-    collider_args, scene_type = analyze_and_calculate_adaptive_collider(
-        cfg.transforms_file, 
-        force_cull=cfg.force_spherical_culling,
-        radius_scale=cfg.scene_radius_scale
-    )
-    
-    # 构建训练命令 (ns-train splatfacto)
-    train_cmd = [
-        "ns-train", "splatfacto", 
-        "--data", str(data_dir), 
-        "--output-dir", str(output_dir), 
-        "--experiment-name", cfg.project_name, 
-        "--pipeline.model.random-init", "False", # 禁用随机初始化，使用 COLMAP 点云初始化
-        
-        # 🔥 新增参数 1: 告诉 Nerfstudio 背景是随机颜色或透明的
-        # 这样模型不会把黑色背景当成真实的黑色物体去学习，而是倾向于将背景透明化
-        "--pipeline.model.background-color", "random", 
-        
-        # 🔥 新增参数 2: 提高 Alpha 剔除阈值
-        # 默认 0.005，提高到 0.05 可以让那种淡淡的烟雾状噪点直接不渲染
-        "--pipeline.model.cull-alpha-thresh", "0.05", 
-
-        # [高阶调优参数]
-        # 提高分裂阈值：让高斯球更难分裂，防止产生过多细碎的浮点
-        "--pipeline.model.densify-grad-thresh", "0.0008",
-        # 提前停止分裂：最后阶段只优化位置和颜色，不增加新点，有助于稳定画面
-        "--pipeline.model.stop-split-at", "10000",
-        # 缩短热身期
-        "--pipeline.model.warmup-length", "500",
-        
-        # 注入之前计算的 collider 参数 (Near/Far plane)
-        *collider_args,
-        
-        "--max-num-iterations", "15000", # 迭代次数
-        "--vis", "viewer+tensorboard",   # 开启可视化支持
-        "--viewer.quit-on-train-completion", "True", # 训练完自动关闭 Viewer
-        
-        "nerfstudio-data", # 数据解析器类型
-        "--downscale-factor", "1", # 图片缩放比例，1 表示原图
-        "--orientation-method", "none", # 不自动调整方向 (信任 COLMAP)
-        "--center-method", "none",      # 不自动居中 (信任 COLMAP)
-        "--auto-scale-poses", "False"   # 不自动缩放位姿
-    ]
-    
-    # 执行训练
-    subprocess.run(train_cmd, check=True, env=env)
-    step2_duration = time.time() - step2_start
-
-    # [Step 3] 导出
-    step3_start = time.time()
-    print(f"\n💾 正在导出...")
-    # 寻找训练生成的 config.yml 文件
-    search_path = output_dir / cfg.project_name / "splatfacto"
-    run_dirs = sorted(list(search_path.glob("*"))) # 通常是一个时间戳目录
-    latest_run = run_dirs[-1]
-    
-    # 调用 ns-export 导出为标准的 .ply 高斯文件
-    subprocess.run([
-        "ns-export", "gaussian-splat", 
-        "--load-config", str(latest_run/"config.yml"), 
-        "--output-dir", str(work_dir)
-    ], check=True, env=env)
-    
-    # 后处理切割
-    raw_ply = work_dir / "point_cloud.ply"
-    if not raw_ply.exists(): raw_ply = work_dir / "splat.ply" # 兼容旧版本文件名
-    cleaned_ply = work_dir / "point_cloud_cleaned.ply"
-    final_ply = raw_ply
-    
-    # 如果是物体模式，执行之前的“分位数切割”函数
-    if (scene_type == "object" or cfg.force_spherical_culling) and raw_ply.exists():
-        if perform_percentile_culling(
-            raw_ply, 
-            cfg.transforms_file, 
-            cleaned_ply, 
-            keep_percentile=cfg.keep_percentile # <--- 新增这行
-        ):
-            final_ply = cleaned_ply
-    
-    step3_duration = time.time() - step3_start
-
-    # [Step 4] 结果回传
-    # 将最终结果复制到脚本所在目录的 results 文件夹
-    target_dir = Path(__file__).parent / "results"
-    target_dir.mkdir(exist_ok=True)
-    shutil.copy2(str(final_ply), str(target_dir / f"{cfg.project_name}.ply"))
-    
-    # 打印最终统计信息
-    total_duration = time.time() - global_start_time
-    print(f"\n🎉 全部完成！模型已保存至: {target_dir / f'{cfg.project_name}.ply'}")
-    print(f"📊 耗时统计:")
-    print(f"   - 预处理 (COLMAP + AI): {format_duration(step1_duration)}")
-    print(f"   - 训练 (Splatfacto):    {format_duration(step2_duration)}")
-    print(f"   - 导出与后处理:         {format_duration(step3_duration)}")
-    print(f"   - 总耗时:               {format_duration(total_duration)}")
-    
-    return str(target_dir / f"{cfg.project_name}.ply")
 
 # 程序入口
 if __name__ == "__main__":
-    ##
-    # 1. 定义基础参数
-    video_file = Path("test.mp4")
+    script_dir = Path(__file__).resolve().parent
+    video_file = script_dir / "test.mp4" 
     if len(sys.argv) > 1: video_file = Path(sys.argv[1])
     
-    # 2. 【关键】实例化配置对象
+    if not video_file.exists():
+        print(f"❌ 找不到视频: {video_file}")
+        sys.exit(1)
+
+    # 实例化配置
     cfg = PipelineConfig(
-        project_name="scene_ai_test_v2",
+        project_name="glomap_test_v1", # 改个名字
         video_path=video_file,
-        max_images=100, # 我可以在这里灵活修改参数，不用改代码
+        max_images=100,
         enable_ai=True
     )
     
-    # 3. 传入 Pipeline
-    run_pipeline(cfg) # 注意：这里入参变了，后面会讲
-
-
-
-
-
-
-    if video_file.exists():
-        run_pipeline(video_file, "scene_ai_test")
-    else:
-        print(f"❌ 找不到视频: {video_file}")
+    # 运行流水线
+    run_pipeline(cfg)

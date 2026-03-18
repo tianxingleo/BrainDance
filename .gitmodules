@@ -1,0 +1,21 @@
+[submodule "ai_engine/3dgs/src/libs/SuGaR"]
+	path = ai_engine/3dgs/src/libs/SuGaR
+	url = https://github.com/tianxingleo/SuGaR.git
+[submodule "ai_engine/3dgs/src/libs/2d-gaussian-splatting"]
+	path = ai_engine/3dgs/src/libs/2d-gaussian-splatting
+	url = https://github.com/tianxingleo/2d-gaussian-splatting.git
+[submodule "ai_engine/3dgs/src/libs/ml-sharp"]
+	path = ai_engine/3dgs/src/libs/ml-sharp
+	url = https://github.com/tianxingleo/ml-sharp.git
+[submodule "ai_engine/3dgs/src/libs/sam-3d-objects"]
+	path = ai_engine/3dgs/src/libs/sam-3d-objects
+	url = https://github.com/tianxingleo/sam-3d-objects.git
+[submodule "ai_engine/3dgs/src/libs/Depth-Anything-3"]
+	path = ai_engine/3dgs/src/libs/Depth-Anything-3
+	url = https://github.com/tianxingleo/Depth-Anything-3.git
+[submodule "ai_engine/3dgs/src/libs/Sparse2DGS"]
+	path = ai_engine/3dgs/src/libs/Sparse2DGS
+	url = https://github.com/tianxingleo/Sparse2DGS.git
+[submodule "ai_engine/3dgs/src/libs/nerfstudio"]
+	path = ai_engine/3dgs/src/libs/nerfstudio
+	url = https://github.com/tianxingleo/nerfstudio.git
