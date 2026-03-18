@@ -24,8 +24,8 @@ const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
-const DRAG_ROTATE_SENSITIVITY = 0.05;
-const DRAG_PAN_SENSITIVITY = 0.0035;
+const DRAG_ROTATE_SENSITIVITY = 0.065;
+const DRAG_PAN_SENSITIVITY = 0.0022;
 const WHEEL_ZOOM_STEP = 0.08;
 const PINCH_ZOOM_STEP = 1.0;
 

@@ -72,9 +72,14 @@ class _RecallPageState extends State<RecallPage> {
   int _modelDownloadedBytes = 0;
   int? _modelDownloadTotalBytes;
   final Map<String, GlobalKey> _modelCardKeys = {};
+  final Map<String, _RecallSearchCacheEntry> _searchCache = {};
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
+  bool _isTabActive = true;
+  bool _shouldRefreshProcessingOnResume = false;
+  int _searchRequestId = 0;
+  String? _lastSearchKey;
 
   @override
   void initState() {
@@ -94,6 +99,20 @@ class _RecallPageState extends State<RecallPage> {
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isTabActive = TickerMode.valuesOf(context).enabled;
+    if (_isTabActive == isTabActive) {
+      return;
+    }
+    _isTabActive = isTabActive;
+    if (_isTabActive && _shouldRefreshProcessingOnResume) {
+      _shouldRefreshProcessingOnResume = false;
+      unawaited(_fetchProcessingTasks());
+    }
   }
 
   void _bootstrapPage() {
@@ -598,6 +617,11 @@ $userQuestion
 
   /// 处理 Realtime 变化
   void _handleRealtimeChange(PostgresChangePayload payload) {
+    if (!_isTabActive) {
+      _shouldRefreshProcessingOnResume = true;
+      return;
+    }
+
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
     final taskId = (newData['id'] ?? oldData['id'])?.toString();
@@ -732,6 +756,8 @@ $userQuestion
           _isLoading = false;
         });
       }
+      _searchCache.clear();
+      _lastSearchKey = null;
       await _syncLocalIndex(models);
     } catch (e) {
       final demoModels = [_buildDemoModel()];
@@ -746,6 +772,8 @@ $userQuestion
           context: context,
         );
       }
+      _searchCache.clear();
+      _lastSearchKey = null;
       await _syncLocalIndex(demoModels);
     }
   }
@@ -1158,7 +1186,9 @@ $userQuestion
   }
 
   Future<void> _searchModels(String query) async {
-    if (query.trim().isEmpty) {
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) {
+      _lastSearchKey = null;
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
@@ -1167,21 +1197,56 @@ $userQuestion
       return;
     }
 
+    final cacheKey = '${_searchMode.name}:$normalizedQuery';
+    final now = DateTime.now();
+    final cached = _searchCache[cacheKey];
+    if (cached != null && now.difference(cached.createdAt) < const Duration(minutes: 2)) {
+      _lastSearchKey = cacheKey;
+      if (!mounted) return;
+      setState(() {
+        _models = cached.results
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        _isLoading = false;
+      });
+      return;
+    }
+
+    if (_lastSearchKey == cacheKey && !_isLoading) {
+      return;
+    }
+
+    final requestId = ++_searchRequestId;
+    _lastSearchKey = cacheKey;
     setState(() {
       _isLoading = true;
     });
 
     try {
       final results = _searchMode == _RecallSearchMode.local
-          ? await _localRagIndex.search(query)
-          : await _searchModelsFromCloud(query);
-      if (!mounted) return;
+          ? await _localRagIndex.search(normalizedQuery)
+          : await _searchModelsFromCloud(normalizedQuery);
+      if (!mounted || requestId != _searchRequestId) return;
+      _searchCache[cacheKey] = _RecallSearchCacheEntry(
+        createdAt: now,
+        results: results.map((item) => Map<String, dynamic>.from(item)).toList(),
+      );
+      if (_searchCache.length > 24) {
+        final oldestKey = _searchCache.entries
+            .reduce((left, right) {
+              return left.value.createdAt.isBefore(right.value.createdAt)
+                  ? left
+                  : right;
+            })
+            .key;
+        _searchCache.remove(oldestKey);
+      }
       setState(() {
         _models = results;
         _isLoading = false;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _isLoading = false;
         });
@@ -1997,6 +2062,16 @@ $userQuestion
       coverUrl: preview,
     );
   }
+}
+
+class _RecallSearchCacheEntry {
+  const _RecallSearchCacheEntry({
+    required this.createdAt,
+    required this.results,
+  });
+
+  final DateTime createdAt;
+  final List<Map<String, dynamic>> results;
 }
 
 class _DetailRow extends StatelessWidget {

@@ -170,6 +170,9 @@ class RecallModelGrid extends StatelessWidget {
                                         Image.network(
                                           imageUrl,
                                           fit: BoxFit.cover,
+                                          cacheWidth: 280,
+                                          cacheHeight: 240,
+                                          filterQuality: FilterQuality.low,
                                           loadingBuilder:
                                               (
                                                 context,
@@ -615,6 +618,9 @@ class RecallModelTile extends StatelessWidget {
                       ? Image.network(
                           model['preview_img_path'],
                           fit: BoxFit.cover,
+                          cacheWidth: 720,
+                          cacheHeight: 720,
+                          filterQuality: FilterQuality.low,
                           errorBuilder: (context, error, stackTrace) =>
                               RecallModelMockCover(
                                 isDark: isDark,
