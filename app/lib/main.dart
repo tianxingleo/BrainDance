@@ -402,8 +402,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
   int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
 
   late final AnimationController _animController;
-  late final CurvedAnimation _curveIn;
-  late final CurvedAnimation _curveOut;
   bool _isAnimating = false;
 
   /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
@@ -426,20 +424,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
           }
         }
       });
-    _curveIn = CurvedAnimation(
-      parent: _animController,
-      curve: Curves.easeOutCubic,
-    );
-    _curveOut = CurvedAnimation(
-      parent: _animController,
-      curve: Curves.easeInCubic,
-    );
   }
 
   @override
   void dispose() {
-    _curveIn.dispose();
-    _curveOut.dispose();
     _animController.dispose();
     super.dispose();
   }
@@ -500,35 +488,58 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // ── 离场页面（动画期间可见，结束后被 IndexedStack 隐藏） ──
-                  if (_isAnimating && _previousIndex != pageIndex)
-                    _buildSlidingPage(
-                      index: _previousIndex,
-                      beginOffset: Offset.zero,
-                      endOffset: Offset(-0.15 * _slideDirection, 0),
-                      curve: _curveOut,
-                      fadeOut: true,
-                    ),
-                  // ── 入场页面 ──
-                  if (_isAnimating)
-                    _buildSlidingPage(
-                      index: pageIndex,
-                      beginOffset: Offset(0.15 * _slideDirection, 0),
-                      endOffset: Offset.zero,
-                      curve: _curveIn,
-                      fadeOut: false,
-                    )
-                  else
-                    // ── 静止态：用 IndexedStack 保留所有已访问页面的 State ──
-                    IndexedStack(
-                      index: pageIndex,
-                      children: List.generate(_pageCount, (i) {
-                        if (!_builtPages.contains(i)) {
-                          return const SizedBox.shrink();
+                  // ── 5 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  ...List.generate(_pageCount, (i) {
+                    if (!_builtPages.contains(i)) {
+                      // 占位：保持索引稳定，类型始终是 SizedBox
+                      return const SizedBox.shrink();
+                    }
+                    final isActive = i == pageIndex;
+                    final isLeaving = _isAnimating &&
+                        i == _previousIndex &&
+                        i != pageIndex;
+
+                    // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
+                    return AnimatedBuilder(
+                      animation: _animController,
+                      builder: (context, child) {
+                        Offset translation = Offset.zero;
+                        double opacity = isActive ? 1.0 : 0.0;
+
+                        if (_isAnimating && isActive) {
+                          // 入场：从侧面滑入 + 淡入
+                          final t = Curves.easeOutCubic
+                              .transform(_animController.value);
+                          translation = Offset(
+                            0.15 * _slideDirection * (1.0 - t),
+                            0,
+                          );
+                          opacity = t;
+                        } else if (isLeaving) {
+                          // 离场：向反方向滑出 + 淡出
+                          final t = Curves.easeInCubic
+                              .transform(_animController.value);
+                          translation = Offset(
+                            -0.15 * _slideDirection * t,
+                            0,
+                          );
+                          opacity = 1.0 - t;
                         }
-                        return _ensurePage(i);
-                      }),
-                    ),
+
+                        return IgnorePointer(
+                          ignoring: !isActive,
+                          child: FractionalTranslation(
+                            translation: translation,
+                            child: Opacity(
+                              opacity: opacity.clamp(0.0, 1.0),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: _ensurePage(i),
+                    );
+                  }),
                   if (!isRecording)
                     FloatingNavBar(
                       currentIndex: pageIndex,
@@ -559,35 +570,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
                 ],
               ),
       ),
-    );
-  }
-
-  /// 构建带滑动 + 淡入/淡出动画的页面层
-  Widget _buildSlidingPage({
-    required int index,
-    required Offset beginOffset,
-    required Offset endOffset,
-    required CurvedAnimation curve,
-    required bool fadeOut,
-  }) {
-    final position = Tween<Offset>(begin: beginOffset, end: endOffset)
-        .animate(curve);
-    final opacity = fadeOut
-        ? Tween<double>(begin: 1.0, end: 0.0).animate(curve)
-        : Tween<double>(begin: 0.0, end: 1.0).animate(curve);
-
-    return AnimatedBuilder(
-      animation: _animController,
-      builder: (context, child) {
-        return FractionalTranslation(
-          translation: position.value,
-          child: Opacity(
-            opacity: opacity.value.clamp(0.0, 1.0),
-            child: child,
-          ),
-        );
-      },
-      child: _ensurePage(index),
     );
   }
 }
