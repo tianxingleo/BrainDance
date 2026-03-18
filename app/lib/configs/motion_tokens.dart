@@ -56,13 +56,13 @@ class BDDesign {
 
   /// 极度克制的阴影
   static final BoxShadow shadowLight = BoxShadow(
-    color: const Color(0xFF000000).withOpacity(0.03),
+    color: const Color(0xFF000000).withAlpha(8),
     blurRadius: 16.0,
     offset: const Offset(0, 4),
   );
 
   static final BoxShadow shadowElevated = BoxShadow(
-    color: const Color(0xFF000000).withOpacity(0.06),
+    color: const Color(0xFF000000).withAlpha(15),
     blurRadius: 24.0,
     offset: const Offset(0, 8),
   );

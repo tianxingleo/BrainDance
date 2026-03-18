@@ -10,10 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
-import 'pages/record.dart';
-import 'pages/generate.dart';
+import 'pages/time_peeling.dart';
 import 'pages/community.dart';
-import 'pages/settings.dart';
+import 'pages/create_guide.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -387,8 +386,6 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
 //主屏幕
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
-  static const double unselectedSize = 30;
-  static const double selectedSize = 34;
 
   @override
   ConsumerState<MainScreen> createState() => _MainScreenState();
@@ -396,7 +393,7 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
-  static const int _pageCount = 5;
+  static const int _pageCount = 4;
 
   int _previousIndex = 0;
   int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
@@ -411,19 +408,20 @@ class _MainScreenState extends ConsumerState<MainScreen>
   @override
   void initState() {
     super.initState();
-    _animController = AnimationController(
-      duration: const Duration(milliseconds: 360),
-      vsync: this,
-    )..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          if (mounted) {
-            setState(() {
-              _isAnimating = false;
-              _previousIndex = ref.read(pageIndexProvider);
-            });
+    _animController =
+        AnimationController(
+          duration: const Duration(milliseconds: 360),
+          vsync: this,
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            if (mounted) {
+              setState(() {
+                _isAnimating = false;
+                _previousIndex = ref.read(pageIndexProvider);
+              });
+            }
           }
-        }
-      });
+        });
   }
 
   @override
@@ -437,17 +435,15 @@ class _MainScreenState extends ConsumerState<MainScreen>
     late final Widget page;
     switch (index) {
       case 0:
-        page = RecallPage();
+        page = const RecallPage();
       case 1:
-        page = RecordPage();
+        page = const TimePeelingPage();
       case 2:
-        page = GeneratePage();
-      case 3:
         page = const CommunityPage();
-      case 4:
-        page = SettingsPage(homeRef: ref);
+      case 3:
+        page = const CreateGuidePage();
       default:
-        page = RecallPage();
+        page = const RecallPage();
     }
     _cachedPages[index] = page;
     return page;
@@ -483,21 +479,19 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return Scaffold(
       extendBody: true,
       body: BDPageBackdrop(
-        darken: pageIndex == 1,
         child: isLoading
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // ── 5 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  // ── 4 个页面槽位，位置永远固定，保证 State 不被重建 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
                       // 占位：保持索引稳定，类型始终是 SizedBox
                       return const SizedBox.shrink();
                     }
                     final isActive = i == pageIndex;
-                    final isLeaving = _isAnimating &&
-                        i == _previousIndex &&
-                        i != pageIndex;
+                    final isLeaving =
+                        _isAnimating && i == _previousIndex && i != pageIndex;
 
                     // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
                     return AnimatedBuilder(
@@ -508,8 +502,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
                         if (_isAnimating && isActive) {
                           // 入场：从侧面滑入 + 淡入
-                          final t = Curves.easeOutCubic
-                              .transform(_animController.value);
+                          final t = Curves.easeOutCubic.transform(
+                            _animController.value,
+                          );
                           translation = Offset(
                             0.15 * _slideDirection * (1.0 - t),
                             0,
@@ -517,12 +512,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           opacity = t;
                         } else if (isLeaving) {
                           // 离场：向反方向滑出 + 淡出
-                          final t = Curves.easeInCubic
-                              .transform(_animController.value);
-                          translation = Offset(
-                            -0.15 * _slideDirection * t,
-                            0,
+                          final t = Curves.easeInCubic.transform(
+                            _animController.value,
                           );
+                          translation = Offset(-0.15 * _slideDirection * t, 0);
                           opacity = 1.0 - t;
                         }
 
@@ -550,20 +543,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
-                          icon: Icons.camera_rounded,
-                          label: textLocalize("record"),
-                        ),
-                        NavIslandItem(
-                          icon: Icons.auto_awesome_rounded,
-                          label: textLocalize("generate"),
+                          icon: Icons.layers_rounded,
+                          label: textLocalize("timepeeling"),
                         ),
                         NavIslandItem(
                           icon: Icons.public_rounded,
                           label: textLocalize("community"),
                         ),
                         NavIslandItem(
-                          icon: Icons.settings_rounded,
-                          label: textLocalize("settings"),
+                          icon: Icons.add_rounded,
+                          label: textLocalize("create"),
+                          isLarge: true,
                         ),
                       ],
                     ),

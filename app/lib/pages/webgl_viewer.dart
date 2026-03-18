@@ -162,18 +162,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         String contentType = 'text/plain';
         if (path.endsWith('.html')) {
           contentType = 'text/html; charset=utf-8';
-        } else if (path.endsWith('.js'))
+        } else if (path.endsWith('.js')) {
           contentType = 'application/javascript; charset=utf-8';
-        else if (path.endsWith('.css'))
+        } else if (path.endsWith('.css')) {
           contentType = 'text/css; charset=utf-8';
-        else if (path.endsWith('.png'))
+        } else if (path.endsWith('.png')) {
           contentType = 'image/png';
-        else if (path.endsWith('.ico'))
+        } else if (path.endsWith('.ico')) {
           contentType = 'image/x-icon';
-        else if (path.endsWith('.ply') ||
+        } else if (path.endsWith('.ply') ||
             path.endsWith('.splat') ||
-            path.endsWith('.ksplat'))
+            path.endsWith('.ksplat')) {
           contentType = 'application/octet-stream';
+        }
 
         request.response.headers.contentType = ContentType.parse(contentType);
         // 允许跨域
@@ -460,7 +461,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   @override
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
-    final brightness = MediaQuery.of(context).platformBrightness;
     final isDark = AppConfig.isNightMode;
     final textColor = isDark
         ? const Color(0xFFFFFFFF)

@@ -499,7 +499,8 @@ textarea {
 }
 
 .panel-grid--charts,
-.panel-grid--resources {
+.panel-grid--resources,
+.panel-grid--users {
   grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
 }
 
@@ -593,6 +594,10 @@ textarea {
   margin-bottom: 18px;
 }
 
+.db-metrics--users {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .metric-value.ok,
 .tone-good .overview-value,
 .tone-good .alert-value,
@@ -615,6 +620,31 @@ textarea {
 
 .db-chart {
   height: 300px;
+}
+
+.user-summary-block__head {
+  margin-bottom: 10px;
+}
+
+.user-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--ink-2);
+}
+
+.user-chip strong {
+  color: var(--ink-1);
 }
 
 .mb-16 {
@@ -717,7 +747,8 @@ textarea {
 
   .panel-grid--charts,
   .panel-grid--resources,
-  .panel-grid--operations {
+  .panel-grid--operations,
+  .panel-grid--users {
     grid-template-columns: 1fr;
   }
 

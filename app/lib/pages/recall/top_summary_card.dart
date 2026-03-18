@@ -9,18 +9,20 @@ class TopSummaryCard extends StatelessWidget {
   final bool isDark;
 
   const TopSummaryCard({
-    Key? key,
+    super.key,
     required this.recordCount,
     required this.completedCount,
     required this.onTaskTap,
     required this.isDark,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     final bgColor = isDark ? const Color(0xFF18181C) : BDDesign.colorPaperWhite;
     final textColor = isDark ? Colors.white : BDDesign.colorInkBlack;
-    final subTextColor = isDark ? Colors.white70 : BDDesign.colorInkBlack.withOpacity(0.6);
+    final subTextColor = isDark
+        ? Colors.white70
+        : BDDesign.colorInkBlack.withAlpha(153);
 
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0.0, end: 1.0),
@@ -29,10 +31,7 @@ class TopSummaryCard extends StatelessWidget {
       builder: (context, value, child) {
         return Transform.translate(
           offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(
-            opacity: value,
-            child: child,
-          ),
+          child: Opacity(opacity: value, child: child),
         );
       },
       child: Container(
@@ -57,14 +56,18 @@ class TopSummaryCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFFA0AAB5) : BDDesign.colorMutedBlue,
+                    color: isDark
+                        ? const Color(0xFFA0AAB5)
+                        : BDDesign.colorMutedBlue,
                   ),
                 ),
                 IconButton(
                   onPressed: onTaskTap,
                   icon: Icon(
                     Icons.task_alt_rounded,
-                    color: isDark ? const Color(0xFFA0AAB5) : BDDesign.colorMutedBlue,
+                    color: isDark
+                        ? const Color(0xFFA0AAB5)
+                        : BDDesign.colorMutedBlue,
                     size: 20,
                   ),
                   tooltip: textLocalize("recall_task_list"),
@@ -77,9 +80,19 @@ class TopSummaryCard extends StatelessWidget {
             const SizedBox(height: 16),
             Row(
               children: [
-                _buildStatItem(textLocalize("recall_recent_added"), recordCount.toString(), textColor, subTextColor),
+                _buildStatItem(
+                  textLocalize("recall_recent_added"),
+                  recordCount.toString(),
+                  textColor,
+                  subTextColor,
+                ),
                 const SizedBox(width: 48),
-                _buildStatItem(textLocalize("recall_ready_spaces"), completedCount.toString(), textColor, subTextColor),
+                _buildStatItem(
+                  textLocalize("recall_ready_spaces"),
+                  completedCount.toString(),
+                  textColor,
+                  subTextColor,
+                ),
               ],
             ),
           ],
@@ -88,7 +101,12 @@ class TopSummaryCard extends StatelessWidget {
     );
   }
 
-  Widget _buildStatItem(String label, String value, Color textColor, Color subTextColor) {
+  Widget _buildStatItem(
+    String label,
+    String value,
+    Color textColor,
+    Color subTextColor,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -102,13 +120,7 @@ class TopSummaryCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: subTextColor,
-          ),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, color: subTextColor)),
       ],
     );
   }
