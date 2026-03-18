@@ -526,6 +526,11 @@ extension _GenerateSubmissionX on _GeneratePageState {
         '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$storagePath';
     final dio = Dio();
 
+    _refresh(() {
+      _totalFileSize = fileSize;
+      _uploadedBytes = 0;
+    });
+
     await dio.post(
       url,
       data: file.openRead(),
@@ -540,6 +545,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       onSendProgress: (count, total) {
         if (mounted) {
           _refresh(() {
+            _uploadedBytes = count;
             _uploadProgress = count / fileSize;
           });
         }

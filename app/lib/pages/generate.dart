@@ -51,6 +51,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   bool _isUploading = false;
   double _uploadProgress = 0.0;
+  int _uploadedBytes = 0;
+  int _totalFileSize = 0;
   String? _generatedImageUrl;
   bool _isGenerating = false;
 
@@ -66,6 +68,15 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   void _refresh(VoidCallback fn) {
     setState(fn);
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   @override
@@ -427,6 +438,69 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_isUploading)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: BDPanelCard(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.cloud_upload_outlined,
+                                  size: 14,
+                                  color: isDark
+                                      ? const Color(0xFFFFB74D)
+                                      : const Color(0xFFF57C00),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? const Color(0xFFFFB74D)
+                                        : const Color(0xFFF57C00),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.58)
+                                        : BDDesign.colorMutedBlue,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(3),
+                              child: LinearProgressIndicator(
+                                value: _uploadProgress,
+                                minHeight: 5,
+                                backgroundColor: isDark
+                                    ? Colors.white.withAlpha(20)
+                                    : Colors.black.withAlpha(15),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  isDark
+                                      ? const Color(0xFFFFB74D)
+                                      : const Color(0xFFF57C00),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   Expanded(child: Column(children: tabContents)),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
