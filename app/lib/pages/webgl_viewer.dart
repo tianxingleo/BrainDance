@@ -192,6 +192,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } else {
           // 使用临时文件下载，完成后再重命名，避免部分下载被当作完整文件
           final tmpFile = File('${localFile.path}.tmp');
+
+          // 断点续传：检查已下载的临时文件大小
+          int existingBytes = 0;
+          if (await tmpFile.exists()) {
+            existingBytes = await tmpFile.length();
+            debugPrint('Resuming download from byte $existingBytes');
+          }
+
           debugPrint('Starting download from: $originalUrl');
           setState(() {
             _isDownloading = true;
@@ -203,9 +211,21 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             ..badCertificateCallback = (cert, host, port) => true;
           final request = await client.getUrl(uri);
           request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          // 断点续传：设置 Range 头从已下载位置继续
+          if (existingBytes > 0) {
+            request.headers.set('Range', 'bytes=$existingBytes-');
+          }
           final response = await request.close();
 
-          if (response.statusCode != 200) {
+          // 206 Partial Content = 服务器支持断点续传
+          // 200 OK = 服务器不支持 Range，需从头下载
+          if (response.statusCode == 200 && existingBytes > 0) {
+            // 服务器不支持续传，删除旧临时文件从头开始
+            debugPrint('Server does not support Range, restarting download');
+            if (await tmpFile.exists()) await tmpFile.delete();
+            existingBytes = 0;
+          } else if (response.statusCode != 200 &&
+              response.statusCode != 206) {
             String errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -213,15 +233,30 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             throw Exception('HTTP Error ${response.statusCode}: $errorBody');
           }
 
-          final totalBytes = response.contentLength;
-          int receivedBytes = 0;
+          // 计算总大小：续传时 contentLength 是剩余部分大小
+          final contentLength = response.contentLength;
+          final totalBytes = contentLength > 0
+              ? contentLength + existingBytes
+              : -1;
+          int receivedBytes = existingBytes;
 
-          final sink = tmpFile.openWrite();
+          // 续传时追加写入，否则覆盖写入
+          final sink = tmpFile.openWrite(
+            mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+          );
+
+          // 如果有已下载的部分，立即更新进度条
+          if (existingBytes > 0 && totalBytes > 0 && mounted) {
+            setState(() {
+              _downloadProgress = receivedBytes / totalBytes;
+            });
+          }
+
           try {
             await for (final chunk in response) {
               if (_downloadCancelled) {
                 await sink.close();
-                if (await tmpFile.exists()) await tmpFile.delete();
+                // 断点续传：取消时保留临时文件，下次可继续
                 return;
               }
               sink.add(chunk);
@@ -246,8 +281,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             }
           } catch (e) {
             await sink.close();
-            // 下载失败，清理临时文件
-            if (await tmpFile.exists()) await tmpFile.delete();
+            // 断点续传：下载失败时保留临时文件，下次可继续
+            debugPrint('Download interrupted, tmp file preserved for resume');
             rethrow;
           }
         }
