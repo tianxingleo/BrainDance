@@ -6,6 +6,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
+import 'model_card.dart';
 
 class RecallModelGrid extends StatelessWidget {
   final TDThemeData theme;
@@ -18,6 +19,7 @@ class RecallModelGrid extends StatelessWidget {
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final void Function(Map<String, dynamic>) onShowModelActions;
+  final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
     super.key,
@@ -31,6 +33,7 @@ class RecallModelGrid extends StatelessWidget {
     required this.isSameModel,
     required this.onNavigateToViewer,
     required this.onShowModelActions,
+    required this.toPublicUrl,
   });
 
   @override
@@ -51,8 +54,11 @@ class RecallModelGrid extends StatelessWidget {
         itemCount: models.length,
         itemBuilder: (context, index) {
           final model = models[index];
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
+          final sceneId =
+              model['display_name']?.toString() ??
+              model['scene_id'] ??
+              'Unknown Scene';
+          final desc = model['description'] ?? textLocalize("recall_no_desc");
           final similarity = model['similarity'] as double?;
           final userId = model['user_id'] ?? '';
           final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
@@ -180,10 +186,13 @@ class RecallModelGrid extends StatelessWidget {
                                             return Center(
                                               child: CircularProgressIndicator(
                                                 value:
-                                                    loadingProgress.expectedTotalBytes !=
+                                                    loadingProgress
+                                                            .expectedTotalBytes !=
                                                         null
-                                                    ? loadingProgress.cumulativeBytesLoaded /
-                                                          loadingProgress.expectedTotalBytes!
+                                                    ? loadingProgress
+                                                              .cumulativeBytesLoaded /
+                                                          loadingProgress
+                                                              .expectedTotalBytes!
                                                     : null,
                                               ),
                                             );
@@ -289,6 +298,7 @@ class RecallModelGrid extends StatelessWidget {
                   darkInput: darkInput,
                   textColor: textColor,
                   hintTextColor: hintTextColor,
+                  toPublicUrl: toPublicUrl,
                 ),
               ),
             ),
@@ -309,6 +319,9 @@ class RecallModelActionOverlay extends StatelessWidget {
   final VoidCallback onDismiss;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
+  final Future<void> Function(Map<String, dynamic>) onRenameModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
+  final String Function(String) toPublicUrl;
 
   const RecallModelActionOverlay({
     super.key,
@@ -321,6 +334,9 @@ class RecallModelActionOverlay extends StatelessWidget {
     required this.onDismiss,
     required this.onNavigateToViewer,
     required this.onShareModelToCommunity,
+    required this.onRenameModel,
+    required this.onDeleteLocalModel,
+    required this.toPublicUrl,
   });
 
   @override
@@ -328,8 +344,8 @@ class RecallModelActionOverlay extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     const horizontalGap = 12.0;
     const actionWidth = 112.0;
-    final actionLeft = (rect.right + horizontalGap + actionWidth <=
-            screenWidth - 16)
+    final actionLeft =
+        (rect.right + horizontalGap + actionWidth <= screenWidth - 16)
         ? rect.right + horizontalGap
         : rect.left + rect.width - actionWidth;
 
@@ -395,6 +411,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                         ? const Color(0xFF888888)
                         : theme.fontGyColor3,
                     elevated: true,
+                    toPublicUrl: toPublicUrl,
                   ),
                 ),
               ),
@@ -493,6 +510,7 @@ class RecallModelTile extends StatelessWidget {
   final Color textColor;
   final Color hintTextColor;
   final bool elevated;
+  final String Function(String) toPublicUrl;
 
   const RecallModelTile({
     super.key,
@@ -504,13 +522,21 @@ class RecallModelTile extends StatelessWidget {
     required this.textColor,
     required this.hintTextColor,
     this.elevated = false,
+    required this.toPublicUrl,
   });
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
+    final plyPath = model['ply_path'] as String? ?? '';
+    final modelUrl = plyPath.isNotEmpty
+        ? toPublicUrl(plyPath)
+        : './models/scene_auto_sync_raw.ply';
 
     return Container(
       decoration: BoxDecoration(
@@ -605,6 +631,12 @@ class RecallModelTile extends StatelessWidget {
                   font: theme.fontBodySmall,
                   textColor: hintTextColor,
                   maxLines: 2,
+                ),
+                const SizedBox(height: 6),
+                ModelDownloadBadge(
+                  modelUrl: modelUrl,
+                  isDark: isDark,
+                  theme: theme,
                 ),
               ],
             ),

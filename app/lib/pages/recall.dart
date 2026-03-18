@@ -1132,6 +1132,7 @@ $userQuestion
                         modelCardKeyFor: _modelCardKeyFor,
                         isSameModel: _isSameModel,
                         onNavigateToViewer: _navigateToViewer,
+                        toPublicUrl: _toPublicUrl,
                         onShowModelActions: (model) {
                           unawaited(_showModelActions(model));
                         },
@@ -1149,9 +1150,12 @@ $userQuestion
               darkInput: darkInput,
               model: _activeModelAction!,
               rect: _activeModelActionRect!,
+              toPublicUrl: _toPublicUrl,
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
               onShareModelToCommunity: _shareModelToCommunity,
+              onRenameModel: _renameModel,
+              onDeleteLocalModel: _deleteLocalModel,
             ),
         ],
       ),
