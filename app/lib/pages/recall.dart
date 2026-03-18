@@ -11,6 +11,7 @@ import 'community.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
 import 'recall/top_summary_card.dart';
+import 'recall/model_card.dart';
 
 enum _RecallSearchMode { local, cloud }
 
@@ -1125,6 +1126,10 @@ class _RecallPageState extends State<RecallPage> {
           final similarity = model['similarity'] as double?;
           final userId = model['user_id'] ?? '';
           final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
+          final searchPlyPath = model['ply_path'] as String? ?? '';
+          final searchModelUrl = searchPlyPath.isNotEmpty
+              ? _toPublicUrl(searchPlyPath)
+              : './models/scene_auto_sync_raw.ply';
 
           return TweenAnimationBuilder<double>(
             tween: Tween(begin: 0.0, end: 1.0),
@@ -1173,7 +1178,13 @@ class _RecallPageState extends State<RecallPage> {
                                   maxLines: 1,
                                   textColor: textColor,
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 5),
+                                ModelDownloadBadge(
+                                  modelUrl: searchModelUrl,
+                                  isDark: isDark,
+                                  theme: theme,
+                                ),
+                                const SizedBox(height: 5),
                                 TDText(
                                   desc,
                                   font: theme.fontBodySmall,
@@ -1328,7 +1339,7 @@ class _RecallPageState extends State<RecallPage> {
         crossAxisCount: 2,
         crossAxisSpacing: 16.0,
         mainAxisSpacing: 16.0,
-        childAspectRatio: 0.85,
+        childAspectRatio: 0.72,
       ),
       itemCount: _models.length,
       itemBuilder: (context, index) {
@@ -1336,6 +1347,10 @@ class _RecallPageState extends State<RecallPage> {
         final sceneId = model['scene_id'] ?? 'Unknown Scene';
         final desc = model['description'] ?? textLocalize("recall_no_desc");
         final similarity = model['similarity'] as double?;
+        final plyPath = model['ply_path'] as String? ?? '';
+        final modelUrl = plyPath.isNotEmpty
+            ? _toPublicUrl(plyPath)
+            : './models/scene_auto_sync_raw.ply';
 
         return TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
@@ -1446,7 +1461,13 @@ class _RecallPageState extends State<RecallPage> {
                           maxLines: 1,
                           textColor: textColor,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
+                        ModelDownloadBadge(
+                          modelUrl: modelUrl,
+                          isDark: isDark,
+                          theme: theme,
+                        ),
+                        const SizedBox(height: 5),
                         TDText(
                           desc,
                           font: theme.fontBodySmall,

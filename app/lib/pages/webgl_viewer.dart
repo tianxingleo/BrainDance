@@ -240,6 +240,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               : -1;
           int receivedBytes = existingBytes;
 
+          // 保存总大小到 .meta 文件，供主页模型卡片读取下载进度
+          final metaFile = File('${localFile.path}.meta');
+          if (totalBytes > 0) {
+            await metaFile.writeAsString('$totalBytes');
+          }
+
           // 续传时追加写入，否则覆盖写入
           final sink = tmpFile.openWrite(
             mode: existingBytes > 0 ? FileMode.append : FileMode.write,
@@ -269,8 +275,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             }
             await sink.close();
 
-            // 下载完成，将临时文件重命名为正式文件
+            // 下载完成，将临时文件重命名为正式文件，并清理 meta 文件
             await tmpFile.rename(localFile.path);
+            if (await metaFile.exists()) await metaFile.delete();
             debugPrint('Download complete: ${localFile.path}');
             _localModelPath = localFile.path;
             if (mounted) {
