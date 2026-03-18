@@ -33,6 +33,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final TextEditingController nameController = TextEditingController();
   bool _isUploading = false;
   double _uploadProgress = 0.0;
+  int _uploadedBytes = 0;
+  int _totalFileSize = 0;
 
   static final Random _rdg = Random();
 

@@ -88,23 +88,26 @@ class _RecallPageState extends State<RecallPage> {
       // 更新或添加 processing 任务
       final logsJson = newData['logs'] as List<dynamic>?;
       final allLogs = _parseAllLogMsgs(logsJson);
-
-      setState(() {
-        // 移除旧版本（如果存在）
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        // 添加更新后的任务
-        _processingTasks.add(Map<String, dynamic>.from(newData));
-        if (allLogs.isNotEmpty) {
-          _taskAllLogs[taskId] = allLogs;
-        }
-      });
+      if (mounted) {
+        setState(() {
+          // 移除旧版本（如果存在）
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          // 添加更新后的任务
+          _processingTasks.add(Map<String, dynamic>.from(newData));
+          if (allLogs.isNotEmpty) {
+            _taskAllLogs[taskId] = allLogs;
+          }
+        });
+      }
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
-      setState(() {
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        _taskAllLogs.remove(taskId);
-        _expandedTaskLogs.remove(taskId);
-      });
+      if (mounted) {
+        setState(() {
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          _taskAllLogs.remove(taskId);
+          _expandedTaskLogs.remove(taskId);
+        });
+      }
     }
   }
 
@@ -923,7 +926,9 @@ class _RecallPageState extends State<RecallPage> {
       return List<Map<String, dynamic>>.from(data['results'] ?? []);
     }
 
-    final errMsg = (data is Map) ? (data['error'] ?? textLocalize('recall_unknown_error')) : textLocalize('recall_server_error');
+    final errMsg = (data is Map)
+        ? (data['error'] ?? textLocalize('recall_unknown_error'))
+        : textLocalize('recall_server_error');
     throw Exception(errMsg);
   }
 
@@ -1156,7 +1161,10 @@ class _RecallPageState extends State<RecallPage> {
         itemCount: _models.length,
         itemBuilder: (context, index) {
           final model = _models[index];
-          final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
+          final sceneId =
+              model['display_name']?.toString() ??
+              model['scene_id'] ??
+              'Unknown Scene';
           final desc = model['description'] ?? textLocalize('recall_no_desc');
           final similarity = model['similarity'] as double?;
           final userId = model['user_id'] ?? '';
@@ -1379,7 +1387,10 @@ class _RecallPageState extends State<RecallPage> {
       itemCount: _models.length,
       itemBuilder: (context, index) {
         final model = _models[index];
-        final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
+        final sceneId =
+            model['display_name']?.toString() ??
+            model['scene_id'] ??
+            'Unknown Scene';
         final desc = model['description'] ?? textLocalize("recall_no_desc");
         final similarity = model['similarity'] as double?;
         final plyPath = model['ply_path'] as String? ?? '';
@@ -1563,7 +1574,10 @@ class _RecallPageState extends State<RecallPage> {
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId = model['display_name']?.toString() ?? model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
 
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
@@ -1633,8 +1647,9 @@ class _RecallPageState extends State<RecallPage> {
       }
       final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
       final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName =
-          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
       final dir = await getApplicationDocumentsDirectory();
 
       int totalBytes = 0;
@@ -1672,7 +1687,10 @@ class _RecallPageState extends State<RecallPage> {
         final hintColor = isDark
             ? Colors.white.withValues(alpha: 0.62)
             : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-        final sceneId = model['display_name']?.toString() ?? model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model');
+        final sceneId =
+            model['display_name']?.toString() ??
+            model['scene_id']?.toString() ??
+            textLocalize('recall_unnamed_model');
         final desc =
             model['description']?.toString() ?? textLocalize("recall_no_desc");
 
@@ -1712,8 +1730,12 @@ class _RecallPageState extends State<RecallPage> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.delete_outline_rounded),
-                    title: Text('${textLocalize('recall_delete_local')}$sizeLabel'),
-                    subtitle: Text(textLocalize('recall_delete_local_subtitle')),
+                    title: Text(
+                      '${textLocalize('recall_delete_local')}$sizeLabel',
+                    ),
+                    subtitle: Text(
+                      textLocalize('recall_delete_local_subtitle'),
+                    ),
                     onTap: () => Navigator.pop(context, 'delete_local'),
                   ),
                   ListTile(
@@ -1752,58 +1774,11 @@ class _RecallPageState extends State<RecallPage> {
     final sceneId = model['scene_id']?.toString();
     if (sceneId == null) return;
 
-    // 非法字符正则：禁止 / \ : * ? " < > |
-    final invalidChars = RegExp(r'[/\\:*?"<>|]');
-
     final currentName = model['display_name']?.toString() ?? sceneId;
-    final controller = TextEditingController(text: currentName);
     final newName = await showDialog<String>(
       context: context,
-      builder: (ctx) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              title: Text(textLocalize('recall_rename_model')),
-              content: TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: InputDecoration(
-                  hintText: textLocalize('recall_rename_hint'),
-                  errorText: errorText,
-                ),
-                onChanged: (value) {
-                  if (invalidChars.hasMatch(value)) {
-                    setDialogState(() {
-                      errorText = textLocalize('recall_rename_invalid');
-                    });
-                  } else {
-                    setDialogState(() {
-                      errorText = null;
-                    });
-                  }
-                },
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(textLocalize('gen_cancel')),
-                ),
-                TextButton(
-                  onPressed: () {
-                    final text = controller.text.trim();
-                    if (text.isEmpty || invalidChars.hasMatch(text)) return;
-                    Navigator.pop(ctx, text);
-                  },
-                  child: Text(textLocalize('gen_button')),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (_) => _RenameModelDialog(initialName: currentName),
     );
-    controller.dispose();
 
     if (newName == null || newName.isEmpty || !mounted) return;
 
@@ -1816,6 +1791,10 @@ class _RecallPageState extends State<RecallPage> {
 
       // 立即更新本地数据
       if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_rename_success'),
+          context: context,
+        );
         setState(() {
           for (final m in _allModels) {
             if (m['scene_id'] == sceneId) {
@@ -1828,11 +1807,13 @@ class _RecallPageState extends State<RecallPage> {
             }
           }
         });
-        TDToast.showText(textLocalize('recall_rename_success'), context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('recall_rename_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('recall_rename_fail')}: $e',
+          context: context,
+        );
       }
     }
   }
@@ -1841,7 +1822,10 @@ class _RecallPageState extends State<RecallPage> {
     final plyPath = model['ply_path'] as String? ?? '';
     if (plyPath.isEmpty) {
       if (mounted) {
-        TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+        TDToast.showText(
+          textLocalize('recall_delete_local_none'),
+          context: context,
+        );
       }
       return;
     }
@@ -1850,15 +1834,19 @@ class _RecallPageState extends State<RecallPage> {
       final modelUrl = _toPublicUrl(plyPath);
       if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
         if (mounted) {
-          TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
         }
         return;
       }
 
       final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
       final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName =
-          uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
       final dir = await getApplicationDocumentsDirectory();
 
       final localFile = File('${dir.path}/$sanitizedFileName');
@@ -1882,19 +1870,26 @@ class _RecallPageState extends State<RecallPage> {
       if (mounted) {
         if (deleted) {
           // 通知下载状态徽章重置为"未下载"
-          downloadEventBus.add(ModelDownloadEvent(
-            url: modelUrl,
-            progress: 0.0,
-            isDeleted: true,
-          ));
-          TDToast.showText(textLocalize('recall_delete_local_success'), context: context);
+          downloadEventBus.add(
+            ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
+          );
+          TDToast.showText(
+            textLocalize('recall_delete_local_success'),
+            context: context,
+          );
         } else {
-          TDToast.showText(textLocalize('recall_delete_local_none'), context: context);
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
         }
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('recall_delete_local_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('recall_delete_local_fail')}: $e',
+          context: context,
+        );
       }
     }
   }
@@ -1904,7 +1899,10 @@ class _RecallPageState extends State<RecallPage> {
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['display_name']?.toString() ?? model['scene_id']?.toString() ?? textLocalize('recall_unnamed_model'),
+      sceneId:
+          model['display_name']?.toString() ??
+          model['scene_id']?.toString() ??
+          textLocalize('recall_unnamed_model'),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
@@ -1949,6 +1947,70 @@ class _RecallMetric extends StatelessWidget {
                 accent ??
                 (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 独立的重命名对话框组件，避免 StatefulBuilder + showDialog 导致的
+/// `_dependents.isEmpty` 断言错误。
+class _RenameModelDialog extends StatefulWidget {
+  final String initialName;
+  const _RenameModelDialog({required this.initialName});
+
+  @override
+  State<_RenameModelDialog> createState() => _RenameModelDialogState();
+}
+
+class _RenameModelDialogState extends State<_RenameModelDialog> {
+  static final _invalidChars = RegExp(r'[/\\:*?"<>|]');
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(textLocalize('recall_rename_model')),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: textLocalize('recall_rename_hint'),
+          errorText: _errorText,
+        ),
+        onChanged: (value) {
+          setState(() {
+            _errorText = _invalidChars.hasMatch(value)
+                ? textLocalize('recall_rename_invalid')
+                : null;
+          });
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(textLocalize('gen_cancel')),
+        ),
+        TextButton(
+          onPressed: () {
+            final text = _controller.text.trim();
+            if (text.isEmpty || _invalidChars.hasMatch(text)) return;
+            Navigator.pop(context, text);
+          },
+          child: Text(textLocalize('gen_button')),
         ),
       ],
     );
