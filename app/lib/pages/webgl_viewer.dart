@@ -288,13 +288,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               if (_downloadCancelled) {
                 await sink.close();
                 // 断点续传：取消时保留临时文件，下次可继续
-                downloadEventBus.add(ModelDownloadEvent(
-                  url: originalUrl,
-                  progress: _downloadProgress,
-                  downloadedBytes: receivedBytes,
-                  totalBytes: totalBytes,
-                  isCancelled: true,
-                ));
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: _downloadProgress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                    isCancelled: true,
+                  ),
+                );
                 return;
               }
               sink.add(chunk);
@@ -305,12 +307,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                   _downloadProgress = progress;
                   _downloadedBytes = receivedBytes;
                 });
-                downloadEventBus.add(ModelDownloadEvent(
-                  url: originalUrl,
-                  progress: progress,
-                  downloadedBytes: receivedBytes,
-                  totalBytes: totalBytes,
-                ));
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: progress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                  ),
+                );
               }
             }
             await sink.close();
@@ -320,13 +324,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             if (await metaFile.exists()) await metaFile.delete();
             debugPrint('Download complete: ${localFile.path}');
             _localModelPath = localFile.path;
-            downloadEventBus.add(ModelDownloadEvent(
-              url: originalUrl,
-              progress: 1.0,
-              isComplete: true,
-              downloadedBytes: receivedBytes,
-              totalBytes: totalBytes,
-            ));
+            downloadEventBus.add(
+              ModelDownloadEvent(
+                url: originalUrl,
+                progress: 1.0,
+                isComplete: true,
+                downloadedBytes: receivedBytes,
+                totalBytes: totalBytes,
+              ),
+            );
             if (mounted) {
               setState(() {
                 _isDownloading = false;
@@ -575,7 +581,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                           SizedBox(
                             width: 140,
                             child: OutlinedButton.icon(
-                              onPressed: _stopDownload,
+                              onPressed: () {
+                                _stopDownload();
+                                Navigator.of(context).pop();
+                              },
                               icon: const Icon(Icons.stop_rounded, size: 18),
                               label: Text(textLocalize('viewer_stop_download')),
                               style: OutlinedButton.styleFrom(

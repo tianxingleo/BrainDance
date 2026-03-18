@@ -86,6 +86,11 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
       final dio = Dio();
 
+      setState(() {
+        _totalFileSize = fileSize;
+        _uploadedBytes = 0;
+      });
+
       await dio.post(
         url,
         data: file.openRead(),
@@ -101,6 +106,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         onSendProgress: (count, total) {
           if (mounted) {
             setState(() {
+              _uploadedBytes = count;
               _uploadProgress = count / fileSize;
             });
           }
