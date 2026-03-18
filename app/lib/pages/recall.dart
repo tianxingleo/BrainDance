@@ -13,6 +13,7 @@ import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
+import 'settings.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
 import 'recall/top_summary_card.dart';
@@ -817,6 +818,23 @@ $userQuestion
                             _isLoading = true;
                           });
                           _fetchModels();
+                        },
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.settings_rounded,
+                          color: isDark
+                              ? BDDesign.colorPaperWhite
+                              : BDDesign.colorInkBlack,
+                        ),
+                        tooltip: textLocalize("settings"),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SettingsPage(),
+                            ),
+                          );
                         },
                       ),
                     ],
