@@ -10,8 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
-import 'pages/time_peeling.dart';
-import 'pages/community.dart';
+import 'pages/settings.dart';
 import 'pages/create_guide.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
@@ -30,6 +29,17 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+
+// OverviewCard 统计数据，recall 写入，manage 读取
+final overviewStatsProvider = StateProvider<Map<String, int>>(
+  (ref) => {
+    'allModelCount': 0,
+    'processingTaskCount': 0,
+    'ragCount': 0,
+    'recentCount': 0,
+  },
+);
+final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -392,18 +402,16 @@ class MainScreen extends ConsumerStatefulWidget {
 }
 
 class _MainScreenState extends ConsumerState<MainScreen> {
-  final List<Widget?> _pageCache = List<Widget?>.filled(4, null);
+  final List<Widget?> _pageCache = List<Widget?>.filled(3, null);
 
   Widget _buildPage(int pageIndex) {
     switch (pageIndex) {
       case 0:
         return const RecallPage(); // 页面0: 主页：过往回忆
       case 1:
-        return const TimePeelingPage(); // 页面1: 时间切片（占位）
+        return const CreateGuidePage(); // 页面1: 创作引导
       case 2:
-        return const CommunityPage(); // 页面2: 社区
-      case 3:
-        return const CreateGuidePage(); // 页面3: 创作引导
+        return const SettingsPage(); // 页面2: 管理（设置）
     }
     return const RecallPage();
   }
@@ -428,7 +436,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                 children: [
                   IndexedStack(
                     index: pageIndex,
-                    children: List<Widget>.generate(4, (index) {
+                    children: List<Widget>.generate(3, (index) {
                       final page = _pageCache[index] ?? const SizedBox.shrink();
                       return TickerMode(
                         enabled: index == pageIndex,
@@ -451,17 +459,13 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
-                          icon: Icons.layers_rounded,
-                          label: textLocalize("timepeeling"),
-                        ),
-                        NavIslandItem(
-                          icon: Icons.public_rounded,
-                          label: textLocalize("community"),
-                        ),
-                        NavIslandItem(
                           icon: Icons.add_rounded,
                           label: textLocalize("create"),
                           isLarge: true,
+                        ),
+                        NavIslandItem(
+                          icon: Icons.settings_rounded,
+                          label: textLocalize("manage"),
                         ),
                       ],
                     ),

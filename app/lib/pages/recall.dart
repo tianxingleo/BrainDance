@@ -9,28 +9,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
 import 'recall/local_ai_panel.dart';
 import 'recall/model_grid.dart';
-import 'recall/overview_card.dart';
 import 'recall/processing_section.dart';
-import 'settings.dart';
 import 'webgl_viewer.dart';
-import 'task_list.dart';
 
 enum _RecallSearchMode { local, cloud }
 
-class RecallPage extends StatefulWidget {
+class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
 
   @override
-  State<RecallPage> createState() => _RecallPageState();
+  ConsumerState<RecallPage> createState() => _RecallPageState();
 }
 
-class _RecallPageState extends State<RecallPage> {
+class _RecallPageState extends ConsumerState<RecallPage> {
   static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
   static const String _defaultModelDownloadUrl =
       'https://hf-mirror.com/jc-builds/Qwen3-1.7B-Q4_K_M-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true';
@@ -697,6 +696,7 @@ $userQuestion
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
+        _updateOverviewProvider();
       }
     } catch (e) {
       // 静默失败
@@ -755,6 +755,7 @@ $userQuestion
           _models = models;
           _isLoading = false;
         });
+        _updateOverviewProvider();
       }
       _searchCache.clear();
       _lastSearchKey = null;
@@ -767,6 +768,7 @@ $userQuestion
           _models = demoModels;
           _isLoading = false;
         });
+        _updateOverviewProvider();
         TDToast.showText(
           '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
           context: context,
@@ -827,6 +829,37 @@ $userQuestion
     }).length;
   }
 
+  void _updateOverviewProvider() {
+    ref.read(overviewStatsProvider.notifier).state = {
+      'allModelCount': _allModels.length,
+      'processingTaskCount': _processingTasks.length,
+      'ragCount': _indexStats?.totalItems ?? _allModels.length,
+      'recentCount': _recentModelCount(),
+    };
+    ref.read(overviewLocalIndexingProvider.notifier).state = _isLocalIndexing;
+  }
+
+  /// 按模型名称分组，每组内按 created_at 降序排列（Time Peeling）
+  Map<String, List<Map<String, dynamic>>> _groupModelsByName(
+    List<Map<String, dynamic>> models,
+  ) {
+    final groups = <String, List<Map<String, dynamic>>>{};
+    for (final model in models) {
+      final name = model['display_name']?.toString() ??
+          model['scene_id']?.toString() ??
+          'Unknown';
+      groups.putIfAbsent(name, () => []).add(model);
+    }
+    for (final list in groups.values) {
+      list.sort((a, b) {
+        final ta = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
+        final tb = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
+        return tb.compareTo(ta);
+      });
+    }
+    return groups;
+  }
+
   // 更黑的夜间色值
   final darkBg = const Color(0xFF101014);
   final darkCard = const Color(0xFF18181C);
@@ -885,43 +918,7 @@ $userQuestion
                               _fetchModels();
                             },
                           ),
-                          IconButton(
-                            icon: Icon(
-                              Icons.settings_rounded,
-                              color: isDark
-                                  ? BDDesign.colorPaperWhite
-                                  : BDDesign.colorInkBlack,
-                            ),
-                            tooltip: textLocalize("settings"),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const SettingsPage(),
-                                ),
-                              );
-                            },
-                          ),
                         ],
-                      ),
-                    ),
-                    RepaintBoundary(
-                      child: RecallOverviewCard(
-                        isDark: isDark,
-                        textColor: textColor,
-                        recentCount: _recentModelCount(),
-                        allModelCount: _allModels.length,
-                        processingTaskCount: _processingTasks.length,
-                        ragCount: _indexStats?.totalItems ?? _allModels.length,
-                        isLocalIndexing: _isLocalIndexing,
-                        onOpenTasks: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const TaskListPage(),
-                            ),
-                          );
-                        },
                       ),
                     ),
                     Padding(
@@ -1143,13 +1140,29 @@ $userQuestion
                             : _buildSearchEmptyState(theme, isDark),
                       ),
                     )
-                  else
+                  else if (_models.isNotEmpty &&
+                      _models.first.containsKey('matched_frames'))
                     RecallModelGrid(
                       theme: theme,
                       isDark: isDark,
                       darkCard: darkCard,
                       darkInput: darkInput,
                       models: _models,
+                      activeModelAction: _activeModelAction,
+                      modelCardKeyFor: _modelCardKeyFor,
+                      isSameModel: _isSameModel,
+                      onNavigateToViewer: _navigateToViewer,
+                      onShowModelActions: (model) {
+                        unawaited(_showModelActions(model));
+                      },
+                    )
+                  else
+                    TimePeelingList(
+                      theme: theme,
+                      isDark: isDark,
+                      darkCard: darkCard,
+                      darkInput: darkInput,
+                      groupedModels: _groupModelsByName(_models),
                       activeModelAction: _activeModelAction,
                       modelCardKeyFor: _modelCardKeyFor,
                       isSameModel: _isSameModel,
