@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -47,203 +47,141 @@ class RecallModelGrid extends StatelessWidget {
       return SliverPadding(
         padding: const EdgeInsets.fromLTRB(16.0, 6.0, 16.0, 16.0),
         sliver: SliverList(
-          delegate: SliverChildBuilderDelegate((context, index) {
-          final model = models[index];
-          final cardKey = modelCardKeyFor(model);
-          final isActionTarget = isSameModel(activeModelAction, model);
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
-          final similarity = model['similarity'] as double?;
-          final userId = model['user_id'] ?? '';
-          final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final model = models[index];
+              final cardKey = modelCardKeyFor(model);
+              final isActionTarget = isSameModel(activeModelAction, model);
+              final sceneId = model['scene_id'] ?? 'Unknown Scene';
+              final desc = model['description'] ?? '没有描述信息';
+              final similarity = model['similarity'] as double?;
+              final userId = model['user_id'] ?? '';
+              final matchedFrames =
+                  model['matched_frames'] as List<dynamic>? ?? [];
 
-          return RepaintBoundary(
-            child: IgnorePointer(
-              ignoring: isActionTarget,
-              child: Opacity(
-                opacity: isActionTarget ? 0.0 : 1.0,
-                child: Container(
-                  key: cardKey,
-                  margin: const EdgeInsets.only(bottom: 16.0),
-                  decoration: BoxDecoration(
-                    color: isDark ? darkCard : BDDesign.colorPaperWhite,
-                    borderRadius: BDDesign.radiusLarge,
-                    boxShadow: isDark ? [] : [BDDesign.shadowLight],
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0xFF2A2A30)
-                          : Colors.transparent,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      GestureDetector(
-                        onTap: () => onNavigateToViewer(model, null),
-                        onLongPressStart: (_) => onShowModelActions(model),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    TDText(
-                                      sceneId,
-                                      font: theme.fontTitleMedium,
-                                      fontWeight: FontWeight.w600,
-                                      maxLines: 1,
-                                      textColor: textColor,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    TDText(
-                                      desc,
-                                      font: theme.fontBodySmall,
-                                      textColor: hintTextColor,
-                                      maxLines: 2,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (similarity != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: theme.brandColor4.withAlpha(220),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: TDText(
-                                    '${(similarity * 100).toStringAsFixed(1)}%',
-                                    font: theme.fontBodySmall,
-                                    textColor: isDark
-                                        ? const Color(0xFFFFFFFF)
-                                        : Colors.white,
-                                  ),
-                                ),
-                            ],
-                          ),
+              return RepaintBoundary(
+                child: IgnorePointer(
+                  ignoring: isActionTarget,
+                  child: Opacity(
+                    opacity: isActionTarget ? 0.0 : 1.0,
+                    child: Container(
+                      key: cardKey,
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      decoration: BoxDecoration(
+                        color: isDark ? darkCard : BDDesign.colorPaperWhite,
+                        borderRadius: BDDesign.radiusLarge,
+                        boxShadow: isDark ? [] : [BDDesign.shadowLight],
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF2A2A30)
+                              : Colors.transparent,
                         ),
                       ),
-                      if (matchedFrames.isNotEmpty)
-                        SizedBox(
-                          height: 120,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16.0,
-                            ).copyWith(bottom: 16.0),
-                            itemCount: matchedFrames.length,
-                            itemBuilder: (context, frameIndex) {
-                              final frame = matchedFrames[frameIndex];
-                              final imageName = frame['image_name'];
-                              final transformMatrix = frame['transform_matrix'];
-                              final frameSim = frame['similarity'] as double?;
-
-                              final imageUrl = Supabase.instance.client.storage
-                                  .from('braindance-assets')
-                                  .getPublicUrl(
-                                    '$userId/$sceneId/output/images/$imageName',
-                                  );
-
-                              return GestureDetector(
-                                onTap: () =>
-                                    onNavigateToViewer(model, transformMatrix),
-                                child: Container(
-                                  width: 140,
-                                  margin: const EdgeInsets.only(right: 12.0),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    color: isDark
-                                        ? darkInput
-                                        : theme.grayColor3,
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    child: Stack(
-                                      fit: StackFit.expand,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          GestureDetector(
+                            onTap: () => onNavigateToViewer(model, null),
+                            onLongPressStart: (_) => onShowModelActions(model),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Image.network(
-                                          imageUrl,
-                                          fit: BoxFit.cover,
-                                          cacheWidth: 280,
-                                          cacheHeight: 240,
-                                          filterQuality: FilterQuality.low,
-                                          loadingBuilder:
-                                              (
-                                                context,
-                                                child,
-                                                loadingProgress,
-                                              ) {
-                                                if (loadingProgress == null) {
-                                                  return child;
-                                                }
-                                                return const Center(
-                                                  child: SizedBox(
-                                                    width: 18,
-                                                    height: 18,
-                                                    child:
-                                                        CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                        ),
-                                                  ),
-                                                );
-                                              },
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
-                                                return const Center(
-                                                  child: Icon(
-                                                    Icons.broken_image,
-                                                    color: Colors.grey,
-                                                  ),
-                                                );
-                                              },
+                                        TDText(
+                                          sceneId,
+                                          font: theme.fontTitleMedium,
+                                          fontWeight: FontWeight.w600,
+                                          maxLines: 1,
+                                          textColor: textColor,
                                         ),
-                                        if (frameSim != null)
-                                          Positioned(
-                                            bottom: 4,
-                                            left: 4,
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 4,
-                                                    vertical: 2,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.black.withAlpha(
-                                                  100,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                '${(frameSim * 100).toStringAsFixed(1)}%',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 10,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
+                                        const SizedBox(height: 4),
+                                        TDText(
+                                          desc,
+                                          font: theme.fontBodySmall,
+                                          textColor: hintTextColor,
+                                          maxLines: 2,
+                                        ),
                                       ],
                                     ),
                                   ),
-                                ),
-                              );
-                            },
+                                  if (similarity != null)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: theme.brandColor4.withAlpha(220),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: TDText(
+                                        '${(similarity * 100).toStringAsFixed(1)}%',
+                                        font: theme.fontBodySmall,
+                                        textColor: isDark
+                                            ? const Color(0xFFFFFFFF)
+                                            : Colors.white,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                    ],
+                          if (matchedFrames.isNotEmpty)
+                            SizedBox(
+                              height: 120,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0,
+                                ).copyWith(bottom: 16.0),
+                                itemCount: matchedFrames.length,
+                                itemBuilder: (context, frameIndex) {
+                                  final frame = matchedFrames[frameIndex];
+                                  final imageName = frame['image_name'];
+                                  final frameSim =
+                                      frame['similarity'] as double?;
+
+                                  final imageUrl = Supabase
+                                      .instance
+                                      .client
+                                      .storage
+                                      .from('braindance-assets')
+                                      .getPublicUrl(
+                                        '$userId/$sceneId/output/images/$imageName',
+                                      );
+
+                                  return GestureDetector(
+                                    onTap: () =>
+                                        onNavigateToViewer(model, frame),
+                                    child: _AdaptiveFrameThumbnail(
+                                      imageUrl: imageUrl,
+                                      frameSim: frameSim,
+                                      height: 104,
+                                      backgroundColor: isDark
+                                          ? darkInput
+                                          : theme.grayColor3,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          );
-          }, childCount: models.length, addAutomaticKeepAlives: false),
+              );
+            },
+            childCount: models.length,
+            addAutomaticKeepAlives: false,
+          ),
         ),
       );
     }
@@ -256,36 +194,40 @@ class RecallModelGrid extends StatelessWidget {
         bottom: 16.0,
       ),
       sliver: SliverGrid(
-        delegate: SliverChildBuilderDelegate((context, index) {
-        final model = models[index];
-        final cardKey = modelCardKeyFor(model);
-        final isActionTarget = isSameModel(activeModelAction, model);
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final model = models[index];
+            final cardKey = modelCardKeyFor(model);
+            final isActionTarget = isSameModel(activeModelAction, model);
 
-        return RepaintBoundary(
-          child: IgnorePointer(
-            ignoring: isActionTarget,
-            child: Opacity(
-              opacity: isActionTarget ? 0.0 : 1.0,
-              child: GestureDetector(
-                onTap: () => onNavigateToViewer(model, null),
-                onLongPressStart: (_) => onShowModelActions(model),
-                child: Container(
-                  key: cardKey,
-                  child: RecallModelTile(
-                    model: model,
-                    theme: theme,
-                    isDark: isDark,
-                    darkCard: darkCard,
-                    darkInput: darkInput,
-                    textColor: textColor,
-                    hintTextColor: hintTextColor,
+            return RepaintBoundary(
+              child: IgnorePointer(
+                ignoring: isActionTarget,
+                child: Opacity(
+                  opacity: isActionTarget ? 0.0 : 1.0,
+                  child: GestureDetector(
+                    onTap: () => onNavigateToViewer(model, null),
+                    onLongPressStart: (_) => onShowModelActions(model),
+                    child: Container(
+                      key: cardKey,
+                      child: RecallModelTile(
+                        model: model,
+                        theme: theme,
+                        isDark: isDark,
+                        darkCard: darkCard,
+                        darkInput: darkInput,
+                        textColor: textColor,
+                        hintTextColor: hintTextColor,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        );
-        }, childCount: models.length, addAutomaticKeepAlives: false),
+            );
+          },
+          childCount: models.length,
+          addAutomaticKeepAlives: false,
+        ),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16.0,
@@ -352,7 +294,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                   opacity: value,
                   child: ClipRect(
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(
+                      filter: ui.ImageFilter.blur(
                         sigmaX: 10 * value,
                         sigmaY: 10 * value,
                       ),
@@ -556,6 +498,291 @@ class _ActionMenuItem extends StatelessWidget {
   }
 }
 
+class _AdaptiveFrameThumbnail extends StatefulWidget {
+  final String imageUrl;
+  final double? frameSim;
+  final double height;
+  final Color backgroundColor;
+
+  const _AdaptiveFrameThumbnail({
+    required this.imageUrl,
+    required this.frameSim,
+    required this.height,
+    required this.backgroundColor,
+  });
+
+  @override
+  State<_AdaptiveFrameThumbnail> createState() =>
+      _AdaptiveFrameThumbnailState();
+}
+
+class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
+  static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
+
+  ui.Image? _resolvedImage;
+  Object? _lastError;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AdaptiveFrameThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _stopListening();
+      _resolvedImage = null;
+      _lastError = null;
+      _resolveImage();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  void _resolveImage() {
+    final cached = _imageCache[widget.imageUrl];
+    if (cached != null) {
+      _resolvedImage = cached;
+      return;
+    }
+
+    final provider = NetworkImage(widget.imageUrl);
+    final stream = provider.resolve(const ImageConfiguration());
+    _imageStream = stream;
+    _imageStreamListener = ImageStreamListener(
+      (ImageInfo info, bool synchronousCall) {
+        _imageCache[widget.imageUrl] = info.image;
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _resolvedImage = info.image;
+          _lastError = null;
+        });
+      },
+      onError: (Object error, StackTrace? stackTrace) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _lastError = error;
+        });
+      },
+    );
+    stream.addListener(_imageStreamListener!);
+  }
+
+  void _stopListening() {
+    final stream = _imageStream;
+    final listener = _imageStreamListener;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+    _imageStream = null;
+    _imageStreamListener = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedImage = _resolvedImage;
+    final aspectRatio = resolvedImage == null
+        ? 4 / 3
+        : resolvedImage.width / resolvedImage.height;
+    final width = (widget.height * aspectRatio).clamp(76.0, 220.0);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: width,
+      margin: const EdgeInsets.only(right: 12.0),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8.0),
+        color: widget.backgroundColor,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8.0),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: widget.backgroundColor,
+              child: resolvedImage != null
+                  ? FittedBox(
+                      fit: BoxFit.cover,
+                      clipBehavior: Clip.hardEdge,
+                      child: SizedBox(
+                        width: resolvedImage.width.toDouble(),
+                        height: resolvedImage.height.toDouble(),
+                        child: RawImage(
+                          image: resolvedImage,
+                          filterQuality: FilterQuality.low,
+                        ),
+                      ),
+                    )
+                  : _lastError != null
+                  ? const Center(
+                      child: Icon(Icons.broken_image, color: Colors.grey),
+                    )
+                  : const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+            ),
+            if (widget.frameSim != null)
+              Positioned(
+                bottom: 4,
+                left: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(100),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${(widget.frameSim! * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoverNetworkImage extends StatefulWidget {
+  final String imageUrl;
+  final Color backgroundColor;
+  final Widget errorWidget;
+
+  const _CoverNetworkImage({
+    required this.imageUrl,
+    required this.backgroundColor,
+    required this.errorWidget,
+  });
+
+  @override
+  State<_CoverNetworkImage> createState() => _CoverNetworkImageState();
+}
+
+class _CoverNetworkImageState extends State<_CoverNetworkImage> {
+  static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
+
+  ui.Image? _resolvedImage;
+  Object? _lastError;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CoverNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _stopListening();
+      _resolvedImage = null;
+      _lastError = null;
+      _resolveImage();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  void _resolveImage() {
+    final cached = _imageCache[widget.imageUrl];
+    if (cached != null) {
+      _resolvedImage = cached;
+      return;
+    }
+
+    final provider = NetworkImage(widget.imageUrl);
+    final stream = provider.resolve(const ImageConfiguration());
+    _imageStream = stream;
+    _imageStreamListener = ImageStreamListener(
+      (ImageInfo info, bool synchronousCall) {
+        _imageCache[widget.imageUrl] = info.image;
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _resolvedImage = info.image;
+          _lastError = null;
+        });
+      },
+      onError: (Object error, StackTrace? stackTrace) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _lastError = error;
+        });
+      },
+    );
+    stream.addListener(_imageStreamListener!);
+  }
+
+  void _stopListening() {
+    final stream = _imageStream;
+    final listener = _imageStreamListener;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+    _imageStream = null;
+    _imageStreamListener = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedImage = _resolvedImage;
+    if (_lastError != null) {
+      return widget.errorWidget;
+    }
+
+    return ColoredBox(
+      color: widget.backgroundColor,
+      child: resolvedImage != null
+          ? ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: resolvedImage.width.toDouble(),
+                  height: resolvedImage.height.toDouble(),
+                  child: RawImage(
+                    image: resolvedImage,
+                    filterQuality: FilterQuality.low,
+                  ),
+                ),
+              ),
+            )
+          : const Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
 class RecallModelTile extends StatelessWidget {
   final Map<String, dynamic> model;
   final TDThemeData theme;
@@ -615,25 +842,15 @@ class RecallModelTile extends StatelessWidget {
                   child:
                       model['preview_img_path'] != null &&
                           model['preview_img_path'].toString().isNotEmpty
-                      ? Image.network(
-                          model['preview_img_path'],
-                          fit: BoxFit.cover,
-                          cacheWidth: 720,
-                          cacheHeight: 720,
-                          filterQuality: FilterQuality.low,
-                          errorBuilder: (context, error, stackTrace) =>
-                              RecallModelMockCover(
-                                isDark: isDark,
-                                theme: theme,
-                              ),
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) {
-                              return child;
-                            }
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          },
+                      ? _CoverNetworkImage(
+                          imageUrl: model['preview_img_path'].toString(),
+                          backgroundColor: isDark
+                              ? darkInput
+                              : theme.grayColor3,
+                          errorWidget: RecallModelMockCover(
+                            isDark: isDark,
+                            theme: theme,
+                          ),
                         )
                       : RecallModelMockCover(isDark: isDark, theme: theme),
                 ),

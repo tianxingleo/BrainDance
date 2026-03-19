@@ -20,6 +20,7 @@ class WebGLViewerPage extends StatefulWidget {
   final String? posesUrl; // 云端 webgl_poses.json 的公开 URL（可选）
   final String sceneId;
   final List<double>? initialPose; // 从 RAG 视角跳转传入的坐标矩阵
+  final String? initialPoseId; // 从 RAG 结果传入的图片 ID，优先用于精确匹配 viewer 内 pose
 
   const WebGLViewerPage({
     super.key,
@@ -27,6 +28,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
+    this.initialPoseId,
   });
 
   @override
@@ -284,6 +286,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,
+      if (widget.initialPoseId != null && widget.initialPoseId!.isNotEmpty)
+        'imageId': widget.initialPoseId,
     };
   }
 

@@ -2,7 +2,6 @@
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import gsap from 'gsap';
 
 const containerRef = ref(null);
@@ -33,6 +32,10 @@ const DRAG_ROTATE_SENSITIVITY = 0.065;
 const DRAG_PAN_SENSITIVITY = 0.0022;
 const WHEEL_ZOOM_STEP = 0.08;
 const PINCH_ZOOM_STEP = 1.0;
+const ORBIT_YAW_SENSITIVITY = 0.0055;
+const ORBIT_PITCH_SENSITIVITY = 0.0042;
+const ORBIT_ROLL_SENSITIVITY = 1.0;
+const ORBIT_DOLLY_FACTOR = 0.35;
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -62,6 +65,10 @@ const searchAndFly = () => {
 
 let viewer;
 let particleSystem;
+const worldUp = new THREE.Vector3(0, 1, 0);
+let pendingInitialTarget = null;
+let didApplyInitialTarget = false;
+let posesFetchSettled = false;
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
 
@@ -205,27 +212,7 @@ const copyMatrixToClipboard = () => {
 
 const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 
-const getSuggestedOrbitTarget = () => {
-  if (!viewer || !viewer.camera) return new THREE.Vector3(0, 0, 0);
-
-  const worldCenter = getModelWorldCenter();
-  const distanceToCenter = viewer.camera.position.distanceTo(worldCenter);
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(viewer.camera.quaternion);
-  const fallbackDistance = Number.isFinite(distanceToCenter) && distanceToCenter > 0
-    ? distanceToCenter * 0.6
-    : 3.0;
-
-  return worldCenter.distanceTo(viewer.camera.position) > 0.001
-    ? worldCenter
-    : viewer.camera.position.clone().add(forward.multiplyScalar(fallbackDistance));
-};
-
-const syncOrbitTarget = (target = null) => {
-  if (!viewer || !viewer.controls || !isOrbitMode.value) return;
-  const orbitTarget = target ? target.clone() : getSuggestedOrbitTarget();
-  viewer.controls.target.copy(orbitTarget);
-  viewer.controls.update();
-};
+const syncOrbitTarget = () => {};
 
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
@@ -470,19 +457,125 @@ const applyAdvancedShader = (mesh) => {
   material.needsUpdate = true;
 };
 
+const normalizeMatrixArray = (input) => {
+  if (!Array.isArray(input)) return null;
+
+  if (input.length === 16) {
+    const flat = input.map(value => Number(value));
+    return flat.every(Number.isFinite) ? flat : null;
+  }
+
+  if (input.length === 4 && input.every(row => Array.isArray(row) && row.length === 4)) {
+    const flat = input.flat().map(value => Number(value));
+    return flat.every(Number.isFinite) ? flat : null;
+  }
+
+  return null;
+};
+
+const normalizeImageId = (value) => {
+  if (value == null) return '';
+
+  let text = String(value).trim();
+  if (!text) return '';
+
+  try {
+    text = decodeURIComponent(text);
+  } catch (_) {}
+
+  text = text.replace(/\\/g, '/');
+  const parts = text.split('/');
+  return (parts[parts.length - 1] || '').trim().toLowerCase();
+};
+
+const getPoseImageId = (pose) => {
+  if (!pose) return '';
+  const directId = pose.id || pose.image_id || pose.imageId;
+  if (directId) return normalizeImageId(directId);
+
+  const imageUrl = pose.image_url;
+  if (typeof imageUrl !== 'string' || imageUrl.length === 0) return '';
+
+  const cleanUrl = imageUrl.split('?')[0];
+  return normalizeImageId(cleanUrl);
+};
+
+const findPoseByInitialTarget = (target) => {
+  if (!target || cameraPoses.value.length === 0) return null;
+
+  const targetImageId = normalizeImageId(target.imageId);
+  if (targetImageId) {
+    const matchedPose = cameraPoses.value.find((pose) => getPoseImageId(pose) === targetImageId);
+    if (matchedPose) return matchedPose;
+  }
+
+  const targetMatrix = normalizeMatrixArray(target.matrix);
+  if (!targetMatrix) return null;
+
+  let bestPose = null;
+  let bestDiff = Number.POSITIVE_INFINITY;
+
+  for (const pose of cameraPoses.value) {
+    const poseMatrix = normalizeMatrixArray(pose.matrix);
+    if (!poseMatrix) continue;
+
+    let maxDiff = 0;
+    for (let i = 0; i < 16; i += 1) {
+      const diff = Math.abs(poseMatrix[i] - targetMatrix[i]);
+      if (diff > maxDiff) maxDiff = diff;
+      if (maxDiff >= bestDiff) break;
+    }
+
+    if (maxDiff < bestDiff) {
+      bestDiff = maxDiff;
+      bestPose = pose;
+    }
+  }
+
+  return bestDiff <= 1e-4 ? bestPose : null;
+};
+
+const maybeApplyInitialTarget = (forceFallback = false) => {
+  if (!pendingInitialTarget || didApplyInitialTarget) return;
+
+  const resolvedPose = findPoseByInitialTarget(pendingInitialTarget);
+  if (resolvedPose) {
+    didApplyInitialTarget = true;
+    flyToImage(resolvedPose);
+    return;
+  }
+
+  if (!forceFallback) return;
+  if (pendingInitialTarget.imageId && !posesFetchSettled) return;
+
+  const fallbackMatrix = normalizeMatrixArray(pendingInitialTarget.matrix);
+  if (!fallbackMatrix) return;
+
+  didApplyInitialTarget = true;
+  flyToImage({
+    matrix: fallbackMatrix,
+    image_url: pendingInitialTarget.imageId || '',
+  });
+};
+
 // --- 5. 初始化 ---
 const flyToImage = (poseData) => {
   if (!viewer || !viewer.camera) return;
+  const normalizedMatrix = normalizeMatrixArray(poseData?.matrix);
+  if (!normalizedMatrix) {
+    console.warn('[Viewer] Skip invalid pose matrix:', poseData);
+    return;
+  }
 
   const cam = viewer.camera;
   const splatMesh = viewer.getSplatMesh(); // 获取当前加载的高斯模型
 
   // 更新参考图
-  activeImage.value = poseData.image_url;
+  activeImage.value = poseData.image_url || getPoseImageId(poseData);
   activeTag.value = poseData.tag || '';
 
   // 1. 读取原始矩阵 (假设后端传来的是按列优先的 16 位数组)
-  const rawMatrix = new THREE.Matrix4().fromArray(poseData.matrix);
+  const rawMatrix = new THREE.Matrix4().fromArray(normalizedMatrix);
 
   // === 修正：移除多余的坐标系转换 ===
   // 用户反馈：当前状态下再旋转X轴180度才正确。
@@ -528,12 +621,6 @@ const flyToImage = (poseData) => {
     cam.updateProjectionMatrix();
   }
 
-  // 计算控制器焦点：看向相机正前方 5 个单位处
-  const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
-  const targetLookAt = targetPosition.clone().add(forwardVector.multiplyScalar(5.0));
-
-  const orbitTarget = isOrbitMode.value ? getModelWorldCenter() : targetLookAt.clone();
-
   // 停用当前控制
   isAutoRotate.value = false;
   if (viewer.controls) viewer.controls.enabled = false;
@@ -564,9 +651,9 @@ const flyToImage = (poseData) => {
         z: (euler.z * 180 / Math.PI).toFixed(1)
       };
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
+      orbitTouchState.roll = 0;
       updateDebugInfo();
 
-      syncOrbitTarget(orbitTarget);
       if (viewer.controls) viewer.controls.enabled = true;
     }
   });
@@ -601,7 +688,8 @@ const parseInitialInputFromUrl = () => {
       return {
         ply: decoded.ply || null,
         poses: decoded.poses || null,
-        matrix: decoded.matrix || null
+        matrix: decoded.matrix || null,
+        imageId: decoded.imageId || null
       };
     } catch (error) {
       console.warn('[Viewer] 无法解析 payload 查询参数:', error);
@@ -611,6 +699,7 @@ const parseInitialInputFromUrl = () => {
   const ply = params.get('ply');
   const poses = params.get('poses');
   const matrix = params.get('matrix');
+  const imageId = params.get('imageId');
 
   let parsedMatrix = null;
   if (matrix) {
@@ -625,14 +714,15 @@ const parseInitialInputFromUrl = () => {
     return {
       ply: ply || null,
       poses: poses || null,
-      matrix: parsedMatrix
+      matrix: parsedMatrix,
+      imageId: imageId || null
     };
   }
 
   return null;
 };
 
-const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
+const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
 
@@ -653,6 +743,9 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     globalUniforms.uParticleProgress.value = 0;
     globalUniforms.uGeoRadius.value = 0;
     globalUniforms.uColorRadius.value = 0;
+    pendingInitialTarget = null;
+    didApplyInitialTarget = false;
+    posesFetchSettled = false;
 
     const config = getViewerConfig();
     viewer = new GaussianSplats3D.Viewer(config);
@@ -679,6 +772,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     fetch(currentPosesUrl)
       .then(res => res.json())
       .then(data => {
+        posesFetchSettled = true;
         // 数据适配
         if (data.frames) {
           sceneMetadata.value = {
@@ -723,14 +817,18 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
           } else {
             applyFocalLengthPx(DEFAULT_FOCAL_PX);
           }
+          maybeApplyInitialTarget(true);
         } else {
           cameraPoses.value = data; // 兼容旧格式
           applyFocalLengthPx(DEFAULT_FOCAL_PX);
+          maybeApplyInitialTarget(true);
         }
       })
       .catch(err => {
+        posesFetchSettled = true;
         console.error("加载位姿失败:", err);
         applyFocalLengthPx(DEFAULT_FOCAL_PX);
+        maybeApplyInitialTarget(true);
       });
 
     const splatMesh = viewer.getSplatMesh();
@@ -743,8 +841,16 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
         // 然后应用 Shader
         applyAdvancedShader(splatMesh);
         
-          if (initialPoseMatrix) {
-            setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
+          if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
+            pendingInitialTarget = {
+              matrix: initialTarget.matrix || null,
+              imageId: initialTarget.imageId || null
+            };
+            maybeApplyInitialTarget(posesFetchSettled);
+            setTimeout(() => { maybeApplyInitialTarget(false); }, 50);
+            if (!initialTarget.imageId) {
+              setTimeout(() => { maybeApplyInitialTarget(true); }, 800);
+            }
           }
 
         animationState.lastFrameTime = Date.now();
@@ -852,6 +958,49 @@ const disposeControls = () => {
   viewer.controls = null;
 };
 
+const renderCameraUpdate = () => {
+  if (!viewer || !viewer.camera) return;
+  viewer.camera.updateProjectionMatrix();
+  refreshCurrentFocalInfo();
+  updateDebugInfo();
+  try { viewer.update(); viewer.render(); } catch (_) {}
+};
+
+const orbitRotate = (deltaYaw, deltaPitch) => {
+  if (!viewer || !viewer.camera) return;
+  viewer.camera.rotateOnWorldAxis(worldUp, -deltaYaw);
+  viewer.camera.rotateX(-deltaPitch);
+  renderCameraUpdate();
+};
+
+const orbitRoll = (deltaAngleRad) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
+  viewer.camera.rotateZ(deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  renderCameraUpdate();
+};
+
+const orbitZoom = (zoomFactor) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
+  const sceneDistance = Math.max(0.3, viewer.camera.position.distanceTo(getModelWorldCenter()));
+  const deltaZ = THREE.MathUtils.clamp(
+    (1 - zoomFactor) * sceneDistance * ORBIT_DOLLY_FACTOR,
+    -sceneDistance * 0.25,
+    sceneDistance * 0.25
+  );
+  viewer.camera.translateZ(deltaZ);
+  renderCameraUpdate();
+};
+
+const getTouchAngle = (touchA, touchB) => {
+  return Math.atan2(touchB.clientY - touchA.clientY, touchB.clientX - touchA.clientX);
+};
+
+const normalizeTouchAngleDelta = (delta) => {
+  if (delta > Math.PI) return delta - (Math.PI * 2);
+  if (delta < -Math.PI) return delta + (Math.PI * 2);
+  return delta;
+};
+
 const setupFreeControls = () => {
   if (!viewer) return;
   disposeControls();
@@ -860,17 +1009,7 @@ const setupFreeControls = () => {
 const setupOrbitControls = () => {
   if (!viewer) return;
   disposeControls();
-
-  const controls = new OrbitControls(viewer.camera, viewer.renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.screenSpacePanning = true;
-  controls.enablePan = true;
-  controls.rotateSpeed = 0.8;
-  controls.zoomSpeed = 0.9;
-  controls.target.copy(getSuggestedOrbitTarget());
-  controls.update();
-  viewer.controls = controls;
+  orbitTouchState.roll = 0;
 };
 
 const applyViewMode = () => {
@@ -934,6 +1073,11 @@ const pinchState = {
   active: false,
   distance: 0
 };
+const orbitTouchState = {
+  active: false,
+  angle: 0,
+  roll: 0
+};
 // const rotationDelta removed here
 
 const getTouchDistance = (touchA, touchB) => {
@@ -944,7 +1088,15 @@ const getTouchDistance = (touchA, touchB) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    if (e.button !== 0) return;
+    isDragging.value = true;
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    lastMouse.x = e.clientX;
+    lastMouse.y = e.clientY;
+    return;
+  }
   isDragging.value = true;
   pinchState.active = false;
   lastMouse.x = e.clientX;
@@ -952,7 +1104,15 @@ const onMouseDown = (e) => {
 };
 
 const onMouseMove = (e) => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    if (!isDragging.value || !viewer || !viewer.camera) return;
+    const dx = e.clientX - lastMouse.x;
+    const dy = e.clientY - lastMouse.y;
+    orbitRotate(dx * ORBIT_YAW_SENSITIVITY, dy * ORBIT_PITCH_SENSITIVITY);
+    lastMouse.x = e.clientX;
+    lastMouse.y = e.clientY;
+    return;
+  }
   if (!isDragging.value || !viewer || !viewer.camera) return;
 
   const dx = e.clientX - lastMouse.x;
@@ -975,21 +1135,48 @@ const onMouseMove = (e) => {
 };
 
 const onMouseUp = () => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    isDragging.value = false;
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    return;
+  }
   isDragging.value = false;
   pinchState.active = false;
 };
 
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
+    orbitZoom(zoomFactor);
+    return;
+  }
   const direction = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
   zoomByFocalScale(direction);
 };
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    if (e.touches.length >= 2) {
+      isDragging.value = false;
+      pinchState.active = true;
+      pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+      orbitTouchState.active = true;
+      orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      return;
+    }
+
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    if (e.touches.length === 1) {
+      isDragging.value = true;
+      lastMouse.x = e.touches[0].clientX;
+      lastMouse.y = e.touches[0].clientY;
+    }
+    return;
+  }
   if (e.touches.length >= 2) {
     isDragging.value = false;
     pinchState.active = true;
@@ -1006,7 +1193,37 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    if (!viewer || !viewer.camera || e.touches.length === 0) return;
+
+    if (e.touches.length >= 2) {
+      const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
+      const nextAngle = getTouchAngle(e.touches[0], e.touches[1]);
+
+      if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+        orbitZoom(nextDistance / pinchState.distance);
+      }
+      if (orbitTouchState.active) {
+        orbitRoll(normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle));
+      }
+
+      pinchState.active = true;
+      pinchState.distance = nextDistance;
+      orbitTouchState.active = true;
+      orbitTouchState.angle = nextAngle;
+      isDragging.value = false;
+      return;
+    }
+
+    if (!isDragging.value) return;
+
+    const dx = e.touches[0].clientX - lastMouse.x;
+    const dy = e.touches[0].clientY - lastMouse.y;
+    orbitRotate(dx * ORBIT_YAW_SENSITIVITY, dy * ORBIT_PITCH_SENSITIVITY);
+    lastMouse.x = e.touches[0].clientX;
+    lastMouse.y = e.touches[0].clientY;
+    return;
+  }
   if (!viewer || !viewer.camera || e.touches.length === 0) return;
 
   if (e.touches.length >= 2) {
@@ -1042,7 +1259,29 @@ const onTouchMove = (e) => {
 };
 
 const onTouchEnd = (e) => {
-  if (isOrbitMode.value) return;
+  if (isOrbitMode.value) {
+    if (e.touches.length >= 2) {
+      pinchState.active = true;
+      pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+      orbitTouchState.active = true;
+      orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      isDragging.value = false;
+      return;
+    }
+
+    pinchState.active = false;
+    pinchState.distance = 0;
+    orbitTouchState.active = false;
+    orbitTouchState.angle = 0;
+    isDragging.value = false;
+
+    if (e.touches.length === 1) {
+      lastMouse.x = e.touches[0].clientX;
+      lastMouse.y = e.touches[0].clientY;
+      isDragging.value = true;
+    }
+    return;
+  }
   if (e.touches.length >= 2) {
     pinchState.active = true;
     pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
@@ -1075,8 +1314,11 @@ onMounted(() => {
         // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
         initViewer(input, null, null);
       } else if (typeof input === 'object' && input !== null) {
-        // 新版：同时传 PLY URL、poses URL 与 初始矩阵
-        initViewer(input.ply || null, input.poses || null, input.matrix || null);
+        // 新版：同时传 PLY URL、poses URL 与 初始目标
+        initViewer(input.ply || null, input.poses || null, {
+          matrix: input.matrix || null,
+          imageId: input.imageId || null
+        });
       } else {
         initViewer(null, null, null);
       }
@@ -1090,7 +1332,10 @@ onMounted(() => {
       const initialInput = parseInitialInputFromUrl();
       if (initialInput && !hasInitializedFromExternalInput) {
         hasInitializedFromExternalInput = true;
-        initViewer(initialInput.ply, initialInput.poses, initialInput.matrix);
+        initViewer(initialInput.ply, initialInput.poses, {
+          matrix: initialInput.matrix || null,
+          imageId: initialInput.imageId || null
+        });
       } else {
         initViewer(null, null);
       }
@@ -1237,7 +1482,7 @@ onBeforeUnmount(async () => {
     -->
 
     <!-- 镜头轨道小功能 -->
-    <div class="camera-track" v-if="filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
+    <div class="camera-track" v-if="!isOrbitMode && filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
       @touchend.stop>
       <div class="camera-track-header">
         <div class="eyebrow">Shot Strip</div>
@@ -1324,8 +1569,8 @@ onBeforeUnmount(async () => {
   right: 18px;
   z-index: 120;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -1334,6 +1579,9 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+  align-self: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .view-mode-switch {
@@ -1613,8 +1861,8 @@ button.active {
 .search-panel {
   position: static;
   z-index: auto;
-  width: min(520px, 100%);
-  max-width: 520px;
+  width: min(560px, 100%);
+  max-width: 560px;
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -1657,7 +1905,7 @@ button.active {
 
 .focal-settings-panel {
   position: absolute;
-  top: 74px;
+  top: 122px;
   right: 18px;
   z-index: 120;
   width: 236px;
@@ -1835,12 +2083,11 @@ input[type='range'] {
     left: 12px;
     right: 12px;
     gap: 8px;
-    align-items: stretch;
   }
 
   .top-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+    align-self: stretch;
+    justify-content: space-between;
     gap: 8px;
   }
 
@@ -1855,7 +2102,7 @@ input[type='range'] {
   }
 
   .search-panel {
-    width: auto;
+    width: 100%;
     max-width: none;
     padding: 6px;
     gap: 6px;

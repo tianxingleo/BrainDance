@@ -1631,6 +1631,12 @@ $userQuestion
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    String? initialPoseId;
+
+    if (transformMatrix is Map) {
+      initialPoseId = transformMatrix['image_name']?.toString();
+      transformMatrix = transformMatrix['transform_matrix'];
+    }
 
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
@@ -1655,6 +1661,7 @@ $userQuestion
               posesUrl: posesUrl,
               sceneId: sceneId,
               initialPose: initialPose,
+              initialPoseId: initialPoseId,
             ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
