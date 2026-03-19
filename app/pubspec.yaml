@@ -135,6 +135,9 @@ flutter:
     - assets/webgl/
     - assets/webgl/models/
     - assets/webgl/assets/
+    - assets/webgl_spark/
+    - assets/webgl_spark/models/
+    - assets/webgl_spark/assets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:

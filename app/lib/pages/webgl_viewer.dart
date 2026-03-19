@@ -21,6 +21,7 @@ class WebGLViewerPage extends StatefulWidget {
   final String sceneId;
   final List<double>? initialPose; // 从 RAG 视角跳转传入的坐标矩阵
   final String? initialPoseId; // 从 RAG 结果传入的图片 ID，优先用于精确匹配 viewer 内 pose
+  final bool useSparkViewer;
 
   const WebGLViewerPage({
     super.key,
@@ -29,6 +30,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.sceneId = '3DGS Viewer',
     this.initialPose,
     this.initialPoseId,
+    this.useSparkViewer = false,
   });
 
   @override
@@ -48,10 +50,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
   String? _localModelPath;
+  late bool _useSparkViewer;
+
+  String get _viewerAssetRoot =>
+      _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
+
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '原版';
 
   @override
   void initState() {
     super.initState();
+    _useSparkViewer = widget.useSparkViewer;
     // Flutter Web 仍不支持此实现；桌面端改走外部浏览器模式
     if (kIsWeb) {
       _isUnsupportedPlatform = true;
@@ -141,7 +150,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       }
 
       // 将请求路径映射到 Flutter 的 assets/webgl 目录
-      String assetPath = 'assets/webgl$path';
+      String assetPath = '$_viewerAssetRoot$path';
 
       try {
         final ByteData data = await rootBundle.load(assetPath);
@@ -408,6 +417,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
+  Future<void> _switchViewer(bool useSpark) async {
+    if (_useSparkViewer == useSpark) return;
+    setState(() {
+      _useSparkViewer = useSpark;
+      _isWebReady = false;
+      _didAttemptExternalOpen = false;
+      _externalViewerUrl = null;
+    });
+
+    if (_useExternalBrowserMode) {
+      await _openInExternalBrowser();
+      return;
+    }
+
+    await _loadLocalHtml();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
@@ -433,6 +459,31 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             : SystemUiOverlayStyle.dark,
         elevation: 0,
         iconTheme: IconThemeData(color: iconColor),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: ToggleButtons(
+                isSelected: [!_useSparkViewer, _useSparkViewer],
+                onPressed: (index) {
+                  _switchViewer(index == 1);
+                },
+                borderRadius: BorderRadius.circular(10),
+                constraints: const BoxConstraints(minHeight: 34, minWidth: 54),
+                children: const [
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Text('原版'),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Text('Spark'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
       body: _isUnsupportedPlatform
           ? Center(
@@ -488,7 +539,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     TDText(
                       _isOpeningExternalViewer
                           ? '正在启动本地渲染服务并打开系统浏览器...'
-                          : '渲染器和 Flutter 端使用同一套静态资源。若浏览器没有自动弹出，可手动重新打开。',
+                          : '当前使用 $_viewerLabel 查看器。若浏览器没有自动弹出，可手动重新打开。',
                       font: theme.fontBodyMedium,
                       textColor: hintTextColor,
                       textAlign: TextAlign.center,

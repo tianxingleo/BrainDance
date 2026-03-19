@@ -5,6 +5,7 @@
 ## 当前目录内容
 
 - `my-3dgs-viewer/`：Vue 3 + Three.js 查看器前端
+- `spark-3dgs-viewer/`：基于 `@sparkjsdev/spark` 的备选查看器前端，不影响原版
 - `run_glomap.py`：本地视频到查看器资源的实验脚本
 - `export_poses.py`：位姿导出工具
 - `sync_images.py`：同步参考图片到查看器目录
@@ -22,6 +23,14 @@
 
 ```bash
 cd 3dgs_viewer/my-3dgs-viewer
+npm install
+npm run dev
+```
+
+备选 `Spark` 版：
+
+```bash
+cd 3dgs_viewer/spark-3dgs-viewer
 npm install
 npm run dev
 ```
