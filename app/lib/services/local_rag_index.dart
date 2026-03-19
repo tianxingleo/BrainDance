@@ -225,6 +225,7 @@ List<Map<String, dynamic>> _searchRows(Map<String, dynamic> payload) {
 
 String _buildSearchableTextStatic(Map<String, dynamic> model) {
   final parts = <String>[
+    model['display_name']?.toString() ?? '',
     model['scene_id']?.toString() ?? '',
     model['description']?.toString() ?? '',
     ..._stringListStatic(model['tags']),

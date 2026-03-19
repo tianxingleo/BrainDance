@@ -52,7 +52,7 @@ class RecallModelGrid extends StatelessWidget {
               final model = models[index];
               final cardKey = modelCardKeyFor(model);
               final isActionTarget = isSameModel(activeModelAction, model);
-              final sceneId = model['scene_id'] ?? 'Unknown Scene';
+              final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
               final desc = model['description'] ?? '没有描述信息';
               final similarity = model['similarity'] as double?;
               final userId = model['user_id'] ?? '';
@@ -792,6 +792,7 @@ class RecallModelTile extends StatelessWidget {
   final Color textColor;
   final Color hintTextColor;
   final bool elevated;
+  final bool imageOnly;
 
   const RecallModelTile({
     super.key,
@@ -803,18 +804,20 @@ class RecallModelTile extends StatelessWidget {
     required this.textColor,
     required this.hintTextColor,
     this.elevated = false,
+    this.imageOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
+    final radius = BorderRadius.circular(28.0);
 
     return Container(
       decoration: BoxDecoration(
         color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-        borderRadius: BorderRadius.circular(28.0),
+        borderRadius: radius,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withAlpha(elevated ? 46 : 20),
@@ -834,9 +837,11 @@ class RecallModelTile extends StatelessWidget {
                 Container(
                   decoration: BoxDecoration(
                     color: isDark ? darkInput : theme.grayColor3,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28.0),
-                    ),
+                    borderRadius: imageOnly
+                        ? radius
+                        : const BorderRadius.vertical(
+                            top: Radius.circular(28.0),
+                          ),
                   ),
                   clipBehavior: Clip.hardEdge,
                   child:
@@ -879,28 +884,29 @@ class RecallModelTile extends StatelessWidget {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TDText(
-                  sceneId,
-                  font: theme.fontTitleMedium,
-                  fontWeight: FontWeight.w600,
-                  maxLines: 1,
-                  textColor: textColor,
-                ),
-                const SizedBox(height: 4),
-                TDText(
-                  desc,
-                  font: theme.fontBodySmall,
-                  textColor: hintTextColor,
-                  maxLines: 2,
-                ),
-              ],
+          if (!imageOnly)
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TDText(
+                    sceneId,
+                    font: theme.fontTitleMedium,
+                    fontWeight: FontWeight.w600,
+                    maxLines: 1,
+                    textColor: textColor,
+                  ),
+                  const SizedBox(height: 4),
+                  TDText(
+                    desc,
+                    font: theme.fontBodySmall,
+                    textColor: hintTextColor,
+                    maxLines: 2,
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -1034,6 +1040,14 @@ class TimePeelingList extends StatelessWidget {
   }
 }
 
+const double _kCardWidth = 170.0;
+const double _kCardGap = 12.0;
+const double _kSlotWidth = _kCardWidth + _kCardGap;
+const double _kTimelineHeight = 58.0;
+const double _kNodeRadius = 7.0;
+const double _kLineHeight = 3.5;
+const Color _kTimelineColor = Color(0xFFCC9A5C); // 橙色微灰
+
 class _TimePeelingSlot extends StatelessWidget {
   final String name;
   final List<Map<String, dynamic>> models;
@@ -1069,11 +1083,20 @@ class _TimePeelingSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lineColor = _kTimelineColor.withValues(alpha: 0.6);
+    final nodeColor = _kTimelineColor.withValues(alpha: 0.95);
+    final timeStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w500,
+      color: _kTimelineColor.withValues(alpha: 0.8),
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 标题行
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -1110,8 +1133,9 @@ class _TimePeelingSlot extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          // 卡片 + 时间轴，统一水平滚动
           SizedBox(
-            height: 220,
+            height: 220 + 10 + _kTimelineHeight,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1120,31 +1144,64 @@ class _TimePeelingSlot extends StatelessWidget {
                 final model = models[i];
                 final cardKey = modelCardKeyFor(model);
                 final isActionTarget = isSameModel(activeModelAction, model);
+                final dt = DateTime.tryParse(
+                  model['created_at']?.toString() ?? '',
+                );
+                final timeLabel = dt != null
+                    ? '${dt.toLocal().month.toString().padLeft(2, '0')}/${dt.toLocal().day.toString().padLeft(2, '0')} ${dt.toLocal().hour.toString().padLeft(2, '0')}:${dt.toLocal().minute.toString().padLeft(2, '0')}'
+                    : '--';
 
-                return RepaintBoundary(
-                  child: IgnorePointer(
-                    ignoring: isActionTarget,
-                    child: Opacity(
-                      opacity: isActionTarget ? 0.0 : 1.0,
-                      child: GestureDetector(
-                        onTap: () => onNavigateToViewer(model, null),
-                        onLongPressStart: (_) => onShowModelActions(model),
-                        child: Container(
-                          key: cardKey,
-                          width: 170,
-                          margin: const EdgeInsets.only(right: 12),
-                          child: RecallModelTile(
-                            model: model,
-                            theme: theme,
-                            isDark: isDark,
-                            darkCard: darkCard,
-                            darkInput: darkInput,
-                            textColor: textColor,
-                            hintTextColor: hintTextColor,
+                return SizedBox(
+                  width: _kSlotWidth,
+                  child: Column(
+                    children: [
+                      // 卡片
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: _kCardGap),
+                          child: RepaintBoundary(
+                            child: IgnorePointer(
+                              ignoring: isActionTarget,
+                              child: Opacity(
+                                opacity: isActionTarget ? 0.0 : 1.0,
+                                child: GestureDetector(
+                                  onTap: () => onNavigateToViewer(model, null),
+                                  onLongPressStart: (_) =>
+                                      onShowModelActions(model),
+                                  child: Container(
+                                    key: cardKey,
+                                    child: RecallModelTile(
+                                      model: model,
+                                      theme: theme,
+                                      isDark: isDark,
+                                      darkCard: darkCard,
+                                      darkInput: darkInput,
+                                      textColor: textColor,
+                                      hintTextColor: hintTextColor,
+                                      imageOnly: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                      // 卡片与时间轴间距
+                      const SizedBox(height: 10),
+                      // 时间轴
+                      SizedBox(
+                        height: _kTimelineHeight,
+                        child: _TimelineNode(
+                          isFirst: i == 0,
+                          isLast: i == models.length - 1,
+                          lineColor: lineColor,
+                          nodeColor: nodeColor,
+                          timeLabel: timeLabel,
+                          timeStyle: timeStyle,
+                        ),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -1152,6 +1209,75 @@ class _TimePeelingSlot extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 单个时间轴节点：横线 + 圆点 + 时间标签
+class _TimelineNode extends StatelessWidget {
+  final bool isFirst;
+  final bool isLast;
+  final Color lineColor;
+  final Color nodeColor;
+  final String timeLabel;
+  final TextStyle timeStyle;
+
+  const _TimelineNode({
+    required this.isFirst,
+    required this.isLast,
+    required this.lineColor,
+    required this.nodeColor,
+    required this.timeLabel,
+    required this.timeStyle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // 横线 + 节点
+        SizedBox(
+          height: _kNodeRadius * 2 + 4,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 横线
+              Positioned(
+                left: isFirst ? _kSlotWidth / 2 : 0,
+                right: isLast ? _kSlotWidth / 2 : 0,
+                child: Container(
+                  height: _kLineHeight,
+                  color: lineColor,
+                ),
+              ),
+              // 圆点，居中于卡片（含 gap 的一半偏移）
+              Positioned(
+                left: (_kCardWidth - _kNodeRadius * 2) / 2,
+                child: Container(
+                  width: _kNodeRadius * 2,
+                  height: _kNodeRadius * 2,
+                  decoration: BoxDecoration(
+                    color: nodeColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // 时间标签，居中于卡片
+        SizedBox(
+          width: _kCardWidth,
+          child: Text(
+            timeLabel,
+            textAlign: TextAlign.center,
+            style: timeStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

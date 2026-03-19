@@ -29,7 +29,7 @@ class SearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     final desc = model['description'] ?? '没有描述信息';
     final similarity = model['similarity'] as double?;
     final userId = model['user_id'] ?? '';
@@ -193,7 +193,7 @@ class SearchResultCard extends StatelessWidget {
         ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     String? initialPoseId;
 
     if (transformMatrix is Map) {

@@ -30,7 +30,7 @@ class ModelCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
 
@@ -161,7 +161,7 @@ class ModelCard extends StatelessWidget {
         ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
 
     dynamic transformMatrix;
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
