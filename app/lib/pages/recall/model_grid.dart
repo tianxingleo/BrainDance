@@ -951,3 +951,207 @@ class RecallModelMockCover extends StatelessWidget {
     );
   }
 }
+
+/// Time Peeling: 按模型名称分组，每组一个水平滑动时间槽
+class TimePeelingList extends StatelessWidget {
+  final TDThemeData theme;
+  final bool isDark;
+  final Color darkCard;
+  final Color darkInput;
+  final Map<String, List<Map<String, dynamic>>> groupedModels;
+  final Map<String, dynamic>? activeModelAction;
+  final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
+  final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
+  final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final void Function(Map<String, dynamic>) onShowModelActions;
+
+  const TimePeelingList({
+    super.key,
+    required this.theme,
+    required this.isDark,
+    required this.darkCard,
+    required this.darkInput,
+    required this.groupedModels,
+    required this.activeModelAction,
+    required this.modelCardKeyFor,
+    required this.isSameModel,
+    required this.onNavigateToViewer,
+    required this.onShowModelActions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark
+        ? const Color(0xFFCCCCCC)
+        : theme.fontGyColor3;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.55)
+        : BDDesign.colorMutedBlue;
+
+    final sortedKeys = groupedModels.keys.toList()..sort((a, b) {
+      final ta = _newestTime(groupedModels[a]!);
+      final tb = _newestTime(groupedModels[b]!);
+      return tb.compareTo(ta);
+    });
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(0, 6, 0, 16),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final name = sortedKeys[index];
+            final models = groupedModels[name]!;
+            return _TimePeelingSlot(
+              name: name,
+              models: models,
+              theme: theme,
+              isDark: isDark,
+              darkCard: darkCard,
+              darkInput: darkInput,
+              textColor: textColor,
+              hintTextColor: hintTextColor,
+              hintColor: hintColor,
+              activeModelAction: activeModelAction,
+              modelCardKeyFor: modelCardKeyFor,
+              isSameModel: isSameModel,
+              onNavigateToViewer: onNavigateToViewer,
+              onShowModelActions: onShowModelActions,
+            );
+          },
+          childCount: sortedKeys.length,
+        ),
+      ),
+    );
+  }
+
+  DateTime _newestTime(List<Map<String, dynamic>> models) {
+    return models
+        .map((m) => DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime(0))
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+  }
+}
+
+class _TimePeelingSlot extends StatelessWidget {
+  final String name;
+  final List<Map<String, dynamic>> models;
+  final TDThemeData theme;
+  final bool isDark;
+  final Color darkCard;
+  final Color darkInput;
+  final Color textColor;
+  final Color hintTextColor;
+  final Color hintColor;
+  final Map<String, dynamic>? activeModelAction;
+  final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
+  final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
+  final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final void Function(Map<String, dynamic>) onShowModelActions;
+
+  const _TimePeelingSlot({
+    required this.name,
+    required this.models,
+    required this.theme,
+    required this.isDark,
+    required this.darkCard,
+    required this.darkInput,
+    required this.textColor,
+    required this.hintTextColor,
+    required this.hintColor,
+    required this.activeModelAction,
+    required this.modelCardKeyFor,
+    required this.isSameModel,
+    required this.onNavigateToViewer,
+    required this.onShowModelActions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: hintColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${models.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: hintColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 220,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: models.length,
+              itemBuilder: (context, i) {
+                final model = models[i];
+                final cardKey = modelCardKeyFor(model);
+                final isActionTarget = isSameModel(activeModelAction, model);
+
+                return RepaintBoundary(
+                  child: IgnorePointer(
+                    ignoring: isActionTarget,
+                    child: Opacity(
+                      opacity: isActionTarget ? 0.0 : 1.0,
+                      child: GestureDetector(
+                        onTap: () => onNavigateToViewer(model, null),
+                        onLongPressStart: (_) => onShowModelActions(model),
+                        child: Container(
+                          key: cardKey,
+                          width: 170,
+                          margin: const EdgeInsets.only(right: 12),
+                          child: RecallModelTile(
+                            model: model,
+                            theme: theme,
+                            isDark: isDark,
+                            darkCard: darkCard,
+                            darkInput: darkInput,
+                            textColor: textColor,
+                            hintTextColor: hintTextColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
