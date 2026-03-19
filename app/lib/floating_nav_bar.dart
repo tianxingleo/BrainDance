@@ -12,6 +12,10 @@ import 'package:braindance/configs/motion_tokens.dart';
 const double _kCreateSize = 66.0;
 const double _kNavBarInnerHeight = 60.0;
 const double _kCreateDockWidth = 88.0;
+const double _kCreateDockRightInset =
+    (_kCreateDockWidth - _kCreateSize) / 2;
+const double _kCreateDockBottomOffset =
+    (_kNavBarInnerHeight - _kCreateSize) / 2;
 
 class FloatingNavBar extends StatelessWidget {
   final int currentIndex;
@@ -232,8 +236,8 @@ class FloatingNavBar extends StatelessWidget {
               final item = items[index];
               if (!item.isLarge) return const SizedBox.shrink();
               return Positioned(
-                bottom: 0,
-                right: 12.0,
+                bottom: _kCreateDockBottomOffset,
+                right: _kCreateDockRightInset,
                 child: _CreateButton(
                   isSelected: currentIndex == index,
                   isDark: isDark,
@@ -529,11 +533,18 @@ class _CreateButton extends StatelessWidget {
                   ],
                 ),
                 child: Center(
-                  child: AnimatedRotation(
-                    turns: isSelected ? 0.125 : 0.0,
-                    duration: BDMotion.durationNormal,
-                    curve: BDMotion.curveFluid,
-                    child: Icon(Icons.add_rounded, color: iconColor, size: 30),
+                  child: Transform.translate(
+                    offset: const Offset(0, 1),
+                    child: AnimatedRotation(
+                      turns: isSelected ? 0.125 : 0.0,
+                      duration: BDMotion.durationNormal,
+                      curve: BDMotion.curveFluid,
+                      child: Icon(
+                        Icons.add_rounded,
+                        color: iconColor,
+                        size: 30,
+                      ),
+                    ),
                   ),
                 ),
               ),
