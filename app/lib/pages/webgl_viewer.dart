@@ -37,6 +37,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
+  bool _useExternalBrowserMode = false;
+  bool _isOpeningExternalViewer = false;
+  bool _didAttemptExternalOpen = false;
+  String? _externalViewerUrl;
   HttpServer? _localServer;
   int _localPort = 0;
   bool _isDownloading = false;
@@ -46,12 +50,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   @override
   void initState() {
     super.initState();
-    // Flutter Web 和桌面端均不支持 webview_flutter（需 Android/iOS）
-    if (kIsWeb ||
-        defaultTargetPlatform == TargetPlatform.windows ||
+    // Flutter Web 仍不支持此实现；桌面端改走外部浏览器模式
+    if (kIsWeb) {
+      _isUnsupportedPlatform = true;
+    } else if (defaultTargetPlatform == TargetPlatform.windows ||
         defaultTargetPlatform == TargetPlatform.linux ||
         defaultTargetPlatform == TargetPlatform.macOS) {
-      _isUnsupportedPlatform = true;
+      _useExternalBrowserMode = true;
+      _startLocalServer().then((_) {
+        if (mounted) _prepareModelAndLoad();
+      });
     } else {
       try {
         _startLocalServer().then((_) {
@@ -187,7 +195,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         if (await localFile.exists()) {
           debugPrint('Using cached offline model: ${localFile.path}');
           _localModelPath = localFile.path;
-          if (mounted) _initWebView();
+          if (mounted) _launchViewer();
         } else {
           debugPrint('Starting download from: $originalUrl');
           setState(() {
@@ -232,7 +240,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             setState(() {
               _isDownloading = false;
             });
-            _initWebView();
+            _launchViewer();
           }
         }
       } catch (e) {
@@ -242,12 +250,89 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             _isDownloading = false;
           });
           TDToast.showText('下载模型失败: $e', context: context);
-          _initWebView();
+          _launchViewer();
         }
       }
     } else {
-      if (mounted) _initWebView();
+      if (mounted) _launchViewer();
     }
+  }
+
+  void _launchViewer() {
+    if (_useExternalBrowserMode) {
+      _openInExternalBrowser();
+      return;
+    }
+    _initWebView();
+  }
+
+  Map<String, dynamic> _buildViewerPayload() {
+    String targetUrl;
+    if (_localModelPath != null) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+    } else if (widget.initialModelUrl.startsWith('http://') ||
+        widget.initialModelUrl.startsWith('https://')) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
+    } else {
+      targetUrl = widget.initialModelUrl;
+    }
+
+    return {
+      'ply': targetUrl,
+      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
+        'poses': widget.posesUrl,
+      if (widget.initialPose != null) 'matrix': widget.initialPose,
+    };
+  }
+
+  Future<void> _openInExternalBrowser() async {
+    final payload = _buildViewerPayload();
+    final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
+    final url =
+        'http://127.0.0.1:$_localPort/index.html?payload=$encodedPayload';
+    _externalViewerUrl = url;
+
+    if (_didAttemptExternalOpen) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _didAttemptExternalOpen = true;
+    if (mounted) {
+      setState(() {
+        _isOpeningExternalViewer = true;
+      });
+    }
+
+    try {
+      await _openUrlOnDesktop(url);
+    } catch (e) {
+      debugPrint('Open external viewer failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpeningExternalViewer = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openUrlOnDesktop(String url) async {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await Process.start('cmd', ['/c', 'start', '', url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await Process.start('open', [url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      await Process.start('xdg-open', [url], runInShell: true);
+      return;
+    }
+    throw UnsupportedError('Unsupported desktop platform');
   }
 
   void _initWebView() {
@@ -311,39 +396,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   /// - 如果是相对路径（本地 demo） -> 直接传递
   void _sendModelToVue() {
     if (!_isWebReady) return;
-    String targetUrl;
-    if (_localModelPath != null) {
-      // 已下载到本地：通过本地 HTTP 服务提供
-      targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
-    } else if (widget.initialModelUrl.startsWith('http://') ||
-        widget.initialModelUrl.startsWith('https://')) {
-      // 远程 URL：通过本地代理，避免 WebView 直接访问 HTTPS
-      targetUrl =
-          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
-    } else {
-      // 相对路径（本地 demo 模型）
-      targetUrl = widget.initialModelUrl;
-    }
+    final payloadData = _buildViewerPayload();
+    final targetUrl = payloadData['ply'];
 
     debugPrint('Sending model URL to WebView: $targetUrl');
-
-    if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
-      // 新版：同时传模型 URL、webgl_poses.json 公网 URL 以及可能的初始视角矩阵
-      final payload = jsonEncode({
-        'ply': targetUrl, 
-        'poses': widget.posesUrl,
-        if (widget.initialPose != null) 'matrix': widget.initialPose,
-      });
-      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
-    } else {
-      // 旧版兼容：只传模型 URL，由 WebGL 内部使用默认位姿文件
-      final payload = jsonEncode({
-        'ply': targetUrl,
-        if (widget.initialPose != null) 'matrix': widget.initialPose,
-      });
-      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
-    }
+    final payload = jsonEncode(payloadData);
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
   @override
@@ -386,18 +444,77 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ),
                     const SizedBox(height: 16),
                     TDText(
-                      '当前平台不支持内嵌网页',
+                      '当前平台不支持当前查看方式',
                       font: theme.fontTitleLarge,
                       fontWeight: FontWeight.w600,
                       textColor: textColor,
                     ),
                     const SizedBox(height: 12),
                     TDText(
-                      'Flutter 官方的 webview_flutter 插件目前仅支持 Android / iOS / Web 平台。\n如果你正在使用 Windows / macOS 调试，不支持直接原位打开 3D 模型。\n\n请在移动端模拟器（Android Emulator/iOS Simulator）或真实手机设备上调试 3D 查看功能！',
+                      '当前实现未覆盖 Flutter Web。\n请在 Android / iOS 使用内嵌查看器，或在桌面端运行原生 Flutter 应用后使用系统浏览器打开 3D 渲染器。',
                       font: theme.fontBodyMedium,
                       textColor: hintTextColor,
                       textAlign: TextAlign.center,
                     ),
+                  ],
+                ),
+              ),
+            )
+          : _useExternalBrowserMode
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.open_in_browser_rounded,
+                      size: 72,
+                      color: iconColor,
+                    ),
+                    const SizedBox(height: 16),
+                    TDText(
+                      '桌面端已切换到浏览器预览模式',
+                      font: theme.fontTitleLarge,
+                      fontWeight: FontWeight.w600,
+                      textColor: textColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    TDText(
+                      _isOpeningExternalViewer
+                          ? '正在启动本地渲染服务并打开系统浏览器...'
+                          : '渲染器和 Flutter 端使用同一套静态资源。若浏览器没有自动弹出，可手动重新打开。',
+                      font: theme.fontBodyMedium,
+                      textColor: hintTextColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_isDownloading) ...[
+                      const SizedBox(height: 18),
+                      CircularProgressIndicator(color: iconColor),
+                      const SizedBox(height: 12),
+                      TDText(
+                        '正在准备模型...\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                        textAlign: TextAlign.center,
+                        font: theme.fontBodyMedium,
+                        textColor: hintTextColor,
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    ElevatedButton(
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text('在浏览器中打开'),
+                    ),
+                    if (_externalViewerUrl != null) ...[
+                      const SizedBox(height: 12),
+                      SelectableText(
+                        _externalViewerUrl!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: hintTextColor, fontSize: 12),
+                      ),
+                    ],
                   ],
                 ),
               ),
