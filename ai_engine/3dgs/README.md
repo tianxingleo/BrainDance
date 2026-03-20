@@ -156,6 +156,8 @@ SUPABASE_WORKER_TABLE=worker_nodes
 WORKER_ID=
 WORKER_HEARTBEAT_INTERVAL=10
 WORKER_ONLINE_TIMEOUT_SECONDS=30
+WORKER_SUPERVISOR_POLL_INTERVAL=3
+WORKER_INTERRUPT_GRACE_SECONDS=20
 
 ```
 
@@ -219,6 +221,8 @@ python main.py
 - 每隔 `WORKER_HEARTBEAT_INTERVAL` 秒写一次心跳
 - 在 Dashboard 将该实例显示为在线 / 忙碌 / 停止中 / 离线
 - 当 `worker_nodes.desired_state='pause'` 时，不再接新任务并优雅退出
+- 当 `worker_nodes.desired_state='interrupt'` 时，Supervisor 会尝试中断当前子 Worker 进程
+- 当 `worker_nodes.desired_state='run'` 时，Supervisor 会重新拉起实例
 
 输出示例：
 

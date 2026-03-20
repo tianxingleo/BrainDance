@@ -13,6 +13,7 @@
 - Worker 在线状态推断
 - Worker 实例注册、心跳与在线数量统计
 - 对指定 Worker 发起优雅暂停（远程 `Ctrl+C` 风格）
+- 对指定 Worker 发起中断当前任务与恢复实例
 - Realtime 订阅状态
 - 数据表数量统计
 - Storage bucket 探测与容量统计

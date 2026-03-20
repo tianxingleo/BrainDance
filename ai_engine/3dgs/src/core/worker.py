@@ -186,11 +186,18 @@ class CloudWorker:
         with self._state_lock:
             self._desired_state = desired_state
             busy = self._current_task_id is not None
-        if desired_state == "pause":
-            if busy:
-                self._set_worker_state(status="stopping", stop_requested=True, stop_reason=control_note or "pause requested")
-            else:
-                self._set_worker_state(status="stopping", stop_requested=True, stop_reason=control_note or "pause requested")
+            current_status = self._status
+        if desired_state in ("pause", "interrupt"):
+            self._set_worker_state(
+                status="stopping",
+                stop_requested=True,
+                stop_reason=control_note or f"{desired_state} requested",
+            )
+        elif desired_state == "run":
+            next_status = "busy" if busy else "idle"
+            if current_status == "offline":
+                next_status = "offline"
+            self._set_worker_state(status=next_status, stop_requested=False, stop_reason=None)
 
     def _heartbeat_loop(self):
         while not self._heartbeat_stop.wait(self.heartbeat_interval):

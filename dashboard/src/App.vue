@@ -78,7 +78,7 @@ interface WorkerNode {
   status: string
   current_task_id: string | null
   current_scene_id: string | null
-  desired_state: 'run' | 'pause' | string
+  desired_state: 'run' | 'pause' | 'interrupt' | string
   control_note: string | null
   last_heartbeat: string
   started_at: string | null
@@ -570,24 +570,54 @@ const applyTheme = () => {
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
-const requestWorkerPause = async (worker: WorkerNode) => {
+const updateWorkerDesiredState = async (
+  worker: WorkerNode,
+  desiredState: 'run' | 'pause' | 'interrupt',
+  successMessage: string,
+) => {
   const { error } = await supabase
     .from('worker_nodes')
     .update({
-      desired_state: 'pause',
-      control_note: 'Paused from dashboard',
+      desired_state: desiredState,
+      control_note:
+        desiredState === 'run'
+          ? 'Resumed from dashboard'
+          : desiredState === 'interrupt'
+            ? 'Interrupted from dashboard'
+            : 'Paused from dashboard',
       control_requested_at: new Date().toISOString(),
     })
     .eq('worker_id', worker.worker_id)
 
   if (error) {
-    ElMessage.error(`暂停失败: ${error.message}`)
+    ElMessage.error(`控制失败: ${error.message}`)
     return
   }
 
-  ElMessage.success(`已请求暂停 ${formatWorkerLabel(worker)}，实例会像 Ctrl+C 一样优雅退出。`)
+  ElMessage.success(successMessage)
   await refreshDashboard()
 }
+
+const requestWorkerPause = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'pause',
+    `已请求优雅暂停 ${formatWorkerLabel(worker)}，它会停止接新任务并在安全点退出。`,
+  )
+
+const requestWorkerInterrupt = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'interrupt',
+    `已请求中断 ${formatWorkerLabel(worker)}，Supervisor 会尝试立即打断当前任务。`,
+  )
+
+const requestWorkerResume = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'run',
+    `已请求恢复 ${formatWorkerLabel(worker)}，Supervisor 会在轮询周期内拉起实例。`,
+  )
 
 const edgeFunctionNames = computed(() => {
   const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? ''
@@ -1570,22 +1600,41 @@ onUnmounted(() => {
                     {{ formatDateTime(scope.row.last_heartbeat) }} / {{ formatHeartbeatAge(scope.row.last_heartbeat) }}
                   </template>
                 </el-table-column>
-                <el-table-column label="控制" width="140" align="center">
+                <el-table-column label="控制" min-width="260" align="center">
                   <template #default="scope">
-                    <el-button
-                      size="small"
-                      type="danger"
-                      plain
-                      :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
-                      @click="requestWorkerPause(scope.row)"
-                    >
-                      暂停实例
-                    </el-button>
+                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerPause(scope.row)"
+                      >
+                        优雅暂停
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="danger"
+                        plain
+                        :disabled="scope.row.desired_state === 'interrupt' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerInterrupt(scope.row)"
+                      >
+                        中断任务
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="success"
+                        plain
+                        :disabled="scope.row.desired_state === 'run' && isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerResume(scope.row)"
+                      >
+                        恢复实例
+                      </el-button>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
               <div class="header-meta" style="margin-top: 12px;">
-                “暂停实例” 会把 `desired_state` 设为 `pause`，worker 收到后会停止接新任务并优雅退出；这相当于远程发起一次安全版 `Ctrl+C`，不会强杀正在运行的训练。
+                “优雅暂停” 会把 `desired_state` 设为 `pause`，实例不会再接新任务；“中断任务” 会把 `desired_state` 设为 `interrupt`，Supervisor 会尝试向子 Worker 转发中断信号，尽量打断当前任务；“恢复实例” 会把 `desired_state` 改回 `run` 并重新拉起实例。
               </div>
             </el-card>
 

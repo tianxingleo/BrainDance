@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from src.config import PipelineConfig
 from src.core.pipeline import run_pipeline
+from src.core.supervisor import WorkerSupervisor
 from src.core.worker import CloudWorker
 
 load_dotenv()
@@ -39,12 +40,19 @@ def run_local_mode(video_file: Path):
 
 def run_cloud_mode():
     """云端监听模式"""
+    supervisor = WorkerSupervisor()
+    supervisor.start()
+
+def run_child_worker_mode():
+    """Supervisor 拉起的子 Worker 模式"""
     worker = CloudWorker()
     worker.start()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1] == "--child-worker":
+        run_child_worker_mode()
+    elif len(sys.argv) > 1:
         run_local_mode(Path(sys.argv[1]))
     else:
-        print("☁️ 启动云端监听模式...")
+        print("☁️ 启动云端监听模式（Supervisor）...")
         run_cloud_mode()
