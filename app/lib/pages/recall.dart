@@ -10,7 +10,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider, pageIndexProvider;
+import '../main.dart'
+    show
+        overviewStatsProvider,
+        overviewLocalIndexingProvider,
+        pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
@@ -20,7 +24,7 @@ import 'recall/model_grid.dart';
 import 'recall/processing_section.dart';
 import 'webgl_viewer.dart';
 
-enum _RecallSearchMode { local, cloud }
+enum _RecallSearchMode { cloud, local, localAi }
 
 class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
@@ -50,13 +54,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final TextEditingController _localModelUrlController = TextEditingController(
     text: _defaultModelDownloadUrl,
   );
-  final TextEditingController _localQuestionController =
-      TextEditingController();
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
   Timer? _searchDebounce;
   LocalRagIndexStats? _indexStats;
-  _RecallSearchMode _searchMode = _RecallSearchMode.local;
+  _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   String _localAnswer = '';
@@ -64,9 +66,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String _localContextPreview = '';
   bool _isLocalModelLoading = false;
   bool _isLocalModelReady = false;
-  bool _isLocalAnswering = false;
   bool _isModelDownloading = false;
-  bool _isLocalAiPanelOpen = false;
   double? _modelDownloadProgress;
   int _modelDownloadedBytes = 0;
   int? _modelDownloadTotalBytes;
@@ -94,7 +94,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     _searchController.dispose();
     _localModelPathController.dispose();
     _localModelUrlController.dispose();
-    _localQuestionController.dispose();
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
     super.dispose();
@@ -246,7 +245,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     setState(() {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
-      _isLocalAnswering = false;
       _localAnswer = '';
       _localAnswerStatus = '正在加载 Qwen3-1.7B 端侧模型...';
     });
@@ -336,15 +334,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
-        _isLocalAnswering = false;
         _localAnswerStatus = '模型加载失败：$e';
       });
       TDToast.showText(context: context, '端侧模型加载失败：$e');
     }
   }
 
-  Future<void> _askLocalQuestion() async {
-    final userQuestion = _localQuestionController.text.trim();
+  Future<void> _askLocalQuestion({String? question}) async {
+    final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
       TDToast.showText(context: context, '请输入要提问的问题');
       return;
@@ -375,7 +372,6 @@ $userQuestion
     setState(() {
       _localAnswer = '';
       _localContextPreview = memoryContext;
-      _isLocalAnswering = true;
       _localAnswerStatus = '正在根据本地记忆片段生成回答...';
     });
 
@@ -426,7 +422,6 @@ $userQuestion
                 return;
               }
               setState(() {
-                _isLocalAnswering = false;
                 _localAnswerStatus = '端侧问答失败：$error';
               });
             },
@@ -438,7 +433,6 @@ $userQuestion
                 if (_localAnswer.trim().isEmpty) {
                   _localAnswer = '我不知道';
                 }
-                _isLocalAnswering = false;
                 _localAnswerStatus = '端侧回答完成';
               });
             },
@@ -449,7 +443,6 @@ $userQuestion
         return;
       }
       setState(() {
-        _isLocalAnswering = false;
         _localAnswerStatus = '端侧问答失败：$e';
       });
       TDToast.showText(context: context, '端侧问答失败：$e');
@@ -869,15 +862,18 @@ $userQuestion
   ) {
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final model in models) {
-      final name = model['display_name']?.toString() ??
+      final name =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           'Unknown';
       groups.putIfAbsent(name, () => []).add(model);
     }
     for (final list in groups.values) {
       list.sort((a, b) {
-        final ta = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
-        final tb = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
+        final ta =
+            DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
+        final tb =
+            DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
         return tb.compareTo(ta);
       });
     }
@@ -907,227 +903,188 @@ $userQuestion
                   SliverToBoxAdapter(
                     child: Column(
                       children: [
-                    BDPageHeader(
-                      title: textLocalize("home_page"),
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: AnimatedRotation(
-                              turns: _isLoading ? 1 : 0,
-                              duration: const Duration(milliseconds: 600),
-                              child: Icon(
-                                Icons.sync_rounded,
-                                color: isDark
-                                    ? BDDesign.colorPaperWhite
-                                    : BDDesign.colorInkBlack,
+                        BDPageHeader(
+                          title: textLocalize("home_page"),
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: AnimatedRotation(
+                                  turns: _isLoading ? 1 : 0,
+                                  duration: const Duration(milliseconds: 600),
+                                  child: Icon(
+                                    Icons.sync_rounded,
+                                    color: isDark
+                                        ? BDDesign.colorPaperWhite
+                                        : BDDesign.colorInkBlack,
+                                  ),
+                                ),
+                                tooltip: textLocalize("recall_refresh"),
+                                onPressed: () {
+                                  setState(() {
+                                    _isLoading = true;
+                                  });
+                                  _fetchModels();
+                                },
                               ),
-                            ),
-                            tooltip: textLocalize("recall_refresh"),
-                            onPressed: () {
-                              setState(() {
-                                _isLoading = true;
-                              });
-                              _fetchModels();
-                            },
+                            ],
                           ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
-                      child: Column(
-                        children: [
-                          BDPanelCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: TextField(
-                              controller: _searchController,
-                              style: TextStyle(color: textColor, fontSize: 15),
-                              decoration: InputDecoration(
-                                hintText: textLocalize("recall_search_hint"),
-                                hintStyle: TextStyle(
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.45)
-                                      : BDDesign.colorMutedBlue.withValues(
-                                          alpha: 0.78,
-                                        ),
-                                  fontSize: 15,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.search_rounded,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.5)
-                                      : BDDesign.colorMutedBlue,
-                                ),
-                                suffixIcon:
-                                    ValueListenableBuilder<TextEditingValue>(
-                                      valueListenable: _searchController,
-                                      builder: (context, value, _) {
-                                        final hasText = value.text
-                                            .trim()
-                                            .isNotEmpty;
-                                        return Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            _buildSearchModeMenuButton(isDark),
-                                            if (hasText)
-                                              IconButton(
-                                                onPressed: () {
-                                                  _searchController.clear();
-                                                  _searchDebounce?.cancel();
-                                                  _searchModels('');
-                                                },
-                                                icon: Icon(
-                                                  Icons.close_rounded,
-                                                  color: isDark
-                                                      ? Colors.white.withValues(
-                                                          alpha: 0.5,
-                                                        )
-                                                      : BDDesign.colorMutedBlue,
-                                                ),
-                                              ),
-                                          ],
-                                        );
-                                      },
-                                    ),
-                                filled: true,
-                                fillColor: Colors.transparent,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                  horizontal: 16,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: BorderSide.none,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: BorderSide.none,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: const BorderSide(
-                                    color: BDDesign.colorMutedBlue,
-                                    width: 1.5,
-                                  ),
-                                ),
-                              ),
-                              onSubmitted: _searchModels,
-                              onChanged: _onSearchChanged,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          BDPanelCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  _isLocalIndexing
-                                      ? Icons.memory_rounded
-                                      : Icons.privacy_tip_rounded,
-                                  size: 18,
-                                  color: isDark
-                                      ? BDDesign.colorPaperWhite
-                                      : BDDesign.colorInkBlack,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    _searchMode == _RecallSearchMode.local
-                                        ? (_isLocalIndexing
-                                              ? textLocalize(
-                                                  'recall_local_indexing',
-                                                )
-                                              : '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}')
-                                        : textLocalize('recall_cloud_scope'),
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.72)
-                                          : BDDesign.colorMutedBlue,
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                ),
-                                if (_searchMode == _RecallSearchMode.local &&
-                                    _indexStats != null &&
-                                    !_isLocalIndexing)
-                                  BDStatusPill(
-                                    label:
-                                        '${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}',
-                                    icon: Icons.storage_rounded,
-                                    color: BDDesign.colorMutedBlue,
-                                  ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          RecallLocalAiPanel(
-                            theme: theme,
-                            isDark: isDark,
-                            textColor: textColor,
-                            darkInput: darkInput,
-                            isLocalAiPanelOpen: _isLocalAiPanelOpen,
-                            isLocalModelReady: _isLocalModelReady,
-                            isModelDownloading: _isModelDownloading,
-                            isLocalModelLoading: _isLocalModelLoading,
-                            isLocalAnswering: _isLocalAnswering,
-                            modelDownloadProgress: _modelDownloadProgress,
-                            modelDownloadedBytes: _modelDownloadedBytes,
-                            modelDownloadTotalBytes: _modelDownloadTotalBytes,
-                            localAnswer: _localAnswer,
-                            localAnswerStatus: _localAnswerStatus,
-                            localContextPreview: _localContextPreview,
-                            defaultModelDownloadUrl: _defaultModelDownloadUrl,
-                            localModelUrlController: _localModelUrlController,
-                            localModelPathController: _localModelPathController,
-                            localQuestionController: _localQuestionController,
-                            onToggleOpen: () {
-                              setState(() {
-                                _isLocalAiPanelOpen = !_isLocalAiPanelOpen;
-                              });
-                            },
-                            onDownloadModel: _downloadModelToPrivateDir,
-                            onLoadModel: _loadLocalQnaModel,
-                            onAskQuestion: _askLocalQuestion,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_processingTasks.isNotEmpty)
-                      RepaintBoundary(
-                        child: RecallProcessingSection(
-                          theme: theme,
-                          isDark: isDark,
-                          textColor: textColor,
-                          darkInput: darkInput,
-                          isExpanded: _isProcessingExpanded,
-                          processingTasks: _processingTasks,
-                          taskAllLogs: _taskAllLogs,
-                          expandedTaskLogs: _expandedTaskLogs,
-                          onToggleExpanded: () {
-                            setState(() {
-                              _isProcessingExpanded = !_isProcessingExpanded;
-                            });
-                          },
-                          onToggleTaskLogs: (taskId) {
-                            setState(() {
-                              if (_expandedTaskLogs.contains(taskId)) {
-                                _expandedTaskLogs.remove(taskId);
-                              } else {
-                                _expandedTaskLogs.add(taskId);
-                              }
-                            });
-                          },
                         ),
-                      ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
+                          child: Column(
+                            children: [
+                              BDPanelCard(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                child: TextField(
+                                  controller: _searchController,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 15,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: _searchFieldHint(),
+                                    hintStyle: TextStyle(
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.45)
+                                          : BDDesign.colorMutedBlue.withValues(
+                                              alpha: 0.78,
+                                            ),
+                                      fontSize: 15,
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.search_rounded,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.5)
+                                          : BDDesign.colorMutedBlue,
+                                    ),
+                                    suffixIcon:
+                                        ValueListenableBuilder<
+                                          TextEditingValue
+                                        >(
+                                          valueListenable: _searchController,
+                                          builder: (context, value, _) {
+                                            final hasText = value.text
+                                                .trim()
+                                                .isNotEmpty;
+                                            return Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _buildSearchModeMenuButton(
+                                                  isDark,
+                                                ),
+                                                if (hasText)
+                                                  IconButton(
+                                                    onPressed: () {
+                                                      _searchController.clear();
+                                                      _searchDebounce?.cancel();
+                                                      _searchModels('');
+                                                    },
+                                                    icon: Icon(
+                                                      Icons.close_rounded,
+                                                      color: isDark
+                                                          ? Colors.white
+                                                                .withValues(
+                                                                  alpha: 0.5,
+                                                                )
+                                                          : BDDesign
+                                                                .colorMutedBlue,
+                                                    ),
+                                                  ),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                    filled: true,
+                                    fillColor: Colors.transparent,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                      horizontal: 16,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: const BorderSide(
+                                        color: BDDesign.colorMutedBlue,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                  onSubmitted: (value) {
+                                    unawaited(_handleSearchSubmitted(value));
+                                  },
+                                  onChanged: _onSearchChanged,
+                                ),
+                              ),
+                              if (_searchMode == _RecallSearchMode.localAi) ...[
+                                const SizedBox(height: 10),
+                                RecallLocalAiPanel(
+                                  theme: theme,
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  darkInput: darkInput,
+                                  isLocalModelReady: _isLocalModelReady,
+                                  isModelDownloading: _isModelDownloading,
+                                  isLocalModelLoading: _isLocalModelLoading,
+                                  modelDownloadProgress: _modelDownloadProgress,
+                                  modelDownloadedBytes: _modelDownloadedBytes,
+                                  modelDownloadTotalBytes:
+                                      _modelDownloadTotalBytes,
+                                  localAnswer: _localAnswer,
+                                  localAnswerStatus: _localAnswerStatus,
+                                  localContextPreview: _localContextPreview,
+                                  defaultModelDownloadUrl:
+                                      _defaultModelDownloadUrl,
+                                  localModelUrlController:
+                                      _localModelUrlController,
+                                  localModelPathController:
+                                      _localModelPathController,
+                                  onDownloadModel: _downloadModelToPrivateDir,
+                                  onLoadModel: _loadLocalQnaModel,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (_processingTasks.isNotEmpty)
+                          RepaintBoundary(
+                            child: RecallProcessingSection(
+                              theme: theme,
+                              isDark: isDark,
+                              textColor: textColor,
+                              darkInput: darkInput,
+                              isExpanded: _isProcessingExpanded,
+                              processingTasks: _processingTasks,
+                              taskAllLogs: _taskAllLogs,
+                              expandedTaskLogs: _expandedTaskLogs,
+                              onToggleExpanded: () {
+                                setState(() {
+                                  _isProcessingExpanded =
+                                      !_isProcessingExpanded;
+                                });
+                              },
+                              onToggleTaskLogs: (taskId) {
+                                setState(() {
+                                  if (_expandedTaskLogs.contains(taskId)) {
+                                    _expandedTaskLogs.remove(taskId);
+                                  } else {
+                                    _expandedTaskLogs.add(taskId);
+                                  }
+                                });
+                              },
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -1188,9 +1145,7 @@ $userQuestion
                         ref.read(pageIndexProvider.notifier).state = 1;
                       },
                     ),
-                  const SliverToBoxAdapter(
-                    child: SizedBox(height: 96),
-                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 96)),
                 ],
               ),
             ),
@@ -1222,6 +1177,10 @@ $userQuestion
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
+        if (_searchMode == _RecallSearchMode.localAi) {
+          _localAnswer = '';
+          _localContextPreview = '';
+        }
         _isLoading = false;
       });
       return;
@@ -1230,7 +1189,8 @@ $userQuestion
     final cacheKey = '${_searchMode.name}:$normalizedQuery';
     final now = DateTime.now();
     final cached = _searchCache[cacheKey];
-    if (cached != null && now.difference(cached.createdAt) < const Duration(minutes: 2)) {
+    if (cached != null &&
+        now.difference(cached.createdAt) < const Duration(minutes: 2)) {
       _lastSearchKey = cacheKey;
       if (!mounted) return;
       setState(() {
@@ -1253,22 +1213,22 @@ $userQuestion
     });
 
     try {
-      final results = _searchMode == _RecallSearchMode.local
+      final results = _usesLocalIndex(_searchMode)
           ? await _localRagIndex.search(normalizedQuery)
           : await _searchModelsFromCloud(normalizedQuery);
       if (!mounted || requestId != _searchRequestId) return;
       _searchCache[cacheKey] = _RecallSearchCacheEntry(
         createdAt: now,
-        results: results.map((item) => Map<String, dynamic>.from(item)).toList(),
+        results: results
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
       );
       if (_searchCache.length > 24) {
-        final oldestKey = _searchCache.entries
-            .reduce((left, right) {
-              return left.value.createdAt.isBefore(right.value.createdAt)
-                  ? left
-                  : right;
-            })
-            .key;
+        final oldestKey = _searchCache.entries.reduce((left, right) {
+          return left.value.createdAt.isBefore(right.value.createdAt)
+              ? left
+              : right;
+        }).key;
         _searchCache.remove(oldestKey);
       }
       setState(() {
@@ -1312,48 +1272,131 @@ $userQuestion
     });
   }
 
+  Future<void> _handleSearchSubmitted(String value) async {
+    final query = value.trim();
+    if (_searchMode == _RecallSearchMode.localAi) {
+      await _searchModels(query);
+      if (query.isNotEmpty) {
+        await _askLocalQuestion(question: query);
+      }
+      return;
+    }
+    await _searchModels(query);
+  }
+
+  bool _usesLocalIndex(_RecallSearchMode mode) {
+    return mode == _RecallSearchMode.local || mode == _RecallSearchMode.localAi;
+  }
+
+  String _searchModeTitle(_RecallSearchMode mode) {
+    switch (mode) {
+      case _RecallSearchMode.cloud:
+        return textLocalize('recall_cloud_rag');
+      case _RecallSearchMode.local:
+        return textLocalize('recall_local_rag');
+      case _RecallSearchMode.localAi:
+        return textLocalize('recall_local_ai_rag');
+    }
+  }
+
+  String _searchModeSubtitle(_RecallSearchMode mode) {
+    switch (mode) {
+      case _RecallSearchMode.cloud:
+        return textLocalize('recall_cloud_scope');
+      case _RecallSearchMode.local:
+        if (_isLocalIndexing) {
+          return textLocalize('recall_local_indexing');
+        }
+        final base =
+            '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}';
+        if (_indexStats == null) {
+          return base;
+        }
+        return '$base · ${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}';
+      case _RecallSearchMode.localAi:
+        return textLocalize('recall_local_ai_scope');
+    }
+  }
+
+  String _searchFieldHint() {
+    if (_searchMode == _RecallSearchMode.localAi) {
+      return textLocalize('recall_local_ai_hint');
+    }
+    return textLocalize('recall_search_hint');
+  }
+
   void _setSearchMode(_RecallSearchMode mode) {
     if (_searchMode == mode) {
       return;
     }
     setState(() {
       _searchMode = mode;
+      if (mode != _RecallSearchMode.localAi) {
+        _localAnswer = '';
+        _localContextPreview = '';
+      }
     });
     final keyword = _searchController.text.trim();
     if (keyword.isNotEmpty) {
-      _searchModels(keyword);
+      unawaited(_searchModels(keyword));
     }
   }
 
   Widget _buildSearchModeMenuButton(bool isDark) {
-    final selectedLocal = _searchMode == _RecallSearchMode.local;
-    final icon = selectedLocal
-        ? Icons.privacy_tip_rounded
-        : Icons.cloud_rounded;
+    final icon = switch (_searchMode) {
+      _RecallSearchMode.cloud => Icons.cloud_rounded,
+      _RecallSearchMode.local => Icons.privacy_tip_rounded,
+      _RecallSearchMode.localAi => Icons.auto_awesome_rounded,
+    };
     final foreground = isDark
         ? Colors.white.withValues(alpha: 0.82)
         : BDDesign.colorInkBlack;
 
-    return IconButton(
-      tooltip: textLocalize('recall_search_mode'),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-      onPressed: _showSearchModeSheet,
-      icon: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+    return Tooltip(
+      message: textLocalize('recall_search_mode'),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showSearchModeSheet,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 68),
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: foreground),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    _searchModeTitle(_searchMode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(Icons.expand_more_rounded, size: 16, color: foreground),
+              ],
+            ),
           ),
         ),
-        child: Icon(icon, size: 16, color: foreground),
       ),
     );
   }
@@ -1480,17 +1523,24 @@ $userQuestion
                   ),
                   const SizedBox(height: 16),
                   modeTile(
-                    mode: _RecallSearchMode.local,
-                    icon: Icons.privacy_tip_rounded,
-                    title: textLocalize('recall_local_rag'),
-                    subtitle: textLocalize('recall_local_scope'),
+                    mode: _RecallSearchMode.cloud,
+                    icon: Icons.cloud_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.cloud),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.cloud),
                   ),
                   const SizedBox(height: 10),
                   modeTile(
-                    mode: _RecallSearchMode.cloud,
-                    icon: Icons.cloud_rounded,
-                    title: textLocalize('recall_cloud_rag'),
-                    subtitle: textLocalize('recall_cloud_scope'),
+                    mode: _RecallSearchMode.local,
+                    icon: Icons.privacy_tip_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.local),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.local),
+                  ),
+                  const SizedBox(height: 10),
+                  modeTile(
+                    mode: _RecallSearchMode.localAi,
+                    icon: Icons.auto_awesome_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.localAi),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.localAi),
                   ),
                 ],
               ),
@@ -1617,16 +1667,20 @@ $userQuestion
             ),
             const SizedBox(height: 18),
             TDText(
-              textLocalize('recall_local_rag'),
+              _searchModeTitle(_searchMode),
               font: theme.fontTitleLarge,
               textColor: textColor,
               fontWeight: FontWeight.w600,
             ),
             const SizedBox(height: 8),
             TDText(
-              _searchMode == _RecallSearchMode.local
-                  ? textLocalize('recall_local_empty')
-                  : textLocalize('recall_cloud_empty'),
+              switch (_searchMode) {
+                _RecallSearchMode.local => textLocalize('recall_local_empty'),
+                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                _RecallSearchMode.localAi => textLocalize(
+                  'recall_local_ai_empty',
+                ),
+              },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
             ),
@@ -1660,7 +1714,8 @@ $userQuestion
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -2090,7 +2145,10 @@ $userQuestion
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['display_name']?.toString() ?? model['scene_id']?.toString() ?? '未命名模型',
+      sceneId:
+          model['display_name']?.toString() ??
+          model['scene_id']?.toString() ??
+          '未命名模型',
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'

@@ -9,11 +9,9 @@ class RecallLocalAiPanel extends StatelessWidget {
   final bool isDark;
   final Color textColor;
   final Color darkInput;
-  final bool isLocalAiPanelOpen;
   final bool isLocalModelReady;
   final bool isModelDownloading;
   final bool isLocalModelLoading;
-  final bool isLocalAnswering;
   final double? modelDownloadProgress;
   final int modelDownloadedBytes;
   final int? modelDownloadTotalBytes;
@@ -23,11 +21,8 @@ class RecallLocalAiPanel extends StatelessWidget {
   final String defaultModelDownloadUrl;
   final TextEditingController localModelUrlController;
   final TextEditingController localModelPathController;
-  final TextEditingController localQuestionController;
-  final VoidCallback onToggleOpen;
   final VoidCallback onDownloadModel;
   final VoidCallback onLoadModel;
-  final VoidCallback onAskQuestion;
 
   const RecallLocalAiPanel({
     super.key,
@@ -35,11 +30,9 @@ class RecallLocalAiPanel extends StatelessWidget {
     required this.isDark,
     required this.textColor,
     required this.darkInput,
-    required this.isLocalAiPanelOpen,
     required this.isLocalModelReady,
     required this.isModelDownloading,
     required this.isLocalModelLoading,
-    required this.isLocalAnswering,
     required this.modelDownloadProgress,
     required this.modelDownloadedBytes,
     required this.modelDownloadTotalBytes,
@@ -49,124 +42,34 @@ class RecallLocalAiPanel extends StatelessWidget {
     required this.defaultModelDownloadUrl,
     required this.localModelUrlController,
     required this.localModelPathController,
-    required this.localQuestionController,
-    required this.onToggleOpen,
     required this.onDownloadModel,
     required this.onLoadModel,
-    required this.onAskQuestion,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue;
     final answerText = localAnswer.trim();
     final contextPreview = localContextPreview.trim();
 
-    return Column(
-      children: [
-        BDPanelCard(
-          padding: const EdgeInsets.all(14),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: onToggleOpen,
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1F2836)
-                        : const Color(0xFFEAF1FB),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(
-                    Icons.memory_rounded,
-                    color: isDark
-                        ? BDDesign.colorPaperWhite
-                        : BDDesign.colorInkBlack,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '本地 AI 问答',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isLocalModelReady ? '已就绪，点击展开端侧模型问答' : '点击展开并配置端侧模型',
-                        style: TextStyle(
-                          color: hintColor,
-                          fontSize: 12.5,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                BDStatusPill(
-                  label: isLocalModelReady ? 'READY' : 'OFFLINE',
-                  icon: isLocalModelReady
-                      ? Icons.check_circle_rounded
-                      : Icons.offline_bolt_rounded,
-                  color: isLocalModelReady
-                      ? BDDesign.colorMutedBlue
-                      : BDDesign.colorDarkRed,
-                ),
-                const SizedBox(width: 8),
-                AnimatedRotation(
-                  turns: isLocalAiPanelOpen ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 220),
-                  child: Icon(Icons.expand_more_rounded, color: hintColor),
-                ),
-              ],
-            ),
-          ),
-        ),
-        AnimatedCrossFade(
-          firstChild: const SizedBox.shrink(),
-          secondChild: Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: _RecallLocalQnaPanel(
-              theme: theme,
-              isDark: isDark,
-              textColor: textColor,
-              darkInput: darkInput,
-              isLocalModelReady: isLocalModelReady,
-              isModelDownloading: isModelDownloading,
-              isLocalModelLoading: isLocalModelLoading,
-              isLocalAnswering: isLocalAnswering,
-              modelDownloadProgress: modelDownloadProgress,
-              modelDownloadedBytes: modelDownloadedBytes,
-              modelDownloadTotalBytes: modelDownloadTotalBytes,
-              localAnswerStatus: localAnswerStatus,
-              answerText: answerText,
-              contextPreview: contextPreview,
-              defaultModelDownloadUrl: defaultModelDownloadUrl,
-              localModelUrlController: localModelUrlController,
-              localModelPathController: localModelPathController,
-              localQuestionController: localQuestionController,
-              onDownloadModel: onDownloadModel,
-              onLoadModel: onLoadModel,
-              onAskQuestion: onAskQuestion,
-            ),
-          ),
-          crossFadeState: isLocalAiPanelOpen
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 220),
-        ),
-      ],
+    return _RecallLocalQnaPanel(
+      theme: theme,
+      isDark: isDark,
+      textColor: textColor,
+      darkInput: darkInput,
+      isLocalModelReady: isLocalModelReady,
+      isModelDownloading: isModelDownloading,
+      isLocalModelLoading: isLocalModelLoading,
+      modelDownloadProgress: modelDownloadProgress,
+      modelDownloadedBytes: modelDownloadedBytes,
+      modelDownloadTotalBytes: modelDownloadTotalBytes,
+      localAnswerStatus: localAnswerStatus,
+      answerText: answerText,
+      contextPreview: contextPreview,
+      defaultModelDownloadUrl: defaultModelDownloadUrl,
+      localModelUrlController: localModelUrlController,
+      localModelPathController: localModelPathController,
+      onDownloadModel: onDownloadModel,
+      onLoadModel: onLoadModel,
     );
   }
 }
@@ -179,7 +82,6 @@ class _RecallLocalQnaPanel extends StatelessWidget {
   final bool isLocalModelReady;
   final bool isModelDownloading;
   final bool isLocalModelLoading;
-  final bool isLocalAnswering;
   final double? modelDownloadProgress;
   final int modelDownloadedBytes;
   final int? modelDownloadTotalBytes;
@@ -189,10 +91,8 @@ class _RecallLocalQnaPanel extends StatelessWidget {
   final String defaultModelDownloadUrl;
   final TextEditingController localModelUrlController;
   final TextEditingController localModelPathController;
-  final TextEditingController localQuestionController;
   final VoidCallback onDownloadModel;
   final VoidCallback onLoadModel;
-  final VoidCallback onAskQuestion;
 
   const _RecallLocalQnaPanel({
     required this.theme,
@@ -202,7 +102,6 @@ class _RecallLocalQnaPanel extends StatelessWidget {
     required this.isLocalModelReady,
     required this.isModelDownloading,
     required this.isLocalModelLoading,
-    required this.isLocalAnswering,
     required this.modelDownloadProgress,
     required this.modelDownloadedBytes,
     required this.modelDownloadTotalBytes,
@@ -212,10 +111,8 @@ class _RecallLocalQnaPanel extends StatelessWidget {
     required this.defaultModelDownloadUrl,
     required this.localModelUrlController,
     required this.localModelPathController,
-    required this.localQuestionController,
     required this.onDownloadModel,
     required this.onLoadModel,
-    required this.onAskQuestion,
   });
 
   @override
@@ -261,7 +158,7 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '把手机上的 Qwen3-1.7B GGUF 路径填进来，当前问题会先走本地 RAG 检索，再把记忆片段喂给端侧模型。',
+            '切到上方的“本地 AI 问答”模式后，直接在主搜索框里提问。这里仅保留端侧模型下载、加载和回答状态。',
             style: TextStyle(color: hintColor, fontSize: 12.5, height: 1.4),
           ),
           const SizedBox(height: 12),
@@ -371,43 +268,6 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           Text(
             localAnswerStatus,
             style: TextStyle(color: hintColor, fontSize: 12, height: 1.35),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: localQuestionController,
-            style: TextStyle(color: textColor, fontSize: 14),
-            minLines: 2,
-            maxLines: 4,
-            decoration: InputDecoration(
-              labelText: '问一个和记忆相关的问题',
-              hintText: '例如：我上次重建的那个客厅场景里有什么物体？',
-              filled: true,
-              fillColor: Colors.transparent,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: (isLocalAnswering || !isLocalModelReady)
-                  ? null
-                  : onAskQuestion,
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: Text(isLocalAnswering ? '回答中...' : '开始端侧问答'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(46),
-                backgroundColor: isDark
-                    ? const Color(0xFF1F2836)
-                    : const Color(0xFF111827),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
           ),
           if (contextPreview.isNotEmpty) ...[
             const SizedBox(height: 14),
