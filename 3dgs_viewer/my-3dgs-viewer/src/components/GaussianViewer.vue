@@ -27,6 +27,11 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const cinematicSpeed = ref(1);
+const cinematicProgress = ref(0);
+const cinematicLoop = ref(true);
+const isCinematicPlaying = ref(false);
+const isCinematicPaused = ref(false);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 const DRAG_ROTATE_SENSITIVITY = 0.065;
 const DRAG_PAN_SENSITIVITY = 0.0022;
@@ -69,8 +74,22 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let posesFetchSettled = false;
+let cinematicFrameHandle = 0;
+
+const cinematicState = {
+  trajectory: null,
+  startTimeMs: 0,
+  elapsedMs: 0,
+  lastNearestPoseIndex: -1,
+};
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
+const canPlayCinematic = computed(() => cameraPoses.value.length >= 2);
+const cinematicButtonLabel = computed(() => {
+  if (isCinematicPlaying.value) return '暂停运镜';
+  if (isCinematicPaused.value) return '继续运镜';
+  return '开始运镜';
+});
 
 const calcFovFromFocal = (focalPx, imageHeightPx) => {
   if (!focalPx || !imageHeightPx) return null;
@@ -214,8 +233,46 @@ const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 
 const syncOrbitTarget = () => {};
 
+const cancelCinematicFrame = () => {
+  if (cinematicFrameHandle) {
+    cancelAnimationFrame(cinematicFrameHandle);
+    cinematicFrameHandle = 0;
+  }
+};
+
+const stopCameraTweens = () => {
+  if (!viewer || !viewer.camera) return;
+  gsap.killTweensOf(viewer.camera.position);
+  gsap.killTweensOf(viewer.camera.quaternion);
+  gsap.killTweensOf(viewer.camera);
+};
+
+const setActivePosePresentation = (poseData) => {
+  activeImage.value = poseData?.image_url || getPoseImageId(poseData);
+  activeTag.value = poseData?.tag || '';
+};
+
+const stopCinematicPlayback = (options = {}) => {
+  cancelCinematicFrame();
+  cinematicState.trajectory = null;
+  cinematicState.startTimeMs = 0;
+  cinematicState.elapsedMs = 0;
+  cinematicState.lastNearestPoseIndex = -1;
+  isCinematicPlaying.value = false;
+  isCinematicPaused.value = false;
+  if (options.resetProgress !== false) {
+    cinematicProgress.value = 0;
+  }
+};
+
+const interruptCinematicPlayback = () => {
+  if (!isCinematicPlaying.value && !isCinematicPaused.value) return;
+  stopCinematicPlayback({ resetProgress: false });
+};
+
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
   if (viewer.controls) viewer.controls.enabled = false;
 
   if (axis === 'x') viewer.camera.translateX(dist);
@@ -227,6 +284,7 @@ const manualMove = (axis, dist) => {
 
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
 
   if (viewer.controls) viewer.controls.enabled = false;
 
@@ -558,57 +616,251 @@ const maybeApplyInitialTarget = (forceFallback = false) => {
   });
 };
 
-// --- 5. 初始化 ---
-const flyToImage = (poseData) => {
-  if (!viewer || !viewer.camera) return;
+const resolvePoseCameraState = (poseData) => {
+  if (!viewer || !viewer.camera) return null;
   const normalizedMatrix = normalizeMatrixArray(poseData?.matrix);
-  if (!normalizedMatrix) {
-    console.warn('[Viewer] Skip invalid pose matrix:', poseData);
-    return;
-  }
+  if (!normalizedMatrix) return null;
 
-  const cam = viewer.camera;
-  const splatMesh = viewer.getSplatMesh(); // 获取当前加载的高斯模型
-
-  // 更新参考图
-  activeImage.value = poseData.image_url || getPoseImageId(poseData);
-  activeTag.value = poseData.tag || '';
-
-  // 1. 读取原始矩阵 (假设后端传来的是按列优先的 16 位数组)
+  const splatMesh = viewer.getSplatMesh();
   const rawMatrix = new THREE.Matrix4().fromArray(normalizedMatrix);
-
-  // === 修正：移除多余的坐标系转换 ===
-  // 用户反馈：当前状态下再旋转X轴180度才正确。
-  // 原有的 makeScale(1, -1, -1) 本质就是X轴转180度。
-  // 如果还需要再转180度，说明不需要转，或者需要抵消。
-  // 我们先尝试直接移除这个转换，保持原始矩阵方向。
-  // const cvToGl = new THREE.Matrix4().makeScale(1, -1, -1);
-  // rawMatrix.multiply(cvToGl); 
-
-  // 如果移除后反了，说明 export_poses.py 也没转，那就需要取消注释下面这行来手动修正：
-  // const manualFix = new THREE.Matrix4().makeRotationX(Math.PI);
-  // rawMatrix.multiply(manualFix);
-
-  // === 核心修正 2：跟随模型的世界矩阵同步旋转/缩放 ===
-  // 将相机的原始矩阵，乘以高斯模型目前在 Three.js 世界中的矩阵
   const finalMatrix = new THREE.Matrix4();
+
   if (splatMesh) {
-    // 这样无论模型怎么被 `rotation: [1,0,0,0]` 旋转，相机都会跟过去
     splatMesh.updateMatrixWorld();
     finalMatrix.copy(splatMesh.matrixWorld).multiply(rawMatrix);
   } else {
     finalMatrix.copy(rawMatrix);
   }
 
-  // 提取最终对齐后的 位置 和 旋转
-  const targetPosition = new THREE.Vector3();
-  const targetQuaternion = new THREE.Quaternion();
-  const targetScale = new THREE.Vector3();
-  finalMatrix.decompose(targetPosition, targetQuaternion, targetScale);
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  finalMatrix.decompose(position, quaternion, scale);
+
+  return {
+    position,
+    quaternion,
+    fl_y: Number(poseData?.fl_y || sceneMetadata.value.fl_y || 0),
+    h: Number(poseData?.h || sceneMetadata.value.h || 0),
+  };
+};
+
+const buildCinematicTrajectory = () => {
+  if (!viewer || cameraPoses.value.length < 2) return null;
+
+  const keyframes = cameraPoses.value
+    .map((pose, index) => {
+      const cameraState = resolvePoseCameraState(pose);
+      if (!cameraState) return null;
+      return {
+        index,
+        pose,
+        position: cameraState.position,
+        quaternion: cameraState.quaternion,
+        fl_y: cameraState.fl_y,
+        h: cameraState.h,
+      };
+    })
+    .filter(Boolean);
+
+  if (keyframes.length < 2) return null;
+
+  const dedupedKeyframes = [keyframes[0]];
+  for (let i = 1; i < keyframes.length; i += 1) {
+    const prev = dedupedKeyframes[dedupedKeyframes.length - 1];
+    const next = keyframes[i];
+    const samePoint = prev.position.distanceToSquared(next.position) < 1e-6;
+    const sameAngle = Math.abs(prev.quaternion.dot(next.quaternion)) > 0.999999;
+    if (samePoint && sameAngle) continue;
+    dedupedKeyframes.push(next);
+  }
+
+  if (dedupedKeyframes.length < 2) return null;
+
+  const points = dedupedKeyframes.map(frame => frame.position.clone());
+  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const cumulativeDistances = [0];
+  for (let i = 1; i < dedupedKeyframes.length; i += 1) {
+    const prev = dedupedKeyframes[i - 1];
+    const next = dedupedKeyframes[i];
+    cumulativeDistances.push(
+      cumulativeDistances[i - 1] + prev.position.distanceTo(next.position)
+    );
+  }
+
+  const totalDistance = cumulativeDistances[cumulativeDistances.length - 1];
+  const segmentCount = dedupedKeyframes.length - 1;
+  const durationMs = THREE.MathUtils.clamp(segmentCount * 220, 6000, 45000) / cinematicSpeed.value;
+
+  return {
+    keyframes: dedupedKeyframes,
+    curve,
+    cumulativeDistances,
+    totalDistance: Math.max(totalDistance, 1e-5),
+    durationMs,
+  };
+};
+
+const sampleCinematicTrajectory = (trajectory, normalizedT) => {
+  if (!trajectory) return null;
+
+  const t = THREE.MathUtils.clamp(normalizedT, 0, 1);
+  const distanceAlongPath = trajectory.totalDistance * t;
+  let segmentIndex = trajectory.keyframes.length - 2;
+
+  for (let i = 0; i < trajectory.cumulativeDistances.length - 1; i += 1) {
+    if (distanceAlongPath <= trajectory.cumulativeDistances[i + 1]) {
+      segmentIndex = i;
+      break;
+    }
+  }
+
+  const startDistance = trajectory.cumulativeDistances[segmentIndex];
+  const endDistance = trajectory.cumulativeDistances[segmentIndex + 1];
+  const segmentLength = Math.max(endDistance - startDistance, 1e-5);
+  const localT = THREE.MathUtils.smootherstep(
+    (distanceAlongPath - startDistance) / segmentLength,
+    0,
+    1
+  );
+  const from = trajectory.keyframes[segmentIndex];
+  const to = trajectory.keyframes[segmentIndex + 1];
+  const quaternion = from.quaternion.clone().slerp(to.quaternion, localT);
+
+  return {
+    position: trajectory.curve.getPointAt(t),
+    quaternion,
+    fl_y: from.fl_y && to.fl_y ? THREE.MathUtils.lerp(from.fl_y, to.fl_y, localT) : (from.fl_y || to.fl_y || 0),
+    h: from.h || to.h || sceneMetadata.value.h || 0,
+    nearestPoseIndex: localT < 0.5 ? from.index : to.index,
+  };
+};
+
+const applyCinematicSample = (sample) => {
+  if (!sample || !viewer || !viewer.camera) return;
+
+  const cam = viewer.camera;
+  cam.position.copy(sample.position);
+  cam.quaternion.copy(sample.quaternion);
+
+  if (sample.fl_y && sample.h) {
+    sceneMetadata.value.h = sample.h;
+    manualFocalPx.value = Number(sample.fl_y.toFixed(1));
+    applyFocalLengthPx(sample.fl_y);
+  } else {
+    renderCameraUpdate();
+  }
+
+  if (sample.nearestPoseIndex !== cinematicState.lastNearestPoseIndex) {
+    cinematicState.lastNearestPoseIndex = sample.nearestPoseIndex;
+    const nearestPose = cameraPoses.value[sample.nearestPoseIndex];
+    if (nearestPose) setActivePosePresentation(nearestPose);
+  }
+};
+
+const stepCinematicPlayback = (now) => {
+  if (!cinematicState.trajectory || !viewer || !viewer.camera) {
+    stopCinematicPlayback({ resetProgress: false });
+    return;
+  }
+
+  const durationMs = Math.max(cinematicState.trajectory.durationMs, 1);
+  const elapsedMs = Math.max(0, now - cinematicState.startTimeMs);
+  cinematicState.elapsedMs = elapsedMs;
+
+  let normalizedT = elapsedMs / durationMs;
+  if (normalizedT >= 1) {
+    if (cinematicLoop.value) {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else {
+      normalizedT = 1;
+    }
+  }
+
+  cinematicProgress.value = normalizedT;
+  applyCinematicSample(sampleCinematicTrajectory(cinematicState.trajectory, normalizedT));
+
+  if (!cinematicLoop.value && normalizedT >= 1) {
+    stopCinematicPlayback({ resetProgress: false });
+    cinematicProgress.value = 1;
+    return;
+  }
+
+  cinematicFrameHandle = requestAnimationFrame(stepCinematicPlayback);
+};
+
+const startCinematicPlayback = (options = {}) => {
+  if (!viewer || !viewer.camera) return;
+  const trajectory = buildCinematicTrajectory();
+  if (!trajectory) return;
+
+  stopCameraTweens();
+  cancelCinematicFrame();
+  cinematicState.trajectory = trajectory;
+  cinematicState.elapsedMs = options.resume ? cinematicState.elapsedMs : 0;
+  cinematicState.startTimeMs = performance.now() - cinematicState.elapsedMs;
+  cinematicState.lastNearestPoseIndex = -1;
+  isCinematicPlaying.value = true;
+  isCinematicPaused.value = false;
+
+  if (!options.resume) {
+    cinematicProgress.value = 0;
+    applyCinematicSample(sampleCinematicTrajectory(trajectory, 0));
+  }
+
+  cinematicFrameHandle = requestAnimationFrame(stepCinematicPlayback);
+};
+
+const pauseCinematicPlayback = () => {
+  if (!isCinematicPlaying.value) return;
+  cancelCinematicFrame();
+  cinematicState.elapsedMs = Math.max(0, performance.now() - cinematicState.startTimeMs);
+  isCinematicPlaying.value = false;
+  isCinematicPaused.value = true;
+};
+
+const toggleCinematicPlayback = () => {
+  if (!canPlayCinematic.value) return;
+  if (isCinematicPlaying.value) {
+    pauseCinematicPlayback();
+    return;
+  }
+  startCinematicPlayback({ resume: isCinematicPaused.value });
+};
+
+const onCinematicSpeedChange = () => {
+  cinematicSpeed.value = Number(
+    THREE.MathUtils.clamp(Number(cinematicSpeed.value) || 1, 0.25, 3).toFixed(2)
+  );
+
+  if (isCinematicPlaying.value) {
+    startCinematicPlayback();
+  } else if (isCinematicPaused.value) {
+    cinematicState.trajectory = buildCinematicTrajectory();
+  }
+};
+
+// --- 5. 初始化 ---
+const flyToImage = (poseData, options = {}) => {
+  if (!viewer || !viewer.camera) return;
+  const targetCameraState = resolvePoseCameraState(poseData);
+  if (!targetCameraState) {
+    console.warn('[Viewer] Skip invalid pose matrix:', poseData);
+    return;
+  }
+  if (!options.keepCinematic) interruptCinematicPlayback();
+
+  const cam = viewer.camera;
+  const targetPosition = targetCameraState.position;
+  const targetQuaternion = targetCameraState.quaternion;
+  setActivePosePresentation(poseData);
 
   // === 核心修正 3：同步真实相机的视场角 (FOV) ===
-  const fl_y = poseData.fl_y || sceneMetadata.value.fl_y;
-  const h = poseData.h || sceneMetadata.value.h;
+  const fl_y = targetCameraState.fl_y;
+  const h = targetCameraState.h;
   if (fl_y && h) {
     sceneMetadata.value.h = h;
     manualFocalPx.value = Number(fl_y.toFixed(1));
@@ -629,8 +881,7 @@ const flyToImage = (poseData) => {
   const startQuat = cam.quaternion.clone();
   const animState = { t: 0 };
 
-  gsap.killTweensOf(cam.position);
-  gsap.killTweensOf(cam.quaternion);
+  stopCameraTweens();
   gsap.killTweensOf(animState);
 
   // 开始丝滑运镜
@@ -725,6 +976,7 @@ const parseInitialInputFromUrl = () => {
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
+  stopCinematicPlayback();
 
   // 更新 URL（如果有新传入的值）
   if (plyUrl) currentPlyUrl = plyUrl;
@@ -1088,6 +1340,7 @@ const getTouchDistance = (touchA, touchB) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  interruptCinematicPlayback();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
     isDragging.value = true;
@@ -1147,6 +1400,7 @@ const onMouseUp = () => {
 
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
   if (isOrbitMode.value) {
     const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
     orbitZoom(zoomFactor);
@@ -1158,6 +1412,7 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  interruptCinematicPlayback();
   if (isOrbitMode.value) {
     if (e.touches.length >= 2) {
       isDragging.value = false;
@@ -1352,6 +1607,7 @@ onBeforeUnmount(async () => {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
+  stopCinematicPlayback();
 
   if (viewer) {
     viewer.renderer.setAnimationLoop(null);
@@ -1390,6 +1646,41 @@ onBeforeUnmount(async () => {
           @mousedown.stop @touchstart.stop @touchend.stop>
           {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
         </button>
+        <div class="cinematic-panel archive-card" v-if="canPlayCinematic"
+          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+          <div class="cinematic-head">
+            <div>
+              <div class="eyebrow">Camera Move</div>
+              <div class="cinematic-title">自动运镜</div>
+            </div>
+            <label class="cinematic-loop-toggle">
+              <input type="checkbox" v-model="cinematicLoop" />
+              <span>循环</span>
+            </label>
+          </div>
+          <div class="cinematic-actions">
+            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
+              {{ cinematicButtonLabel }}
+            </button>
+            <button class="archive-btn archive-btn--ghost cinematic-secondary"
+              @click="stopCinematicPlayback()"
+              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
+              停止
+            </button>
+          </div>
+          <div class="cinematic-progress-row">
+            <span>进度</span>
+            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
+          </div>
+          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
+            step="1" disabled />
+          <div class="cinematic-progress-row">
+            <span>速度</span>
+            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
+            @input="onCinematicSpeedChange" />
+        </div>
         <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
     </div>
@@ -1590,6 +1881,63 @@ onBeforeUnmount(async () => {
   gap: 6px;
   padding: 6px;
   border-radius: 18px;
+}
+
+.cinematic-panel {
+  width: min(84vw, 280px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cinematic-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cinematic-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.cinematic-loop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.7);
+}
+
+.cinematic-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cinematic-primary,
+.cinematic-secondary {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.cinematic-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.72);
+}
+
+.cinematic-progress,
+.cinematic-speed {
+  width: 100%;
+  accent-color: #6d8260;
+}
+
+.cinematic-progress[disabled] {
+  opacity: 0.8;
 }
 
 .mode-chip {
@@ -2094,6 +2442,10 @@ input[type='range'] {
   .view-mode-switch {
     padding: 4px;
     gap: 4px;
+  }
+
+  .cinematic-panel {
+    width: 100%;
   }
 
   .mode-chip {
