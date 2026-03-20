@@ -29,6 +29,7 @@
 - **任务驱动**：通过 Supabase 中的 `processing_tasks` 解耦前端和计算节点。
 - **自动流水线**：覆盖 `抽帧 -> 位姿解算 -> 训练 -> 后处理 -> 上传` 的基本过程。
 - **状态回写**：运行日志和任务状态会持续回写数据库，便于前端和 Dashboard 观察进度。
+- **Worker 注册**：每个实例会把自身 `worker_id`、心跳、当前任务和控制状态同步到 `worker_nodes`。
 - **双模式运行**：既支持云端监听模式，也支持直接处理本地文件的调试模式。
 
 ## 第三方依赖与论文引用
@@ -149,6 +150,12 @@ SUPABASE_KEY=your_service_role_key_here
 # 存储桶与表名配置
 SUPABASE_BUCKET=braindance-assets
 SUPABASE_TABLE=processing_tasks
+SUPABASE_WORKER_TABLE=worker_nodes
+
+# Worker 集群管理（可选）
+WORKER_ID=
+WORKER_HEARTBEAT_INTERVAL=10
+WORKER_ONLINE_TIMEOUT_SECONDS=30
 
 ```
 
@@ -205,6 +212,13 @@ SUPABASE_TABLE=processing_tasks
 python main.py
 
 ```
+
+启动后，Worker 会自动：
+
+- 向 `worker_nodes` 注册自己
+- 每隔 `WORKER_HEARTBEAT_INTERVAL` 秒写一次心跳
+- 在 Dashboard 将该实例显示为在线 / 忙碌 / 停止中 / 离线
+- 当 `worker_nodes.desired_state='pause'` 时，不再接新任务并优雅退出
 
 输出示例：
 

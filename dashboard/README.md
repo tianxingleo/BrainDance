@@ -11,6 +11,8 @@
 - 成功率、平均质量分、平均处理时长
 - 最近任务趋势图
 - Worker 在线状态推断
+- Worker 实例注册、心跳与在线数量统计
+- 对指定 Worker 发起优雅暂停（远程 `Ctrl+C` 风格）
 - Realtime 订阅状态
 - 数据表数量统计
 - Storage bucket 探测与容量统计
@@ -76,6 +78,7 @@ npm run build
 - `memory_poses`
 - `rag_docs`
 - `tasks`
+- `worker_nodes`
 - `braindance-assets` bucket
 
 如果本地数据库还没初始化，请先参考 [supabase/README.md](/home/ltx/projects/BrainDance/supabase/README.md) 启动 Supabase。

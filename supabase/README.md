@@ -42,6 +42,7 @@ supabase start
 从现有迁移文件看，当前仓库至少覆盖了这些核心对象：
 
 - `processing_tasks`
+- `worker_nodes`
 - `model_assets`
 - `memory_poses`
 - `rag_docs`

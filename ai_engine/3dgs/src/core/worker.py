@@ -3,8 +3,12 @@
 # 实现：通过Supabase轮询任务，下载资源，执行pipeline，上传结果
 # 逻辑：1. 轮询Supabase任务 2. 锁定任务 3. 下载资源 4. 执行pipeline 5. 上传结果 6. 清理资源
 # 包含：CloudWorker类、任务监听逻辑、资源管理、日志同步、RAG集成
-import time
 import os
+import socket
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 引入 Supabase 客户端库，用于连接云数据库和存储
@@ -21,6 +25,8 @@ from src.utils.ply_utils import compress_model_for_delivery
 # [初始化] 加载当前目录下的 .env 文件
 # 这一步必须在所有 os.getenv 调用之前执行，否则读不到变量
 load_dotenv()
+
+_UNSET = object()
 
 class CloudWorker:
     """
@@ -46,6 +52,7 @@ class CloudWorker:
         self.SUPABASE_KEY = os.getenv("SUPABASE_KEY")
         self.BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "braindance-assets")  # 存储桶名称
         self.TABLE_NAME = os.getenv("SUPABASE_TABLE", "processing_tasks")    # 任务表名称
+        self.WORKER_TABLE = os.getenv("SUPABASE_WORKER_TABLE", "worker_nodes")
         
         # --- 2. 防御性检查 ---
         # 如果关键配置缺失，直接报错停止，避免后续出现莫名其妙的连接错误
@@ -84,6 +91,130 @@ class CloudWorker:
         # 我们不再每次 Select 数据库，而是将当前任务的所有日志保存在这个内存列表里。
         # 每次有新日志，append 进这里，然后把整个列表覆盖上传到云端。
         self.current_task_logs = []
+        self.worker_id = os.getenv("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self.hostname = socket.gethostname()
+        self.pid = os.getpid()
+        self.heartbeat_interval = max(3, int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10")))
+        self.online_timeout_seconds = max(
+            self.heartbeat_interval * 2,
+            int(os.getenv("WORKER_ONLINE_TIMEOUT_SECONDS", str(self.heartbeat_interval * 3))),
+        )
+        self._state_lock = threading.Lock()
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread = None
+        self._status = "starting"
+        self._current_task_id = None
+        self._current_scene_id = None
+        self._desired_state = "run"
+        self._stop_requested = False
+        self._stop_reason = None
+
+    def _now_iso(self):
+        return datetime.now(timezone.utc).isoformat()
+
+    def _set_worker_state(self, *, status=None, current_task_id=_UNSET, current_scene_id=_UNSET, stop_requested=None, stop_reason=None):
+        with self._state_lock:
+            if status is not None:
+                self._status = status
+            if current_task_id is not _UNSET:
+                self._current_task_id = current_task_id
+            if current_scene_id is not _UNSET:
+                self._current_scene_id = current_scene_id
+            if stop_requested is not None:
+                self._stop_requested = stop_requested
+            if stop_reason is not None:
+                self._stop_reason = stop_reason
+
+    def _worker_row_payload(self, *, status_override=None, stopped=False):
+        with self._state_lock:
+            status = status_override or self._status
+            current_task_id = self._current_task_id
+            current_scene_id = self._current_scene_id
+            stop_reason = self._stop_reason
+            desired_state = self._desired_state
+
+        payload = {
+            "worker_id": self.worker_id,
+            "hostname": self.hostname,
+            "pid": self.pid,
+            "status": status,
+            "current_task_id": current_task_id,
+            "current_scene_id": current_scene_id,
+            "last_heartbeat": self._now_iso(),
+            "metadata": {
+                "online_timeout_seconds": self.online_timeout_seconds,
+                "stop_reason": stop_reason,
+            },
+        }
+
+        if desired_state != "run":
+            payload["metadata"]["desired_state_seen"] = desired_state
+
+        if stopped:
+            payload["stopped_at"] = self._now_iso()
+            payload["current_task_id"] = None
+            payload["current_scene_id"] = None
+
+        return payload
+
+    def _push_worker_state(self, *, status_override=None, stopped=False):
+        try:
+            self.supabase.table(self.WORKER_TABLE).upsert(
+                self._worker_row_payload(status_override=status_override, stopped=stopped),
+                on_conflict="worker_id",
+            ).execute()
+        except Exception as e:
+            print(f"⚠️ [WorkerRegistry] 状态同步失败: {e}")
+
+    def _fetch_desired_state(self):
+        try:
+            response = self.supabase.table(self.WORKER_TABLE)\
+                .select("desired_state, control_note, control_requested_at")\
+                .eq("worker_id", self.worker_id)\
+                .limit(1)\
+                .execute()
+            row = response.data[0] if response.data else None
+            if not row:
+                return "run", None
+            return (row.get("desired_state") or "run").lower(), row.get("control_note")
+        except Exception as e:
+            print(f"⚠️ [WorkerRegistry] 控制指令读取失败: {e}")
+            return "run", None
+
+    def _apply_desired_state(self, desired_state, control_note=None):
+        desired_state = (desired_state or "run").lower()
+        with self._state_lock:
+            self._desired_state = desired_state
+            busy = self._current_task_id is not None
+        if desired_state == "pause":
+            if busy:
+                self._set_worker_state(status="stopping", stop_requested=True, stop_reason=control_note or "pause requested")
+            else:
+                self._set_worker_state(status="stopping", stop_requested=True, stop_reason=control_note or "pause requested")
+
+    def _heartbeat_loop(self):
+        while not self._heartbeat_stop.wait(self.heartbeat_interval):
+            desired_state, control_note = self._fetch_desired_state()
+            self._apply_desired_state(desired_state, control_note)
+            self._push_worker_state()
+
+    def _start_heartbeat_loop(self):
+        self._push_worker_state()
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, name="worker-heartbeat", daemon=True)
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat_loop(self):
+        self._heartbeat_stop.set()
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            self._heartbeat_thread.join(timeout=self.heartbeat_interval + 1)
+
+    def _should_stop(self):
+        with self._state_lock:
+            return self._stop_requested
+
+    def _finalize_worker_shutdown(self, status="offline"):
+        self._set_worker_state(status=status, current_task_id=None, current_scene_id=None)
+        self._push_worker_state(status_override=status, stopped=True)
 
     def _sync_log(self, task_id):
         """
@@ -107,20 +238,32 @@ class CloudWorker:
         🚀 [主入口] 启动监听循环
         这是外部调用的唯一入口，启动后会进入死循环，直到被手动停止。
         """
-        print(f"🚀 [CloudWorker] 启动成功! 正在监听任务表: [{self.TABLE_NAME}]")
+        print(f"🚀 [CloudWorker] 启动成功! Worker={self.worker_id} 正在监听任务表: [{self.TABLE_NAME}]")
+        self._set_worker_state(status="idle")
+        self._start_heartbeat_loop()
         try:
-            while True:
+            while not self._should_stop():
                 # 执行一次“心跳”检测
                 self._tick()
         except KeyboardInterrupt:
             # 捕获 Ctrl+C 中断信号，优雅退出
             print("\n🛑 [CloudWorker] 接收到停止信号，服务已关闭。")
+            self._set_worker_state(stop_requested=True, stop_reason="keyboard interrupt")
+        finally:
+            self._stop_heartbeat_loop()
+            self._finalize_worker_shutdown()
 
     def _tick(self):
         """
         💓 [心跳函数] 单次轮询逻辑
         """
         try:
+            desired_state, control_note = self._fetch_desired_state()
+            self._apply_desired_state(desired_state, control_note)
+            if self._should_stop():
+                print("\n🛑 [CloudWorker] 收到远程暂停指令，准备退出。")
+                return
+
             # --- 1. 轮询数据库 ---
             # 查询条件：状态(status)必须是 'pending' (待处理)
             # limit(1)：每次只取 1 个任务，避免贪多嚼不烂
@@ -133,6 +276,7 @@ class CloudWorker:
                 # response.data 是一个列表，我们取第一个元素
                 self._process_task(response.data[0])
             else:
+                self._set_worker_state(status="idle")
                 # 💤 没有任务，休眠 3 秒
                 # 避免死循环空转导致 CPU 占用率过高，同时也减少数据库压力
                 time.sleep(3)
@@ -154,6 +298,8 @@ class CloudWorker:
         scene_id = task['scene_id']     # 场景/项目ID (作为文件名)
         # 获取用户ID，如果数据库里没存 user_id 字段，就用默认值 'default_user'
         user_id = task.get('user_id', 'default_user') 
+        self._set_worker_state(status="busy", current_task_id=task_id, current_scene_id=scene_id)
+        self._push_worker_state()
         
         print(f"\n📥 [接收任务] 场景ID: {scene_id} | 任务ID: {task_id}")
 
@@ -430,6 +576,11 @@ class CloudWorker:
             self.supabase.table(self.TABLE_NAME).update({"status": "failed"}).eq("id", task_id).execute()
         
         finally:
+            self._set_worker_state(status="idle", current_task_id=None, current_scene_id=None)
+            desired_state, control_note = self._fetch_desired_state()
+            self._apply_desired_state(desired_state, control_note)
+            self._push_worker_state()
+
             # =================== 🧹 清理工作 (新增逻辑) ===================
             import shutil # 确保引入 shutil
 
