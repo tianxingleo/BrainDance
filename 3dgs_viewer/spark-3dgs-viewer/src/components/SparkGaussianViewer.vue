@@ -879,21 +879,37 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.86);
 }
 
-.camera-track {
+.camera-track-dock {
   position: absolute;
   left: 18px;
-  right: 18px;
   bottom: 18px;
   z-index: 55;
   display: flex;
-  gap: 16px;
-  align-items: stretch;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.camera-track-toggle {
+  padding: 9px 12px;
+  border-radius: 999px;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.07);
+}
+
+.camera-track {
+  position: absolute;
+  left: 0;
+  bottom: 48px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: min(540px, calc(100vw - 36px));
   overflow-x: auto;
-  padding: 16px 18px;
+  padding: 12px 14px;
 }
 
 .track-copy {
-  min-width: 152px;
+  min-width: 110px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -908,10 +924,10 @@ onBeforeUnmount(() => {
 
 .camera-item {
   position: relative;
-  width: 100px;
-  height: 70px;
+  width: 84px;
+  height: 60px;
   flex-shrink: 0;
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
   border: 1px solid rgba(97, 109, 118, 0.12);
   background: rgba(255, 255, 255, 0.74);
@@ -941,9 +957,9 @@ onBeforeUnmount(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 10px 8px 8px;
+  padding: 8px 7px 6px;
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -1058,20 +1074,24 @@ button {
     min-width: 112px;
   }
 
-  .camera-track {
+  .camera-track-dock {
     left: 12px;
-    right: 12px;
     bottom: 12px;
-    padding: 14px;
+  }
+
+  .camera-track {
+    width: min(360px, calc(100vw - 24px));
+    bottom: 44px;
+    padding: 12px;
   }
 
   .track-copy {
-    min-width: 118px;
+    min-width: 96px;
   }
 
   .camera-item {
-    width: 92px;
-    height: 66px;
+    width: 78px;
+    height: 56px;
   }
 }
 </style>

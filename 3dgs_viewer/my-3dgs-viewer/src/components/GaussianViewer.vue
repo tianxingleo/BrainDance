@@ -724,10 +724,10 @@ const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
 
   return buildCinematicSegment({
     keyframes: [
-      { index: last.index, pose: last.pose, fl_y: bridgeFocal, h: last.h },
-      { index: last.index, pose: last.pose, fl_y: bridgeFocal, h: last.h },
-      { index: first.index, pose: first.pose, fl_y: bridgeFocal, h: first.h },
-      { index: first.index, pose: first.pose, fl_y: bridgeFocal, h: first.h },
+      { index: last.index, pose: last.pose, quaternion: last.quaternion || last.stabilizedQuaternion, fl_y: bridgeFocal, h: last.h },
+      { index: last.index, pose: last.pose, quaternion: last.quaternion || last.stabilizedQuaternion, fl_y: bridgeFocal, h: last.h },
+      { index: first.index, pose: first.pose, quaternion: first.quaternion || first.stabilizedQuaternion, fl_y: bridgeFocal, h: first.h },
+      { index: first.index, pose: first.pose, quaternion: first.quaternion || first.stabilizedQuaternion, fl_y: bridgeFocal, h: first.h },
     ],
     positions: bridgePositions,
     targets: bridgeTargets,
