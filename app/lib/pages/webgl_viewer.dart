@@ -52,6 +52,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String? _localModelPath;
   late bool _useSparkViewer;
 
+  void _attachViewerHeaders(HttpResponse response) {
+    response.headers.add('Access-Control-Allow-Origin', '*');
+    response.headers.add('Cross-Origin-Opener-Policy', 'same-origin');
+    response.headers.add('Cross-Origin-Embedder-Policy', 'require-corp');
+    response.headers.add('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
@@ -107,7 +114,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           proxyReq.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
           final proxyResp = await proxyReq.close();
           request.response.statusCode = proxyResp.statusCode;
-          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          _attachViewerHeaders(request.response);
           final ct = proxyResp.headers.contentType;
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
@@ -126,7 +133,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         );
         final file = File(filePath);
         if (await file.exists()) {
-          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          _attachViewerHeaders(request.response);
           if (filePath.endsWith('.ply') ||
               filePath.endsWith('.splat') ||
               filePath.endsWith('.ksplat')) {
@@ -174,8 +181,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
-        // 允许跨域
-        request.response.headers.add('Access-Control-Allow-Origin', '*');
+        _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
       } catch (e) {
@@ -356,14 +362,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         'BrainDanceChannel',
         onMessageReceived: (JavaScriptMessage message) {
           final data = jsonDecode(message.message);
+          debugPrint('BrainDanceChannel: ${message.message}');
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
             // 优先使用本地路径或代理 URL，避免 WebView JS 直接访问 HTTPS
             _sendModelToVue();
-          } else if (data['status'] == 'success') {
+          } else if (data['status'] == 'error') {
             if (mounted) {
-              TDToast.showText(data['msg'], context: context);
+              TDToast.showText('Spark 错误: ${data['msg']}', context: context);
             }
+          } else if (data['status'] == 'info') {
+            debugPrint('Spark info: ${data['msg']}');
           }
         },
       )

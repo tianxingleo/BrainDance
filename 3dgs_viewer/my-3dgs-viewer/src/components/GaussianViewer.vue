@@ -724,10 +724,10 @@ const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
 
   return buildCinematicSegment({
     keyframes: [
-      { index: last.index, pose: last.pose, quaternion: last.quaternion || last.stabilizedQuaternion, fl_y: bridgeFocal, h: last.h },
-      { index: last.index, pose: last.pose, quaternion: last.quaternion || last.stabilizedQuaternion, fl_y: bridgeFocal, h: last.h },
-      { index: first.index, pose: first.pose, quaternion: first.quaternion || first.stabilizedQuaternion, fl_y: bridgeFocal, h: first.h },
-      { index: first.index, pose: first.pose, quaternion: first.quaternion || first.stabilizedQuaternion, fl_y: bridgeFocal, h: first.h },
+      { index: last.index, pose: last.pose, quaternion: last.stabilizedQuaternion || last.quaternion, fl_y: bridgeFocal, h: last.h },
+      { index: last.index, pose: last.pose, quaternion: last.stabilizedQuaternion || last.quaternion, fl_y: bridgeFocal, h: last.h },
+      { index: first.index, pose: first.pose, quaternion: first.stabilizedQuaternion || first.quaternion, fl_y: bridgeFocal, h: first.h },
+      { index: first.index, pose: first.pose, quaternion: first.stabilizedQuaternion || first.quaternion, fl_y: bridgeFocal, h: first.h },
     ],
     positions: bridgePositions,
     targets: bridgeTargets,
@@ -1178,16 +1178,18 @@ const resolvePoseCameraState = (poseData) => {
 const buildCinematicTrajectory = () => {
   const sourcePoses = getPreferredCinematicPoses();
   if (!viewer || !Array.isArray(sourcePoses) || sourcePoses.length < 2) return null;
+  const worldCenter = getModelWorldCenter();
 
   const keyframes = sourcePoses
     .map((pose, index) => {
       const cameraState = resolvePoseCameraState(pose);
       if (!cameraState) return null;
+      const uprightQuaternion = makeUprightQuaternion(cameraState.position, cameraState.quaternion, worldCenter);
       return {
         index,
         pose,
         position: cameraState.position,
-        quaternion: cameraState.quaternion,
+        quaternion: uprightQuaternion,
         fl_y: cameraState.fl_y,
         h: cameraState.h,
       };
@@ -1211,7 +1213,6 @@ const buildCinematicTrajectory = () => {
   const stableKeyframes = selectStableCinematicKeyframes(dedupedKeyframes);
   if (stableKeyframes.length < 2) return null;
 
-  const worldCenter = getModelWorldCenter();
   const orderedKeyframes = stableKeyframes;
   const rawPositions = orderedKeyframes.map(frame => frame.position.clone());
   const smoothedPositions = smoothVectorSeries(rawPositions, cinematicSmoothness.value);
