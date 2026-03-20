@@ -18,6 +18,7 @@ const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
 const activeTag = ref(''); // 当前激活的标签
+const activePoseId = ref(''); // 当前高亮的镜头项，不一定同步刷新右侧参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
@@ -34,6 +35,7 @@ const isCinematicPlaying = ref(false);
 const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
+const showCinematicPanel = ref(false);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 const DRAG_ROTATE_SENSITIVITY = 0.065;
 const DRAG_PAN_SENSITIVITY = 0.0022;
@@ -43,6 +45,14 @@ const ORBIT_YAW_SENSITIVITY = 0.0055;
 const ORBIT_PITCH_SENSITIVITY = 0.0042;
 const ORBIT_ROLL_SENSITIVITY = 1.0;
 const ORBIT_DOLLY_FACTOR = 0.35;
+const CINEMATIC_MIN_LOOK_AHEAD = 1.2;
+const CINEMATIC_MAX_LOOK_AHEAD = 8.0;
+const CINEMATIC_PATH_BLEND = 0.72;
+const CINEMATIC_CAMERA_DAMPING_FAST = 0.26;
+const CINEMATIC_CAMERA_DAMPING_SLOW = 0.1;
+const CINEMATIC_MAX_KEYFRAMES = 18;
+const CINEMATIC_MIN_KEYFRAMES = 6;
+const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -75,14 +85,17 @@ let particleSystem;
 const worldUp = new THREE.Vector3(0, 1, 0);
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
+let didApplyDefaultPose = false;
 let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
 
 const cinematicState = {
   trajectory: null,
+  phase: 'main',
   startTimeMs: 0,
   elapsedMs: 0,
   lastNearestPoseIndex: -1,
+  filteredSample: null,
 };
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
@@ -232,6 +245,10 @@ const copyMatrixToClipboard = () => {
 };
 
 const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
+const getSceneRadius = () => {
+  const radius = Number(globalUniforms.uMaxRadius.value || 0);
+  return radius > 0 ? radius : 1;
+};
 
 const syncOrbitTarget = () => {};
 
@@ -250,6 +267,25 @@ const stopCameraTweens = () => {
 };
 
 const setActivePosePresentation = (poseData) => {
+  setActivePosePresentationState(poseData);
+};
+
+const getPosePresentationId = (poseData) => {
+  if (!poseData) return '';
+  return String(
+    poseData.id
+    || poseData.image_id
+    || poseData.imageId
+    || getPoseImageId(poseData)
+    || JSON.stringify(normalizeMatrixArray(poseData.matrix) || [])
+  );
+};
+
+const setActivePosePresentationState = (poseData, options = {}) => {
+  activePoseId.value = getPosePresentationId(poseData);
+
+  if (options.updateReference === false) return;
+
   activeImage.value = poseData?.image_url || getPoseImageId(poseData);
   activeTag.value = poseData?.tag || '';
 };
@@ -260,6 +296,7 @@ const stopCinematicPlayback = (options = {}) => {
   cinematicState.startTimeMs = 0;
   cinematicState.elapsedMs = 0;
   cinematicState.lastNearestPoseIndex = -1;
+  cinematicState.filteredSample = null;
   isCinematicPlaying.value = false;
   isCinematicPaused.value = false;
   if (options.resetProgress !== false) {
@@ -313,6 +350,390 @@ const smoothScalarSeries = (values, amount) => {
   }
 
   return result;
+};
+
+const makeLookQuaternion = (position, target) => {
+  const forward = target.clone().sub(position);
+  if (forward.lengthSq() < 1e-8) return new THREE.Quaternion();
+
+  const lookAtMatrix = new THREE.Matrix4().lookAt(position, target, worldUp);
+  return new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
+};
+
+const makeUprightQuaternion = (position, quaternion, fallbackTarget) => {
+  const forward = getCameraForward(quaternion);
+  let target = position.clone().add(forward);
+
+  if (fallbackTarget && forward.lengthSq() < 1e-8) {
+    target = fallbackTarget.clone();
+  }
+
+  return makeLookQuaternion(position, target);
+};
+
+const ensureQuaternionContinuity = (quaternions) => {
+  if (!Array.isArray(quaternions) || quaternions.length === 0) return [];
+
+  const result = [quaternions[0].clone().normalize()];
+  for (let i = 1; i < quaternions.length; i += 1) {
+    const next = quaternions[i].clone().normalize();
+    if (result[i - 1].dot(next) < 0) {
+      next.x *= -1;
+      next.y *= -1;
+      next.z *= -1;
+      next.w *= -1;
+    }
+    result.push(next);
+  }
+
+  return result;
+};
+
+const smoothQuaternionSeries = (quaternions, amount) => {
+  if (!Array.isArray(quaternions) || quaternions.length < 3) {
+    return ensureQuaternionContinuity(quaternions || []);
+  }
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 2));
+  const blend = 0.16 + strength * 0.22;
+  let result = ensureQuaternionContinuity(quaternions);
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((quat, index) => {
+      if (index === 0 || index === result.length - 1) return quat.clone();
+
+      const prev = result[index - 1].clone();
+      const curr = result[index].clone();
+      const next = result[index + 1].clone();
+      const averaged = prev.slerp(next, 0.5);
+      return curr.slerp(averaged, blend).normalize();
+    });
+    result = ensureQuaternionContinuity(nextSeries);
+  }
+
+  return result;
+};
+
+const getCameraUpAlignment = (quaternion) => {
+  if (!quaternion) return 0;
+  const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion).normalize();
+  return Math.abs(cameraUp.dot(worldUp));
+};
+
+const getCameraForward = (quaternion) => {
+  return new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion).normalize();
+};
+
+const selectStableCinematicKeyframes = (keyframes) => {
+  if (!Array.isArray(keyframes) || keyframes.length <= CINEMATIC_MAX_KEYFRAMES) {
+    return keyframes;
+  }
+
+  const filtered = keyframes.filter((frame) => {
+    const alignment = getCameraUpAlignment(frame.quaternion);
+    return alignment >= CINEMATIC_UP_ALIGNMENT_MIN;
+  });
+
+  const pool = filtered.length >= CINEMATIC_MIN_KEYFRAMES ? filtered : keyframes.slice();
+  if (pool.length <= CINEMATIC_MAX_KEYFRAMES) return pool;
+
+  const scored = pool.map((frame, index, arr) => {
+    const prev = arr[Math.max(0, index - 1)];
+    const next = arr[Math.min(arr.length - 1, index + 1)];
+    const upAlignment = getCameraUpAlignment(frame.quaternion);
+    const prevDistance = index > 0 ? frame.position.distanceTo(prev.position) : 0;
+    const nextDistance = index < arr.length - 1 ? frame.position.distanceTo(next.position) : 0;
+    const avgDistance = (prevDistance + nextDistance) * 0.5;
+    const prevForward = getCameraForward(prev.quaternion);
+    const currForward = getCameraForward(frame.quaternion);
+    const nextForward = getCameraForward(next.quaternion);
+    const directionalContinuity = index > 0 && index < arr.length - 1
+      ? Math.max(0, prevForward.dot(currForward)) * 0.5 + Math.max(0, currForward.dot(nextForward)) * 0.5
+      : 1;
+
+    return {
+      frame,
+      index,
+      score: upAlignment * 2.2 + directionalContinuity * 1.4 + Math.min(avgDistance, 1.5) * 0.4,
+    };
+  });
+
+  const forcedIndices = new Set([0, pool.length - 1]);
+  const targetCount = Math.max(CINEMATIC_MIN_KEYFRAMES, Math.min(CINEMATIC_MAX_KEYFRAMES, pool.length));
+  const selected = scored
+    .filter(({ index }) => forcedIndices.has(index))
+    .map(({ frame }) => frame);
+
+  const remaining = scored
+    .filter(({ index }) => !forcedIndices.has(index))
+    .sort((a, b) => b.score - a.score);
+
+  for (const candidate of remaining) {
+    if (selected.length >= targetCount) break;
+    selected.push(candidate.frame);
+  }
+
+  selected.sort((a, b) => a.index - b.index);
+
+  if (selected.length < CINEMATIC_MIN_KEYFRAMES) {
+    const step = Math.max(1, Math.floor(pool.length / CINEMATIC_MIN_KEYFRAMES));
+    for (let i = 0; i < pool.length && selected.length < CINEMATIC_MIN_KEYFRAMES; i += step) {
+      const frame = pool[i];
+      if (!selected.includes(frame)) selected.push(frame);
+    }
+    selected.sort((a, b) => a.index - b.index);
+  }
+
+  return selected;
+};
+
+const unwrapCircularAngles = (angles) => {
+  if (!Array.isArray(angles) || angles.length === 0) return [];
+  const sorted = angles
+    .map((angle, index) => ({ angle, index }))
+    .sort((a, b) => a.angle - b.angle);
+
+  let largestGap = -1;
+  let splitIndex = 0;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const current = sorted[i].angle;
+    const next = sorted[(i + 1) % sorted.length].angle + (i === sorted.length - 1 ? Math.PI * 2 : 0);
+    const gap = next - current;
+    if (gap > largestGap) {
+      largestGap = gap;
+      splitIndex = (i + 1) % sorted.length;
+    }
+  }
+
+  const rotated = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    const item = sorted[(splitIndex + i) % sorted.length];
+    let angle = item.angle;
+    if (rotated.length > 0 && angle < rotated[rotated.length - 1].angle) {
+      angle += Math.PI * 2;
+    }
+    rotated.push({ ...item, angle });
+  }
+
+  return rotated;
+};
+
+const computeRouteTransitionCost = (from, to, worldCenter) => {
+  const distance = from.position.distanceTo(to.position);
+  const fromForward = getCameraForward(from.quaternion);
+  const toForward = getCameraForward(to.quaternion);
+  const forwardMismatch = 1 - Math.max(-1, Math.min(1, fromForward.dot(toForward)));
+  const fromTargetDir = worldCenter.clone().sub(from.position).normalize();
+  const toTargetDir = worldCenter.clone().sub(to.position).normalize();
+  const focusMismatch = 1 - Math.max(-1, Math.min(1, fromTargetDir.dot(toTargetDir)));
+  const heightDelta = Math.abs(from.position.y - to.position.y);
+  return distance * 1.25 + forwardMismatch * 1.4 + focusMismatch * 0.9 + heightDelta * 0.35;
+};
+
+const getDominantHorizontalAxis = (keyframes) => {
+  let bestA = keyframes[0]?.position || new THREE.Vector3(1, 0, 0);
+  let bestB = keyframes[keyframes.length - 1]?.position || new THREE.Vector3(0, 0, 0);
+  let bestDistSq = -1;
+
+  for (let i = 0; i < keyframes.length; i += 1) {
+    for (let j = i + 1; j < keyframes.length; j += 1) {
+      const distSq = keyframes[i].position.distanceToSquared(keyframes[j].position);
+      if (distSq > bestDistSq) {
+        bestDistSq = distSq;
+        bestA = keyframes[i].position;
+        bestB = keyframes[j].position;
+      }
+    }
+  }
+
+  const axis = bestB.clone().sub(bestA);
+  axis.y = 0;
+  if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+  return axis.normalize();
+};
+
+const chooseLowerCostRouteDirection = (orderedKeyframes, worldCenter) => {
+  if (!Array.isArray(orderedKeyframes) || orderedKeyframes.length < 3) return orderedKeyframes;
+
+  const routeCost = (frames) => {
+    let total = 0;
+    for (let i = 1; i < frames.length; i += 1) {
+      total += computeRouteTransitionCost(frames[i - 1], frames[i], worldCenter);
+    }
+    return total;
+  };
+
+  const forward = orderedKeyframes.slice();
+  const reverse = orderedKeyframes.slice().reverse();
+  return routeCost(forward) <= routeCost(reverse) ? forward : reverse;
+};
+
+const planSmartCinematicRoute = (keyframes, worldCenter) => {
+  if (!Array.isArray(keyframes) || keyframes.length < 3) return keyframes;
+
+  const horizontalDistances = keyframes.map((frame) => {
+    const offset = frame.position.clone().sub(worldCenter);
+    offset.y = 0;
+    return offset.length();
+  });
+  const radiiMean = horizontalDistances.reduce((sum, value) => sum + value, 0) / horizontalDistances.length;
+  const radiiVariance = horizontalDistances.reduce((sum, value) => sum + ((value - radiiMean) ** 2), 0) / horizontalDistances.length;
+  const radiiStd = Math.sqrt(radiiVariance);
+  const yValues = keyframes.map((frame) => frame.position.y);
+  const heightSpread = Math.max(...yValues) - Math.min(...yValues);
+
+  const angles = keyframes.map((frame) => {
+    const offset = frame.position.clone().sub(worldCenter);
+    return Math.atan2(offset.z, offset.x);
+  });
+  const unwrappedAngles = unwrapCircularAngles(angles);
+  const angleSpread = unwrappedAngles.length > 1
+    ? unwrappedAngles[unwrappedAngles.length - 1].angle - unwrappedAngles[0].angle
+    : 0;
+
+  let routeMode = 'dolly';
+  if (angleSpread > 1.1 && radiiStd < Math.max(0.35, radiiMean * 0.28)) {
+    routeMode = 'orbit';
+  } else if (heightSpread > Math.max(0.8, radiiMean * 0.42)) {
+    routeMode = 'crane';
+  }
+
+  let ordered = keyframes.slice();
+
+  if (routeMode === 'orbit') {
+    const byAngle = unwrappedAngles.map(({ index }) => keyframes[index]);
+    ordered = chooseLowerCostRouteDirection(byAngle, worldCenter);
+  } else if (routeMode === 'crane') {
+    ordered = chooseLowerCostRouteDirection(
+      keyframes.slice().sort((a, b) => a.position.y - b.position.y),
+      worldCenter
+    );
+  } else {
+    const axis = getDominantHorizontalAxis(keyframes);
+    ordered = chooseLowerCostRouteDirection(
+      keyframes.slice().sort((a, b) => a.position.dot(axis) - b.position.dot(axis)),
+      worldCenter
+    );
+  }
+
+  return ordered.map((frame, index) => ({
+    ...frame,
+    routeIndex: index,
+    routeMode,
+  }));
+};
+
+const buildCinematicSegment = ({
+  keyframes,
+  positions,
+  targets,
+  focals,
+  durationMs,
+}) => {
+  const sceneRadius = getSceneRadius();
+  const stabilizedQuaternions = smoothQuaternionSeries(
+    positions.map((position, index) => makeUprightQuaternion(position, keyframes[index].quaternion, targets[index])),
+    cinematicSmoothness.value
+  );
+
+  const preparedKeyframes = keyframes.map((frame, index) => ({
+    ...frame,
+    position: positions[index],
+    target: targets[index],
+    stabilizedQuaternion: stabilizedQuaternions[index],
+    fl_y: focals[index] || frame.fl_y,
+  }));
+
+  const curve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.position.clone()),
+    false,
+    'centripetal'
+  );
+  const lookCurve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.target.clone()),
+    false,
+    'centripetal'
+  );
+  const cumulativeDistances = [0];
+  for (let i = 1; i < preparedKeyframes.length; i += 1) {
+    const prev = preparedKeyframes[i - 1];
+    const next = preparedKeyframes[i];
+    cumulativeDistances.push(
+      cumulativeDistances[i - 1] + prev.position.distanceTo(next.position)
+    );
+  }
+
+  return {
+    keyframes: preparedKeyframes,
+    curve,
+    lookCurve,
+    cumulativeDistances,
+    totalDistance: Math.max(cumulativeDistances[cumulativeDistances.length - 1], 1e-5),
+    durationMs,
+    lookAheadDistance: THREE.MathUtils.clamp(
+      sceneRadius * (0.4 + cinematicSmoothness.value * 0.45),
+      CINEMATIC_MIN_LOOK_AHEAD,
+      CINEMATIC_MAX_LOOK_AHEAD
+    ),
+  };
+};
+
+const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
+  if (!mainSegment?.keyframes || mainSegment.keyframes.length < 2) return null;
+
+  const sceneRadius = getSceneRadius();
+  const first = mainSegment.keyframes[0];
+  const last = mainSegment.keyframes[mainSegment.keyframes.length - 1];
+  const directDistance = last.position.distanceTo(first.position);
+  if (directDistance < 1e-4) return null;
+
+  const liftAmount = Math.max(sceneRadius * 0.55, directDistance * 0.22, 0.9);
+  const radialPush = Math.max(sceneRadius * 0.18, directDistance * 0.08, 0.35);
+  const startOut = last.position.clone().sub(worldCenter).setY(0);
+  const endOut = first.position.clone().sub(worldCenter).setY(0);
+
+  if (startOut.lengthSq() < 1e-6) startOut.set(1, 0, 0);
+  if (endOut.lengthSq() < 1e-6) endOut.set(-1, 0, 0);
+
+  startOut.normalize().multiplyScalar(radialPush);
+  endOut.normalize().multiplyScalar(radialPush);
+
+  const centerLift = worldCenter.clone().add(new THREE.Vector3(0, sceneRadius * 0.15, 0));
+  const bridgePositions = [
+    last.position.clone(),
+    last.position.clone().add(new THREE.Vector3(0, liftAmount, 0)).add(startOut),
+    first.position.clone().add(new THREE.Vector3(0, liftAmount * 0.86, 0)).add(endOut),
+    first.position.clone(),
+  ];
+  const bridgeTargets = [
+    last.target.clone().lerp(centerLift, 0.4),
+    centerLift.clone(),
+    centerLift.clone(),
+    first.target.clone().lerp(centerLift, 0.28),
+  ];
+  const bridgeFocal = Math.max(
+    0,
+    Number(last.fl_y || first.fl_y || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX)
+  );
+  const bridgeDurationMs = THREE.MathUtils.clamp(
+    directDistance * 1350 + 1800,
+    2400,
+    6200
+  ) / cinematicSpeed.value;
+
+  return buildCinematicSegment({
+    keyframes: [
+      { index: last.index, pose: last.pose, fl_y: bridgeFocal, h: last.h },
+      { index: last.index, pose: last.pose, fl_y: bridgeFocal, h: last.h },
+      { index: first.index, pose: first.pose, fl_y: bridgeFocal, h: first.h },
+      { index: first.index, pose: first.pose, fl_y: bridgeFocal, h: first.h },
+    ],
+    positions: bridgePositions,
+    targets: bridgeTargets,
+    focals: [bridgeFocal, bridgeFocal, bridgeFocal, bridgeFocal],
+    durationMs: bridgeDurationMs,
+  });
 };
 
 const manualMove = (axis, dist) => {
@@ -591,6 +1012,20 @@ const normalizeImageId = (value) => {
   return (parts[parts.length - 1] || '').trim().toLowerCase();
 };
 
+const isRemoteHttpUrl = (value) => /^https?:\/\//i.test(String(value || ''));
+
+const toViewerSafeAssetUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const raw = value.trim();
+  if (!isRemoteHttpUrl(raw)) return raw;
+
+  if (window.location.origin.startsWith('http://127.0.0.1:')) {
+    return `${window.location.origin}/proxy/${encodeURIComponent(raw)}`;
+  }
+
+  return raw;
+};
+
 const getPoseImageId = (pose) => {
   if (!pose) return '';
   const directId = pose.id || pose.image_id || pose.imageId;
@@ -641,6 +1076,15 @@ const findPoseByInitialTarget = (target) => {
 const maybeApplyInitialTarget = (forceFallback = false) => {
   if (!pendingInitialTarget || didApplyInitialTarget) return;
 
+  if (!pendingInitialTarget.imageId) {
+    const preferredDefaultPose = getPreferredDefaultPose();
+    if (preferredDefaultPose) {
+      didApplyInitialTarget = true;
+      flyToImage(preferredDefaultPose);
+      return;
+    }
+  }
+
   const resolvedPose = findPoseByInitialTarget(pendingInitialTarget);
   if (resolvedPose) {
     didApplyInitialTarget = true;
@@ -659,6 +1103,47 @@ const maybeApplyInitialTarget = (forceFallback = false) => {
     matrix: fallbackMatrix,
     image_url: pendingInitialTarget.imageId || '',
   });
+};
+
+const hasUsablePoseImage = (pose) => {
+  const imageUrl = pose?.image_url;
+  return typeof imageUrl === 'string' && imageUrl.trim().length > 0;
+};
+
+const getPreferredDefaultPose = () => {
+  if (!Array.isArray(cameraPoses.value) || cameraPoses.value.length === 0) return null;
+
+  const taggedWithImage = cameraPoses.value.find((pose) => hasUsablePoseImage(pose) && pose.tag);
+  if (taggedWithImage) return taggedWithImage;
+
+  const firstWithImage = cameraPoses.value.find((pose) => hasUsablePoseImage(pose));
+  if (firstWithImage) return firstWithImage;
+
+  return cameraPoses.value[0] || null;
+};
+
+const getPreferredCinematicPoses = () => {
+  if (!Array.isArray(filteredPoses.value) || filteredPoses.value.length === 0) {
+    return cameraPoses.value;
+  }
+
+  const taggedFiltered = filteredPoses.value.filter((pose) => typeof pose?.tag === 'string' && pose.tag.trim().length > 0);
+  if (taggedFiltered.length >= 2) return taggedFiltered.slice(0, 12);
+  if (filteredPoses.value.length >= 2) return filteredPoses.value.slice(0, 12);
+
+  const taggedAll = cameraPoses.value.filter((pose) => typeof pose?.tag === 'string' && pose.tag.trim().length > 0);
+  if (taggedAll.length >= 2) return taggedAll.slice(0, 12);
+
+  return cameraPoses.value.slice(0, 12);
+};
+
+const maybeApplyDefaultPose = () => {
+  if (pendingInitialTarget || didApplyInitialTarget || didApplyDefaultPose) return;
+  const defaultPose = getPreferredDefaultPose();
+  if (!defaultPose) return;
+
+  didApplyDefaultPose = true;
+  flyToImage(defaultPose);
 };
 
 const resolvePoseCameraState = (poseData) => {
@@ -691,9 +1176,10 @@ const resolvePoseCameraState = (poseData) => {
 };
 
 const buildCinematicTrajectory = () => {
-  if (!viewer || cameraPoses.value.length < 2) return null;
+  const sourcePoses = getPreferredCinematicPoses();
+  if (!viewer || !Array.isArray(sourcePoses) || sourcePoses.length < 2) return null;
 
-  const keyframes = cameraPoses.value
+  const keyframes = sourcePoses
     .map((pose, index) => {
       const cameraState = resolvePoseCameraState(pose);
       if (!cameraState) return null;
@@ -722,14 +1208,18 @@ const buildCinematicTrajectory = () => {
 
   if (dedupedKeyframes.length < 2) return null;
 
+  const stableKeyframes = selectStableCinematicKeyframes(dedupedKeyframes);
+  if (stableKeyframes.length < 2) return null;
+
   const worldCenter = getModelWorldCenter();
-  const rawPositions = dedupedKeyframes.map(frame => frame.position.clone());
+  const orderedKeyframes = stableKeyframes;
+  const rawPositions = orderedKeyframes.map(frame => frame.position.clone());
   const smoothedPositions = smoothVectorSeries(rawPositions, cinematicSmoothness.value);
   const smoothedFocals = smoothScalarSeries(
-    dedupedKeyframes.map(frame => frame.fl_y || 0),
+    orderedKeyframes.map(frame => frame.fl_y || 0),
     cinematicSmoothness.value
   );
-  const lookTargets = dedupedKeyframes.map((frame, index) => {
+  const lookTargets = orderedKeyframes.map((frame, index) => {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(frame.quaternion).normalize();
     const frameDistanceToCenter = Math.max(
       0.8,
@@ -747,44 +1237,28 @@ const buildCinematicTrajectory = () => {
     );
   });
   const smoothedLookTargets = smoothVectorSeries(lookTargets, cinematicSmoothness.value);
-
-  const preparedKeyframes = dedupedKeyframes.map((frame, index) => ({
-    ...frame,
-    position: smoothedPositions[index],
-    target: smoothedLookTargets[index],
-    fl_y: smoothedFocals[index] || frame.fl_y,
-  }));
-
-  const curve = new THREE.CatmullRomCurve3(
-    preparedKeyframes.map(frame => frame.position.clone()),
-    false,
-    'centripetal'
-  );
-  const lookCurve = new THREE.CatmullRomCurve3(
-    preparedKeyframes.map(frame => frame.target.clone()),
-    false,
-    'centripetal'
-  );
-  const cumulativeDistances = [0];
-  for (let i = 1; i < preparedKeyframes.length; i += 1) {
-    const prev = preparedKeyframes[i - 1];
-    const next = preparedKeyframes[i];
-    cumulativeDistances.push(
-      cumulativeDistances[i - 1] + prev.position.distanceTo(next.position)
-    );
+  let totalDistance = 0;
+  for (let i = 1; i < smoothedPositions.length; i += 1) {
+    totalDistance += smoothedPositions[i - 1].distanceTo(smoothedPositions[i]);
   }
-
-  const totalDistance = cumulativeDistances[cumulativeDistances.length - 1];
-  const segmentCount = preparedKeyframes.length - 1;
-  const durationMs = THREE.MathUtils.clamp(segmentCount * 220, 6000, 45000) / cinematicSpeed.value;
+  const segmentCount = orderedKeyframes.length - 1;
+  const durationMs = THREE.MathUtils.clamp(
+    totalDistance * 1600 + segmentCount * 260,
+    7000,
+    42000
+  ) / cinematicSpeed.value;
+  const mainSegment = buildCinematicSegment({
+    keyframes: orderedKeyframes,
+    positions: smoothedPositions,
+    targets: smoothedLookTargets,
+    focals: smoothedFocals,
+    durationMs,
+  });
 
   return {
-    keyframes: preparedKeyframes,
-    curve,
-    lookCurve,
-    cumulativeDistances,
-    totalDistance: Math.max(totalDistance, 1e-5),
-    durationMs,
+    ...mainSegment,
+    worldCenter: worldCenter.clone(),
+    loopBridge: buildLoopBridgeSegment(mainSegment, worldCenter),
   };
 };
 
@@ -812,16 +1286,13 @@ const sampleCinematicTrajectory = (trajectory, normalizedT) => {
   );
   const from = trajectory.keyframes[segmentIndex];
   const to = trajectory.keyframes[segmentIndex + 1];
-  const interpolatedOriginalQuaternion = from.quaternion.clone().slerp(to.quaternion, localT);
   const position = trajectory.curve.getPointAt(t);
-  const target = trajectory.lookCurve
-    ? trajectory.lookCurve.getPointAt(t)
-    : from.target.clone().lerp(to.target, localT);
-  const lookAtMatrix = new THREE.Matrix4().lookAt(target, position, worldUp);
-  const focusQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
-  const quaternion = cinematicSubjectLock.value
-    ? focusQuaternion.slerp(interpolatedOriginalQuaternion, 0.18)
-    : interpolatedOriginalQuaternion;
+  const stabilizedQuaternion = from.stabilizedQuaternion
+    .clone()
+    .slerp(to.stabilizedQuaternion, localT)
+    .normalize();
+  const target = from.target.clone().lerp(to.target, localT);
+  const quaternion = stabilizedQuaternion;
 
   return {
     position,
@@ -836,14 +1307,42 @@ const sampleCinematicTrajectory = (trajectory, normalizedT) => {
 const applyCinematicSample = (sample) => {
   if (!sample || !viewer || !viewer.camera) return;
 
-  const cam = viewer.camera;
-  cam.position.copy(sample.position);
-  cam.quaternion.copy(sample.quaternion);
+  const dampingAlpha = THREE.MathUtils.lerp(
+    CINEMATIC_CAMERA_DAMPING_FAST,
+    CINEMATIC_CAMERA_DAMPING_SLOW,
+    cinematicSmoothness.value
+  );
 
-  if (sample.fl_y && sample.h) {
-    sceneMetadata.value.h = sample.h;
-    manualFocalPx.value = Number(sample.fl_y.toFixed(1));
-    applyFocalLengthPx(sample.fl_y);
+  if (!cinematicState.filteredSample) {
+    cinematicState.filteredSample = {
+      position: sample.position.clone(),
+      quaternion: sample.quaternion.clone(),
+      fl_y: Number(sample.fl_y || 0),
+      h: Number(sample.h || sceneMetadata.value.h || 0),
+    };
+  } else {
+    cinematicState.filteredSample.position.lerp(sample.position, dampingAlpha);
+    cinematicState.filteredSample.quaternion.slerp(sample.quaternion, dampingAlpha).normalize();
+    if (sample.fl_y) {
+      cinematicState.filteredSample.fl_y = THREE.MathUtils.lerp(
+        cinematicState.filteredSample.fl_y || sample.fl_y,
+        sample.fl_y,
+        dampingAlpha * 0.85
+      );
+    }
+    if (sample.h) {
+      cinematicState.filteredSample.h = sample.h;
+    }
+  }
+
+  const cam = viewer.camera;
+  cam.position.copy(cinematicState.filteredSample.position);
+  cam.quaternion.copy(cinematicState.filteredSample.quaternion);
+
+  if (cinematicState.filteredSample.fl_y && cinematicState.filteredSample.h) {
+    sceneMetadata.value.h = cinematicState.filteredSample.h;
+    manualFocalPx.value = Number(cinematicState.filteredSample.fl_y.toFixed(1));
+    applyFocalLengthPx(cinematicState.filteredSample.fl_y);
   } else {
     renderCameraUpdate();
   }
@@ -851,7 +1350,9 @@ const applyCinematicSample = (sample) => {
   if (sample.nearestPoseIndex !== cinematicState.lastNearestPoseIndex) {
     cinematicState.lastNearestPoseIndex = sample.nearestPoseIndex;
     const nearestPose = cameraPoses.value[sample.nearestPoseIndex];
-    if (nearestPose) setActivePosePresentation(nearestPose);
+    if (nearestPose) {
+      setActivePosePresentationState(nearestPose, { updateReference: false });
+    }
   }
 };
 
@@ -861,15 +1362,31 @@ const stepCinematicPlayback = (now) => {
     return;
   }
 
-  const durationMs = Math.max(cinematicState.trajectory.durationMs, 1);
+  const activeSegment = cinematicState.phase === 'loop-bridge' && cinematicState.trajectory.loopBridge
+    ? cinematicState.trajectory.loopBridge
+    : cinematicState.trajectory;
+  const durationMs = Math.max(activeSegment.durationMs, 1);
   const elapsedMs = Math.max(0, now - cinematicState.startTimeMs);
   cinematicState.elapsedMs = elapsedMs;
 
   let normalizedT = elapsedMs / durationMs;
   if (normalizedT >= 1) {
-    if (cinematicLoop.value) {
+    if (cinematicState.phase === 'loop-bridge') {
       cinematicState.startTimeMs = now;
       cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'main';
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else if (cinematicLoop.value && cinematicState.trajectory.loopBridge) {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'loop-bridge';
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else if (cinematicLoop.value) {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'main';
       cinematicState.lastNearestPoseIndex = -1;
       normalizedT = 0;
     } else {
@@ -877,10 +1394,10 @@ const stepCinematicPlayback = (now) => {
     }
   }
 
-  cinematicProgress.value = normalizedT;
-  applyCinematicSample(sampleCinematicTrajectory(cinematicState.trajectory, normalizedT));
+  cinematicProgress.value = cinematicState.phase === 'main' ? normalizedT : 1;
+  applyCinematicSample(sampleCinematicTrajectory(activeSegment, normalizedT));
 
-  if (!cinematicLoop.value && normalizedT >= 1) {
+  if (!cinematicLoop.value && cinematicState.phase === 'main' && normalizedT >= 1) {
     stopCinematicPlayback({ resetProgress: false });
     cinematicProgress.value = 1;
     return;
@@ -897,6 +1414,8 @@ const startCinematicPlayback = (options = {}) => {
   stopCameraTweens();
   cancelCinematicFrame();
   cinematicState.trajectory = trajectory;
+  cinematicState.phase = 'main';
+  cinematicState.filteredSample = null;
   cinematicState.elapsedMs = options.resume ? cinematicState.elapsedMs : 0;
   cinematicState.startTimeMs = performance.now() - cinematicState.elapsedMs;
   cinematicState.lastNearestPoseIndex = -1;
@@ -928,11 +1447,17 @@ const toggleCinematicPlayback = () => {
   startCinematicPlayback({ resume: isCinematicPaused.value });
 };
 
+const toggleCinematicPanel = () => {
+  if (!canPlayCinematic.value) return;
+  showCinematicPanel.value = !showCinematicPanel.value;
+};
+
 const rebuildCinematicAtCurrentProgress = () => {
   const nextTrajectory = buildCinematicTrajectory();
   if (!nextTrajectory) return;
 
   cinematicState.trajectory = nextTrajectory;
+  cinematicState.phase = 'main';
   cinematicState.lastNearestPoseIndex = -1;
   applyCinematicSample(sampleCinematicTrajectory(nextTrajectory, cinematicProgress.value));
 
@@ -1113,6 +1638,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     globalUniforms.uColorRadius.value = 0;
     pendingInitialTarget = null;
     didApplyInitialTarget = false;
+    didApplyDefaultPose = false;
     posesFetchSettled = false;
 
     const config = getViewerConfig();
@@ -1168,6 +1694,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
                 imgUrl = `${baseUrl}/${relPath}`;
               }
             }
+            imgUrl = toViewerSafeAssetUrl(imgUrl);
             return {
               id: frame.id,
               matrix: frame.matrix,
@@ -1186,10 +1713,12 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
             applyFocalLengthPx(DEFAULT_FOCAL_PX);
           }
           maybeApplyInitialTarget(true);
+          maybeApplyDefaultPose();
         } else {
           cameraPoses.value = data; // 兼容旧格式
           applyFocalLengthPx(DEFAULT_FOCAL_PX);
           maybeApplyInitialTarget(true);
+          maybeApplyDefaultPose();
         }
       })
       .catch(err => {
@@ -1219,6 +1748,8 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
             if (!initialTarget.imageId) {
               setTimeout(() => { maybeApplyInitialTarget(true); }, 800);
             }
+          } else {
+            setTimeout(() => { maybeApplyDefaultPose(); }, 80);
           }
 
         animationState.lastFrameTime = Date.now();
@@ -1762,17 +2293,33 @@ onBeforeUnmount(async () => {
           @mousedown.stop @touchstart.stop @touchend.stop>
           {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
         </button>
-        <div class="cinematic-panel archive-card" v-if="canPlayCinematic"
+        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
+          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          <span class="cinematic-trigger-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path
+                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
+            </svg>
+          </span>
+          <span>运镜</span>
+        </button>
+        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
           @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
           <div class="cinematic-head">
             <div>
               <div class="eyebrow">Camera Move</div>
               <div class="cinematic-title">自动运镜</div>
             </div>
-            <label class="cinematic-loop-toggle">
-              <input type="checkbox" v-model="cinematicLoop" />
-              <span>循环</span>
-            </label>
+            <div class="cinematic-head-actions">
+              <label class="cinematic-loop-toggle">
+                <input type="checkbox" v-model="cinematicLoop" />
+                <span>循环</span>
+              </label>
+              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
+                ×
+              </button>
+            </div>
           </div>
           <div class="cinematic-actions">
             <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
@@ -1906,7 +2453,7 @@ onBeforeUnmount(async () => {
         <div class="camera-track-copy">{{ searchQuery ? '按当前检索结果排序' : '优先显示已打标签镜头' }}</div>
       </div>
       <div v-for="(pose, index) in filteredPoses" :key="pose.id" class="camera-btn"
-        :class="{ active: activeImage === pose.image_url }" @click.stop="flyToImage(pose)">
+        :class="{ active: activePoseId === getPosePresentationId(pose) }" @click.stop="flyToImage(pose)">
         <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
         <div v-if="pose.tag" class="camera-tag-overlay">
           <div class="camera-tag-text">{{ pose.tag }}</div>
@@ -2009,6 +2556,33 @@ onBeforeUnmount(async () => {
   border-radius: 18px;
 }
 
+.cinematic-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: auto;
+  padding-inline: 12px;
+}
+
+.cinematic-trigger.active {
+  background: #1e1e20;
+  color: #f5f4ef;
+  border-color: rgba(30, 30, 32, 0.2);
+}
+
+.cinematic-trigger-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.cinematic-trigger-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
 .cinematic-panel {
   width: min(84vw, 280px);
   padding: 12px 14px;
@@ -2024,6 +2598,12 @@ onBeforeUnmount(async () => {
   gap: 12px;
 }
 
+.cinematic-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .cinematic-title {
   font-size: 15px;
   font-weight: 700;
@@ -2035,6 +2615,26 @@ onBeforeUnmount(async () => {
   gap: 6px;
   font-size: 12px;
   color: rgba(30, 30, 32, 0.7);
+}
+
+.cinematic-close {
+  appearance: none;
+  border: 0;
+  background: rgba(107, 122, 143, 0.1);
+  color: #1e1e20;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinematic-close:hover {
+  background: rgba(107, 122, 143, 0.18);
 }
 
 .cinematic-focus-toggle {
@@ -2580,6 +3180,10 @@ input[type='range'] {
 
   .cinematic-panel {
     width: 100%;
+  }
+
+  .cinematic-trigger {
+    justify-content: center;
   }
 
   .mode-chip {
