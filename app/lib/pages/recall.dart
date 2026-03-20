@@ -10,7 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
+import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider, pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
@@ -909,6 +909,7 @@ $userQuestion
                       children: [
                     BDPageHeader(
                       title: textLocalize("home_page"),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -935,7 +936,7 @@ $userQuestion
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                      padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
                       child: Column(
                         children: [
                           BDPanelCard(
@@ -1182,6 +1183,9 @@ $userQuestion
                       onNavigateToViewer: _navigateToViewer,
                       onShowModelActions: (model) {
                         unawaited(_showModelActions(model));
+                      },
+                      onAddNewTask: (name) {
+                        ref.read(pageIndexProvider.notifier).state = 1;
                       },
                     ),
                   const SliverToBoxAdapter(

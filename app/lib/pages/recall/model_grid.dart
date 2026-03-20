@@ -970,6 +970,7 @@ class TimePeelingList extends StatelessWidget {
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
     super.key,
@@ -983,6 +984,7 @@ class TimePeelingList extends StatelessWidget {
     required this.isSameModel,
     required this.onNavigateToViewer,
     required this.onShowModelActions,
+    required this.onAddNewTask,
   });
 
   @override
@@ -1025,6 +1027,7 @@ class TimePeelingList extends StatelessWidget {
               isSameModel: isSameModel,
               onNavigateToViewer: onNavigateToViewer,
               onShowModelActions: onShowModelActions,
+              onAddNewTask: onAddNewTask,
             );
           },
           childCount: sortedKeys.length,
@@ -1063,6 +1066,7 @@ class _TimePeelingSlot extends StatelessWidget {
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(String name) onAddNewTask;
 
   const _TimePeelingSlot({
     required this.name,
@@ -1079,6 +1083,7 @@ class _TimePeelingSlot extends StatelessWidget {
     required this.isSameModel,
     required this.onNavigateToViewer,
     required this.onShowModelActions,
+    required this.onAddNewTask,
   });
 
   @override
@@ -1091,57 +1096,132 @@ class _TimePeelingSlot extends StatelessWidget {
       color: _kTimelineColor.withValues(alpha: 0.8),
     );
 
+    final slotBg = isDark
+        ? Colors.white.withValues(alpha: 0.04)
+        : Colors.white.withValues(alpha: 0.55);
+    final slotBorder = isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : Colors.black.withValues(alpha: 0.06);
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 标题行
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: textColor,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: hintColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '${models.length}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: hintColor,
-                    ),
-                  ),
-                ),
-              ],
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: slotBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: slotBorder, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
-          ),
-          const SizedBox(height: 10),
-          // 卡片 + 时间轴，统一水平滚动
-          SizedBox(
-            height: 220 + 10 + _kTimelineHeight,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: models.length,
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题行
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: hintColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${models.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: hintColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 卡片 + 时间轴，统一水平滚动
+            SizedBox(
+              height: 220 + 10 + _kTimelineHeight,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: models.length + 1, // +1 for add card
               itemBuilder: (context, i) {
-                final model = models[i];
+                // 第一个位置：添加卡片
+                if (i == 0) {
+                  return SizedBox(
+                    width: _kSlotWidth,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: _kCardGap),
+                            child: GestureDetector(
+                              onTap: () => onAddNewTask(name),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.06)
+                                      : Colors.white.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(
+                                    color: _kTimelineColor.withValues(alpha: 0.35),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.add_rounded,
+                                        size: 36,
+                                        color: _kTimelineColor.withValues(alpha: 0.7),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        textLocalize("create"),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: _kTimelineColor.withValues(alpha: 0.7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 空白占位，与时间轴对齐
+                        const SizedBox(height: 10),
+                        SizedBox(height: _kTimelineHeight),
+                      ],
+                    ),
+                  );
+                }
+                final modelIndex = i - 1;
+                final model = models[modelIndex];
                 final cardKey = modelCardKeyFor(model);
                 final isActionTarget = isSameModel(activeModelAction, model);
                 final dt = DateTime.tryParse(
@@ -1170,6 +1250,15 @@ class _TimePeelingSlot extends StatelessWidget {
                                       onShowModelActions(model),
                                   child: Container(
                                     key: cardKey,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(28),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? Colors.white.withValues(alpha: 0.08)
+                                            : Colors.black.withValues(alpha: 0.06),
+                                        width: 1,
+                                      ),
+                                    ),
                                     child: RecallModelTile(
                                       model: model,
                                       theme: theme,
@@ -1193,8 +1282,8 @@ class _TimePeelingSlot extends StatelessWidget {
                       SizedBox(
                         height: _kTimelineHeight,
                         child: _TimelineNode(
-                          isFirst: i == 0,
-                          isLast: i == models.length - 1,
+                          isFirst: modelIndex == 0,
+                          isLast: modelIndex == models.length - 1,
                           lineColor: lineColor,
                           nodeColor: nodeColor,
                           timeLabel: timeLabel,
@@ -1209,7 +1298,7 @@ class _TimePeelingSlot extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
