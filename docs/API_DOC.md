@@ -1,6 +1,6 @@
 
 
-# BrainDance API 接入文档 (v1.1)
+# BrainDance API 接入文档 (v1.2)
 
 本文档描述了 BrainDance 3DGS 引擎的前端接入规范。本项目采用 **Supabase (BaaS) + Python (微服务)** 的混合架构。
 
@@ -40,7 +40,7 @@
 ### 3.1 任务表: `processing_tasks`
 用于创建新的 3D 生成任务，并监听进度。
 
-- **权限**: 用户仅可读写自己的数据 (RLS 开启)。
+- **权限**: 开发态当前允许公共访问；Dashboard 额外依赖只读策略直接查询该表。
 - **操作**: `Insert` (创建), `Select` (查询), `Realtime` (监听)。
 
 | 字段名 | 类型 | 必填 | 说明 |
@@ -56,6 +56,8 @@
 | `quality_score`| int | ❌ | (只读) AI 评分 |
 | `quality_reason`| string | ❌ | (只读) AI 评分原因 |
 | `tags` | string[] | ❌ | (只读) AI 标签 |
+
+> Dashboard 当前会优先显示 `display_name`，如果为空则回退到 `scene_id`。
 
 **task_type 可选值:**
 
@@ -253,7 +255,7 @@ final res = await supabase.from('processing_tasks').insert({
 用于存储生成成功的模型资产。
 **用途**：前端直接查询此表以展示“我的模型列表”或“模型总数”。
 
-- **权限**: 读写 (RLS 开启，用户只能查询和删除**属于自己**的数据)。
+- **权限**: 开发态当前允许公共访问；Dashboard 依赖只读策略查询聚合数据。
 - **操作**: `Select` (列表/详情), `Delete` (删除)。
 
 | 字段名 | 类型 | 说明 |
@@ -275,6 +277,101 @@ final res = await supabase.from('processing_tasks').insert({
 final assets = await supabase.from('model_assets')
     .select('*')
     .order('created_at', ascending: false);
+```
+
+### 3.3 社区贴文表: `community_posts`
+
+用于 Community 页的公共贴文流和地图探索。
+
+- **权限**: 开发态当前允许公共读写。
+- **操作**: `Select` (社区流), `Insert` (发布贴文)。
+
+| 字段名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `id` | uuid | ❌ | 主键，自动生成 |
+| `user_id` | string | ❌ | 发布者 ID |
+| `model_asset_id` | uuid | ❌ | 关联 `model_assets.id`，删除资产后会置空 |
+| `model_name` | string | ❌ | 展示用模型名称快照 |
+| `title` | string | ✅ | 贴文标题 |
+| `caption` | string | ✅ | 贴文文案，默认空字符串 |
+| `place_name` | string | ✅ | 地点名称 |
+| `latitude` | double | ✅ | 纬度 |
+| `longitude` | double | ✅ | 经度 |
+| `cover_image_url` | string | ❌ | 封面图地址 |
+| `metadata` | jsonb | ❌ | 扩展元数据 |
+| `created_at` | timestamp | ❌ | 创建时间 |
+| `updated_at` | timestamp | ❌ | 更新时间 |
+
+**读取社区流 (Dart):**
+```dart
+final posts = await supabase.from('community_posts').select('''
+  id,
+  title,
+  caption,
+  place_name,
+  latitude,
+  longitude,
+  user_id,
+  created_at,
+  model_name,
+  cover_image_url,
+  model_assets (
+    scene_id,
+    description,
+    ply_path,
+    preview_img_path
+  )
+''').order('created_at', ascending: false).limit(24);
+```
+
+**发布社区贴文 (Dart):**
+```dart
+await supabase.from('community_posts').insert({
+  'user_id': supabase.auth.currentUser?.id,
+  'model_asset_id': selectedModelId,
+  'model_name': sceneId,
+  'title': '清晨刚亮时的断桥',
+  'caption': '薄雾和湖面的反光被一起留在模型里。',
+  'place_name': '杭州西湖',
+  'latitude': 30.258,
+  'longitude': 120.140,
+  'cover_image_url': previewUrl,
+});
+```
+
+### 3.4 Worker 节点表: `worker_nodes`
+
+用于 AI Engine Worker 注册、心跳和 Dashboard 集群控制。
+
+- **权限**: 当前迁移为开发态全开放策略；Dashboard 直接读写该表。
+- **操作**: `Upsert` (Worker 注册/心跳), `Select` (Dashboard 监控), `Update` (下发控制目标)。
+
+| 字段名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `worker_id` | string | ✅ | Worker 实例 ID，主键 |
+| `hostname` | string | ❌ | 节点主机名 |
+| `pid` | int | ❌ | 进程 ID |
+| `status` | string | ✅ | `starting / idle / busy / stopping / offline / error` |
+| `current_task_id` | uuid | ❌ | 当前任务 ID |
+| `current_scene_id` | string | ❌ | 当前场景 ID |
+| `desired_state` | string | ✅ | Dashboard 控制目标，当前约定 `run / pause / interrupt` |
+| `control_note` | string | ❌ | 控制备注 |
+| `control_requested_at` | timestamp | ❌ | 控制请求时间 |
+| `last_heartbeat` | timestamp | ✅ | 最近心跳 |
+| `started_at` | timestamp | ✅ | 启动时间 |
+| `stopped_at` | timestamp | ❌ | 停止时间 |
+| `metadata` | jsonb | ❌ | 在线超时、停止原因等附加信息 |
+
+**Dashboard 暂停 Worker (TypeScript):**
+```ts
+await supabase
+  .from('worker_nodes')
+  .update({
+    desired_state: 'pause',
+    control_note: 'pause requested from dashboard',
+    control_requested_at: new Date().toISOString(),
+  })
+  .eq('worker_id', workerId)
 ```
 
 ---
@@ -516,3 +613,16 @@ class SearchResult {
     *   当 `status` 变为 `processing` -> 显示进度条。
     *   当 `logs` 数组更新 -> 显示实时日志。
     *   当 `status` 变为 `completed` -> 拼接 URL 下载并展示模型。
+
+### 流程五：发布社区贴文 (Share To Community)
+1.  前端先从 `model_assets` 读取可分享模型。
+2.  用户填写 `title / caption / place_name / latitude / longitude`。
+3.  向 `community_posts` 插入记录，并带上 `model_asset_id`。
+4.  Community 页通过关联查询 `model_assets` 取回 `ply_path`、描述和预览图。
+
+### 流程六：Worker 集群控制 (Worker Cluster Control)
+1.  Worker 启动时向 `worker_nodes` 执行 `upsert`，注册 `worker_id`、`hostname`、`pid` 和 `started_at`。
+2.  Worker 运行期间持续更新 `status`、`current_task_id`、`current_scene_id` 和 `last_heartbeat`。
+3.  Dashboard 读取 `worker_nodes` 渲染实例列表。
+4.  Dashboard 需要暂停实例时，更新 `desired_state='pause'`。
+5.  Worker 观察到状态变更后停止接新任务，并优雅退出。

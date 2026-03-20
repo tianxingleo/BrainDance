@@ -8,8 +8,8 @@
 
 - `app/` 创建任务、上传素材
 - `supabase/` 保存任务和文件
-- `ai_engine/3dgs/` 监听任务并执行处理
-- `dashboard/` 观察处理状态和资产结果
+- `ai_engine/3dgs/` 监听任务并执行处理，同时向 `worker_nodes` 汇报心跳和控制状态
+- `dashboard/` 观察处理状态、资产结果和 Worker 集群状态
 
 ## 当前主用目录
 

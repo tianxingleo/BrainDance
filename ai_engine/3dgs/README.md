@@ -172,6 +172,7 @@ WORKER_INTERRUPT_GRACE_SECONDS=20
 | `id` | `uuid` | 主键，自动生成 |
 | `user_id` | `text` | 用户 ID |
 | `scene_id` | `text` | 场景/项目唯一标识 |
+| `display_name` | `text` | 前端展示名称，Dashboard 和任务列表优先显示 |
 | `status` | `text` | 状态: `pending` (排队), `processing` (处理中), `completed` (完成), `failed` (失败) |
 | `logs` | `jsonb` | 实时日志数组，结构: `[{"ts": 123, "msg": "..."}]` |
 | `created_at` | `timestamp` | 创建时间 |
@@ -189,6 +190,26 @@ WORKER_INTERRUPT_GRACE_SECONDS=20
 | `ply_path` | `text` | 模型文件路径 |
 | `preview_img_path` | `text` | 预览图路径 |
 | `meta_info` | `jsonb` | 质量分、引擎版本等附加信息 |
+
+### Table: `worker_nodes`
+
+该表用于 Worker 注册、心跳和集群控制，是最近新增的运维控制面。
+
+| 字段名 | 类型 | 描述 |
+| --- | --- | --- |
+| `worker_id` | `text` | Worker 实例唯一标识，主键 |
+| `hostname` | `text` | 节点主机名 |
+| `pid` | `integer` | 当前进程 PID |
+| `status` | `text` | `starting / idle / busy / stopping / offline / error` |
+| `current_task_id` | `uuid` | 当前执行中的任务 ID |
+| `current_scene_id` | `text` | 当前执行中的场景 ID |
+| `desired_state` | `text` | Dashboard 下发的目标状态，当前约定 `run / pause / interrupt` |
+| `control_note` | `text` | 控制备注 |
+| `control_requested_at` | `timestamptz` | 最近一次控制请求时间 |
+| `last_heartbeat` | `timestamptz` | 最近心跳时间 |
+| `started_at` | `timestamptz` | 实例启动时间 |
+| `stopped_at` | `timestamptz` | 实例停止时间 |
+| `metadata` | `jsonb` | 在线超时、停止原因等附加信息 |
 
 ### Table: `memory_poses`
 

@@ -8,6 +8,7 @@
 
 - 任务总览：`pending / processing / completed / failed`
 - 任务筛选：按状态、任务类型和关键词过滤
+- 任务展示名：优先显示 `processing_tasks.display_name`
 - 成功率、平均质量分、平均处理时长
 - 最近任务趋势图
 - Worker 在线状态推断
@@ -82,10 +83,19 @@ npm run build
 - `worker_nodes`
 - `braindance-assets` bucket
 
+其中与最近数据库变更直接相关的是：
+
+- `processing_tasks.display_name`：用于任务列表和异常摘要的人类可读名称
+- `worker_nodes`：用于展示实例在线状态、当前任务、心跳和控制目标
+- `dashboard_read_*` RLS 策略：允许 Dashboard 通过 `anon` / `authenticated` 只读访问 `processing_tasks`、`memory_poses`、`tasks`、`model_assets`、`rag_docs`
+
+如果这些策略没有执行，前端即使能连上 Supabase，也会出现“表存在但读不到数据”的情况。
+
 如果本地数据库还没初始化，请先参考 [supabase/README.md](/home/ltx/projects/BrainDance/supabase/README.md) 启动 Supabase。
 
 ## 限制说明
 
 - 这是内部状态看板，不是独立业务后台
 - 当前没有单独的后端中间层，前端直接使用 Supabase Anon Key
+- Worker 控制当前依赖直接更新 `worker_nodes.desired_state`，约定值为 `run / pause / interrupt`
 - 页面展示能力以 `src/App.vue` 的当前实现为准，README 不额外承诺未落地功能

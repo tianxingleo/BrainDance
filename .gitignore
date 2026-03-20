@@ -22,6 +22,8 @@ $RECYCLE.BIN/
 
 # Claude Code
 .claude/
+.cache/
+tmp_papers/
 
 # PyCharm / IntelliJ
 .idea/

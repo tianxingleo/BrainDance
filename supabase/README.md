@@ -15,6 +15,8 @@
 这一层主要承担：
 
 - `processing_tasks` 等业务表的数据存储
+- `worker_nodes` 的注册、心跳与集群控制
+- `community_posts` 的社区贴文存储
 - `pgvector` 向量检索
 - Storage 文件管理
 - Realtime 状态同步
@@ -58,6 +60,18 @@ supabase start
 - `20260306123456_match_memory_poses.sql`
 - `20260307090000_add_display_name_to_processing_tasks.sql`
 - `20260309195500_add_storage_read_policies_for_dashboard.sql`
+- `20260317170000_create_community_posts.sql`
+- `20260320143000_add_dashboard_table_read_policies.sql`
+- `20260320143000_create_worker_nodes.sql`
+
+当前与最近几次表结构变更直接相关的对象可以概括为：
+
+- `processing_tasks`：任务主表，新增了 `display_name` 用于前端列表展示
+- `model_assets`：模型资产表，供 Recall、Community 和 Dashboard 查询
+- `memory_poses`：空间锚点与向量检索表
+- `community_posts`：社区贴文表，引用 `model_assets.id`
+- `worker_nodes`：Worker 注册、心跳、当前任务和控制状态表
+- `dashboard_read_*` 策略：为 Dashboard 直连读表补齐只读 RLS
 
 ## Storage 约定
 
@@ -107,8 +121,8 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ## 与其他模块的关系
 
 - `app/`：使用 Anon Key 直连数据库、Storage 和 Realtime
-- `dashboard/`：读取任务、资产和存储状态
-- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和 Storage
+- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入 `desired_state`
+- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和 Storage，同时持续更新 `worker_nodes`
 
 ## 说明
 
