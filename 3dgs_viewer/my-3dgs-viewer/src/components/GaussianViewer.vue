@@ -32,6 +32,8 @@ const cinematicProgress = ref(0);
 const cinematicLoop = ref(true);
 const isCinematicPlaying = ref(false);
 const isCinematicPaused = ref(false);
+const cinematicSmoothness = ref(0.68);
+const cinematicSubjectLock = ref(true);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 const DRAG_ROTATE_SENSITIVITY = 0.065;
 const DRAG_PAN_SENSITIVITY = 0.0022;
@@ -268,6 +270,49 @@ const stopCinematicPlayback = (options = {}) => {
 const interruptCinematicPlayback = () => {
   if (!isCinematicPlaying.value && !isCinematicPaused.value) return;
   stopCinematicPlayback({ resetProgress: false });
+};
+
+const smoothVectorSeries = (vectors, amount) => {
+  if (!Array.isArray(vectors) || vectors.length < 3) return vectors.map(vec => vec.clone());
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 3));
+  const blend = 0.12 + strength * 0.26;
+  let result = vectors.map(vec => vec.clone());
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((vec, index) => {
+      if (index === 0 || index === result.length - 1) return vec.clone();
+      const blended = result[index - 1].clone()
+        .add(result[index].clone().multiplyScalar(2))
+        .add(result[index + 1])
+        .multiplyScalar(0.25);
+      return vec.clone().lerp(blended, blend);
+    });
+    result = nextSeries;
+  }
+
+  return result;
+};
+
+const smoothScalarSeries = (values, amount) => {
+  if (!Array.isArray(values) || values.length < 3) return values.slice();
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 2));
+  const blend = 0.1 + strength * 0.28;
+  let result = values.slice();
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((value, index) => {
+      if (index === 0 || index === result.length - 1) return value;
+      const averaged = (result[index - 1] + result[index] * 2 + result[index + 1]) / 4;
+      return THREE.MathUtils.lerp(value, averaged, blend);
+    });
+    result = nextSeries;
+  }
+
+  return result;
 };
 
 const manualMove = (axis, dist) => {
@@ -677,24 +722,66 @@ const buildCinematicTrajectory = () => {
 
   if (dedupedKeyframes.length < 2) return null;
 
-  const points = dedupedKeyframes.map(frame => frame.position.clone());
-  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const worldCenter = getModelWorldCenter();
+  const rawPositions = dedupedKeyframes.map(frame => frame.position.clone());
+  const smoothedPositions = smoothVectorSeries(rawPositions, cinematicSmoothness.value);
+  const smoothedFocals = smoothScalarSeries(
+    dedupedKeyframes.map(frame => frame.fl_y || 0),
+    cinematicSmoothness.value
+  );
+  const lookTargets = dedupedKeyframes.map((frame, index) => {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(frame.quaternion).normalize();
+    const frameDistanceToCenter = Math.max(
+      0.8,
+      rawPositions[index].distanceTo(worldCenter)
+    );
+    const forwardTarget = rawPositions[index].clone().add(
+      forward.multiplyScalar(Math.max(2.2, frameDistanceToCenter * 0.9))
+    );
+
+    if (!cinematicSubjectLock.value) return forwardTarget;
+
+    return forwardTarget.lerp(
+      worldCenter,
+      THREE.MathUtils.clamp(0.48 + cinematicSmoothness.value * 0.26, 0, 0.9)
+    );
+  });
+  const smoothedLookTargets = smoothVectorSeries(lookTargets, cinematicSmoothness.value);
+
+  const preparedKeyframes = dedupedKeyframes.map((frame, index) => ({
+    ...frame,
+    position: smoothedPositions[index],
+    target: smoothedLookTargets[index],
+    fl_y: smoothedFocals[index] || frame.fl_y,
+  }));
+
+  const curve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.position.clone()),
+    false,
+    'centripetal'
+  );
+  const lookCurve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.target.clone()),
+    false,
+    'centripetal'
+  );
   const cumulativeDistances = [0];
-  for (let i = 1; i < dedupedKeyframes.length; i += 1) {
-    const prev = dedupedKeyframes[i - 1];
-    const next = dedupedKeyframes[i];
+  for (let i = 1; i < preparedKeyframes.length; i += 1) {
+    const prev = preparedKeyframes[i - 1];
+    const next = preparedKeyframes[i];
     cumulativeDistances.push(
       cumulativeDistances[i - 1] + prev.position.distanceTo(next.position)
     );
   }
 
   const totalDistance = cumulativeDistances[cumulativeDistances.length - 1];
-  const segmentCount = dedupedKeyframes.length - 1;
+  const segmentCount = preparedKeyframes.length - 1;
   const durationMs = THREE.MathUtils.clamp(segmentCount * 220, 6000, 45000) / cinematicSpeed.value;
 
   return {
-    keyframes: dedupedKeyframes,
+    keyframes: preparedKeyframes,
     curve,
+    lookCurve,
     cumulativeDistances,
     totalDistance: Math.max(totalDistance, 1e-5),
     durationMs,
@@ -725,11 +812,21 @@ const sampleCinematicTrajectory = (trajectory, normalizedT) => {
   );
   const from = trajectory.keyframes[segmentIndex];
   const to = trajectory.keyframes[segmentIndex + 1];
-  const quaternion = from.quaternion.clone().slerp(to.quaternion, localT);
+  const interpolatedOriginalQuaternion = from.quaternion.clone().slerp(to.quaternion, localT);
+  const position = trajectory.curve.getPointAt(t);
+  const target = trajectory.lookCurve
+    ? trajectory.lookCurve.getPointAt(t)
+    : from.target.clone().lerp(to.target, localT);
+  const lookAtMatrix = new THREE.Matrix4().lookAt(target, position, worldUp);
+  const focusQuaternion = new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
+  const quaternion = cinematicSubjectLock.value
+    ? focusQuaternion.slerp(interpolatedOriginalQuaternion, 0.18)
+    : interpolatedOriginalQuaternion;
 
   return {
-    position: trajectory.curve.getPointAt(t),
+    position,
     quaternion,
+    target,
     fl_y: from.fl_y && to.fl_y ? THREE.MathUtils.lerp(from.fl_y, to.fl_y, localT) : (from.fl_y || to.fl_y || 0),
     h: from.h || to.h || sceneMetadata.value.h || 0,
     nearestPoseIndex: localT < 0.5 ? from.index : to.index,
@@ -831,16 +928,35 @@ const toggleCinematicPlayback = () => {
   startCinematicPlayback({ resume: isCinematicPaused.value });
 };
 
+const rebuildCinematicAtCurrentProgress = () => {
+  const nextTrajectory = buildCinematicTrajectory();
+  if (!nextTrajectory) return;
+
+  cinematicState.trajectory = nextTrajectory;
+  cinematicState.lastNearestPoseIndex = -1;
+  applyCinematicSample(sampleCinematicTrajectory(nextTrajectory, cinematicProgress.value));
+
+  if (isCinematicPlaying.value) {
+    cinematicState.elapsedMs = nextTrajectory.durationMs * cinematicProgress.value;
+    cinematicState.startTimeMs = performance.now() - cinematicState.elapsedMs;
+  } else if (isCinematicPaused.value) {
+    cinematicState.elapsedMs = nextTrajectory.durationMs * cinematicProgress.value;
+  }
+};
+
 const onCinematicSpeedChange = () => {
   cinematicSpeed.value = Number(
     THREE.MathUtils.clamp(Number(cinematicSpeed.value) || 1, 0.25, 3).toFixed(2)
   );
 
-  if (isCinematicPlaying.value) {
-    startCinematicPlayback();
-  } else if (isCinematicPaused.value) {
-    cinematicState.trajectory = buildCinematicTrajectory();
-  }
+  if (isCinematicPlaying.value || isCinematicPaused.value) rebuildCinematicAtCurrentProgress();
+};
+
+const onCinematicStyleChange = () => {
+  cinematicSmoothness.value = Number(
+    THREE.MathUtils.clamp(Number(cinematicSmoothness.value) || 0.68, 0, 1).toFixed(2)
+  );
+  if (isCinematicPlaying.value || isCinematicPaused.value) rebuildCinematicAtCurrentProgress();
 };
 
 // --- 5. 初始化 ---
@@ -1680,6 +1796,16 @@ onBeforeUnmount(async () => {
           </div>
           <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
             @input="onCinematicSpeedChange" />
+          <div class="cinematic-progress-row">
+            <span>平滑</span>
+            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
+            step="0.05" @input="onCinematicStyleChange" />
+          <label class="cinematic-focus-toggle">
+            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
+            <span>主体锁定</span>
+          </label>
         </div>
         <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
@@ -1909,6 +2035,14 @@ onBeforeUnmount(async () => {
   gap: 6px;
   font-size: 12px;
   color: rgba(30, 30, 32, 0.7);
+}
+
+.cinematic-focus-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.78);
 }
 
 .cinematic-actions {
