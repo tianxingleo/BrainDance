@@ -43,7 +43,7 @@ enum Language {
 最终导出时，确认参数为 1080p 和 30fps。""",
       "reco_camun": "相机访问被拒绝。\n请在系统设置中启用相机权限。",
       "reco_wait": "相机初始化中...",
-      "recall": "过往回忆",
+      "recall": "回忆",
       "record": "相机记录",
       "generate": "图文生成",
       "community": "社区",
