@@ -1640,6 +1640,7 @@ class CommunityRepository {
           authorName: map['user_id']?.toString() ?? '匿名用户',
           modelName:
               map['model_name']?.toString() ??
+              model['display_name']?.toString() ??
               model['scene_id']?.toString() ??
               '3D 模型',
           modelUrl: modelUrl.isEmpty
@@ -1685,7 +1686,7 @@ class CommunityRepository {
         final publicUrl = _publicModelUrl(path);
         return CommunityModelOption(
           id: map['id'].toString(),
-          sceneId: map['scene_id']?.toString() ?? '未命名模型',
+          sceneId: map['display_name']?.toString() ?? map['scene_id']?.toString() ?? '未命名模型',
           description: map['description']?.toString() ?? '',
           modelUrl: publicUrl.isEmpty
               ? './models/scene_auto_sync_raw.ply'

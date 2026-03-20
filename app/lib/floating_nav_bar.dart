@@ -12,7 +12,7 @@ import 'package:braindance/configs/motion_tokens.dart';
 const double _kCreateSize = 68.0;
 const double _kNavBarInnerHeight = 60.0;
 
-class FloatingNavBar extends StatelessWidget {
+class FloatingNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final List<NavIslandItem> items;
@@ -23,6 +23,66 @@ class FloatingNavBar extends StatelessWidget {
     required this.onTap,
     required this.items,
   });
+
+  @override
+  State<FloatingNavBar> createState() => _FloatingNavBarState();
+}
+
+class _FloatingNavBarState extends State<FloatingNavBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pillController;
+  late Animation<double> _pillLeftAnim;
+  late Animation<double> _pillWidthAnim;
+  double _prevPillLeft = 0.0;
+  double _prevPillWidth = 0.0;
+  bool _initialized = false;
+  int _prevIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _prevIndex = widget.currentIndex;
+    _pillController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    _pillLeftAnim = AlwaysStoppedAnimation(0.0);
+    _pillWidthAnim = AlwaysStoppedAnimation(0.0);
+  }
+
+  @override
+  void didUpdateWidget(covariant FloatingNavBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.currentIndex != oldWidget.currentIndex) {
+      _prevIndex = oldWidget.currentIndex;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pillController.dispose();
+    super.dispose();
+  }
+
+  void _animatePill(double targetLeft, double targetWidth) {
+    _pillLeftAnim = Tween<double>(
+      begin: _prevPillLeft,
+      end: targetLeft,
+    ).animate(CurvedAnimation(
+      parent: _pillController,
+      curve: BDMotion.curveFluid,
+    ));
+    _pillWidthAnim = Tween<double>(
+      begin: _prevPillWidth,
+      end: targetWidth,
+    ).animate(CurvedAnimation(
+      parent: _pillController,
+      curve: BDMotion.curveFluid,
+    ));
+    _pillController.forward(from: 0.0);
+    _prevPillLeft = targetLeft;
+    _prevPillWidth = targetWidth;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,77 +142,85 @@ class FloatingNavBar extends StatelessWidget {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final compact = constraints.maxWidth < 420;
-                        final normalItems = items.where((i) => !i.isLarge).toList();
+                        final normalItems = widget.items.where((i) => !i.isLarge).toList();
                         final normalCount = normalItems.length;
                         final createDockWidth = _kCreateSize + 16.0;
                         final contentWidth = constraints.maxWidth - createDockWidth;
                         final normalSlotWidth = normalCount > 0
                             ? math.max(0.0, contentWidth / normalCount)
                             : 0.0;
-                // Build pill position for normal (non-create) items
-                final selectedItem = items[currentIndex];
-                final showSelectedPill = !selectedItem.isLarge;
 
-                // Calculate slot positions accounting for create button in middle
-                double selectedLeft = 0.0;
-                double selectedWidth = 0.0;
-                if (showSelectedPill) {
-                  // Find position among normal items only
-                  int normalIdx = 0;
-                  for (int i = 0; i < currentIndex; i++) {
-                    if (!items[i].isLarge) normalIdx++;
-                  }
-                  // Items before create button are on the left
-                  final createIdx = items.indexWhere((i) => i.isLarge);
-                  if (currentIndex < createIdx) {
-                    selectedLeft = normalIdx * normalSlotWidth;
-                  } else {
-                    selectedLeft = normalIdx * normalSlotWidth + createDockWidth;
-                  }
-                  selectedWidth = normalSlotWidth;
-                }
+                        final selectedItem = widget.items[widget.currentIndex];
+                        final showSelectedPill = !selectedItem.isLarge;
 
-                final labelStyle = TextStyle(
-                  color: selectedColor,
-                  fontWeight: FontWeight.w600,
-                  fontSize: compact ? 13.0 : 14.0,
-                  height: 1.0,
-                );
-                final measuredLabelWidth = _measureLabelWidth(
-                  text: selectedItem.label,
-                  style: labelStyle,
-                );
-                final minPillWidth =
-                    (compact ? 76.0 : 88.0) + measuredLabelWidth;
-                final pillWidth = showSelectedPill
-                    ? math.min(
-                        contentWidth - 8.0,
-                        math.max(minPillWidth, selectedWidth - (compact ? 8.0 : 10.0)),
-                      )
-                    : 0.0;
-                final pillLeft = showSelectedPill
-                    ? (selectedLeft + (selectedWidth - pillWidth) / 2)
-                        .clamp(2.0, constraints.maxWidth - pillWidth - 2.0)
-                    : 0.0;
+                        // Calculate pill target position
+                        double targetLeft = 0.0;
+                        double targetWidth = 0.0;
+                        if (showSelectedPill) {
+                          int normalIdx = 0;
+                          for (int i = 0; i < widget.currentIndex; i++) {
+                            if (!widget.items[i].isLarge) normalIdx++;
+                          }
+                          final createIdx = widget.items.indexWhere((i) => i.isLarge);
+                          if (widget.currentIndex < createIdx) {
+                            targetLeft = normalIdx * normalSlotWidth;
+                          } else {
+                            targetLeft = normalIdx * normalSlotWidth + createDockWidth;
+                          }
+                          targetWidth = normalSlotWidth;
+                        }
 
-                return Stack(
-                  children: [
-                    if (showSelectedPill)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: pillLeft, end: pillLeft),
-                            duration: BDMotion.durationSlow,
-                            curve: Curves.easeOutCubic,
-                            builder: (context, animatedLeft, child) {
-                              return Stack(
-                                children: [
+                        final labelStyle = TextStyle(
+                          color: selectedColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: compact ? 13.0 : 14.0,
+                          height: 1.0,
+                        );
+                        final measuredLabelWidth = _measureLabelWidth(
+                          text: selectedItem.label,
+                          style: labelStyle,
+                        );
+                        final minPillWidth =
+                            (compact ? 76.0 : 88.0) + measuredLabelWidth;
+                        final pillWidth = showSelectedPill
+                            ? math.min(
+                                contentWidth - 8.0,
+                                math.max(minPillWidth, targetWidth - (compact ? 8.0 : 10.0)),
+                              )
+                            : 0.0;
+                        final pillLeft = showSelectedPill
+                            ? (targetLeft + (targetWidth - pillWidth) / 2)
+                                .clamp(2.0, constraints.maxWidth - pillWidth - 2.0)
+                            : 0.0;
+
+                        // Trigger animation when pill position changes
+                        if (!_initialized) {
+                          _prevPillLeft = pillLeft;
+                          _prevPillWidth = pillWidth;
+                          _pillLeftAnim = AlwaysStoppedAnimation(pillLeft);
+                          _pillWidthAnim = AlwaysStoppedAnimation(pillWidth);
+                          _initialized = true;
+                        } else if (widget.currentIndex != _prevIndex ||
+                            (_prevPillLeft - pillLeft).abs() > 1.0) {
+                          _animatePill(pillLeft, pillWidth);
+                          _prevIndex = widget.currentIndex;
+                        }
+
+                        return AnimatedBuilder(
+                          animation: _pillController,
+                          builder: (context, _) {
+                            final animLeft = _pillLeftAnim.value;
+                            final animWidth = _pillWidthAnim.value;
+
+                            return Stack(
+                              children: [
+                                if (showSelectedPill && animWidth > 0)
                                   Positioned(
-                                    left: animatedLeft,
+                                    left: animLeft,
                                     top: 0,
                                     bottom: 0,
                                     child: SizedBox(
-                                      width: pillWidth,
+                                      width: animWidth,
                                       child: DecoratedBox(
                                         decoration: BoxDecoration(
                                           color: selectedBackground,
@@ -165,74 +233,52 @@ class FloatingNavBar extends StatelessWidget {
                                             ),
                                           ],
                                         ),
-                                        child: _SelectedPillContent(
-                                          item: selectedItem,
-                                          compact: compact,
-                                          color: selectedColor,
-                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    Row(
-                      children: List.generate(items.length, (index) {
-                        final item = items[index];
-                        if (item.isLarge) {
-                          // 占位，真正的按钮浮在 Stack 上层
-                          return SizedBox(width: createDockWidth);
-                        }
-                        final distance = (index - currentIndex).abs();
-                        final direction = index < currentIndex ? -1.0 : 1.0;
-                        final shiftBase = compact ? 5.0 : 6.0;
-                        final visualShift = index == currentIndex
-                            ? 0.0
-                            : direction *
-                                  (distance == 1
-                                      ? shiftBase
-                                      : distance == 2
-                                      ? shiftBase * 0.28
-                                      : 0.0);
-
-                        return SizedBox(
-                          width: normalSlotWidth,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                            child: _FloatingNavBarItem(
-                              item: item,
-                              compact: compact,
-                              isSelected: currentIndex == index,
-                              visualShift: visualShift,
-                              onTap: () => onTap(index),
-                              selectedColor: selectedColor,
-                              unselectedColor: unselectedColor,
-                            ),
-                          ),
+                                Row(
+                                  children: List.generate(widget.items.length, (index) {
+                                    final item = widget.items[index];
+                                    if (item.isLarge) {
+                                      return SizedBox(width: createDockWidth);
+                                    }
+                                    final isSelected = widget.currentIndex == index;
+                                    return SizedBox(
+                                      width: normalSlotWidth,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                                        child: _NavBarItem(
+                                          item: item,
+                                          compact: compact,
+                                          isSelected: isSelected,
+                                          onTap: () => widget.onTap(index),
+                                          selectedColor: selectedColor,
+                                          unselectedColor: unselectedColor,
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              ],
+                            );
+                          },
                         );
-                      }),
+                      },
                     ),
-                  ],
-                );
-              },
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
-    ),
-            // Create 按钮浮在上层，可溢出导航栏
+            // Create 按钮浮在上层
             Positioned(
               bottom: (_kNavBarInnerHeight - _kCreateSize) / 2 + 4,
               left: 0,
               right: 0,
               child: Center(
                 child: _CreateButton(
-                  isSelected: currentIndex == items.indexWhere((i) => i.isLarge),
+                  isSelected: widget.currentIndex == widget.items.indexWhere((i) => i.isLarge),
                   isDark: isDark,
-                  onTap: () => onTap(items.indexWhere((i) => i.isLarge)),
+                  onTap: () => widget.onTap(widget.items.indexWhere((i) => i.isLarge)),
                 ),
               ),
             ),
@@ -264,88 +310,12 @@ class NavIslandItem {
   });
 }
 
-class _SelectedPillContent extends StatelessWidget {
-  const _SelectedPillContent({
-    required this.item,
-    required this.compact,
-    required this.color,
-  });
-
-  final NavIslandItem item;
-  final bool compact;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final iconSize = compact ? 21.0 : 22.0;
-    final horizontalPadding = compact ? 10.0 : 12.0;
-    final labelGap = compact ? 3.0 : 4.0;
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      duration: BDMotion.durationSlow,
-      curve: Curves.easeOutCubic,
-      builder: (context, progress, child) {
-        final revealProgress = Curves.easeOutCubic.transform(progress);
-        final bounceWave = math.sin(revealProgress * math.pi);
-
-        return Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPadding,
-            vertical: compact ? 7.0 : 8.0,
-          ),
-          child: Row(
-            children: [
-              Transform.translate(
-                offset: Offset(-1.2 * revealProgress, -1.4 * bounceWave),
-                child: Transform.scale(
-                  scale: 1.0 + 0.08 * bounceWave,
-                  child: _AnimatedFillIcon(
-                    icon: item.icon,
-                    progress: revealProgress,
-                    selectedColor: color,
-                    unselectedColor: color.withValues(alpha: 0.68),
-                    size: iconSize,
-                  ),
-                ),
-              ),
-              SizedBox(width: labelGap),
-              Expanded(
-                child: ClipRect(
-                  child: Transform.translate(
-                    offset: Offset((1 - revealProgress) * -8.0, 0.0),
-                    child: Opacity(
-                      opacity: revealProgress,
-                      child: Text(
-                        item.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.fade,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: color,
-                          fontWeight: FontWeight.w600,
-                          fontSize: compact ? 13.0 : 14.0,
-                          height: 1.0,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _FloatingNavBarItem extends StatelessWidget {
-  const _FloatingNavBarItem({
+/// 普通导航项：选中时显示图标+标签，未选中时仅图标
+class _NavBarItem extends StatelessWidget {
+  const _NavBarItem({
     required this.item,
     required this.compact,
     required this.isSelected,
-    required this.visualShift,
     required this.onTap,
     required this.selectedColor,
     required this.unselectedColor,
@@ -354,7 +324,6 @@ class _FloatingNavBarItem extends StatelessWidget {
   final NavIslandItem item;
   final bool compact;
   final bool isSelected;
-  final double visualShift;
   final VoidCallback onTap;
   final Color selectedColor;
   final Color unselectedColor;
@@ -362,34 +331,65 @@ class _FloatingNavBarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final iconSize = compact ? 21.0 : 22.0;
+    final labelGap = compact ? 3.0 : 4.0;
+    final horizontalPadding = compact ? 10.0 : 12.0;
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0.0, end: isSelected ? 1.0 : 0.0),
-      duration: BDMotion.durationSlow,
-      curve: Curves.easeOutCubic,
-      builder: (context, progress, child) {
-        final revealProgress = Curves.easeOutCubic.transform(
-          progress.clamp(0.0, 1.0),
-        );
-        final bounceWave = math.sin(revealProgress * math.pi);
-
-        return GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Center(
-            child: Transform.translate(
-              offset: Offset(
-                lerpDouble(visualShift, 0.0, revealProgress)!,
-                -1.1 * bounceWave,
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 340),
+        switchInCurve: BDMotion.curveFluid,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: child,
+          );
+        },
+        child: isSelected
+            ? Padding(
+                key: const ValueKey('selected'),
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: compact ? 7.0 : 8.0,
+                ),
+                child: Row(
+                  children: [
+                    _AnimatedFillIcon(
+                      icon: item.icon,
+                      progress: 1.0,
+                      selectedColor: selectedColor,
+                      unselectedColor: selectedColor.withValues(alpha: 0.68),
+                      size: iconSize,
+                    ),
+                    SizedBox(width: labelGap),
+                    Expanded(
+                      child: Text(
+                        item.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: selectedColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: compact ? 13.0 : 14.0,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : Center(
+                key: const ValueKey('unselected'),
+                child: Icon(
+                  item.icon,
+                  size: iconSize,
+                  color: unselectedColor,
+                ),
               ),
-              child: Opacity(
-                opacity: isSelected ? 0.0 : 1.0,
-                child: Icon(item.icon, size: iconSize, color: unselectedColor),
-              ),
-            ),
-          ),
-        );
-      },
+      ),
     );
   }
 }
@@ -411,44 +411,17 @@ class _AnimatedFillIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final easedProgress = Curves.easeOutCubic.transform(
-      progress.clamp(0.0, 1.0),
-    );
-    final fillProgress = Curves.easeInOutCubic.transform(
-      progress.clamp(0.0, 1.0),
-    );
-
     return SizedBox(
       width: size + 8.0,
       height: size + 8.0,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(
-            icon,
-            size: size,
-            color: Color.lerp(unselectedColor, selectedColor, easedProgress),
-            fill: 0.0,
-            weight: 500,
-          ),
-          if (fillProgress > 0.0)
-            ClipRect(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                heightFactor: easedProgress,
-                child: Opacity(
-                  opacity: fillProgress,
-                  child: Icon(
-                    icon,
-                    size: size,
-                    color: selectedColor,
-                    fill: 1.0,
-                    weight: lerpDouble(560, 700, easedProgress),
-                  ),
-                ),
-              ),
-            ),
-        ],
+      child: Center(
+        child: Icon(
+          icon,
+          size: size,
+          color: selectedColor,
+          fill: 1.0,
+          weight: 700,
+        ),
       ),
     );
   }
@@ -517,7 +490,6 @@ class _CreateButtonState extends State<_CreateButton>
 
   @override
   Widget build(BuildContext context) {
-    // 未选中：底色与系统对比，图标与底色对比
     final baseFill = widget.isDark
         ? BDDesign.colorPaperWhite
         : BDDesign.colorInkBlack;
@@ -532,7 +504,6 @@ class _CreateButtonState extends State<_CreateButton>
         animation: _controller,
         builder: (context, child) {
           final t = _colorProgress.value;
-          // 选中时颜色反转
           final fillColor = Color.lerp(baseFill, baseIcon, t)!;
           final iconColor = Color.lerp(baseIcon, baseFill, t)!;
 
@@ -570,5 +541,3 @@ class _CreateButtonState extends State<_CreateButton>
     );
   }
 }
-
-

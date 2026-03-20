@@ -10,7 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
+import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider, pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
 import '../widgets/bd_surfaces.dart';
@@ -497,7 +497,7 @@ $userQuestion
 
     final parts = <String>[
       '片段$index',
-      '场景：${model['scene_id']?.toString() ?? '未知场景'}',
+      '场景：${model['display_name']?.toString() ?? model['scene_id']?.toString() ?? '未知场景'}',
       '描述：${model['description']?.toString() ?? '暂无描述'}',
       if (tags.isNotEmpty) '标签：$tags',
       if (objects.isNotEmpty) '对象：$objects',
@@ -745,6 +745,30 @@ $userQuestion
           .order('created_at', ascending: false);
 
       final models = List<Map<String, dynamic>>.from(response);
+
+      // 从 processing_tasks 获取 display_name，关联到 model_assets
+      try {
+        final tasks = await Supabase.instance.client
+            .from('processing_tasks')
+            .select('scene_id, display_name');
+        final nameMap = <String, String>{};
+        for (final t in tasks) {
+          final sid = t['scene_id']?.toString();
+          final dn = t['display_name']?.toString();
+          if (sid != null && dn != null && dn.isNotEmpty) {
+            nameMap[sid] = dn;
+          }
+        }
+        for (final m in models) {
+          final sid = m['scene_id']?.toString();
+          if (sid != null && nameMap.containsKey(sid)) {
+            m['display_name'] = nameMap[sid];
+          }
+        }
+      } catch (_) {
+        // display_name 获取失败不影响主流程
+      }
+
       if (models.isEmpty) {
         models.add(_buildDemoModel());
       }
@@ -885,20 +909,10 @@ $userQuestion
                       children: [
                     BDPageHeader(
                       title: textLocalize("home_page"),
-                      subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          BDStatusPill(
-                            label: SupabaseConfig.isAdminMode ? 'ADMIN' : 'RLS',
-                            icon: SupabaseConfig.isAdminMode
-                                ? Icons.admin_panel_settings_rounded
-                                : Icons.verified_user_rounded,
-                            color: SupabaseConfig.isAdminMode
-                                ? BDDesign.colorDarkRed
-                                : BDDesign.colorMutedBlue,
-                          ),
-                          const SizedBox(width: 8),
                           IconButton(
                             icon: AnimatedRotation(
                               turns: _isLoading ? 1 : 0,
@@ -922,7 +936,7 @@ $userQuestion
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+                      padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
                       child: Column(
                         children: [
                           BDPanelCard(
@@ -1169,6 +1183,9 @@ $userQuestion
                       onNavigateToViewer: _navigateToViewer,
                       onShowModelActions: (model) {
                         unawaited(_showModelActions(model));
+                      },
+                      onAddNewTask: (name) {
+                        ref.read(pageIndexProvider.notifier).state = 1;
                       },
                     ),
                   const SliverToBoxAdapter(
@@ -1643,7 +1660,7 @@ $userQuestion
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -2073,7 +2090,7 @@ $userQuestion
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['scene_id']?.toString() ?? '未命名模型',
+      sceneId: model['display_name']?.toString() ?? model['scene_id']?.toString() ?? '未命名模型',
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
