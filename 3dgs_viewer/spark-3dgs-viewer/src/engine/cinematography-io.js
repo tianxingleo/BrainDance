@@ -197,7 +197,7 @@ export class PerformanceIO {
     this.state = {
       progress: 0.22,
       fieldMode: 0,
-      bloomStrength: 0.42,
+      bloomStrength: 0.18,
       afterimageDamp: 0.82,
       pinch: 0,
       gestureEnabled: false,

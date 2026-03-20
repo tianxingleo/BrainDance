@@ -18,20 +18,32 @@ function injectStyles() {
   const style = document.createElement('style');
   style.textContent = `
     :root {
-      color-scheme: light;
+      color-scheme: light dark;
       --bg-1: #f4f3ee;
       --bg-2: #e6e3db;
       --fg: #1e1e20;
-      --muted: rgba(30, 30, 32, 0.66);
-      --accent: #6b7a8f;
-      --accent-2: #6d8260;
-      --glass: rgba(249, 249, 248, 0.84);
-      --glass-strong: rgba(249, 249, 248, 0.92);
-      --border: rgba(107, 122, 143, 0.16);
-      --shadow: 0 10px 26px rgba(0, 0, 0, 0.06);
-      --gesture: 0;
+      --muted: rgba(30, 30, 32, 0.6);
+      --accent: #000;
+      --glass: rgba(255, 255, 255, 0.72);
+      --glass-strong: rgba(255, 255, 255, 0.9);
+      --border: rgba(0, 0, 0, 0.08);
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
       --sequence-index: 0;
-      font-family: "HarmonyOS Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+      --gesture: 0;
+      font-family: "Inter", "HarmonyOS Sans SC", "PingFang SC", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-1: #0f1014;
+        --bg-2: #16181d;
+        --fg: #f5f5f7;
+        --muted: rgba(245, 245, 247, 0.6);
+        --accent: #fff;
+        --glass: rgba(28, 28, 32, 0.65);
+        --glass-strong: rgba(28, 28, 32, 0.85);
+        --border: rgba(255, 255, 255, 0.08);
+        --shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      }
     }
     * { box-sizing: border-box; }
     html, body, #app {
@@ -40,16 +52,12 @@ function injectStyles() {
       height: 100%;
       overflow: hidden;
       overscroll-behavior: none;
-      background:
-        radial-gradient(circle at top left, rgba(228, 232, 237, 0.16), transparent 24%),
-        radial-gradient(circle at top right, rgba(107, 122, 143, 0.14), transparent 28%),
-        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      background: radial-gradient(circle at top left, var(--bg-1), var(--bg-2));
       color: var(--fg);
     }
     canvas { display: block; }
     .bd-root, .bd-canvas { position: absolute; inset: 0; }
-    .bd-canvas,
-    .bd-canvas canvas {
+    .bd-canvas, .bd-canvas canvas {
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
@@ -57,358 +65,362 @@ function injectStyles() {
     }
     .bd-ui {
       position: absolute;
-      inset: 0;
+      inset: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
       pointer-events: none;
-    }
-    .bd-topbar,
-    .bd-console,
-    .bd-pose-dock,
-    .bd-pose-rail,
-    .bd-gesture-preview,
-    .bd-status { pointer-events: auto; }
-    .bd-topbar {
-      position: absolute;
-      top: 18px;
-      left: 18px;
-      right: 18px;
       display: flex;
       flex-direction: column;
-      align-items: stretch;
-      gap: 12px;
+      z-index: 20;
+    }
+    .bd-topbar, .bd-console, .bd-pose-dock, .bd-pose-rail, .bd-status, .bd-focus-card {
+      pointer-events: auto;
+    }
+    .bd-topbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
       z-index: 22;
+    }
+    .bd-brand {
+      flex: 1;
+      max-width: 320px;
     }
     .bd-brand-copy {
       margin: 0;
-      max-width: 420px;
+      padding: 10px 14px;
       font-size: 13px;
       line-height: 1.5;
-      color: var(--muted);
-    }
-    .bd-kicker {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      color: #6b7a8f;
+      color: var(--fg);
+      background: var(--glass);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
     }
     .bd-toolbar {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      align-self: flex-end;
-      justify-content: flex-end;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
     }
-    .bd-stats {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      justify-content: flex-start;
-    }
-    .bd-actions {
+    .bd-stats, .bd-actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       justify-content: flex-end;
     }
-    .bd-chip, .bd-icon-btn, .bd-pose-card, select, input[type="range"] {
+    .bd-chip, .bd-icon-btn, select, input[type="range"] {
       border: 1px solid var(--border);
       background: var(--glass);
       color: var(--fg);
-      backdrop-filter: blur(18px);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       box-shadow: var(--shadow);
-    }
-    button,
-    input,
-    select,
-    textarea {
-      touch-action: manipulation;
+      margin: 0;
+      outline: none;
     }
     .bd-chip, .bd-icon-btn {
-      padding: 10px 14px;
-      border-radius: 14px;
-      font: inherit;
+      padding: 10px 16px;
+      border-radius: 20px;
       font-size: 13px;
       font-weight: 600;
+      transition: all 0.2s ease;
     }
-    .bd-chip--action, .bd-icon-btn, .bd-pose-card { cursor: pointer; }
-    .bd-console {
-      position: absolute;
-      top: auto;
-      right: 18px;
-      left: auto;
-      bottom: 108px;
-      width: min(300px, calc(100vw - 36px));
-      padding: 14px;
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      background: var(--glass);
-      backdrop-filter: blur(18px);
-      box-shadow: var(--shadow);
-      transform: translateX(calc(100% + 20px));
-      transition: transform 260ms ease;
-      display: grid;
-      gap: 10px;
-      touch-action: pan-y;
-      z-index: 24;
+    .bd-chip--action, .bd-icon-btn { cursor: pointer; }
+    .bd-chip--action:hover, .bd-icon-btn:hover {
+      background: var(--glass-strong);
+      transform: translateY(-2px);
     }
-    .bd-focus-card {
-      position: absolute;
-      left: 18px;
-      top: 116px;
-      display: grid;
-      gap: 6px;
-      width: min(44vw, 320px);
-      padding: 14px 16px;
-      border-radius: 22px;
-      border: 1px solid var(--border);
-      background: var(--glass);
-      backdrop-filter: blur(18px);
-      box-shadow: var(--shadow);
-      z-index: 21;
-    }
+    
     .bd-status {
       position: absolute;
-      left: 18px;
-      right: 18px;
-      top: 96px;
-      padding: 10px 14px;
-      border-radius: 18px;
-      border: 1px solid rgba(139, 71, 71, 0.18);
-      background: rgba(249, 249, 248, 0.92);
-      color: #8b4747;
-      font-size: 12px;
-      line-height: 1.5;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      padding: 10px 16px;
+      border-radius: 16px;
+      background: rgba(220, 38, 38, 0.9);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
       opacity: 0;
-      transform: translateY(-8px);
-      transition: opacity 180ms ease, transform 180ms ease;
+      visibility: hidden;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 16px rgba(220, 38, 38, 0.3);
       z-index: 30;
-      white-space: pre-wrap;
+      text-align: center;
+      max-width: 90%;
     }
     .bd-status.is-visible {
       opacity: 1;
-      transform: translateY(0);
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .bd-focus-card {
+      position: absolute;
+      left: 16px;
+      top: auto;
+      bottom: 156px; 
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: min(80vw, 340px);
+      padding: 16px 20px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--glass-strong);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow: var(--shadow);
+      z-index: 21;
+      transition: all 0.3s ease;
     }
     .bd-focus-card strong {
       font-size: 15px;
       font-weight: 700;
       line-height: 1.4;
+      color: var(--fg);
     }
     .bd-focus-card span {
       font-size: 12px;
       line-height: 1.5;
       color: var(--muted);
     }
-    .bd-console.is-open { transform: translateX(0); }
+
+    .bd-console {
+      position: absolute;
+      right: 16px;
+      bottom: 156px;
+      width: min(320px, calc(100vw - 32px));
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      background: var(--glass-strong);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      box-shadow: var(--shadow);
+      transform: translateX(calc(100% + 40px));
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      z-index: 24;
+    }
+    .bd-console.is-open { transform: translateX(0) !important; }
     .bd-console__header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
     }
+    .bd-console__header strong { font-size: 15px; font-weight: 700; color: var(--fg); }
+    
     .bd-control {
-      display: grid;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--fg);
+      font-weight: 500;
     }
     .bd-control--toggle {
-      grid-template-columns: 1fr auto;
+      flex-direction: row;
+      justify-content: space-between;
       align-items: center;
     }
-    .bd-control select, .bd-control input[type="range"] {
+    .bd-control select {
       width: 100%;
-      border-radius: 14px;
-      padding: 10px 12px;
-      accent-color: #6d8260;
-      box-shadow: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      appearance: auto;
     }
+    .bd-control input[type="range"] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      padding: 0;
+      appearance: none;
+      background: var(--border);
+    }
+    .bd-control input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+    .bd-control input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
     .bd-bezier {
-      display: grid;
-      gap: 8px;
-      padding: 12px;
-      border-radius: 18px;
-      background: rgba(107, 122, 143, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px;
+      border-radius: 16px;
+      background: rgba(107, 122, 143, 0.05);
+      border: 1px solid var(--border);
     }
+    .bd-kicker {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+    }
+
     .bd-pose-dock {
       position: absolute;
-      left: 18px;
-      right: 18px;
-      bottom: max(18px, env(safe-area-inset-bottom, 0px));
-      width: auto;
-      display: grid;
-      gap: 0;
+      left: 16px;
+      right: 16px;
+      bottom: max(16px, env(safe-area-inset-bottom, 16px));
       z-index: 23;
     }
     .bd-pose-rail {
-      position: relative;
       display: flex;
-      align-items: stretch;
-      gap: 16px;
+      gap: 12px;
       overflow-x: auto;
-      padding: 16px 18px;
+      padding: 12px 16px;
       background: var(--glass);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
       border: 1px solid var(--border);
-      border-radius: 22px;
+      border-radius: 20px;
       box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-      touch-action: pan-x;
-      scroll-snap-type: x proximity;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
     }
+    .bd-pose-rail::-webkit-scrollbar { display: none; }
     .bd-pose-card {
-      flex: 0 0 auto;
-      width: 100px;
-      min-width: 100px;
-      min-height: 70px;
-      border-radius: 16px;
-      padding: 10px 12px;
-      text-align: left;
-      display: grid;
-      align-content: end;
+      scroll-snap-align: center;
+      flex: 0 0 120px;
+      min-height: 80px;
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--glass-strong);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
       gap: 4px;
-      scroll-snap-align: start;
-      background: rgba(255, 255, 255, 0.72);
-      border: 1px solid rgba(107, 122, 143, 0.12);
-      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.04);
-      transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+      text-align: left;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    .bd-pose-card:hover, .bd-pose-card:focus-visible {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      border-color: var(--accent);
+      outline: none;
     }
     .bd-pose-card strong {
-      font-size: 12px;
-      font-weight: 700;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .bd-pose-card span {
       font-size: 11px;
       color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .bd-pose-card:hover,
-    .bd-pose-card:focus-visible {
-      transform: translateY(-3px);
-      box-shadow: 0 10px 20px rgba(107, 122, 143, 0.12);
-      outline: none;
-    }
+
     .bd-gesture-preview {
       position: absolute;
-      left: 18px;
-      top: 112px;
-      width: 140px;
-      height: 140px;
+      right: 16px;
+      top: 140px;
+      width: 100px;
+      height: 100px;
       border-radius: 50%;
-      border: 1px solid rgba(107, 122, 143, 0.18);
+      border: 1px solid var(--border);
       background:
-        radial-gradient(circle, rgba(109,130,96, calc(0.12 + var(--gesture) * 0.28)), transparent 52%),
-        conic-gradient(from calc(var(--sequence-index) * 24deg), rgba(107,122,143,0.28), rgba(107,122,143,0.04), rgba(107,122,143,0.28));
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
+        radial-gradient(circle, rgba(139,195,74, calc(0.12 + var(--gesture) * 0.4)), transparent 52%),
+        conic-gradient(from calc(var(--sequence-index) * 24deg), rgba(107,122,143,0.3), transparent, rgba(107,122,143,0.3));
+      box-shadow: var(--shadow);
       pointer-events: none;
     }
+
     @media (max-width: 820px) {
-      .bd-topbar {
-        top: 18px;
-        left: 18px;
-        right: 18px;
-      }
-      .bd-brand-copy { max-width: none; }
-      .bd-toolbar {
-        align-self: flex-start;
-      }
-      .bd-stats,
-      .bd-actions {
-        justify-content: flex-start;
-      }
-      .bd-focus-card {
-        display: grid;
-        left: 18px;
-        top: 108px;
-        width: min(60vw, 320px);
-      }
-      .bd-status {
-        left: 12px;
-        right: 12px;
-        top: 88px;
-      }
-      .bd-console {
-        bottom: 116px;
-        right: 12px;
-        left: 12px;
-        width: auto;
-        border-radius: 24px;
-      }
-      .bd-pose-dock {
-        left: 12px;
-        right: 12px;
-        width: auto;
-        bottom: max(10px, env(safe-area-inset-bottom, 0px));
-      }
-      .bd-gesture-preview { width: 88px; height: 88px; top: 244px; left: auto; right: 12px; }
-    }
-    @media (orientation: portrait) and (max-width: 820px) {
       .bd-topbar {
         top: 12px;
         left: 12px;
         right: 12px;
-        gap: 10px;
       }
       .bd-brand-copy {
         font-size: 12px;
-        max-width: none;
-      }
-      .bd-chip {
-        padding: 8px 11px;
-        font-size: 12px;
-      }
-      .bd-pose-dock {
-        bottom: max(8px, env(safe-area-inset-bottom, 0px));
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
       }
       .bd-console {
-        max-height: 33vh;
-        overflow: auto;
-        padding: 12px;
-        z-index: 20;
-        border-radius: 20px;
-        bottom: 96px;
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
+        width: auto;
+        transform: translateY(calc(100% + 40px));
+        max-height: 60vh;
+        overflow-y: auto;
+      }
+      .bd-console.is-open {
+        transform: translateY(0) !important;
+      }
+      .bd-focus-card {
+        bottom: 140px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+      }
+      .bd-pose-dock {
+        left: 12px;
+        right: 12px;
+        bottom: max(12px, env(safe-area-inset-bottom, 12px));
+      }
+      .bd-pose-rail {
+        padding: 10px;
+        gap: 10px;
       }
       .bd-gesture-preview {
         display: none;
       }
-      .bd-focus-card {
-        top: 96px;
-        z-index: 16;
-        width: min(72vw, 280px);
-      }
-      .bd-pose-dock {
-        z-index: 18;
-      }
-      .bd-pose-rail {
-        display: grid;
-        grid-auto-flow: column;
-        grid-auto-columns: 100px;
-        padding: 14px;
+    }
+    @media (orientation: portrait) and (max-width: 820px) {
+      .bd-topbar {
+        flex-direction: column;
         gap: 12px;
       }
-    }
-    @media (orientation: portrait) and (max-width: 480px) {
-      .bd-console {
-        max-height: 31vh;
-      }
-      .bd-pose-dock {
-        bottom: max(8px, env(safe-area-inset-bottom, 0px));
-      }
-      .bd-pose-rail {
-        grid-auto-columns: minmax(104px, 40vw);
-      }
-      .bd-status {
-        top: 82px;
-      }
-      .bd-actions {
+      .bd-brand {
+        max-width: 100%;
         width: 100%;
       }
-      .bd-actions .bd-chip {
-        flex: 1 1 auto;
-        text-align: center;
+      .bd-toolbar {
+        width: 100%;
+        align-items: flex-start;
+        flex-direction: row;
+        justify-content: space-between;
       }
-      .bd-focus-card {
-        top: 88px;
-        padding: 10px 12px;
+      .bd-stats {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
       }
+      .bd-stats::-webkit-scrollbar { display: none; }
     }
   `;
   document.head.appendChild(style);
@@ -417,7 +429,7 @@ function injectStyles() {
 function sendChannelMessage(payload) {
   try {
     window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload));
-  } catch (_) {}
+  } catch (_) { }
 }
 
 function normalizeImageId(value) {
@@ -544,7 +556,7 @@ class BrainDanceEngine {
 
     this.composer = new EffectComposer(this.renderer);
     this.renderPass = new RenderPass(this.scene, this.camera);
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.42, 0.45, 0.32);
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.18, 0.45, 0.32);
     this.afterimagePass = new AfterimagePass();
     this.afterimagePass.uniforms.damp.value = 0.82;
     this.composer.addPass(this.renderPass);
@@ -562,7 +574,7 @@ class BrainDanceEngine {
       progress: 0.22,
       progressBezier: 0.22,
       pinch: 0,
-      bloomStrength: 0.42,
+      bloomStrength: 0.18,
       afterimageDamp: 0.82,
       autoCamera: true,
     };
@@ -654,7 +666,7 @@ class BrainDanceEngine {
         event.preventDefault();
       }
     };
-    const stopSelectors = ['button', 'input', 'select', '.bd-console', '.bd-help', '.bd-pose-dock', '.bd-status', '.bd-topbar', '.bd-focus-card'];
+    const stopSelectors = ['button', 'input', 'select', 'label', '.bd-console', '.bd-help', '.bd-pose-dock', '.bd-status', '.bd-topbar', '.bd-focus-card', '.bd-bezier'];
     stopSelectors.forEach((selector) => {
       this.root.querySelectorAll(selector).forEach((node) => {
         ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'wheel'].forEach((eventName) => {
@@ -986,9 +998,9 @@ class BrainDanceEngine {
       const data = await response.json();
       this.poses = Array.isArray(data?.frames)
         ? data.frames.map((frame) => ({
-            ...frame,
-            tag: typeof frame.tag === 'string' ? frame.tag.trim() : '',
-          }))
+          ...frame,
+          tag: typeof frame.tag === 'string' ? frame.tag.trim() : '',
+        }))
         : (Array.isArray(data) ? data : []);
     } catch (error) {
       console.warn('[BrainDance] Pose loading failed.', error);
