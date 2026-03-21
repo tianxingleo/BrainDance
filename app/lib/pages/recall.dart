@@ -77,6 +77,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   int? _modelDownloadTotalBytes;
   final Map<String, GlobalKey> _modelCardKeys = {};
   final Map<String, _RecallSearchCacheEntry> _searchCache = {};
+  final GlobalKey _actionOverlayStackKey = GlobalKey();
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
@@ -909,6 +910,7 @@ $userQuestion
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
+        key: _actionOverlayStackKey,
         children: [
           BDPageBackdrop(
             child: SafeArea(
@@ -1140,7 +1142,7 @@ $userQuestion
                       onNavigateToViewer: _navigateToViewer,
                       toPublicUrl: _toPublicUrl,
                       onShowModelActions: (model) {
-                        unawaited(_showModelActions(model));
+                        _showModelActions(model);
                       },
                     )
                   else
@@ -1155,7 +1157,7 @@ $userQuestion
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
                       onShowModelActions: (model) {
-                        unawaited(_showModelActions(model));
+                        _showModelActions(model);
                       },
                       onAddNewTask: (name) {
                         ref.read(pageIndexProvider.notifier).state = 1;
@@ -1837,113 +1839,22 @@ $userQuestion
     }
   }
 
-  Future<void> _showModelActions(Map<String, dynamic> model) async {
-    final sizeLabel = await _getLocalModelSizeLabel(model);
-
-    if (!mounted) return;
-
-    final selectedAction = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        final textColor = isDark
-            ? BDDesign.colorPaperWhite
-            : BDDesign.colorInkBlack;
-        final hintColor = isDark
-            ? Colors.white.withValues(alpha: 0.62)
-            : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-        final sceneId =
-            model['display_name']?.toString() ??
-            model['scene_id']?.toString() ??
-            textLocalize('recall_unnamed_model');
-        final desc =
-            model['description']?.toString() ?? textLocalize("recall_no_desc");
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    sceneId,
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    desc,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: hintColor, height: 1.35),
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.info_outline_rounded),
-                    title: Text(textLocalize('recall_detail_model')),
-                    subtitle: Text(textLocalize('recall_detail_subtitle')),
-                    onTap: () => Navigator.pop(context, 'detail'),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.edit_rounded),
-                    title: Text(textLocalize('recall_rename_model')),
-                    subtitle: Text(textLocalize('recall_rename_subtitle')),
-                    onTap: () => Navigator.pop(context, 'rename'),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.delete_outline_rounded),
-                    title: Text(
-                      '${textLocalize('recall_delete_local')}$sizeLabel',
-                    ),
-                    subtitle: Text(
-                      textLocalize('recall_delete_local_subtitle'),
-                    ),
-                    onTap: () => Navigator.pop(context, 'delete_local'),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.public_rounded),
-                    title: Text(textLocalize('recall_share_to_community')),
-                    subtitle: Text(textLocalize('recall_share_subtitle')),
-                    onTap: () => Navigator.pop(context, 'share'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+  void _showModelActions(Map<String, dynamic> model) {
+    final cardKey = _modelCardKeyFor(model);
+    final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayRenderBox =
+        _actionOverlayStackKey.currentContext?.findRenderObject()
+            as RenderBox?;
+    if (renderBox == null || overlayRenderBox == null) return;
+    final offset = renderBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayRenderBox,
     );
-
-    if (!mounted) {
-      return;
-    }
-
-    switch (selectedAction) {
-      case 'detail':
-        await _showModelDetails(model);
-        break;
-      case 'rename':
-        await _renameModel(model);
-        break;
-      case 'delete_local':
-        await _deleteLocalModel(model);
-        break;
-      case 'share':
-        await _shareModelToCommunity(model);
-        break;
-    }
+    final rect = offset & renderBox.size;
+    setState(() {
+      _activeModelAction = model;
+      _activeModelActionRect = rect;
+    });
   }
 
   Future<void> _showModelDetails(Map<String, dynamic> model) async {

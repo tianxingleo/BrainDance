@@ -281,12 +281,15 @@ class RecallModelActionOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
+    const screenPadding = 16.0;
     const horizontalGap = 12.0;
     const actionWidth = 128.0;
-    final actionLeft =
-        (rect.right + horizontalGap + actionWidth <= screenWidth - 16)
-        ? rect.right + horizontalGap
-        : rect.left + rect.width - actionWidth;
+    final preferredLeft = rect.right + horizontalGap;
+    final maxLeft = screenWidth - screenPadding - actionWidth;
+    final actionLeft = preferredLeft.clamp(
+      screenPadding,
+      maxLeft,
+    ).toDouble();
 
     return Positioned.fill(
       child: GestureDetector(
