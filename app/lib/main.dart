@@ -533,7 +533,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                             translation: translation,
                             child: Opacity(
                               opacity: opacity.clamp(0.0, 1.0),
-                              child: child,
+                              child: RepaintBoundary(child: child),
                             ),
                           ),
                         );
