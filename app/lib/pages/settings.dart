@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/pages/settabs/settab1.dart';
 import 'package:braindance/pages/settabs/settab2.dart';
 import 'package:braindance/pages/settabs/settab3.dart';
@@ -11,6 +10,7 @@ import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
 import '../widgets/bd_surfaces.dart';
 import 'recall/overview_card.dart';
 import 'task_list.dart';
+import 'package:braindance/configs/motion_tokens.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -23,6 +23,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
   late final ScrollController scrollController;
+  final Set<int> _builtTabs = {0};
+  int _currentTabIndex = 0;
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
     fontFamily: AppConfig.fontFamily,
@@ -37,13 +39,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       vsync: this,
       animationDuration: Duration(milliseconds: 200),
     ); // 正确初始化
-    tabController.addListener(onUpdate);
+    tabController.addListener(_handleTabChange);
     scrollController = ScrollController();
   }
 
   @override
   void dispose() {
-    tabController.removeListener(onUpdate);
+    tabController.removeListener(_handleTabChange);
     tabController.dispose(); // 在 dispose 中释放资源
     scrollController.dispose();
     super.dispose();
@@ -90,29 +92,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
             child: Column(
               children: [
                 BDPageHeader(
-                  title: textLocalize("settings"),
-                  subtitle: textLocalize('set_subtitle'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      BDStatusPill(
-                        label: isDark ? 'NIGHT' : 'DAY',
-                        icon: isDark
-                            ? Icons.dark_mode_rounded
-                            : Icons.wb_sunny_rounded,
-                        color: isDark
-                            ? BDDesign.colorMutedBlueLight
-                            : BDDesign.colorMutedBlue,
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: textColor,
-                        ),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
+                  title: textLocalize('manage'),
+                  trailing: BDStatusPill(
+                    label: isDark ? 'NIGHT' : 'DAY',
+                    icon: isDark
+                        ? Icons.dark_mode_rounded
+                        : Icons.wb_sunny_rounded,
+                    color: isDark
+                        ? BDDesign.colorMutedBlueLight
+                        : BDDesign.colorMutedBlue,
                   ),
                 ),
                 Padding(
@@ -182,23 +170,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   ),
                 ),
                 const SizedBox(height: 10),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: BDMotion.durationNormal,
-                    switchInCurve: BDMotion.curveEnter,
-                    switchOutCurve: BDMotion.curveExit,
-                    child: TDTabBarView(
-                      key: ValueKey<int>(tabController.index),
-                      controller: tabController,
-                      children: [
-                        setTab1(onUpdate, ref),
-                        setTab2(onUpdate, context),
-                        setTab3(context),
-                        setTab4(context, scrollController),
-                      ],
-                    ),
-                  ),
-                ),
+                Expanded(child: _buildTabContent(context, ref)),
               ],
             ),
           ),
@@ -211,6 +183,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     if (mounted) {
       setState(() {});
     }
+  }
+
+  void _handleTabChange() {
+    final nextIndex = tabController.index;
+    if (_currentTabIndex == nextIndex) {
+      return;
+    }
+    setState(() {
+      _currentTabIndex = nextIndex;
+      _builtTabs.add(nextIndex);
+    });
+  }
+
+  Widget _buildTabContent(BuildContext context, WidgetRef ref) {
+    return IndexedStack(
+      index: _currentTabIndex,
+      children: List<Widget>.generate(tabController.length, (index) {
+        if (!_builtTabs.contains(index)) {
+          return const SizedBox.shrink();
+        }
+        return KeyedSubtree(
+          key: ValueKey<int>(index),
+          child: switch (index) {
+            0 => setTab1(onUpdate, ref),
+            1 => setTab2(onUpdate, context),
+            2 => setTab3(context),
+            3 => setTab4(context, scrollController),
+            _ => const SizedBox.shrink(),
+          },
+        );
+      }),
+    );
   }
 }
 
