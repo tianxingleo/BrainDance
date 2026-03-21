@@ -43,12 +43,12 @@ class _RecordPageState extends ConsumerState<RecordPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
-  late AnimationController _hudAnimController; // 用于HUD角点呼吸
+  late AnimationController _hudAnimController; // HUD animation
 
   bool _showTips = false;
   bool _isMotionHudEnabled = false;
-  bool _isMovingTooFast = false; // 用于异常运动警告
-  int _warningEndTime = 0; // 用于抖动警告显示状态的防抖停留时长
+  bool _isMovingTooFast = false; // fast movement warning state
+  int _warningEndTime = 0; // warning hold duration
 
   Timer? _recordTimer;
   int _recordSeconds = 0;
@@ -304,6 +304,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
       smoothedAccel,
       linearAccel * 0.78 + accelDelta * 0.42,
     );
+    final displayMotionMeter =
+        (_motionMeter * 0.82) + (motionMeter * 0.18);
 
     final nextState = switch (motionMeter) {
       <= _kIdealAccelMin => _MotionState.steady,
@@ -367,7 +369,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _smoothedLinearAccel = smoothedAccel;
         _peakLinearAccel = nextPeak;
         _accelDelta = accelDelta;
-        _motionMeter = motionMeter;
+        _motionMeter = displayMotionMeter;
         _motionHint = nextHint;
         _motionDetail = nextDetail;
         _motionState = effectiveState;
@@ -377,7 +379,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _smoothedLinearAccel = smoothedAccel;
       _peakLinearAccel = nextPeak;
       _accelDelta = accelDelta;
-      _motionMeter = motionMeter;
+      _motionMeter = displayMotionMeter;
       _motionHint = nextHint;
       _motionDetail = nextDetail;
       _motionState = effectiveState;
@@ -541,15 +543,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
       late final String label;
       switch (cam.lensDirection) {
         case CameraLensDirection.back:
-          label = '后置$backCount';
+          label = 'Rear$backCount';
           backCount++;
           break;
         case CameraLensDirection.front:
-          label = '前置$frontCount';
+          label = 'Front$frontCount';
           frontCount++;
           break;
         case CameraLensDirection.external:
-          label = '外置$externalCount';
+          label = 'External$externalCount';
           externalCount++;
           break;
       }
@@ -762,27 +764,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
             ),
           ),
           Positioned(
-            top: mediaQuery.padding.top + 72,
-            left: 20,
+            top: mediaQuery.padding.top + 16,
+            left: 16,
             child: AnimatedSwitcher(
               duration: BDMotion.durationFast,
               switchInCurve: BDMotion.curveEnter,
               switchOutCurve: BDMotion.curveExit,
               child: !_isMotionHudEnabled
                   ? const SizedBox.shrink()
-                  : _MotionGuidanceCard(
-                      yaw: _yaw,
-                      pitch: _pitch,
-                      linearAccel: _linearAccel,
-                      smoothedLinearAccel: _smoothedLinearAccel,
-                      peakLinearAccel: _peakLinearAccel,
-                      accelDelta: _accelDelta,
+                  : _SimpleMotionGuidanceCard(
                       motionMeter: _motionMeter,
                       motionState: _motionState,
-                      motionDetail: _motionDetail,
-                      accelHistory: _accelHistory,
-                      isMovingTooFast: _isMovingTooFast,
                       motionHint: _motionHint,
+                      motionDetail: _motionDetail,
                     ),
             ),
           ),
@@ -1204,39 +1198,38 @@ class _RecordOverlayPanel extends StatelessWidget {
   }
 }
 
-class _MotionGuidanceCard extends StatelessWidget {
-  final double yaw;
-  final double pitch;
-  final double linearAccel;
-  final double smoothedLinearAccel;
-  final double peakLinearAccel;
-  final double accelDelta;
+class _SimpleMotionGuidanceCard extends StatelessWidget {
   final double motionMeter;
   final _MotionState motionState;
-  final String motionDetail;
-  final List<double> accelHistory;
-  final bool isMovingTooFast;
   final String motionHint;
+  final String motionDetail;
 
-  const _MotionGuidanceCard({
-    required this.yaw,
-    required this.pitch,
-    required this.linearAccel,
-    required this.smoothedLinearAccel,
-    required this.peakLinearAccel,
-    required this.accelDelta,
+  const _SimpleMotionGuidanceCard({
     required this.motionMeter,
     required this.motionState,
-    required this.motionDetail,
-    required this.accelHistory,
-    required this.isMovingTooFast,
     required this.motionHint,
+    required this.motionDetail,
   });
 
   @override
   Widget build(BuildContext context) {
-    final safePeak = max(peakLinearAccel, _kInstantSpikeAccel);
-    final normalizedAccel = (motionMeter / safePeak).clamp(0.0, 1.0);
+    final size = MediaQuery.of(context).size;
+    final cardWidth = (size.width * 0.42).clamp(170.0, 220.0);
+    final progressValue = switch (motionState) {
+      _MotionState.steady => 0.18,
+      _MotionState.ideal => 0.42 + (motionMeter / _kIdealAccelMax) * 0.18,
+      _MotionState.caution =>
+        0.68 +
+            ((motionMeter - _kIdealAccelMax) /
+                    (_kCautionAccelMax - _kIdealAccelMax)) *
+                0.18,
+      _MotionState.danger =>
+        0.9 +
+            ((motionMeter - _kCautionAccelMax) /
+                    (_kInstantSpikeAccel - _kCautionAccelMax)) *
+                0.1,
+    };
+    final normalizedAccel = progressValue.clamp(0.0, 1.0);
     final guideColor = switch (motionState) {
       _MotionState.steady => BDDesign.colorMutedBlue,
       _MotionState.ideal => BDDesign.colorFadedOlive,
@@ -1251,11 +1244,11 @@ class _MotionGuidanceCard extends StatelessWidget {
     };
 
     return Container(
-      width: 260,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      width: cardWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: BDDesign.colorInkBlack.withAlpha(216),
-        borderRadius: BDDesign.radiusSmall,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: guideColor.withAlpha(160)),
         boxShadow: [BDDesign.shadowElevated],
       ),
@@ -1266,8 +1259,8 @@ class _MotionGuidanceCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 10,
-                height: 10,
+                width: 9,
+                height: 9,
                 decoration: BoxDecoration(
                   color: guideColor,
                   shape: BoxShape.circle,
@@ -1276,16 +1269,18 @@ class _MotionGuidanceCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  motionHint,
-                  style: TextStyle(
+                  textLocalize('sensor_on'),
+                  style: const TextStyle(
                     color: BDDesign.colorPaperWhite,
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: guideColor.withAlpha(36),
                   borderRadius: BorderRadius.circular(999),
@@ -1294,7 +1289,7 @@ class _MotionGuidanceCard extends StatelessWidget {
                   stateLabel,
                   style: TextStyle(
                     color: guideColor,
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1302,72 +1297,41 @@ class _MotionGuidanceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              minHeight: 8,
-              value: normalizedAccel,
-              backgroundColor: Colors.white.withAlpha(28),
-              valueColor: AlwaysStoppedAnimation<Color>(guideColor),
-            ),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: normalizedAccel),
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, _) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 9,
+                  value: value,
+                  backgroundColor: Colors.white.withAlpha(28),
+                  valueColor: AlwaysStoppedAnimation<Color>(guideColor),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           Text(
-            '实时 ${motionMeter.toStringAsFixed(2)}  平滑 ${smoothedLinearAccel.toStringAsFixed(2)}  峰值 ${peakLinearAccel.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: BDDesign.colorPaperWhite,
-              fontFamily: 'Courier',
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.8,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 68,
-            child: CustomPaint(
-              painter: _AccelHistoryPainter(
-                samples: accelHistory,
-                color: guideColor,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '推荐区间 ${_kIdealAccelMin.toStringAsFixed(2)} - ${_kIdealAccelMax.toStringAsFixed(2)} m/s^2',
-            style: TextStyle(
-              color: Colors.white.withAlpha(170),
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            motionDetail,
+            motionHint,
             style: TextStyle(
               color: Colors.white.withAlpha(210),
               fontSize: 11,
               height: 1.35,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           Text(
-            'YAW ${yaw.toStringAsFixed(1)}°   PTH ${pitch.toStringAsFixed(1)}°   Δ ${accelDelta.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: BDDesign.colorPaperWhite,
-              fontFamily: 'Courier',
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.8,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'RAW ${linearAccel.toStringAsFixed(2)}  建议让曲线尽量停在绿色带',
+            motionDetail,
             style: TextStyle(
               color: BDDesign.colorAshGray.withAlpha(220),
-              fontSize: 11,
+              fontSize: 10,
+              height: 1.3,
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -1477,3 +1441,4 @@ class _AccelHistoryPainter extends CustomPainter {
     return oldDelegate.samples != samples || oldDelegate.color != color;
   }
 }
+
