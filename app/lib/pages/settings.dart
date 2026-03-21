@@ -1,16 +1,16 @@
+import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/configs/set_config.dart';
+import 'package:braindance/pages/recall/overview_card.dart';
+import 'package:braindance/pages/settabs/settab1.dart';
+import 'package:braindance/pages/settabs/settab3.dart';
+import 'package:braindance/pages/task_list.dart';
+import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:flutter/material.dart';
-import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/pages/settabs/settab1.dart';
-import 'package:braindance/pages/settabs/settab2.dart';
-import 'package:braindance/pages/settabs/settab3.dart';
-import 'package:braindance/pages/settabs/settab4.dart';
-import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
-import '../widgets/bd_surfaces.dart';
-import 'recall/overview_card.dart';
-import 'task_list.dart';
-import 'package:braindance/configs/motion_tokens.dart';
+
+import '../main.dart' show overviewLocalIndexingProvider, overviewStatsProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -22,32 +22,29 @@ class SettingsPage extends ConsumerStatefulWidget {
 class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
-  late final ScrollController scrollController;
   final Set<int> _builtTabs = {0};
   int _currentTabIndex = 0;
+
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
     fontFamily: AppConfig.fontFamily,
   );
-  // 选择器选中项索引;
+
   @override
   void initState() {
-    //若 tab 数量有变，需同步修改 length
     super.initState();
     tabController = TabController(
-      length: 4,
+      length: 2,
       vsync: this,
-      animationDuration: Duration(milliseconds: 200),
-    ); // 正确初始化
+      animationDuration: const Duration(milliseconds: 200),
+    );
     tabController.addListener(_handleTabChange);
-    scrollController = ScrollController();
   }
 
   @override
   void dispose() {
     tabController.removeListener(_handleTabChange);
-    tabController.dispose(); // 在 dispose 中释放资源
-    scrollController.dispose();
+    tabController.dispose();
     super.dispose();
   }
 
@@ -61,16 +58,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
 
-    final TDTabBar myTabBar = TDTabBar(
+    final myTabBar = TDTabBar(
       tabs: [
         TDTab(text: textLocalize('set_tab1')),
-        TDTab(text: textLocalize('set_tab2')),
         TDTab(text: textLocalize('set_tab3')),
-        TDTab(text: textLocalize('set_tab4')),
       ],
       controller: tabController,
       showIndicator: true,
-      indicatorPadding: const EdgeInsets.all(4.0),
+      indicatorPadding: const EdgeInsets.all(4),
       indicatorWidth: 24,
       indicatorHeight: 3,
       indicatorColor: BDDesign.colorMutedBlue,
@@ -83,6 +78,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         color: hintColor.withValues(alpha: 0.78),
       ),
     );
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
@@ -93,14 +89,23 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
               children: [
                 BDPageHeader(
                   title: textLocalize('manage'),
-                  trailing: BDStatusPill(
-                    label: isDark ? 'NIGHT' : 'DAY',
-                    icon: isDark
-                        ? Icons.dark_mode_rounded
-                        : Icons.wb_sunny_rounded,
-                    color: isDark
-                        ? BDDesign.colorMutedBlueLight
-                        : BDDesign.colorMutedBlue,
+                  trailing: GestureDetector(
+                    onTap: () {
+                      SetConfig.setNightMode(!AppConfig.isNightMode, ref);
+                      SetConfig.saveMsgToFile();
+                      onUpdate();
+                    },
+                    child: BDStatusPill(
+                      label: textLocalize(
+                        isDark ? 'set_theme_night' : 'set_theme_day',
+                      ),
+                      icon: isDark
+                          ? Icons.dark_mode_rounded
+                          : Icons.wb_sunny_rounded,
+                      color: isDark
+                          ? BDDesign.colorMutedBlueLight
+                          : BDDesign.colorMutedBlue,
+                    ),
                   ),
                 ),
                 Padding(
@@ -109,26 +114,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                     padding: const EdgeInsets.all(18),
                     child: Row(
                       children: [
-                        Expanded(
-                          child: _SettingsMetric(
-                            label: textLocalize('set_label_ui'),
-                            value: isDark ? 'Night mode' : 'Paper mode',
+                        Text(
+                          textLocalize('set_label_lang'),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: hintColor,
                           ),
                         ),
-                        Expanded(
-                          child: _SettingsMetric(
-                            label: textLocalize('set_label_lang'),
-                            value: AppConfig.langMap['locale'] == 'en_US'
-                                ? 'English'
-                                : '简体中文',
-                          ),
+                        const Spacer(),
+                        _LanguageToggleChip(
+                          label: textLocalize('set_lang_zh'),
+                          selected: AppConfig.langMap['locale'] == 'zh_CN',
+                          onTap: () {
+                            SetConfig.setLanguage('zh_CN', ref);
+                            SetConfig.saveMsgToFile();
+                            onUpdate();
+                          },
                         ),
-                        Expanded(
-                          child: _SettingsMetric(
-                            label: textLocalize('set_label_style'),
-                            value: 'Archive UI',
-                            accent: textColor,
-                          ),
+                        const SizedBox(width: 10),
+                        _LanguageToggleChip(
+                          label: textLocalize('set_lang_en'),
+                          selected: AppConfig.langMap['locale'] == 'en_US',
+                          onTap: () {
+                            SetConfig.setLanguage('en_US', ref);
+                            SetConfig.saveMsgToFile();
+                            onUpdate();
+                          },
                         ),
                       ],
                     ),
@@ -206,10 +218,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         return KeyedSubtree(
           key: ValueKey<int>(index),
           child: switch (index) {
-            0 => setTab1(onUpdate, ref),
-            1 => setTab2(onUpdate, context),
-            2 => setTab3(context),
-            3 => setTab4(context, scrollController),
+            0 => setTab1(ref),
+            1 => setTab3(context),
             _ => const SizedBox.shrink(),
           },
         );
@@ -218,47 +228,59 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 }
 
-class _SettingsMetric extends StatelessWidget {
+class _LanguageToggleChip extends StatelessWidget {
   final String label;
-  final String value;
-  final Color? accent;
+  final bool selected;
+  final VoidCallback onTap;
 
-  const _SettingsMetric({
+  const _LanguageToggleChip({
     required this.label,
-    required this.value,
-    this.accent,
+    required this.selected,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final titleColor = isDark
-        ? Colors.white.withValues(alpha: 0.6)
+    final selectedColor = isDark
+        ? BDDesign.colorMutedBlueLight
         : BDDesign.colorMutedBlue;
-    final valueColor =
-        accent ?? (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack);
+    final borderColor = selected
+        ? selectedColor.withValues(alpha: 0.22)
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : BDDesign.colorMutedBlue.withValues(alpha: 0.10));
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: titleColor,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: BDMotion.durationNormal,
+          curve: BDMotion.curveFluid,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? selectedColor.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: borderColor),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: selected
+                  ? selectedColor
+                  : (isDark
+                        ? BDDesign.colorPaperWhite
+                        : BDDesign.colorInkBlack),
+            ),
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: valueColor,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
