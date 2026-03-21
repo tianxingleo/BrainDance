@@ -279,6 +279,10 @@ enum Language {
       "create_generate_desc": "通过图片、文本或视频生成记忆模型。",
       "timepeeling": "时间切片",
       "coming_soon": "即将推出",
+      "gen_text_generating": "正在生成中",
+      "gen_text_preview_title": "文本生成结果预览",
+      "gen_text_regenerate": "重新生成",
+      "gen_text_confirm": "确认",
     },
   ),
   en(
@@ -592,6 +596,10 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
           "Generate memory models from images, text, or video.",
       "timepeeling": "Time Peeling",
       "coming_soon": "Coming soon",
+      "gen_text_generating": "Generating...",
+      "gen_text_preview_title": "Text Generation Preview",
+      "gen_text_regenerate": "Regenerate",
+      "gen_text_confirm": "Confirm",
     },
   );
 
