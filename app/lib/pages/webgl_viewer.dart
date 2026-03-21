@@ -709,105 +709,99 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             )
           : Stack(
               children: [
-                Positioned.fill(
-                  child: Stack(
-                    children: [
-                      if (_controller != null && !_isDownloading)
-                        Positioned.fill(
-                          child: AnimatedOpacity(
-                            opacity: _isWebReady ? 1.0 : 0.0,
-                            duration: const Duration(milliseconds: 500),
-                            child: WebViewWidget(controller: _controller!),
+                if (_controller != null && !_isDownloading)
+                  SizedBox.expand(
+                    child: AnimatedOpacity(
+                      opacity: _isWebReady ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 500),
+                      child: WebViewWidget(controller: _controller!),
+                    ),
+                  ),
+                if (_isDownloading)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TDText(
+                            textLocalize('viewer_downloading_title'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodyMedium,
+                            textColor: hintTextColor,
                           ),
-                        ),
-                      if (_isDownloading)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                TDText(
-                                  textLocalize('viewer_downloading_title'),
-                                  textAlign: TextAlign.center,
-                                  font: theme.fontBodyMedium,
-                                  textColor: hintTextColor,
-                                ),
-                                const SizedBox(height: 4),
-                                TDText(
-                                  textLocalize('viewer_downloading_subtitle'),
-                                  textAlign: TextAlign.center,
-                                  font: theme.fontBodySmall,
-                                  textColor: hintTextColor.withAlpha(150),
-                                ),
-                                const SizedBox(height: 24),
-                                TDText(
-                                  '${(_downloadProgress * 100).toStringAsFixed(1)}%',
-                                  font: theme.fontTitleLarge,
-                                  fontWeight: FontWeight.w600,
-                                  textColor: textColor,
-                                ),
-                                const SizedBox(height: 8),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: LinearProgressIndicator(
-                                    value: _downloadProgress,
-                                    minHeight: 6,
-                                    backgroundColor: isDark
-                                        ? Colors.white.withAlpha(20)
-                                        : Colors.black.withAlpha(15),
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      isDark
-                                          ? const Color(0xFF7AA2FF)
-                                          : AppConfig.primaryColor,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                TDText(
-                                  _totalBytes > 0
-                                      ? '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}'
-                                      : '${_formatBytes(_downloadedBytes)} / --',
-                                  font: theme.fontBodySmall,
-                                  textColor: hintTextColor,
-                                ),
-                                const SizedBox(height: 20),
-                                SizedBox(
-                                  width: 140,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () {
-                                      _stopDownload();
-                                      Navigator.of(context).pop();
-                                    },
-                                    icon: const Icon(Icons.stop_rounded, size: 18),
-                                    label: Text(textLocalize('viewer_stop_download')),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: isDark
-                                          ? const Color(0xFFFF6B6B)
-                                          : const Color(0xFFD32F2F),
-                                      side: BorderSide(
-                                        color: isDark
-                                            ? const Color(0xFFFF6B6B)
-                                            : const Color(0xFFD32F2F),
-                                      ),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 10,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          const SizedBox(height: 4),
+                          TDText(
+                            textLocalize('viewer_downloading_subtitle'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor.withAlpha(150),
+                          ),
+                          const SizedBox(height: 24),
+                          TDText(
+                            '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                            font: theme.fontTitleLarge,
+                            fontWeight: FontWeight.w600,
+                            textColor: textColor,
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _downloadProgress,
+                              minHeight: 6,
+                              backgroundColor: isDark
+                                  ? Colors.white.withAlpha(20)
+                                  : Colors.black.withAlpha(15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                isDark
+                                    ? const Color(0xFF7AA2FF)
+                                    : AppConfig.primaryColor,
+                              ),
                             ),
                           ),
-                        )
-                      else if (!_isWebReady && _controller != null)
-                        Center(child: CircularProgressIndicator(color: iconColor)),
-                    ],
-                  ),
-                ),
+                          const SizedBox(height: 8),
+                          TDText(
+                            _totalBytes > 0
+                                ? '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}'
+                                : '${_formatBytes(_downloadedBytes)} / --',
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: 140,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                _stopDownload();
+                                Navigator.of(context).pop();
+                              },
+                              icon: const Icon(Icons.stop_rounded, size: 18),
+                              label: Text(textLocalize('viewer_stop_download')),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: isDark
+                                    ? const Color(0xFFFF6B6B)
+                                    : const Color(0xFFD32F2F),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFFFF6B6B)
+                                      : const Color(0xFFD32F2F),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (!_isWebReady && _controller != null)
+                  Center(child: CircularProgressIndicator(color: iconColor)),
                 if (!_isDownloading)
                   SafeArea(
                     child: Padding(
