@@ -52,7 +52,7 @@ class HashingTextEmbedder implements LocalTextEmbedder {
   }
 
   void _accumulate(List<double> vector, String token, double weight) {
-    final hash = _fnv1a64(token);
+    final hash = _fnv1a32(token);
     final index = hash % dimensions;
     final sign = ((hash >> 1) & 1) == 0 ? 1.0 : -1.0;
     vector[index] += sign * weight;
@@ -75,13 +75,13 @@ class HashingTextEmbedder implements LocalTextEmbedder {
         .trim();
   }
 
-  int _fnv1a64(String input) {
-    const int offset = 0xcbf29ce484222325;
-    const int prime = 0x100000001b3;
+  int _fnv1a32(String input) {
+    const int offset = 0x811c9dc5;
+    const int prime = 0x01000193;
     var hash = offset;
     for (final codeUnit in input.codeUnits) {
       hash ^= codeUnit;
-      hash = (hash * prime) & 0x7fffffffffffffff;
+      hash = (hash * prime) & 0xffffffff;
     }
     return hash;
   }

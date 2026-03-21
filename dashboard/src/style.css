@@ -1,31 +1,34 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap');
 
 :root {
-  --accent-color: #71839a;
-  --bg-0: #09111b;
-  --bg-1: #101b29;
-  --bg-2: #172333;
-  --surface: rgba(18, 29, 43, 0.78);
-  --surface-strong: rgba(14, 22, 33, 0.9);
-  --surface-soft: rgba(122, 146, 175, 0.12);
-  --surface-bright: rgba(239, 246, 255, 0.08);
-  --ink-1: #edf4fb;
-  --ink-2: #aac0d7;
-  --muted: #7f95ad;
-  --stroke: rgba(170, 191, 215, 0.14);
-  --stroke-strong: rgba(255, 255, 255, 0.16);
-  --shadow-lg: 0 34px 90px rgba(2, 9, 18, 0.42);
-  --shadow-md: 0 20px 44px rgba(2, 9, 18, 0.26);
-  --ok: #7ec0aa;
-  --warn: #f0c782;
-  --bad: #d87b7b;
+  --accent-color: #6b7a8f;
+  --bg-0: #0e1013;
+  --bg-1: #101014;
+  --bg-2: #18181c;
+  --surface: rgba(24, 24, 28, 0.92);
+  --surface-strong: rgba(35, 35, 42, 0.96);
+  --surface-soft: rgba(107, 122, 143, 0.12);
+  --surface-bright: rgba(255, 255, 255, 0.05);
+  --ink-1: #f5f7fa;
+  --ink-2: rgba(245, 247, 250, 0.72);
+  --muted: rgba(245, 247, 250, 0.5);
+  --stroke: rgba(255, 255, 255, 0.08);
+  --stroke-strong: rgba(255, 255, 255, 0.1);
+  --shadow-lg: 0 24px 56px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 16px 32px rgba(0, 0, 0, 0.22);
+  --ok: #6d8260;
+  --warn: #b69b72;
+  --bad: #8b4747;
+  --radius-small: 12px;
+  --radius-medium: 20px;
+  --radius-large: 28px;
   --motion-snap: cubic-bezier(0.2, 0.7, 0.2, 1);
   --el-color-primary: var(--accent-color);
-  --el-color-primary-light-3: #89a0bc;
-  --el-color-primary-light-5: #a4b6cb;
-  --el-color-primary-dark-2: #617489;
+  --el-color-primary-light-3: #8393a8;
+  --el-color-primary-light-5: #9ca8b7;
+  --el-color-primary-dark-2: #5c6879;
   --el-bg-color: transparent;
-  --el-bg-color-overlay: rgba(14, 22, 33, 0.96);
+  --el-bg-color-overlay: rgba(24, 24, 28, 0.98);
   --el-fill-color-blank: transparent;
   --el-fill-color-light: rgba(255, 255, 255, 0.04);
   --el-border-color: var(--stroke);
@@ -43,25 +46,25 @@
 }
 
 :root.theme-light {
-  --bg-0: #e8f0f8;
-  --bg-1: #f3f7fb;
-  --bg-2: #dfe8f2;
-  --surface: rgba(255, 255, 255, 0.72);
-  --surface-strong: rgba(248, 251, 255, 0.9);
-  --surface-soft: rgba(113, 131, 154, 0.1);
-  --surface-bright: rgba(255, 255, 255, 0.42);
-  --ink-1: #233446;
-  --ink-2: #607489;
-  --muted: #8194a7;
-  --stroke: rgba(91, 116, 141, 0.14);
-  --stroke-strong: rgba(255, 255, 255, 0.5);
-  --shadow-lg: 0 26px 70px rgba(65, 88, 112, 0.18);
-  --shadow-md: 0 18px 36px rgba(65, 88, 112, 0.12);
-  --ok: #3c8f73;
-  --warn: #d39b49;
-  --bad: #c66767;
-  --el-bg-color-overlay: rgba(250, 253, 255, 0.96);
-  --el-fill-color-light: rgba(96, 116, 137, 0.08);
+  --bg-0: #f9f9f8;
+  --bg-1: #f2f3f2;
+  --bg-2: #ededea;
+  --surface: rgba(249, 249, 248, 0.94);
+  --surface-strong: rgba(255, 255, 255, 0.9);
+  --surface-soft: rgba(107, 122, 143, 0.08);
+  --surface-bright: rgba(255, 255, 255, 0.7);
+  --ink-1: #1e1e20;
+  --ink-2: rgba(30, 30, 32, 0.72);
+  --muted: rgba(30, 30, 32, 0.48);
+  --stroke: rgba(107, 122, 143, 0.1);
+  --stroke-strong: rgba(255, 255, 255, 0.82);
+  --shadow-lg: 0 24px 52px rgba(0, 0, 0, 0.09);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.07);
+  --ok: #6d8260;
+  --warn: #aa8a5d;
+  --bad: #8b4747;
+  --el-bg-color-overlay: rgba(249, 249, 248, 0.98);
+  --el-fill-color-light: rgba(107, 122, 143, 0.06);
   color-scheme: light;
 }
 
@@ -79,10 +82,11 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(38rem 38rem at 0% 0%, rgba(122, 150, 182, 0.32), transparent 58%),
-    radial-gradient(28rem 28rem at 100% 14%, color-mix(in srgb, var(--accent-color) 34%, transparent), transparent 60%),
-    radial-gradient(34rem 34rem at 50% 100%, rgba(142, 168, 194, 0.16), transparent 64%),
+    radial-gradient(42rem 42rem at 10% 0%, color-mix(in srgb, var(--accent-color) 20%, transparent), transparent 58%),
+    radial-gradient(18rem 18rem at 88% 18%, rgba(109, 130, 96, 0.12), transparent 64%),
+    radial-gradient(24rem 24rem at 10% 88%, rgba(228, 232, 237, 0.12), transparent 60%),
     linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 45%, var(--bg-2) 100%);
+  color: var(--ink-1);
 }
 
 body::before,
@@ -95,15 +99,16 @@ body::after {
 
 body::before {
   background:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 30px 30px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.3), transparent 85%);
-  opacity: 0.4;
+    radial-gradient(circle at 14% 12%, color-mix(in srgb, var(--accent-color) 16%, transparent), transparent 28%),
+    radial-gradient(circle at 82% 22%, rgba(109, 130, 96, 0.1), transparent 22%),
+    radial-gradient(circle at 18% 82%, rgba(228, 232, 237, 0.14), transparent 22%);
+  filter: blur(30px);
+  opacity: 0.9;
 }
 
 body::after {
-  backdrop-filter: saturate(108%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%);
+  backdrop-filter: saturate(105%);
 }
 
 img {
@@ -160,7 +165,7 @@ textarea {
   border: 1px solid var(--stroke-strong);
   border-radius: 36px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 22%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 18%),
     linear-gradient(180deg, var(--surface-strong) 0%, var(--surface) 100%);
   box-shadow: var(--shadow-lg);
   backdrop-filter: blur(18px);
@@ -232,12 +237,12 @@ textarea {
 .phone-hero {
   margin-top: 18px;
   padding: 18px;
-  border-radius: 28px;
+  border-radius: var(--radius-large);
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-color) 32%, transparent), transparent 44%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-color) 22%, transparent), transparent 44%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--stroke);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .phone-hero strong {
@@ -283,9 +288,9 @@ textarea {
 .phone-stat-card,
 .metric-item {
   padding: 14px 15px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-medium);
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
 }
 
 .phone-stat-card span,
@@ -307,9 +312,9 @@ textarea {
 .phone-panel {
   margin-top: 18px;
   padding: 18px;
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-large);
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
 }
 
 .phone-panel__title span,
@@ -350,8 +355,8 @@ textarea {
   margin-top: 22px;
   padding: 10px;
   border-radius: 999px;
-  background: rgba(7, 12, 18, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  border: 1px solid var(--stroke);
 }
 
 .bottom-dock__item {
@@ -365,9 +370,9 @@ textarea {
 }
 
 .bottom-dock__item--active {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 60%, white 6%), color-mix(in srgb, var(--accent-color) 80%, black 8%));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 82%, white 8%), color-mix(in srgb, var(--accent-color) 94%, black 2%));
   color: white;
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent-color) 18%, transparent);
 }
 
 .content-stage {
@@ -379,9 +384,9 @@ textarea {
 .el-card.glass-card {
   overflow: hidden;
   border: 1px solid var(--stroke) !important;
-  border-radius: 30px !important;
+  border-radius: var(--radius-large) !important;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 16%),
     linear-gradient(180deg, var(--surface-strong) 0%, var(--surface) 100%) !important;
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(16px);
@@ -441,6 +446,19 @@ textarea {
   display: grid;
   gap: 16px;
   padding: 18px;
+  transition:
+    transform 250ms var(--motion-snap),
+    border-color 250ms var(--motion-snap),
+    box-shadow 250ms var(--motion-snap);
+}
+
+.overview-card:hover,
+.alert-item:hover,
+.metric-item:hover,
+.user-chip:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-color) 18%, var(--stroke));
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.12);
 }
 
 .icon-chip,
@@ -450,8 +468,8 @@ textarea {
   width: 42px;
   height: 42px;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 18%, transparent), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--stroke);
   color: var(--ink-1);
 }
 
@@ -499,7 +517,8 @@ textarea {
 }
 
 .panel-grid--charts,
-.panel-grid--resources {
+.panel-grid--resources,
+.panel-grid--users {
   grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
 }
 
@@ -575,9 +594,9 @@ textarea {
 
 .alert-item {
   padding: 14px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-medium);
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
 }
 
 .alert-note,
@@ -591,6 +610,10 @@ textarea {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
+}
+
+.db-metrics--users {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-value.ok,
@@ -617,6 +640,31 @@ textarea {
   height: 300px;
 }
 
+.user-summary-block__head {
+  margin-bottom: 10px;
+}
+
+.user-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
+  color: var(--ink-2);
+}
+
+.user-chip strong {
+  color: var(--ink-1);
+}
+
 .mb-16 {
   margin-bottom: 4px;
 }
@@ -640,12 +688,13 @@ textarea {
 .el-button {
   border-radius: 999px !important;
   padding-inline: 18px !important;
+  min-height: 42px;
 }
 
 .el-button--primary {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 74%, white 10%), color-mix(in srgb, var(--accent-color) 82%, black 6%)) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 88%, white 9%), color-mix(in srgb, var(--accent-color) 96%, black 2%)) !important;
   border-color: transparent !important;
-  box-shadow: 0 14px 28px color-mix(in srgb, var(--accent-color) 28%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--accent-color) 20%, transparent);
 }
 
 .el-input__wrapper,
@@ -654,35 +703,71 @@ textarea {
 .el-switch,
 .el-radio-group,
 .el-radio-button__inner {
-  border-radius: 18px !important;
+  border-radius: 16px !important;
 }
 
 .el-input__wrapper,
 .el-select__wrapper,
 .el-color-picker__trigger,
 .el-radio-button__inner {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: color-mix(in srgb, var(--surface-soft) 84%, transparent) !important;
   box-shadow: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid var(--stroke) !important;
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  border-color: color-mix(in srgb, var(--accent-color) 48%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 14%, transparent) !important;
 }
 
 .el-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
   --el-table-expanded-cell-bg-color: transparent;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.04);
-  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.05);
-  --el-table-border-color: rgba(255, 255, 255, 0.08);
+  --el-table-header-bg-color: var(--surface-soft);
+  --el-table-row-hover-bg-color: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+  --el-table-border-color: var(--stroke);
   --el-table-text-color: var(--ink-1);
   --el-table-header-text-color: var(--ink-2);
 }
 
 .el-progress-bar__outer {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: var(--surface-soft) !important;
 }
 
 .el-tag {
   border-radius: 999px;
+}
+
+.dashboard-page,
+.phone-shell__frame,
+.glass-card,
+.phone-hero,
+.phone-panel,
+.phone-stat-card,
+.metric-item,
+.alert-item,
+.user-chip,
+.bottom-dock__item,
+.summary-pill,
+.theme-pill,
+.status-dot,
+.filter-count {
+  animation: fade-rise 380ms var(--motion-snap);
+}
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 1280px) {
@@ -717,7 +802,8 @@ textarea {
 
   .panel-grid--charts,
   .panel-grid--resources,
-  .panel-grid--operations {
+  .panel-grid--operations,
+  .panel-grid--users {
     grid-template-columns: 1fr;
   }
 

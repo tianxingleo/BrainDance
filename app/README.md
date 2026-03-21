@@ -11,6 +11,7 @@
 - 视频上传与任务创建
 - 任务列表与状态更新
 - Recall 资产页
+- Community 社区流与地图探索页
 - 基于 WebView 的移动端 3D 模型查看
 - 设置页与本地配置持久化
 
@@ -21,6 +22,7 @@
 - `lib/pages/video_submit.dart`
 - `lib/pages/task_list.dart`
 - `lib/pages/recall.dart`
+- `lib/pages/community.dart`
 - `lib/pages/webgl_viewer.dart`
 - `lib/pages/settings.dart`
 
@@ -81,9 +83,10 @@ flutter devices
 ## 当前约定
 
 - App 通过 `.env` 读取 `SUPABASE_URL` 和 `SUPABASE_ANON_KEY`
-- 任务提交默认写入 `processing_tasks`
+- 任务提交默认写入 `processing_tasks`，列表页优先使用 `display_name`
 - 视频与缩略图默认上传到 `braindance-assets/{user_id}/{scene_id}/raw/`
 - Recall 页从 `model_assets` 读取结果，并尝试推导对应的模型与位姿文件 URL
+- Community 页从 `community_posts` 读取贴文，并通过关联的 `model_assets` 还原模型地址与封面
 
 ## 说明
 

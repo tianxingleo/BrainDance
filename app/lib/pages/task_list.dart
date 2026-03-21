@@ -428,7 +428,7 @@ class TaskListPage extends StatefulWidget {
 class _TaskListPageState extends State<TaskListPage> {
   Map<String, List<Map<String, dynamic>>> _tasksByStatus = {};
   Map<String, List<String>> _taskLogs = {}; // taskId -> logs
-  Map<String, bool> _expandedStatus = {};
+  final Map<String, bool> _expandedStatus = {};
   bool _isLoading = true;
   String? _error;
   Timer? _refreshTimer;

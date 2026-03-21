@@ -7,7 +7,10 @@ import 'package:braindance/pages/settabs/settab1.dart';
 import 'package:braindance/pages/settabs/settab2.dart';
 import 'package:braindance/pages/settabs/settab3.dart';
 import 'package:braindance/pages/settabs/settab4.dart';
+import '../main.dart' show overviewStatsProvider, overviewLocalIndexingProvider;
 import '../widgets/bd_surfaces.dart';
+import 'recall/overview_card.dart';
+import 'task_list.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -87,7 +90,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
             child: Column(
               children: [
                 BDPageHeader(
-                  title: textLocalize("settings"),
+                  title: textLocalize("manage"),
                   subtitle: '调整账户、偏好和本地设备行为，保持整套界面一致。',
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -142,6 +145,30 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       ],
                     ),
                   ),
+                ),
+                const SizedBox(height: 14),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final stats = ref.watch(overviewStatsProvider);
+                    final isIndexing = ref.watch(overviewLocalIndexingProvider);
+                    return RecallOverviewCard(
+                      isDark: isDark,
+                      textColor: textColor,
+                      recentCount: stats['recentCount'] ?? 0,
+                      allModelCount: stats['allModelCount'] ?? 0,
+                      processingTaskCount: stats['processingTaskCount'] ?? 0,
+                      ragCount: stats['ragCount'] ?? 0,
+                      isLocalIndexing: isIndexing,
+                      onOpenTasks: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const TaskListPage(),
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 14),
                 Padding(

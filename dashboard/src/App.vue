@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
+import { ElMessage } from 'element-plus'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -25,6 +26,18 @@ interface ProcessingTask {
   created_at: string
   updated_at: string
   logs: unknown
+}
+
+interface UserActivitySummary {
+  userId: string
+  taskCount: number
+  assetCount: number
+  legacyTaskCount: number
+  totalActions: number
+  task24h: number
+  task7d: number
+  asset7d: number
+  lastSeenAt: string | null
 }
 
 interface BucketStat {
@@ -58,6 +71,25 @@ interface EdgeFunctionCheck {
   message: string
 }
 
+interface WorkerNode {
+  worker_id: string
+  hostname: string | null
+  pid: number | null
+  status: string
+  current_task_id: string | null
+  current_scene_id: string | null
+  desired_state: 'run' | 'pause' | 'interrupt' | string
+  control_note: string | null
+  last_heartbeat: string
+  started_at: string | null
+  stopped_at: string | null
+  metadata?: {
+    online_timeout_seconds?: number
+    stop_reason?: string | null
+    desired_state_seen?: string | null
+  } | null
+}
+
 const loading = ref(true)
 const refreshing = ref(false)
 const storageLoading = ref(false)
@@ -66,8 +98,10 @@ const storageError = ref('')
 const lastUpdated = ref<string | null>(null)
 
 const taskRows = ref<ProcessingTask[]>([])
+const workerRows = ref<WorkerNode[]>([])
 const modelAssetCount = ref(0)
 const memoryPoseCount = ref(0)
+const userSummaries = ref<UserActivitySummary[]>([])
 
 const selectedStatus = ref<'all' | TaskStatus>('all')
 const selectedTaskType = ref('all')
@@ -76,7 +110,7 @@ const autoRefresh = ref(true)
 const refreshSeconds = ref(60)
 const taskTrendRange = ref<'24h' | '7d' | '30d' | 'all'>('all')
 const isDarkTheme = ref(true)
-const accentColor = ref('#71839a')
+const accentColor = ref('#6b7a8f')
 
 const THEME_STORAGE_KEY = 'dashboard-theme-dark'
 const ACCENT_STORAGE_KEY = 'dashboard-theme-accent'
@@ -85,6 +119,7 @@ const channelState = ref<Record<string, string>>({
   processing_tasks: 'connecting',
   model_assets: 'connecting',
   memory_poses: 'connecting',
+  worker_nodes: 'connecting',
 })
 
 const storageStats = ref<BucketStat[]>([])
@@ -105,6 +140,8 @@ const timeBasedStats = ref({
   tasks24h: 0,
   failed24h: 0,
   completed24h: 0,
+  totalUsers: 0,
+  activeUsers24h: 0,
   activeUsers7d: 0,
   assets7d: 0,
 })
@@ -169,9 +206,17 @@ const taskFreshnessText = computed(() => {
   return `${Math.floor(diffSeconds / 3600)}h 前更新`
 })
 
-const workerOnline = computed(() => {
-  if (!latestTaskUpdatedAt.value) return false
-  return dayjs().diff(latestTaskUpdatedAt.value, 'second') <= 180
+const isWorkerRowOnline = (worker: WorkerNode) => {
+  const timeout = Number(worker.metadata?.online_timeout_seconds ?? 30)
+  return dayjs().diff(dayjs(worker.last_heartbeat), 'second') <= timeout && worker.status !== 'offline'
+}
+
+const onlineWorkerRows = computed(() => workerRows.value.filter((item) => isWorkerRowOnline(item)))
+const onlineWorkerCount = computed(() => onlineWorkerRows.value.length)
+const workerOnline = computed(() => onlineWorkerCount.value > 0)
+const workerSummaryText = computed(() => {
+  if (!workerRows.value.length) return '0 / 0'
+  return `${onlineWorkerCount.value} / ${workerRows.value.length}`
 })
 
 const realtimeHealthy = computed(() =>
@@ -203,6 +248,8 @@ const filteredTasks = computed(() => {
 
 const taskQueue = computed(() => filteredTasks.value.slice(0, 20))
 const failedTasks = computed(() => taskRows.value.filter((item) => item.status === 'failed').slice(0, 6))
+const topUsers = computed(() => userSummaries.value.slice(0, 6))
+const newlyActiveUsers = computed(() => userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).slice(0, 8))
 
 const totalStorageBytes = computed(() =>
   storageStats.value.reduce((sum, item) => sum + item.totalBytes, 0),
@@ -212,6 +259,7 @@ const edgeHealthyCount = computed(() => edgeChecks.value.filter((item) => item.s
 const queueCount = computed(() => pendingCount.value + processingCount.value)
 
 const refreshModeText = computed(() => (autoRefresh.value ? `${refreshSeconds.value}s 自动刷新` : '手动刷新'))
+const totalUserCount = computed(() => userSummaries.value.length)
 
 const storageModeText = computed(() => {
   if (storageProbeMode.value === 'bucket_list') return '列桶模式'
@@ -274,7 +322,7 @@ const chartTheme = computed(() => ({
   area: hexToRgba(accentColor.value, isDarkTheme.value ? 0.18 : 0.14),
   accentSoft: hexToRgba(accentColor.value, isDarkTheme.value ? 0.26 : 0.18),
   paper: isDarkTheme.value ? '#101722' : '#f4f8fc',
-  pie: ['#8aa0bb', accentColor.value, '#78b39d', '#d27070'],
+  pie: ['#a0aab5', accentColor.value, '#6d8260', '#8b4747'],
 }))
 
 const dbRowsChartOption = computed(() => ({
@@ -297,7 +345,7 @@ const dbRowsChartOption = computed(() => ({
       type: 'bar',
       barWidth: 14,
       itemStyle: { color: accentColor.value, borderRadius: [0, 10, 10, 0] },
-      emphasis: { itemStyle: { color: '#f2a33c' } },
+      emphasis: { itemStyle: { color: '#8393a8' } },
       data: [
         dbCounts.value.processing_tasks,
         dbCounts.value.model_assets,
@@ -428,7 +476,7 @@ const taskTrendOption = computed(() => {
         data: labels.map((key) => bucketMap[key]),
         symbolSize: 7,
         lineStyle: { width: 3, color: accentColor.value },
-        itemStyle: { color: '#f2a33c', borderColor: accentColor.value, borderWidth: 2 },
+        itemStyle: { color: '#e4e8ed', borderColor: accentColor.value, borderWidth: 2 },
         areaStyle: { color: chartTheme.value.area },
       },
     ],
@@ -471,6 +519,29 @@ const statusPieOption = computed(() => ({
 
 const formatDisplayName = (task: ProcessingTask) => task.display_name || task.scene_id || task.id
 const formatDateTime = (iso: string) => dayjs(iso).format('YYYY-MM-DD HH:mm:ss')
+const formatWorkerLabel = (worker: WorkerNode) => worker.hostname || worker.worker_id
+const getWorkerStatusTag = (status: string) => {
+  if (status === 'idle') return 'success'
+  if (status === 'busy') return 'warning'
+  if (status === 'stopping') return 'danger'
+  if (status === 'offline') return 'info'
+  return 'info'
+}
+const getWorkerStatusLabel = (worker: WorkerNode) => {
+  if (isWorkerRowOnline(worker)) {
+    if (worker.status === 'busy') return '执行中'
+    if (worker.status === 'stopping') return '停止中'
+    if (worker.status === 'idle') return '空闲'
+    return '在线'
+  }
+  return worker.status === 'offline' ? '已离线' : '失联'
+}
+const formatHeartbeatAge = (iso: string) => {
+  const diffSeconds = dayjs().diff(dayjs(iso), 'second')
+  if (diffSeconds < 60) return `${diffSeconds}s 前`
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m 前`
+  return `${Math.floor(diffSeconds / 3600)}h 前`
+}
 
 const getProgressByStatus = (status: TaskStatus) => {
   if (status === 'pending') return 15
@@ -499,8 +570,57 @@ const applyTheme = () => {
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
+const updateWorkerDesiredState = async (
+  worker: WorkerNode,
+  desiredState: 'run' | 'pause' | 'interrupt',
+  successMessage: string,
+) => {
+  const { error } = await supabase
+    .from('worker_nodes')
+    .update({
+      desired_state: desiredState,
+      control_note:
+        desiredState === 'run'
+          ? 'Resumed from dashboard'
+          : desiredState === 'interrupt'
+            ? 'Interrupted from dashboard'
+            : 'Paused from dashboard',
+      control_requested_at: new Date().toISOString(),
+    })
+    .eq('worker_id', worker.worker_id)
+
+  if (error) {
+    ElMessage.error(`控制失败: ${error.message}`)
+    return
+  }
+
+  ElMessage.success(successMessage)
+  await refreshDashboard()
+}
+
+const requestWorkerPause = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'pause',
+    `已请求优雅暂停 ${formatWorkerLabel(worker)}，它会停止接新任务并在安全点退出。`,
+  )
+
+const requestWorkerInterrupt = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'interrupt',
+    `已请求中断 ${formatWorkerLabel(worker)}，Supervisor 会尝试立即打断当前任务。`,
+  )
+
+const requestWorkerResume = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'run',
+    `已请求恢复 ${formatWorkerLabel(worker)}，Supervisor 会在轮询周期内拉起实例。`,
+  )
+
 const edgeFunctionNames = computed(() => {
-  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? 'search-models,test-timeout'
+  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? ''
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -508,6 +628,7 @@ const edgeFunctionNames = computed(() => {
 })
 
 const edgeStatusText = computed(() => {
+  if (!edgeFunctionNames.value.length) return '未配置探测'
   if (!edgeChecks.value.length) return '还没探测'
   if (edgeHealthyCount.value === edgeFunctionNames.value.length) return '全部在线'
   if (!edgeHealthyCount.value) return '全部失联'
@@ -548,9 +669,9 @@ const overviewCards = computed(() => [
   },
   {
     key: 'worker',
-    label: 'Worker',
-    value: workerOnline.value ? '在线' : '离线',
-    note: taskFreshnessText.value,
+    label: 'Workers',
+    value: workerSummaryText.value,
+    note: workerOnline.value ? '心跳正常' : '无在线实例',
     icon: 'lucide:bot',
     tone: workerSeverity.value,
   },
@@ -569,6 +690,14 @@ const overviewCards = computed(() => [
     note: edgeStatusText.value,
     icon: 'lucide:plug-zap',
     tone: edgeSeverity.value,
+  },
+  {
+    key: 'users',
+    label: '用户总数',
+    value: `${totalUserCount.value}`,
+    note: `24h 活跃 ${timeBasedStats.value.activeUsers24h} / 7d 活跃 ${timeBasedStats.value.activeUsers7d}`,
+    icon: 'lucide:users',
+    tone: 'neutral' as const,
   },
   {
     key: 'assets',
@@ -643,6 +772,113 @@ const activeAlertCount = computed(() =>
   alertRows.value.filter((item) => item.tone === 'warn' || item.tone === 'bad').length,
 )
 
+const formatUserId = (userId: string) => {
+  if (userId.length <= 14) return userId
+  return `${userId.slice(0, 8)}...${userId.slice(-4)}`
+}
+
+const fetchAllRows = async <T,>(table: string, columns: string, orderColumn = 'created_at') => {
+  const pageSize = 1000
+  let from = 0
+  const rows: T[] = []
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .order(orderColumn, { ascending: false })
+      .range(from, from + pageSize - 1)
+
+    if (error) {
+      console.warn(`[dashboard] failed to fetch rows from ${table}:`, error.message)
+      return rows
+    }
+
+    const chunk = (data ?? []) as T[]
+    rows.push(...chunk)
+
+    if (chunk.length < pageSize) break
+    from += pageSize
+  }
+
+  return rows
+}
+
+const buildUserSummaries = (
+  processingTaskUsers: Array<{ user_id: string; created_at: string }>,
+  assetUsers: Array<{ user_id: string | null; created_at: string }>,
+  legacyTaskUsers: Array<{ user_id: string; created_at: string }>,
+) => {
+  const now = dayjs()
+  const since24h = now.subtract(24, 'hour')
+  const since7d = now.subtract(7, 'day')
+  const map = new Map<string, UserActivitySummary>()
+
+  const ensureUser = (userId: string) => {
+    const normalized = userId.trim()
+    if (!normalized) return null
+
+    const existing = map.get(normalized)
+    if (existing) return existing
+
+    const next: UserActivitySummary = {
+      userId: normalized,
+      taskCount: 0,
+      assetCount: 0,
+      legacyTaskCount: 0,
+      totalActions: 0,
+      task24h: 0,
+      task7d: 0,
+      asset7d: 0,
+      lastSeenAt: null,
+    }
+    map.set(normalized, next)
+    return next
+  }
+
+  const bumpLastSeen = (summary: UserActivitySummary, createdAt: string) => {
+    if (!summary.lastSeenAt || dayjs(createdAt).isAfter(dayjs(summary.lastSeenAt))) {
+      summary.lastSeenAt = createdAt
+    }
+  }
+
+  processingTaskUsers.forEach((item) => {
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.taskCount += 1
+    summary.totalActions += 1
+    bumpLastSeen(summary, item.created_at)
+
+    const createdAt = dayjs(item.created_at)
+    if (createdAt.isAfter(since24h)) summary.task24h += 1
+    if (createdAt.isAfter(since7d)) summary.task7d += 1
+  })
+
+  assetUsers.forEach((item) => {
+    if (!item.user_id) return
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.assetCount += 1
+    summary.totalActions += 1
+    bumpLastSeen(summary, item.created_at)
+
+    const createdAt = dayjs(item.created_at)
+    if (createdAt.isAfter(since7d)) summary.asset7d += 1
+  })
+
+  legacyTaskUsers.forEach((item) => {
+    const summary = ensureUser(item.user_id)
+    if (!summary) return
+    summary.legacyTaskCount += 1
+    bumpLastSeen(summary, item.created_at)
+  })
+
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.totalActions !== a.totalActions) return b.totalActions - a.totalActions
+    return dayjs(b.lastSeenAt ?? 0).valueOf() - dayjs(a.lastSeenAt ?? 0).valueOf()
+  })
+}
+
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
   const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? ''
   const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? ''
@@ -709,6 +945,12 @@ const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
 }
 
 const refreshEdgeChecks = async () => {
+  if (!edgeFunctionNames.value.length) {
+    edgeChecks.value = []
+    edgeLoading.value = false
+    return
+  }
+
   edgeLoading.value = true
   const checks = await Promise.all(edgeFunctionNames.value.map((name) => checkEdgeFunction(name)))
   edgeChecks.value = checks
@@ -834,12 +1076,31 @@ const refreshDashboard = async () => {
   const since24h = now.subtract(24, 'hour').toISOString()
   const since7d = now.subtract(7, 'day').toISOString()
 
-  const [tasksRes, assetCountRes, poseCountRes, ragCountRes, taskTableRes, task24hRes, asset7dRes] = await Promise.all([
+  const [
+    tasksRes,
+    workerRes,
+    processingTaskCountRes,
+    assetCountRes,
+    poseCountRes,
+    ragCountRes,
+    taskTableCountRes,
+    task24hRes,
+    asset7dRes,
+    processingTaskUsers,
+    assetUsers,
+    legacyTaskUsers,
+  ] = await Promise.all([
     supabase
       .from('processing_tasks')
       .select('id, display_name, scene_id, user_id, status, task_type, quality_score, created_at, updated_at, logs')
       .order('updated_at', { ascending: false })
       .limit(500),
+    supabase
+      .from('worker_nodes')
+      .select('worker_id, hostname, pid, status, current_task_id, current_scene_id, desired_state, control_note, last_heartbeat, started_at, stopped_at, metadata')
+      .order('last_heartbeat', { ascending: false })
+      .limit(100),
+    supabase.from('processing_tasks').select('*', { count: 'exact', head: true }),
     supabase.from('model_assets').select('*', { count: 'exact', head: true }),
     supabase.from('memory_poses').select('*', { count: 'exact', head: true }),
     supabase.from('rag_docs').select('*', { count: 'exact', head: true }),
@@ -850,13 +1111,26 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
+    fetchAllRows<{ user_id: string; created_at: string }>('processing_tasks', 'user_id, created_at'),
+    fetchAllRows<{ user_id: string | null; created_at: string }>('model_assets', 'user_id, created_at'),
+    fetchAllRows<{ user_id: string; created_at: string }>('tasks', 'user_id, created_at'),
   ])
 
-  if (tasksRes.error || assetCountRes.error || poseCountRes.error) {
-    errorMessage.value = tasksRes.error?.message || assetCountRes.error?.message || poseCountRes.error?.message || '数据读取失败'
+  if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
+    errorMessage.value =
+      tasksRes.error?.message ||
+      workerRes.error?.message ||
+      processingTaskCountRes.error?.message ||
+      assetCountRes.error?.message ||
+      poseCountRes.error?.message ||
+      '数据读取失败'
   } else {
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
+    const workers = (workerRes.data ?? []) as WorkerNode[]
+    const summaries = buildUserSummaries(processingTaskUsers, assetUsers, legacyTaskUsers)
     taskRows.value = tasks
+    workerRows.value = workers
+    userSummaries.value = summaries
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
 
@@ -865,18 +1139,18 @@ const refreshDashboard = async () => {
       tasks24h: task24hRes.count ?? 0,
       failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
       completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
-      activeUsers7d: new Set(
-        tasks.filter((item) => dayjs(item.created_at).isAfter(dayjs(since7d))).map((item) => item.user_id),
-      ).size,
+      totalUsers: summaries.length,
+      activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
+      activeUsers7d: summaries.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
       assets7d: asset7dRes.count ?? 0,
     }
 
     dbCounts.value = {
-      processing_tasks: tasksRes.data?.length ?? 0,
+      processing_tasks: processingTaskCountRes.count ?? 0,
       model_assets: assetCountRes.count ?? 0,
       memory_poses: poseCountRes.count ?? 0,
       rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
-      tasks: taskTableRes.error ? 0 : (taskTableRes.count ?? 0),
+      tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
     }
 
     lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
@@ -945,6 +1219,7 @@ onMounted(async () => {
   bindChannel('processing_tasks', 'dashboard-processing-tasks')
   bindChannel('model_assets', 'dashboard-model-assets')
   bindChannel('memory_poses', 'dashboard-memory-poses')
+  bindChannel('worker_nodes', 'dashboard-worker-nodes')
 
   restartPolling()
 })
@@ -1004,6 +1279,10 @@ onUnmounted(() => {
             <article class="phone-stat-card">
               <span>资产</span>
               <strong>{{ modelAssetCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>用户</span>
+              <strong>{{ totalUserCount }}</strong>
             </article>
           </div>
 
@@ -1082,7 +1361,7 @@ onUnmounted(() => {
                 <Icon icon="lucide:paintbrush-2" />
                 <el-color-picker
                   v-model="accentColor"
-                  :predefine="['#71839a', '#5f86c2', '#86a8a1', '#8d9bc4', '#a0afc7']"
+                  :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
                 />
               </div>
             </div>
@@ -1098,8 +1377,8 @@ onUnmounted(() => {
               <strong>{{ queueCount }}</strong>
             </article>
             <article class="summary-pill" :class="`tone-${workerSeverity}`">
-              <span>Worker</span>
-              <strong>{{ workerOnline ? '在线' : '离线' }}</strong>
+              <span>Workers</span>
+              <strong>{{ workerSummaryText }}</strong>
             </article>
           </div>
         </section>
@@ -1288,6 +1567,77 @@ onUnmounted(() => {
           </section>
 
           <section class="panel-grid panel-grid--resources">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">Worker 集群</div>
+                    <div class="header-meta">在线 {{ onlineWorkerCount }} / 总数 {{ workerRows.length }}，支持对单个实例发起优雅暂停。</div>
+                  </div>
+                </div>
+              </template>
+              <el-table :data="workerRows" stripe height="300" empty-text="还没有 worker 注册心跳">
+                <el-table-column label="Worker" min-width="240">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatWorkerLabel(scope.row) }}</div>
+                    <div class="task-sub">{{ scope.row.worker_id }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="120" align="center">
+                  <template #default="scope">
+                    <el-tag :type="getWorkerStatusTag(scope.row.status)">
+                      {{ getWorkerStatusLabel(scope.row) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="当前任务" min-width="180">
+                  <template #default="scope">
+                    {{ scope.row.current_scene_id || scope.row.current_task_id || '-' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="心跳" min-width="170">
+                  <template #default="scope">
+                    {{ formatDateTime(scope.row.last_heartbeat) }} / {{ formatHeartbeatAge(scope.row.last_heartbeat) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="控制" min-width="260" align="center">
+                  <template #default="scope">
+                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerPause(scope.row)"
+                      >
+                        优雅暂停
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="danger"
+                        plain
+                        :disabled="scope.row.desired_state === 'interrupt' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerInterrupt(scope.row)"
+                      >
+                        中断任务
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="success"
+                        plain
+                        :disabled="scope.row.desired_state === 'run' && isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerResume(scope.row)"
+                      >
+                        恢复实例
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="header-meta" style="margin-top: 12px;">
+                “优雅暂停” 会把 `desired_state` 设为 `pause`，实例不会再接新任务；“中断任务” 会把 `desired_state` 设为 `interrupt`，Supervisor 会尝试向子 Worker 转发中断信号，尽量打断当前任务；“恢复实例” 会把 `desired_state` 改回 `run` 并重新拉起实例。
+              </div>
+            </el-card>
+
             <el-card shadow="never" class="storage-card glass-card">
               <template #header>
                 <div>
@@ -1333,6 +1683,14 @@ onUnmounted(() => {
                   <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
                 </div>
                 <div class="metric-item">
+                  <div class="metric-title">用户总数</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃用户</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
                   <div class="metric-title">7d 活跃</div>
                   <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
                 </div>
@@ -1342,6 +1700,94 @@ onUnmounted(() => {
                 </div>
               </div>
               <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--users">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户列表</div>
+                  <div class="header-meta">基于 `processing_tasks`、`model_assets`、`tasks` 的 user_id 聚合。</div>
+                </div>
+              </template>
+              <el-table :data="userSummaries" stripe height="360" empty-text="暂无用户数据">
+                <el-table-column label="用户" min-width="180">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatUserId(scope.row.userId) }}</div>
+                    <div class="task-sub">{{ scope.row.userId }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="任务数" width="90" align="right" prop="taskCount" />
+                <el-table-column label="资产数" width="90" align="right" prop="assetCount" />
+                <el-table-column label="24h 任务" width="100" align="right" prop="task24h" />
+                <el-table-column label="7d 活跃" width="100" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.task7d > 0 || scope.row.asset7d > 0 ? 'success' : 'info'">
+                      {{ scope.row.task7d > 0 || scope.row.asset7d > 0 ? '活跃' : '沉默' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="最近活动" min-width="170">
+                  <template #default="scope">
+                    {{ scope.row.lastSeenAt ? formatDateTime(scope.row.lastSeenAt) : '-' }}
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户活跃摘要</div>
+                  <div class="header-meta">最近活跃与高频使用者。</div>
+                </div>
+              </template>
+
+              <div class="db-metrics db-metrics--users">
+                <div class="metric-item">
+                  <div class="metric-title">总用户</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 活跃</div>
+                  <div class="metric-value ok">{{ timeBasedStats.activeUsers7d }}</div>
+                </div>
+              </div>
+
+              <div class="user-summary-block">
+                <div class="card-header-row user-summary-block__head">
+                  <div>
+                    <div class="card-header">Top 用户</div>
+                    <div class="header-meta">按业务动作总数排序。</div>
+                  </div>
+                </div>
+                <div class="alerts-list alerts-list--soft">
+                  <article v-for="item in topUsers" :key="item.userId" class="alert-item">
+                    <div class="alert-item-top">
+                      <div>
+                        <span class="alert-label">{{ formatUserId(item.userId) }}</span>
+                        <strong class="alert-value">{{ item.totalActions }}</strong>
+                      </div>
+                      <el-tag type="info">任务 {{ item.taskCount }}</el-tag>
+                    </div>
+                    <p class="alert-note">资产 {{ item.assetCount }}，最近活动 {{ item.lastSeenAt ? formatDateTime(item.lastSeenAt) : '-' }}</p>
+                  </article>
+                </div>
+              </div>
+
+              <el-divider />
+
+              <div class="user-chip-list">
+                <div v-for="item in newlyActiveUsers" :key="item.userId" class="user-chip">
+                  <span>{{ formatUserId(item.userId) }}</span>
+                  <strong>{{ item.task7d + item.asset7d }}</strong>
+                </div>
+              </div>
             </el-card>
           </section>
 
