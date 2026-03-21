@@ -1,0 +1,308 @@
+[
+  {
+    "case_id": "part16_recent_001",
+    "group": "recent_hit",
+    "question": "这两天我都拍了啥？",
+    "expected_route_hint": "recent_capture",
+    "expected_focus": ["recent_capture"],
+    "priority": "medium",
+    "notes": "观察口语化 recent 是否稳定走 recent 路由。"
+  },
+  {
+    "case_id": "part16_recent_002",
+    "group": "recent_hit",
+    "question": "最近又扫到什么了？",
+    "expected_route_hint": "recent_capture",
+    "expected_focus": ["recent_capture"],
+    "priority": "medium",
+    "notes": "观察 recent 路由和回答自然度。"
+  },
+  {
+    "case_id": "part16_recent_003",
+    "group": "recent_hit",
+    "question": "最近拍了些什么东西？",
+    "expected_route_hint": "recent_capture",
+    "expected_focus": ["recent_capture"],
+    "priority": "medium",
+    "notes": "检查 recent 不要误掉到 object_lookup。"
+  },
+  {
+    "case_id": "part16_recent_004",
+    "group": "recent_hit",
+    "question": "我最近拍到过什么场景？",
+    "expected_route_hint": "recent_capture",
+    "expected_focus": ["recent_capture"],
+    "priority": "medium",
+    "notes": "观察 recent 回答聚焦程度。"
+  },
+  {
+    "case_id": "part16_nohit_001",
+    "group": "no_hit",
+    "question": "我最近拍过钢琴吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["钢琴"],
+    "priority": "medium",
+    "notes": "检查 no-hit 是否会误召回。"
+  },
+  {
+    "case_id": "part16_nohit_002",
+    "group": "no_hit",
+    "question": "最近拍到过小提琴吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["小提琴"],
+    "priority": "medium",
+    "notes": "检查 no-hit 风格是否自然。"
+  },
+  {
+    "case_id": "part16_nohit_003",
+    "group": "no_hit",
+    "question": "我最近有记录过鼓吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["鼓"],
+    "priority": "medium",
+    "notes": "检查 no-hit 不要误报近义物体。"
+  },
+  {
+    "case_id": "part16_nohit_004",
+    "group": "no_hit",
+    "question": "最近拍到过汽车吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["汽车"],
+    "priority": "medium",
+    "notes": "检查 no-hit 稳定性。"
+  },
+  {
+    "case_id": "part16_obj_001",
+    "group": "object_lookup",
+    "question": "帮我找一下洛天依模型",
+    "expected_route_hint": "lexical_fallback",
+    "expected_focus": ["洛天依"],
+    "priority": "high",
+    "notes": "观察实体词查询是否依赖 lexical fallback。"
+  },
+  {
+    "case_id": "part16_obj_002",
+    "group": "object_lookup",
+    "question": "最近有没有洛天依相关的内容？",
+    "expected_route_hint": "lexical_fallback",
+    "expected_focus": ["洛天依"],
+    "priority": "high",
+    "notes": "检查实体名短句问法的召回稳定性。"
+  },
+  {
+    "case_id": "part16_obj_003",
+    "group": "object_lookup",
+    "question": "最近拍到过地球仪吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["地球仪"],
+    "priority": "high",
+    "notes": "检查具体物体召回。"
+  },
+  {
+    "case_id": "part16_obj_004",
+    "group": "object_lookup",
+    "question": "有没有显示器相关的记录？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["显示器"],
+    "priority": "high",
+    "notes": "检查 object lookup 命中质量。"
+  },
+  {
+    "case_id": "part16_obj_005",
+    "group": "object_lookup",
+    "question": "最近有笔记本电脑相关的画面吗？",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "high",
+    "notes": "检查向量召回是否稳定。"
+  },
+  {
+    "case_id": "part16_obj_006",
+    "group": "object_lookup",
+    "question": "帮我找找手办相关的内容",
+    "expected_route_hint": "object_lookup",
+    "expected_focus": ["手办"],
+    "priority": "high",
+    "notes": "观察泛化词 object_lookup 的命中和 style。"
+  },
+  {
+    "case_id": "part16_partial2_001",
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑和钢琴吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["笔记本电脑", "钢琴"],
+    "priority": "high",
+    "notes": "检查 partial 二元是否保持显式否定。"
+  },
+  {
+    "case_id": "part16_partial2_002",
+    "group": "partial_coverage",
+    "question": "我最近拍过地球仪和钢琴吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["地球仪", "钢琴"],
+    "priority": "high",
+    "notes": "检查 partial false negative。"
+  },
+  {
+    "case_id": "part16_partial2_003",
+    "group": "partial_coverage",
+    "question": "我最近拍过显示器和小提琴吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["显示器", "小提琴"],
+    "priority": "high",
+    "notes": "检查 partial 混合命中表现。"
+  },
+  {
+    "case_id": "part16_partial2_004",
+    "group": "partial_coverage",
+    "question": "最近有手办和钢琴相关的内容吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["手办", "钢琴"],
+    "priority": "high",
+    "notes": "检查 partial 的口语化问法。"
+  },
+  {
+    "case_id": "part16_partial2_005",
+    "group": "partial_coverage",
+    "question": "最近见过键盘和汽车吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["键盘", "汽车"],
+    "priority": "high",
+    "notes": "检查 partial 回答是否分清命中与未命中。"
+  },
+  {
+    "case_id": "part16_partial2_006",
+    "group": "partial_coverage",
+    "question": "最近拍到过书架和鼓吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["书架", "鼓"],
+    "priority": "high",
+    "notes": "检查 lexical fallback 是否在 partial 内触发。"
+  },
+  {
+    "case_id": "part16_partial3_001",
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑、地球仪和钢琴吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["笔记本电脑", "地球仪", "钢琴"],
+    "priority": "high",
+    "notes": "检查三元 partial 是否出现新的 failure mode。"
+  },
+  {
+    "case_id": "part16_partial3_002",
+    "group": "partial_coverage",
+    "question": "最近拍到过显示器、笔记本电脑和小提琴吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["显示器", "笔记本电脑", "小提琴"],
+    "priority": "high",
+    "notes": "检查三元混合命中。"
+  },
+  {
+    "case_id": "part16_partial3_003",
+    "group": "partial_coverage",
+    "question": "最近有手办、书架和钢琴相关内容吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["手办", "书架", "钢琴"],
+    "priority": "high",
+    "notes": "检查三元 partial 的稳定性。"
+  },
+  {
+    "case_id": "part16_partial3_004",
+    "group": "partial_coverage",
+    "question": "最近拍到过键盘、地球仪和汽车吗？",
+    "expected_route_hint": "partial_coverage",
+    "expected_focus": ["键盘", "地球仪", "汽车"],
+    "priority": "high",
+    "notes": "检查 partial 在三元场景下的显式否定能力。"
+  },
+  {
+    "case_id": "part16_must_001",
+    "group": "must_answer",
+    "question": "最近拍到过什么笔记本电脑相关画面？",
+    "expected_route_hint": "must_answer",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "medium",
+    "notes": "检查 must-answer 是否足够聚焦。"
+  },
+  {
+    "case_id": "part16_must_002",
+    "group": "must_answer",
+    "question": "最近拍到过什么显示器相关画面？",
+    "expected_route_hint": "must_answer",
+    "expected_focus": ["显示器"],
+    "priority": "medium",
+    "notes": "检查主目标不要被陪衬物体稀释。"
+  },
+  {
+    "case_id": "part16_must_003",
+    "group": "must_answer",
+    "question": "最近拍到过什么地球仪相关画面？",
+    "expected_route_hint": "must_answer",
+    "expected_focus": ["地球仪"],
+    "priority": "medium",
+    "notes": "检查 must-answer 具体性。"
+  },
+  {
+    "case_id": "part16_must_004",
+    "group": "must_answer",
+    "question": "最近拍到过什么手办相关画面？",
+    "expected_route_hint": "must_answer",
+    "expected_focus": ["手办"],
+    "priority": "medium",
+    "notes": "检查 must-answer 风格。"
+  },
+  {
+    "case_id": "part16_multi_001",
+    "group": "multi_hit_must_answer",
+    "question": "最近拍到过什么书籍相关内容？",
+    "expected_route_hint": "multi_hit_must_answer",
+    "expected_focus": ["书籍"],
+    "priority": "medium",
+    "notes": "检查 multi-hit 的聚合表达。"
+  },
+  {
+    "case_id": "part16_multi_002",
+    "group": "multi_hit_must_answer",
+    "question": "最近拍到过什么笔记本电脑相关内容？",
+    "expected_route_hint": "multi_hit_must_answer",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "medium",
+    "notes": "检查多命中回答是否仍然自然。"
+  },
+  {
+    "case_id": "part16_inventory_001",
+    "group": "inventory",
+    "question": "我有没有生成什么模型？",
+    "expected_route_hint": "inventory_special_case",
+    "expected_focus": ["模型"],
+    "priority": "high",
+    "notes": "检查 inventory formatter 是否稳定工作。"
+  },
+  {
+    "case_id": "part16_inventory_002",
+    "group": "inventory",
+    "question": "最近有哪些模型？",
+    "expected_route_hint": "inventory_special_case",
+    "expected_focus": ["模型"],
+    "priority": "high",
+    "notes": "检查 inventory 回答是否仍然人话。"
+  },
+  {
+    "case_id": "part16_semantic_001",
+    "group": "abstract_semantic_query",
+    "question": "有没有偏理工一点的模型？",
+    "expected_route_hint": "semantic_summary_formatter",
+    "expected_focus": ["理工"],
+    "priority": "high",
+    "notes": "检查 semantic expansion 和 summary formatter。"
+  },
+  {
+    "case_id": "part16_semantic_002",
+    "group": "abstract_semantic_query",
+    "question": "最近拍到过计算机科学相关内容吗？",
+    "expected_route_hint": "semantic_summary_formatter",
+    "expected_focus": ["计算机科学"],
+    "priority": "high",
+    "notes": "检查抽象概念查询的 route 和命中质量。"
+  }
+]
