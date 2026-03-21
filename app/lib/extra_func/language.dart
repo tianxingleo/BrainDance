@@ -2,6 +2,8 @@ enum Language {
   zh(
     name: "简体中文",
     map: {
+      "sensor_off": "传感器关闭",
+      'sensor_on': "传感器开启",
       "lang": "简体中文",
       "locale": "zh_CN",
       "title": "流光 · 记",
@@ -288,6 +290,8 @@ enum Language {
   en(
     name: "English",
     map: {
+      "sensor_off": "Sensor Off",
+      'sensor_on': "Sensor On",
       "lang": "English",
       "locale": "en_US",
       "title": "Brain Dance",
