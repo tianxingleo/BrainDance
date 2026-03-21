@@ -97,6 +97,9 @@ doc/api/
 # 5. AI Engine: Python (算法端)
 # =========================
 # 字节码与缓存
+__pycache__/
+*.pyc
+.pytest_cache/
 ai_engine/**/__pycache__/
 ai_engine/**/*.pyc
 

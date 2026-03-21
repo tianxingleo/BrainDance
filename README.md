@@ -114,6 +114,35 @@ BrainDance 的价值架构跨越了三个维度，构建了一个从个体到文
     - **Single Image**: 支持基于 SAM3D 的单图 3DGS 生成，无需视频。
     - **Understanding**: 调用多模态大模型 (Qwen-VL) 进行场景理解与自动打标 (Auto-Tagging)。
 
+### 🧪 Qwen3 本地问答微调（实验链路）
+
+`ai_engine/finetune_qwen3` 已沉淀 `Qwen3-1.7B + LoRA` 的本地问答实验能力（Part 16-19）：
+
+- 检索路由可观测性与回归机制
+- `object_lookup` 检索专项优化
+- formatter 回答路由稳定化
+- 最小本地问答入口 `local_qa_cli.py`
+
+当前状态说明：
+
+- 属于实验/调试链路
+- 尚未并入正式产品主流程
+
+快速命令：
+
+```bash
+# 单轮问答
+python ai_engine/finetune_qwen3/scripts/local_qa_cli.py --question "我最近拍了什么？"
+
+# 回归测试
+pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
+```
+
+文档入口：
+
+- `ai_engine/finetune_qwen3/README.md`
+- `docs/开发文档/本地问答微调文档补充说明.md`
+
 
 
 ------
@@ -145,6 +174,7 @@ BrainDance/
 │   │   ├── requirements.txt  #   - Python 依赖
 │   │   └── main.py           #   - 程序入口
 │   ├── demo/              #   - 演示脚本与测试数据
+│   ├── finetune_qwen3/    #   - Qwen3 本地问答微调实验链路（Part16-19）
 │   ├── models/            #   - AI 模型缓存目录
 │   ├── rag/               #   - RAG 数据处理
 │   └── log/               #   - 日志文件
