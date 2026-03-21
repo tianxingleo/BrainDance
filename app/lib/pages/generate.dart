@@ -55,6 +55,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   int _totalFileSize = 0;
   String? _generatedImageUrl;
   bool _isGenerating = false;
+  String _selectedVideoTaskType = 'video_3dgs';
+  bool _wasGeneratePageActive = false;
 
   static String _generateSceneId() {
     final time = DateTime.now();
@@ -99,14 +101,119 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   @override
   void dispose() {
+    _clearGenerateDraft();
     _tabController.dispose();
     _scrollController.dispose();
     _textEditingController.dispose();
     super.dispose();
   }
 
+  void _clearGenerateDraft() {
+    GenConfig.uploadedImages.clear();
+    GenConfig.uploadedVideos.clear();
+    GenConfig.uploadedText = "";
+    _generatedImageUrl = null;
+    _selectedVideoTaskType = 'video_3dgs';
+    _textEditingController.clear();
+    unawaited(GenConfig.deleteImagePathsFile());
+    unawaited(GenConfig.deleteTextFile());
+    unawaited(GenConfig.deleteVideoPathsFile());
+  }
+
+  bool get _isZh =>
+      Localizations.localeOf(context).languageCode.toLowerCase().startsWith(
+        'zh',
+      );
+
+  String _videoTaskTypeLabel(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return _isZh ? '视频双链' : 'Video Dual Chain';
+      case 'video_3dgs':
+        return _isZh ? '视频3DGS' : 'Video 3DGS';
+      case 'da3_feed_forward_3dgs':
+        return _isZh ? '视频前馈3DGS' : 'Video Feed-Forward 3DGS';
+      case 'da3_sugar':
+        return _isZh ? '视频SuGaR高质量' : 'Video SuGaR High Quality';
+      case 'da3_2dgs':
+        return _isZh ? '视频2DGS' : 'Video 2DGS';
+      case 'sparse2dgs':
+        return _isZh ? '视频Sparse2DGS' : 'Video Sparse2DGS';
+      default:
+        return taskType;
+    }
+  }
+
+  String _videoTaskTypeHint(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return _isZh ? '先快后精，适合默认使用' : 'Fast first, then refine';
+      case 'video_3dgs':
+        return _isZh ? '传统视频转 3DGS' : 'Classic video to 3DGS';
+      case 'da3_feed_forward_3dgs':
+        return _isZh ? '更快出结果的 3DGS' : 'Faster 3DGS generation';
+      case 'da3_sugar':
+        return _isZh ? '更高质量，但更慢' : 'Higher quality, slower';
+      case 'da3_2dgs':
+        return _isZh ? '输出 2DGS 路线' : '2DGS output pipeline';
+      case 'sparse2dgs':
+        return _isZh ? '抽帧后走 Sparse2DGS' : 'Sample frames into Sparse2DGS';
+      default:
+        return '';
+    }
+  }
+
+  List<String> get _videoTaskTypeOptions => const [
+    'video_3dgs',
+    'video_dual_chain',
+    'da3_feed_forward_3dgs',
+    'da3_sugar',
+    'da3_2dgs',
+    'sparse2dgs',
+  ];
+
+  Future<void> _showVideoTaskTypeSheet() async {
+    final completer = Completer<void>();
+    TDActionSheet(
+      context,
+      description: _isZh ? '选择这段视频要走的生成路线' : 'Choose the generation pipeline for this video',
+      items: _videoTaskTypeOptions
+          .map(
+            (taskType) => TDActionSheetItem(
+              label: _videoTaskTypeLabel(taskType),
+            ),
+          )
+          .toList(),
+      cancelText: textLocalize("gen_cancel"),
+      onSelected: (item, index) {
+        _refresh(() {
+          _selectedVideoTaskType = _videoTaskTypeOptions[index];
+        });
+        completer.complete();
+      },
+      onCancel: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+      onClose: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+    ).show();
+    await completer.future;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isGeneratePageActive = ref.watch(pageIndexProvider) == 1;
+    if (isGeneratePageActive) {
+      _wasGeneratePageActive = true;
+    } else if (_wasGeneratePageActive) {
+      _wasGeneratePageActive = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _refresh(_clearGenerateDraft);
+      });
+    }
+
     final theme = TDTheme.of(context);
     final isDark = AppConfig.isNightMode;
     const double floatingNavHeight = 68;
@@ -324,6 +431,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 for (final f in files) {
                   GenConfig.uploadedVideos.remove(f);
                 }
+                if (GenConfig.uploadedVideos.isEmpty) {
+                  _selectedVideoTaskType = 'video_3dgs';
+                }
                 break;
               case TDUploadType.replace:
                 break;
@@ -365,6 +475,63 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                     child: upload,
                   ),
                 ),
+                if (GenConfig.uploadedVideos.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  BDPanelCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 16,
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: _showVideoTaskTypeSheet,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _isZh ? '任务类型' : 'Task Type',
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _videoTaskTypeLabel(_selectedVideoTaskType),
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _videoTaskTypeHint(_selectedVideoTaskType),
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.62)
+                                        : theme.fontGyColor3,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.tune_rounded,
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.72)
+                                : BDDesign.colorMutedBlue,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
