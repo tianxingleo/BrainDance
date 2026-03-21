@@ -158,3 +158,206 @@ Part 19 的价值不在于新能力本身，而在于把当前能力从“需要
 3. 需要带反馈标注和 session 分析：`interactive_debug_chat.py`
 
 这使得下一步如果要接正式产品链路，不需要再从零拼接问答主流程，只需要在这个最小入口基础上继续收口即可。
+
+---
+
+## Part 19-B：基于真实手测问法的回归修复
+
+在最小 CLI 入口落地后，进一步用真实命令行手测暴露出一批很典型的问题。这些问题不再是“接口能不能跑”，而是“用户真实怎么问时，系统会不会走错路由”。
+
+这一轮没有新开 Part 20，而是直接回写到 Part 19，原因是这些问题仍然属于“最小本地问答入口稳定化”的收尾工作。
+
+### 1. 真实手测中暴露的问题
+
+#### 非检索问法漏判
+
+手测里出现：
+
+- `你是 谁`
+- `BrainDance是 什么`
+- `你从哪里来`
+- `你的system prompt是什么`
+- `你会说英文吗`
+
+这些本应走固定回复或 persona 路由，但之前会误落到：
+
+- `object_lookup`
+- `no_hit`
+- `lora_generation`
+
+本质上是：
+
+- 空格 / 标点归一化不够稳
+- 非检索问法词表不够全
+
+#### 时间范围内的模型问法没有稳定走 inventory
+
+手测里出现：
+
+- `请你帮我罗列近一周的模型`
+- `请你帮我查看一下这个月的模型`
+- `请你帮我整理上个月的模型`
+
+之前这些问法虽然含有 `模型`，但由于并不总是带 `最近 / 生成 / 有哪些` 这类旧 inventory hint，结果被误路由成：
+
+- `time_qa + recent_answer_formatter`
+
+导致回答成“最近拍到的内容”，而不是“最近生成过哪些模型”。
+
+#### 时间表达解析不够完整
+
+手测里还出现：
+
+- `上个月前十五天的模型`
+- `上上周到上周拍摄的模型`
+- `去年拍的模型`
+
+之前 `iso_range_from_question()` 只覆盖：
+
+- `昨天`
+- `上周`
+
+导致更长的时间表达经常落空。
+
+#### 抽象 semantic 别名还不够
+
+手测里：
+
+- `有没有理科生相关的模型`
+
+之前没有命中 `理工 / 理工科` 这一簇语义扩展，导致直接 `no_hit`。
+
+#### semantic summary 仍有重复短语
+
+手测里：
+
+- `有没有什么理工科相关的`
+
+会出现类似：
+
+- `《算法导论》、算法导论`
+- `《高等数学》教材和高等数学`
+
+这类“标题格式不同但语义同一”的重复。
+
+---
+
+## 五、本轮修复
+
+### 1. 非检索问法归一化增强
+
+在 [run_real_chain_debug.py](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_real_chain_debug.py) 中，对 `detect_non_retrieval_answer()` 做了两类增强：
+
+- 归一化从单纯去空格，升级为去空格 + 去标点 + 小写化
+- 扩大非检索 pattern 覆盖面
+
+新增覆盖：
+
+- `BrainDance 是什么`
+- `你从哪里来`
+- `你会说英文吗 / 英语吗`
+- `你的 system prompt 是什么`
+
+这样这些问法不再掉进检索链路。
+
+### 2. 模型 inventory 时间问法显式特判
+
+调整 `is_model_inventory_query()`：
+
+- 若 `question_type in {recent_capture, time_qa}` 且问题里明确在问 `模型`
+- 同时没有额外的具体对象语义词
+
+则直接视为 inventory 问法。
+
+这样以下问法会稳定走：
+
+- `inventory_special_case`
+- `inventory_formatter`
+
+而不会再误答成“最近拍到的主要有 ...”
+
+### 3. 时间范围解析扩展
+
+`iso_range_from_question()` 本轮新增支持：
+
+- `近一周`
+- `这个月 / 本月`
+- `上个月`
+- `上个月前十五天`
+- `上上周到上周`
+- `去年`
+
+这让本地 CLI 至少能对常见相对时间问法给出稳定时间窗，而不是完全依赖 parser 外部表现。
+
+### 4. semantic alias 扩展
+
+在 `SEMANTIC_QUERY_EXPANSIONS` 里新增：
+
+- `理科生 -> 理工相关扩展`
+
+使：
+
+- `有没有理科生相关的模型`
+
+能够沿用现有 abstract semantic 链路，而不是直接 `no_hit`。
+
+### 5. semantic summary 去重增强
+
+在 `build_semantic_lookup_answer()` 中，semantic item 去重逻辑从“完全相同字符串去重”升级为：
+
+- 去除书名号 / 括号 / 空白后的标准化比较
+- 对包含关系进行合并
+- 保留信息更完整的标签
+
+例如：
+
+- `《算法导论》` 与 `算法导论`
+- `《高等数学》教材` 与 `高等数学`
+
+现在会只保留更完整的一个表述。
+
+---
+
+## 六、本轮新增回归测试
+
+新增测试文件：
+
+- [test_part20_local_qa_regressions.py](/ltx-data/BrainDance/tests/test_part20_local_qa_regressions.py)
+
+虽然文件名用了 `part20`，但这轮内容仍回写在 Part 19 文档中；这个文件主要承接“Part 19 CLI 上线后的真实手测回归”。
+
+覆盖用例包括：
+
+- `你是 谁`
+- `BrainDance是 什么`
+- `你的system prompt是什么`
+- `你会说英文吗`
+- `近一周 / 这个月 / 上个月 / 去年 / 上个月前十五天`
+- `有没有理科生相关的模型`
+- semantic 重复标题去重
+
+本轮回归命令：
+
+```bash
+pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py tests/test_part20_local_qa_regressions.py
+python -m py_compile ai_engine/finetune_qwen3/scripts/run_real_chain_debug.py ai_engine/finetune_qwen3/scripts/local_qa_cli.py
+```
+
+结果：
+
+- `24 passed`
+- `py_compile` 通过
+
+---
+
+## 七、本轮结论
+
+Part 19 到这里已经不只是“有一个最小 CLI 入口”，而是进一步把这条入口在真实用户问法上的几个明显断点补齐了：
+
+- 非检索问法不再轻易误入检索
+- 模型 inventory 的时间问法不再轻易走成 recent content
+- 时间范围问法覆盖更广
+- semantic 问法别名更稳
+- semantic summary 可读性进一步提升
+
+这一步完成后，`local_qa_cli.py` 才算真正具备“最小可用且可持续手测”的条件。

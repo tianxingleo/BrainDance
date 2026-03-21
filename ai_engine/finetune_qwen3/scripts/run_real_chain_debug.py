@@ -60,8 +60,12 @@ VALID_MODES = {"off", "base", "lora_round3", "compare"}
 VALID_QUESTION_TYPES = {"recent_capture", "time_qa", "object_lookup", "partial_coverage", "other"}
 GENERIC_SEARCH_TEXTS = {"什么", "哪些", "哪几个", "哪几条", "内容", "记录", "场景"}
 RECENT_KEYWORDS = ("最近", "刚才", "最新", "这几天")
+LAST_SEVEN_DAYS_KEYWORDS = ("近一周", "最近一周", "过去一周")
 YESTERDAY_KEYWORDS = ("昨天",)
 LAST_WEEK_KEYWORDS = ("上周",)
+THIS_MONTH_KEYWORDS = ("这个月", "本月")
+LAST_MONTH_KEYWORDS = ("上个月",)
+LAST_YEAR_KEYWORDS = ("去年",)
 PARTIAL_CONNECTORS = ("和", "以及", "还有", "、", "分别", "那")
 NEGATIVE_MARKERS = ("暂无", "未见", "没有", "未拍到", "没看到", "无", "不存在")
 LIST_SEPARATORS = ("、", "，", ",", "；", ";")
@@ -69,6 +73,15 @@ GENERIC_FOCUS_TERMS = {"办公桌", "桌面", "书桌", "桌子", "房间", "屋
 GENERIC_MODEL_TERMS = {"模型", "3d模型", "三维模型", "高斯模型", "3dgs", "高斯", "场景模型"}
 MODEL_INVENTORY_HINTS = ("生成", "建模", "做了", "有没有", "有哪些", "最近", "刚刚")
 GREETING_KEYWORDS = ("你好", "您好", "嗨", "hello", "hi", "早上好", "下午好", "晚上好")
+ENGLISH_MODEL_HINTS = ("model", "models")
+ENGLISH_INVENTORY_HINTS = (
+    "what model i have",
+    "what models i have",
+    "what model do i have",
+    "what models do i have",
+    "recent model",
+    "recent models",
+)
 IDENTITY_PATTERNS = (
     "你是谁",
     "你是干什么的",
@@ -81,7 +94,13 @@ IDENTITY_PATTERNS = (
     "你可以帮我做什么",
     "你可以做什么",
     "你有什么功能",
+    "你从哪里来",
+    "你会说英文吗",
+    "你会英语吗",
+    "你会英文吗",
 )
+SYSTEM_PROMPT_PATTERNS = ("systemprompt", "system提示", "系统提示", "prompt")
+PRODUCT_IDENTITY_PATTERNS = ("braindance是什么", "braindance是啥", "braindance有什么用")
 GENERIC_OBJECT_SUFFIXES = (
     "模型",
     "场景",
@@ -141,6 +160,7 @@ GENERIC_OBJECT_PREFIXES = (
 SEMANTIC_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "理工": ("算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"),
     "理工科": ("算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"),
+    "理科生": ("算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"),
     "计算机科学": ("算法", "算法导论", "电脑", "笔记本电脑", "显示器", "机械键盘", "白板", "办公桌"),
     "计算机": ("电脑", "笔记本电脑", "显示器", "机械键盘", "办公桌", "白板"),
     "学习相关": ("教材", "词典", "算法导论", "高等数学", "白板", "笔记本电脑", "显示器"),
@@ -372,15 +392,43 @@ def parse_datetime(value: str) -> datetime:
 
 def iso_range_from_question(question: str) -> tuple[str | None, str | None]:
     current = now_utc()
+    normalized = re.sub(r"\s+", "", question or "")
+    if any(word in normalized for word in LAST_SEVEN_DAYS_KEYWORDS):
+        start = (current - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = current.replace(microsecond=0)
+        return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
     if any(word in question for word in YESTERDAY_KEYWORDS):
         start = (current - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end = start.replace(hour=23, minute=59, second=59)
+        return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
+    if "上上周到上周" in normalized or "上上周至上周" in normalized:
+        weekday = current.weekday()
+        this_week_start = (current - timedelta(days=weekday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = this_week_start - timedelta(days=14)
+        end = this_week_start - timedelta(seconds=1)
         return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
     if any(word in question for word in LAST_WEEK_KEYWORDS):
         weekday = current.weekday()
         this_week_start = (current - timedelta(days=weekday)).replace(hour=0, minute=0, second=0, microsecond=0)
         start = this_week_start - timedelta(days=7)
         end = this_week_start - timedelta(seconds=1)
+        return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
+    if any(word in normalized for word in THIS_MONTH_KEYWORDS):
+        start = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = current.replace(microsecond=0)
+        return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
+    if any(word in normalized for word in LAST_MONTH_KEYWORDS):
+        first_day_this_month = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = first_day_this_month - timedelta(seconds=1)
+        start = end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if "前十五天" in normalized:
+            half_end_day = min(15, end.day)
+            half_end = start.replace(day=half_end_day, hour=23, minute=59, second=59, microsecond=0)
+            return start.isoformat().replace("+00:00", "Z"), half_end.isoformat().replace("+00:00", "Z")
+        return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
+    if any(word in normalized for word in LAST_YEAR_KEYWORDS):
+        start = current.replace(year=current.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = current.replace(year=current.year - 1, month=12, day=31, hour=23, minute=59, second=59, microsecond=0)
         return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
     return None, None
 
@@ -468,7 +516,15 @@ def parse_query_intent(
     if question_type == "other":
         if any(token in question for token in RECENT_KEYWORDS):
             question_type = "recent_capture"
-        elif any(token in question for token in YESTERDAY_KEYWORDS + LAST_WEEK_KEYWORDS):
+        elif any(
+            token in question
+            for token in YESTERDAY_KEYWORDS
+            + LAST_WEEK_KEYWORDS
+            + LAST_SEVEN_DAYS_KEYWORDS
+            + THIS_MONTH_KEYWORDS
+            + LAST_MONTH_KEYWORDS
+            + LAST_YEAR_KEYWORDS
+        ):
             question_type = "time_qa"
         elif target_objects and len(target_objects) >= 2 and any(token in question for token in PARTIAL_CONNECTORS):
             question_type = "partial_coverage"
@@ -1139,7 +1195,7 @@ def build_object_lookup_candidates(
 
 
 def detect_non_retrieval_answer(question: str) -> tuple[str, str] | None:
-    normalized = re.sub(r"\s+", "", question or "").lower()
+    normalized = re.sub(r"[\s\W_]+", "", question or "").lower()
     if not normalized:
         return None
     if normalized in {"你好", "您好", "嗨", "hello", "hi"} or any(keyword in normalized for keyword in GREETING_KEYWORDS):
@@ -1147,10 +1203,30 @@ def detect_non_retrieval_answer(question: str) -> tuple[str, str] | None:
             "greeting",
             "我是 BrainDance 的本地记忆问答助手，可以帮你查最近拍到的内容、物体线索和生成过的模型。",
         )
+    if any(pattern in normalized for pattern in PRODUCT_IDENTITY_PATTERNS):
+        return (
+            "persona",
+            "BrainDance 是一个面向本地记录检索的记忆问答助手，主要用来查询拍摄内容、物体线索和生成过的模型。",
+        )
     if any(pattern in normalized for pattern in IDENTITY_PATTERNS):
+        if "英文" in normalized or "英语" in normalized:
+            return (
+                "persona",
+                "可以，我能处理简单英文问法，但当前主要面向本地记录检索，中文问法通常更稳。",
+            )
+        if "从哪里来" in normalized:
+            return (
+                "persona",
+                "我是 BrainDance 项目里的本地记忆问答助手，基于你的本地记录和当前检索链路工作。",
+            )
         return (
             "persona",
             "我是 BrainDance 的本地记忆问答助手，主要帮你根据本地记录查询拍摄内容、物体线索和模型资产。",
+        )
+    if any(pattern in normalized for pattern in SYSTEM_PROMPT_PATTERNS) and "你的" in normalized:
+        return (
+            "non_retrieval",
+            "我不能直接透露内部 system prompt，但可以说明：我会优先依据本地检索证据回答问题。",
         )
     return None
 
@@ -1158,8 +1234,18 @@ def detect_non_retrieval_answer(question: str) -> tuple[str, str] | None:
 def is_model_inventory_query(question: str, question_type: str, lookup_terms: list[str]) -> bool:
     if any(key in question for key in SEMANTIC_QUERY_EXPANSIONS):
         return False
+    normalized_question = re.sub(r"\s+", "", question or "").lower()
+    if any(hint in normalized_question for hint in ENGLISH_INVENTORY_HINTS):
+        return True
+    if question_type in {"recent_capture", "time_qa"} and "模型" in question:
+        non_generic_terms = [term for term in lookup_terms if term not in GENERIC_MODEL_TERMS]
+        if not non_generic_terms:
+            return True
     if question_type != "object_lookup" or not lookup_terms:
-        return "模型" in question and any(hint in question for hint in MODEL_INVENTORY_HINTS)
+        return (
+            ("模型" in question and any(hint in question for hint in MODEL_INVENTORY_HINTS))
+            or ("model" in normalized_question and any(hint in normalized_question for hint in ENGLISH_MODEL_HINTS))
+        )
     if any(term not in GENERIC_MODEL_TERMS for term in lookup_terms):
         return False
     return any(hint in question for hint in MODEL_INVENTORY_HINTS)
@@ -1448,11 +1534,29 @@ def build_semantic_lookup_answer(question: str, evidence: list[dict[str, Any]], 
     if not semantic_terms:
         semantic_terms = lookup_terms
 
+    def normalize_semantic_item(value: str) -> str:
+        text = re.sub(r"[《》〈〉“”\"'（）()【】\[\]]", "", value or "")
+        return re.sub(r"\s+", "", text)
+
     def add_unique(items: list[str], value: str, seen: set[str]) -> None:
-        normalized = re.sub(r"\s+", "", value)
-        if value and normalized not in seen:
-            seen.add(normalized)
-            items.append(value)
+        normalized = normalize_semantic_item(value)
+        if not value or not normalized:
+            return
+        for existing in list(seen):
+            if normalized == existing:
+                return
+            if normalized in existing:
+                return
+            if existing in normalized:
+                seen.remove(existing)
+                for index, item in enumerate(items):
+                    if normalize_semantic_item(item) == existing:
+                        items[index] = value
+                        break
+                seen.add(normalized)
+                return
+        seen.add(normalized)
+        items.append(value)
 
     matched_items: list[str] = []
     seen_items: set[str] = set()
