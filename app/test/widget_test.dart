@@ -52,7 +52,7 @@ void main() {
     expect(find.text('Recall'), findsOneWidget);
     expect(find.text('Record'), findsNothing);
 
-    await tester.tap(find.byIcon(Icons.camera_alt_rounded));
+    await tester.tap(find.byType(GestureDetector).at(1));
     await tester.pumpAndSettle();
 
     expect(find.text('Record'), findsOneWidget);

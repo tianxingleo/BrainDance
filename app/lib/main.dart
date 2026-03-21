@@ -385,31 +385,43 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
 }
 
 //主屏幕
-class MainScreen extends ConsumerWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
-  static const double unselectedSize = 30;
-  static const double selectedSize = 34;
-  Widget getPage(int pageIndex, WidgetRef ref) {
+
+  @override
+  ConsumerState<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends ConsumerState<MainScreen> {
+  final List<Widget?> _pageCache = List<Widget?>.filled(5, null);
+
+  Widget _buildPage(int pageIndex) {
     switch (pageIndex) {
       case 0:
-        return RecallPage(); // 页面0: 主页：过往回忆
+        return const RecallPage(); // 页面0: 主页：过往回忆
       case 1:
-        return RecordPage(); // 页面1: 相机记录
+        return const RecordPage(); // 页面1: 相机记录
       case 2:
-        return GeneratePage(); // 页面2: 图文生成
+        return const GeneratePage(); // 页面2: 图文生成
       case 3:
         return const CommunityPage(); // 页面3: 社区
       case 4:
         return SettingsPage(homeRef: ref); // 页面4: 设置
     }
-    return RecallPage();
+    return const RecallPage();
+  }
+
+  Widget _getOrCreatePage(int pageIndex) {
+    return _pageCache[pageIndex] ??= _buildPage(pageIndex);
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
+    _getOrCreatePage(pageIndex);
+
     return Scaffold(
       extendBody: true,
       body: BDPageBackdrop(
@@ -418,26 +430,19 @@ class MainScreen extends ConsumerWidget {
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 360),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween<Offset>(
-                            begin: const Offset(0.0, 0.025),
-                            end: Offset.zero,
-                          ).animate(animation),
-                          child: child,
+                  IndexedStack(
+                    index: pageIndex,
+                    children: List<Widget>.generate(5, (index) {
+                      final page =
+                          _pageCache[index] ?? const SizedBox.shrink();
+                      return TickerMode(
+                        enabled: index == pageIndex,
+                        child: KeyedSubtree(
+                          key: ValueKey<int>(index),
+                          child: page,
                         ),
                       );
-                    },
-                    child: KeyedSubtree(
-                      key: ValueKey<int>(pageIndex),
-                      child: getPage(pageIndex, ref),
-                    ),
+                    }),
                   ),
                   if (!isRecording)
                     FloatingNavBar(
