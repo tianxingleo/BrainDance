@@ -1,24 +1,20 @@
+# BrainDance AI Engine - 3DGS Cloud Node
 
----
-
-# 🧠 BrainDance AI Engine - 3DGS Cloud Node
-
-> **BrainDance 核心计算后端**：基于 Supabase 消息队列与 Nerfstudio 的云原生 3D 高斯泼溅（3DGS）生成引擎。
+> BrainDance 当前主用的计算节点，负责任务监听、三维重建、结果上传和语义资产回写。
 
 本项目是 BrainDance 的核心 AI 算力节点，负责监听云端任务、自动下载用户上传的视频、执行全自动 3D 重建流程（COLMAP/GLOMAP + Splatfacto），并将最终的 3D 模型（PLY）与日志实时回传至云端。
 
-## 📑 文档导航
+## 文档导航
 
 本文档分为两个部分：
 
 ### 第一部分：Cloud Node 部署指南
-- [快速开始](#-快速开始) - 5 分钟上手
-- [环境准备](#-环境准备) - 硬件和软件要求
-- [运行模式](#-运行模式) - 本地/云端/单图模式
-- [论文 Pipeline 使用指南](#-论文-pipeline-使用指南新增) - DA3+SuGaR / DA3+2DGS / Sparse2DGS
-- [工作流原理](#-工作流原理) - 系统架构和数据流
+- [环境准备](#环境准备) - 硬件与软件依赖
+- [运行指南](#运行指南) - 云端监听模式与本地调试模式
+- [论文 Pipeline 使用指南](#论文-pipeline-使用指南) - DA3+SuGaR / DA3+2DGS / Sparse2DGS
+- [工作流原理](#工作流原理) - 任务从创建到完成的基本流程
 
-**适合读者**：运维人员、新用户、快速部署者
+适合读者：准备部署或调试 Worker 的开发者。
 
 ### 第二部分：RAG 系统设计文档
 - [设计核心逻辑](#1-设计核心逻辑-design-philosophy) - 架构原则
@@ -26,18 +22,27 @@
 - [内容生成策略](#3-内容生成策略-content-strategy) - 向量化策略
 - [搜索与交互流程](#4-搜索与交互流程-search-workflow) - 检索流程
 
-**适合读者**：开发者、架构师、研究人员
+适合读者：需要理解语义检索数据结构和搜索流程的开发者。
 
----
+## 核心特性
 
-## ✨ 核心特性
+- **任务驱动**：通过 Supabase 中的 `processing_tasks` 解耦前端和计算节点。
+- **自动流水线**：覆盖 `抽帧 -> 位姿解算 -> 训练 -> 后处理 -> 上传` 的基本过程。
+- **状态回写**：运行日志和任务状态会持续回写数据库，便于前端和 Dashboard 观察进度。
+- **Worker 注册**：每个实例会把自身 `worker_id`、心跳、当前任务和控制状态同步到 `worker_nodes`。
+- **双模式运行**：既支持云端监听模式，也支持直接处理本地文件的调试模式。
 
-* **☁️ 云原生架构**：通过 Supabase 实现完全解耦的“生产者-消费者”模式，前端只管发任务，后端自动排队处理。
-* **🔄 全自动流水线**：一键完成 `视频抽帧` -> `位姿解算 (COLMAP)` -> `AI 场景分析` -> `3DGS 训练` -> `模型后处理`。
-* **📡 实时状态同步**：训练进度与详细日志实时推送到 Supabase 数据库，支持前端远程监控。
-* **🚀 混合运行模式**：支持 `本地调试模式`（直接处理文件）和 `云端监听模式`（无人值守工单处理）。
+## 第三方依赖与论文引用
 
-## 📂 项目结构
+本目录集成了多个上游研究项目与子模块，例如 `nerfstudio`、`2d-gaussian-splatting`、`Sparse2DGS`、`SuGaR`、`Depth-Anything-3`、`ml-sharp`、`sam-3d-objects`。
+
+这些依赖的论文、Citation、致谢和许可证已单独整理在：
+
+- [THIRD_PARTY_ATTRIBUTIONS.md](./THIRD_PARTY_ATTRIBUTIONS.md)
+
+使用本目录中的代码、模型与子模块时，请同时遵守各项目自身许可证以及可能存在的模型许可证、非商业限制。
+
+## 项目结构
 
 ```text
 BrainDance/
@@ -48,22 +53,43 @@ BrainDance/
 ├── src/
 │   ├── config.py              # [配置] PipelineConfig 配置类定义
 │   ├── core/                  # [核心逻辑]
-│   │   ├── pipeline.py        # 3DGS 生成主流水线 (run_pipeline)
-│   │   └── worker.py          # Supabase 轮询器与上传下载逻辑
+│   │   ├── pipeline.py        # 本地单次运行入口
+│   │   ├── worker.py          # Supabase 轮询与任务执行
+│   │   ├── factory.py         # task_type 到 pipeline 的映射
+│   │   └── pipeline_base.py   # 各类 pipeline 的公共逻辑
+│   ├── pipelines/             # [任务流水线]
+│   │   ├── video_3dgs.py
+│   │   ├── single_image_sam3d.py
+│   │   ├── single_image_sharp.py
+│   │   ├── da3_feed_forward_pipeline.py
+│   │   ├── da3_sugar_pipeline.py
+│   │   ├── da3_2dgs_pipeline.py
+│   │   └── sparse2dgs.py
 │   ├── modules/               # [功能模块]
-│   │   ├── ai_segmentor.py    # AI 语义分割与物体提取
-│   │   ├── glomap_runner.py   # GLOMAP/COLMAP 位姿解算封装
-│   │   ├── image_proc.py      # 图像预处理 (抽帧、锐化等)
-│   │   └── nerf_engine.py     # Nerfstudio 训练引擎封装
+│   │   ├── scene_analyzer.py
+│   │   ├── knowledge_base.py
+│   │   ├── rag_memory.py
+│   │   ├── spatial_anchor.py
+│   │   └── sam3d_engine/
+│   ├── libs/                  # [上游仓库与子模块]
+│   │   ├── nerfstudio/
+│   │   ├── SuGaR/
+│   │   ├── Sparse2DGS/
+│   │   ├── 2d-gaussian-splatting/
+│   │   ├── Depth-Anything-3/
+│   │   ├── ml-sharp/
+│   │   └── sam-3d-objects/
 │   └── utils/                 # [工具库]
-│       ├── common.py          # 通用工具 (如时间格式化)
-│       ├── cv_algorithms.py   # 计算机视觉算法 (Mask处理、包围盒计算)
-│       ├── geometry.py        # 几何分析 (自动计算裁剪框)
-│       └── ply_utils.py       # PLY 点云后处理工具
-
+│       ├── common.py
+│       ├── cv_algorithms.py
+│       ├── geometry.py
+│       └── ply_utils.py
+├── tests/                     # 测试脚本
+├── scripts/                   # 辅助脚本
+└── ENVIRONMENT.md             # 环境依赖说明
 ```
 
-## 🛠️ 环境准备
+## 环境准备
 
 ### 1. 硬件要求
 
@@ -72,18 +98,18 @@ BrainDance/
 * **CPU**: Intel Core i5-14600KF 或同级处理器
 * **RAM**: 64GB
 * **OS**: Linux (推荐 Ubuntu 22.04) 或 Windows WSL2
-* **CUDA**: 11.8 或 12.x
+* **CUDA**: 12.8
 
 **推荐配置（生产环境）**
 * **GPU**: NVIDIA L20 45GB × 2 (双卡配置)
 * **CPU**: Intel Xeon Platinum 8260 × 2 (双路配置)
 * **RAM**: 512GB
 * **OS**: Linux (Ubuntu 22.04)
-* **CUDA**: 12.x
+* **CUDA**: 12.8
 
 ### 2. 软件依赖
 
-依赖以 `Braindance` 实际环境为准，统一文档见：
+依赖以当前仓库实际环境为准，统一说明见：
 
 - `ENVIRONMENT.md`（系统版本、COLMAP/GLOMAP/FFmpeg、全量 Python 依赖、编译/非编译分类、`nerfstudio` 子模块安装）
 
@@ -138,6 +164,19 @@ cp .env.example .env
 SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_KEY=your_service_role_key_here
 DASHSCOPE_API_KEY=your_dashscope_key_here
+
+# 存储桶与表名配置
+SUPABASE_BUCKET=braindance-assets
+SUPABASE_TABLE=processing_tasks
+SUPABASE_WORKER_TABLE=worker_nodes
+
+# Worker 集群管理（可选）
+WORKER_ID=
+WORKER_HEARTBEAT_INTERVAL=10
+WORKER_ONLINE_TIMEOUT_SECONDS=30
+WORKER_SUPERVISOR_POLL_INTERVAL=3
+WORKER_INTERRUPT_GRACE_SECONDS=20
+
 ```
 
 `config/default.toml` 示例片段：
@@ -161,9 +200,9 @@ table = "processing_tasks"
 
 也就是说，环境变量会覆盖 `TOML` 中的默认值。
 
-## 💾 数据库设计 (Supabase)
+## 数据库设计 (Supabase)
 
-请确保 Supabase 中包含以下 Table 和 Storage Bucket。
+这一部分只列出 Worker 当前依赖的最小对象，不替代表结构设计文档。
 
 ### Table: `processing_tasks`
 
@@ -172,20 +211,62 @@ table = "processing_tasks"
 | `id` | `uuid` | 主键，自动生成 |
 | `user_id` | `text` | 用户 ID |
 | `scene_id` | `text` | 场景/项目唯一标识 |
+| `display_name` | `text` | 前端展示名称，Dashboard 和任务列表优先显示 |
 | `status` | `text` | 状态: `pending` (排队), `processing` (处理中), `completed` (完成), `failed` (失败) |
 | `logs` | `jsonb` | 实时日志数组，结构: `[{"ts": 123, "msg": "..."}]` |
 | `created_at` | `timestamp` | 创建时间 |
+
+### Table: `model_assets`
+
+| 字段名 | 类型 | 描述 |
+| --- | --- | --- |
+| `scene_id` | `text` | 场景唯一标识，用于 upsert |
+| `user_id` | `text` | 所有者 ID |
+| `description` | `text` | 场景描述 |
+| `objects` | `text[]` | 场景物体列表 |
+| `tags` | `text[]` | 标签 |
+| `embedding` | `vector(1536)` | 语义向量 |
+| `ply_path` | `text` | 模型文件路径 |
+| `preview_img_path` | `text` | 预览图路径 |
+| `meta_info` | `jsonb` | 质量分、引擎版本等附加信息 |
+
+### Table: `worker_nodes`
+
+该表用于 Worker 注册、心跳和集群控制，是最近新增的运维控制面。
+
+| 字段名 | 类型 | 描述 |
+| --- | --- | --- |
+| `worker_id` | `text` | Worker 实例唯一标识，主键 |
+| `hostname` | `text` | 节点主机名 |
+| `pid` | `integer` | 当前进程 PID |
+| `status` | `text` | `starting / idle / busy / stopping / offline / error` |
+| `current_task_id` | `uuid` | 当前执行中的任务 ID |
+| `current_scene_id` | `text` | 当前执行中的场景 ID |
+| `desired_state` | `text` | Dashboard 下发的目标状态，当前约定 `run / pause / interrupt` |
+| `control_note` | `text` | 控制备注 |
+| `control_requested_at` | `timestamptz` | 最近一次控制请求时间 |
+| `last_heartbeat` | `timestamptz` | 最近心跳时间 |
+| `started_at` | `timestamptz` | 实例启动时间 |
+| `stopped_at` | `timestamptz` | 实例停止时间 |
+| `metadata` | `jsonb` | 在线超时、停止原因等附加信息 |
+
+### Table: `memory_poses`
+
+该表用于保存帧级空间锚点与相关向量数据，供后续空间检索使用。
 
 ### Storage Bucket: `braindance-assets`
 
 文件存储路径规范：
 
-* **输入视频**: `{user_id}/{scene_id}/raw/video.mp4`
-* **输出模型**: `{user_id}/{scene_id}/output/point_cloud.ply`
+- **输入视频**: `{user_id}/{scene_id}/raw/video.mp4`
+- **输入单图**: `{user_id}/{scene_id}/raw/image.png`
+- **输入多图**: `{user_id}/{scene_id}/raw/images.zip`
+- **输出模型**: `{user_id}/{scene_id}/output/point_cloud.ply`
+- **输出位姿**: `{user_id}/{scene_id}/output/webgl_poses.json`
 
-## 🚀 运行指南
+## 运行指南
 
-### 模式 A：云端监听模式 (生产环境)
+### 模式 A：云端监听模式
 
 启动 Worker，持续监听 Supabase 的 `pending` 任务。
 
@@ -194,13 +275,22 @@ python main.py
 
 ```
 
-*输出示例：*
+启动后，Worker 会自动：
+
+- 向 `worker_nodes` 注册自己
+- 每隔 `WORKER_HEARTBEAT_INTERVAL` 秒写一次心跳
+- 在 Dashboard 将该实例显示为在线 / 忙碌 / 停止中 / 离线
+- 当 `worker_nodes.desired_state='pause'` 时，不再接新任务并优雅退出
+- 当 `worker_nodes.desired_state='interrupt'` 时，Supervisor 会尝试中断当前子 Worker 进程
+- 当 `worker_nodes.desired_state='run'` 时，Supervisor 会重新拉起实例
+
+输出示例：
 
 > 🚀 [CloudWorker] 启动! 正在监听表: [processing_tasks]
 > .....
 > 📥 [接收任务] ID: ... | Scene: party_01
 
-### 模式 B：本地调试模式 (开发测试)
+### 模式 B：本地调试模式
 
 不经过数据库，直接处理本地视频文件。
 
@@ -209,12 +299,12 @@ python main.py /path/to/your/video.mp4
 
 ```
 
-*输出示例：*
+输出示例：
 
 > 💿 启动本地模式: video.mp4
 > ... (开始直接运行 Pipeline)
 
-## 🧪 论文 Pipeline 使用指南（新增）
+## 论文 Pipeline 使用指南
 
 下面三条是近期新增的“论文复现/组合型”流水线，统一通过 `processing_tasks.task_type` 触发。
 
@@ -279,7 +369,7 @@ python main.py /path/to/your/video.mp4
 | `min_video_frame_gap` | `3` | 随机抽帧时的最小帧间隔 |
 | `video_max_edge` | `0` | 视频抽帧后缩放长边上限，`0` 表示不缩放 |
 
-### 选型建议（实战）
+### 选型建议
 
 | 目标 | 推荐 task_type | 原因 |
 | --- | --- | --- |
@@ -294,7 +384,7 @@ python main.py /path/to/your/video.mp4
 3. 可选传入 `task_params` 调参（建议先默认参数跑通，再微调）。
 4. 监听 `status` 和 `logs`，完成后从 `output/point_cloud.*` 获取交付文件。
 
-## 🔄 工作流原理
+## 工作流原理
 
 1. **用户** 在前端上传视频，Supabase Storage 存入文件，Database 插入一条 `status='pending'` 的记录。
 2. **Worker** (`worker.py`) 轮询检测到新记录，将状态改为 `processing`。
@@ -306,44 +396,28 @@ python main.py /path/to/your/video.mp4
 
 ---
 
-# 📚 第二部分：RAG 系统设计文档
+# 第二部分：RAG 系统设计文档
 
-> **语义检索增强生成架构的完整设计说明**
+> 这一部分说明 Worker 侧资产入库和语义搜索的数据组织方式。
 
-本部分详细说明 BrainDance 的"语义+元数据"混合检索系统设计，将 3D 模型从"死文件"变成"活知识"。
-
----
-
-这就是你现在的 **BrainDance 智能资产库 (RAG System)** 的完整设计文档。
-
-这是一个**“语义+元数据”混合检索系统**，旨在把你的 3D 模型从“死文件”变成“活知识”。
-
----
+本部分说明 BrainDance 当前的“语义 + 元数据”混合检索设计。目标不是单纯存一个模型文件，而是把模型整理成后续可以检索和定位的资产。
 
 ## 1. 设计核心逻辑 (Design Philosophy)
 
-目前的架构设计遵循以下 4 个核心原则：
+目前的设计主要遵循以下 4 个原则：
 
-1. **资产化 (Permanent Assets)**：
-* 分离“流水线任务”(`processing_tasks`) 和 “数字资产”(`model_assets`)。
-* 任务是暂时的（会失败、重试），资产是永久的（只存成功的、高质量的结果）。
+1. **资产化 (Permanent Assets)**
+   分离“流水线任务”(`processing_tasks`) 和“数字资产”(`model_assets`)。
+   任务是暂时的，资产是长期保留的成功结果。
 
+2. **富文本上下文 (Rich Context Embedding)**
+   向量化不只基于一句描述，而是把 **核心物体 + 详细描述 + 物品清单 + 环境标签** 组合成一个加权文本块，提高搜索命中率。
 
-2. **富文本上下文 (Rich Context Embedding)**：
-* 向量化不仅仅是基于简单的描述。我们将 **“核心物体 + 详细描述 + 物品清单 + 环境标签”** 组合成一个“加权文本块”，提高搜索命中率。
+3. **唯一性 (Idempotency)**
+   以 `scene_id` 为唯一锚点。同一个场景无论跑多少次，数据库里只保留最新的一条资产记录。
 
-
-3. **唯一性 (Idempotency)**：
-* 以 `scene_id` 为唯一锚点。同一个场景无论跑多少次，数据库里永远只有最新的一条记录，避免“影分身”。
-
-
-4. **混合检索 (Hybrid Search)**：
-* **向量搜索 (Vector)**：负责模糊匹配（“找个像红杯子的”）。
-* **标量过滤 (Scalar)**：负责精确限制（“只要上周生成的”、“分数大于80的”）。
-
-
-
----
+4. **混合检索 (Hybrid Search)**
+   向量搜索负责模糊匹配，标量过滤负责时间范围、质量分等精确限制。
 
 ## 2. 数据库结构 (Schema Structure)
 
@@ -367,7 +441,7 @@ python main.py /path/to/your/video.mp4
 
 ## 3. 内容生成策略 (Content Strategy)
 
-当 `Worker` 调用 `knowledge_base.py` 入库时，它不仅仅是存数据，还在做**数据清洗和加权**。
+当 `Worker` 调用 `knowledge_base.py` 入库时，除了写入数据，还会做一次面向搜索的文本整理。
 
 #### A. 向量内容的构成
 
@@ -381,7 +455,7 @@ python main.py /path/to/your/video.mp4
 
 ```
 
-* **为什么要重复？** Embedding 模型通常对文本开头的内容更敏感。重复核心物体可以让向量在多维空间中更靠近该物体类别。
+- **为什么要重复？** Embedding 模型通常对文本开头更敏感。重复核心物体，是为了让向量更稳定地靠近该物体类别。
 
 #### B. 元数据的构成
 
@@ -402,51 +476,31 @@ python main.py /path/to/your/video.mp4
 
 当用户发起搜索时，系统经历以下步骤：
 
-1. **意图解析 (Python/LLM)**：
-* 用户输入：“找一下上周做的红色杯子”
-* LLM 提取：
-* `Query`: "红色杯子" (去掉了时间词)
-* `Filter`: Start="2025-XX-XX", End="2025-XX-XX"
+1. **意图解析 (Python/LLM)**
+   用户输入“找一下上周做的红色杯子”后，LLM 会提取：
+   `Query`: `"红色杯子"`
+   `Filter`: `Start="2025-XX-XX", End="2025-XX-XX"`
+
+2. **向量化 (Python/Embedding)**
+   将 `"红色杯子"` 转换为 1536 维向量。
+
+3. **数据库执行 RPC (Supabase/PostgreSQL)**
+   调用 `match_model_assets` 函数。
+   第一层做向量相似度匹配，第二层做时间范围等标量过滤，最后按相似度排序。
+
+4. **结果返回**
+   返回 `ply_path`，前端或脚本即可继续下载和展示模型。
 
 
+### 小结
 
-
-2. **向量化 (Python/Embedding)**：
-* 将 "红色杯子" 转换为 `[0.12, -0.98, ...]` (1536维)。
-
-
-3. **数据库执行 RPC (Supabase/PostgreSQL)**：
-* 调用 `match_model_assets` 函数。
-* **第一层 (Vector)**：计算余弦相似度，找出所有像“红色杯子”的模型。
-* **第二层 (Filter)**：执行 SQL `WHERE created_at BETWEEN ...`，过滤掉不在时间范围内的。
-* **排序**：按相似度从高到低返回。
-
-
-4. **结果返回**：
-* 返回 `ply_path`，前端或脚本即可直接下载模型。
-
-
-
-
-### 总结
-
-你现在拥有的不仅仅是一个文件存储系统，而是一个**具备"理解能力"的 3D 资产管理平台**。它知道你每个模型长什么样、包含什么东西、是什么时候做的，并且能通过自然语言瞬间找到它。
+这套设计的重点，不是把模型文件单独存起来，而是让模型同时具备描述、物体清单、标签和时间信息，后续才能稳定支撑自然语言检索。
 
 ---
 
-## 🎯 总结
-
-本文档介绍了 BrainDance 3DGS Cloud Node 的完整技术架构和 RAG 语义检索系统的设计原理。
-
-**第一部分**涵盖了如何部署和运行 3DGS 生成引擎，**第二部分**深入讲解了语义检索系统的设计哲学和实现细节。
-
-## 🔗 相关文档
+## 相关文档
 
 - [上层文档](../README.md) - BrainDance AI Engine 总览
-- [快速开始指南](../../docs/快速开始指南.md) - 30 分钟上手
+- [快速开始指南](../../docs/01-入门指南/快速开始.md) - 项目级启动路径
 - [API 接口文档](../../docs/API_DOC.md) - 完整接口说明
-- [返回顶部](#-braindance-ai-engine---3dgs-cloud-node)
-
----
-
-**BrainDance Team © 2026**
+- [返回顶部](#braindance-ai-engine---3dgs-cloud-node)

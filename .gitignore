@@ -22,6 +22,8 @@ $RECYCLE.BIN/
 
 # Claude Code
 .claude/
+.cache/
+tmp_papers/
 
 # PyCharm / IntelliJ
 .idea/
@@ -155,6 +157,12 @@ app/assets/webgl/models/*.webp
 app/assets/webgl/assets/
 app/assets/webgl/dist/
 app/assets/webgl/.vite/
+
+# Spark 备选查看器本地开发产物
+3dgs_viewer/spark-3dgs-viewer/node_modules/
+3dgs_viewer/spark-3dgs-viewer/dist/
+3dgs_viewer/spark-3dgs-viewer/.vite/
+3dgs_viewer/spark-3dgs-viewer/.tmp/
 
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
