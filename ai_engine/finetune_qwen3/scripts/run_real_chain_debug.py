@@ -146,6 +146,30 @@ SEMANTIC_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "学习相关": ("教材", "词典", "算法导论", "高等数学", "白板", "笔记本电脑", "显示器"),
     "学术": ("教材", "词典", "算法导论", "高等数学", "白板", "办公桌"),
 }
+OBJECT_LOOKUP_PHRASE_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "洛天依展台": ("洛天依",),
+    "洛天依主题展台": ("洛天依",),
+    "商业展台装置": ("洛天依", "展台"),
+    "学习类摆件": ("学习相关", "地球仪", "手办", "书架", "词典"),
+    "学习摆件": ("学习相关", "地球仪", "手办"),
+    "动漫收藏角": ("手办", "书架", "地球仪"),
+    "桌面设备": ("显示器", "笔记本电脑", "键盘", "办公桌"),
+    "白色办公桌上的摆件": ("办公桌", "手办"),
+    "办公桌摆件": ("办公桌", "手办"),
+    "书架角落的模型": ("书架", "地球仪", "手办"),
+    "词典和手办的收纳角": ("词典", "手办", "书架"),
+}
+ANCHOR_OBJECT_HINTS: tuple[str, ...] = (
+    "洛天依",
+    "地球仪",
+    "显示器",
+    "笔记本电脑",
+    "办公桌",
+    "手办",
+    "书架",
+    "词典",
+    "键盘",
+)
 MUST_ANSWER_GROUPS = {"must_answer", "multi_hit_must_answer"}
 RETRIEVAL_ROUTES = {
     "vector_only",
@@ -690,6 +714,45 @@ def canonicalize_lookup_term(text: str) -> str:
     return value.strip()
 
 
+def expand_lookup_aliases(text: str) -> list[str]:
+    base = canonicalize_lookup_term(text)
+    if not base:
+        return []
+
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        token = canonicalize_lookup_term(value)
+        if not token or token == base or token in seen:
+            return
+        seen.add(token)
+        expanded.append(token)
+
+    for phrase, aliases in OBJECT_LOOKUP_PHRASE_EXPANSIONS.items():
+        if phrase in base:
+            for alias in aliases:
+                add(alias)
+
+    for hint in ANCHOR_OBJECT_HINTS:
+        if hint in base:
+            add(hint)
+
+    if "展台" in base and "洛天依" in base:
+        add("洛天依")
+    if "摆件" in base and "办公桌" in base:
+        add("办公桌")
+        add("手办")
+    if "摆件" in base and "学习" in base:
+        for alias in ("学习相关", "地球仪", "手办", "书架"):
+            add(alias)
+    if "模型" in base and "书架" in base:
+        for alias in ("书架", "地球仪", "手办"):
+            add(alias)
+
+    return expanded
+
+
 def is_generic_lookup_token(text: str) -> bool:
     token = canonicalize_lookup_term(text)
     if not token:
@@ -718,11 +781,15 @@ def split_target_objects(target_objects: list[str], search_text: str = "") -> li
             continue
         if not any(separator in text for separator in LOOKUP_SPLIT_SEPARATORS):
             add(text)
+            for alias in expand_lookup_aliases(text):
+                add(alias)
         for fragment in split_lookup_fragments(text):
             add(fragment)
             cleaned = clean_lookup_fragment(fragment)
             if cleaned and cleaned != fragment:
                 add(cleaned)
+            for alias in expand_lookup_aliases(fragment):
+                add(alias)
 
     return normalized
 
@@ -758,6 +825,8 @@ def normalize_lookup_terms(*terms: str) -> list[str]:
             add(clean_lookup_fragment(fragment))
             add(canonicalize_lookup_term(fragment))
 
+        for alias in expand_lookup_aliases(base):
+            add(alias)
         for extra in expand_semantic_terms(base):
             add(extra)
 
@@ -908,7 +977,11 @@ def select_object_lookup_queries(
         ordered.append(token)
 
     for target in target_objects:
+        for alias in expand_lookup_aliases(target):
+            add(alias)
         add(target)
+    for alias in expand_lookup_aliases(search_text):
+        add(alias)
     add(search_text)
     for term in lookup_terms:
         add(term)

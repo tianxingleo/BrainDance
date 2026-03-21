@@ -16,6 +16,7 @@ DEFAULT_CASES_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "data" / "o
 DEFAULT_LOG_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "object_lookup_eval_part17.jsonl"
 DEFAULT_SUMMARY_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "object_lookup_after_summary.json"
 DEFAULT_COMPARE_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "object_lookup_before_after_compare.md"
+DEFAULT_HARD_CASES_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "object_lookup_hard_cases_part17.json"
 DEFAULT_MODULE_PATH = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "scripts" / "run_real_chain_debug.py"
 
 
@@ -26,10 +27,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary_file", default=str(DEFAULT_SUMMARY_FILE))
     parser.add_argument("--compare_md", default=str(DEFAULT_COMPARE_FILE))
     parser.add_argument("--baseline_summary", default="")
+    parser.add_argument("--baseline_jsonl", default="")
+    parser.add_argument("--hard_cases_file", default=str(DEFAULT_HARD_CASES_FILE))
     parser.add_argument("--retrieval_module", default=str(DEFAULT_MODULE_PATH))
     parser.add_argument("--match_threshold", type=float, default=0.5)
     parser.add_argument("--match_count", type=int, default=5)
     parser.add_argument("--recent_limit", type=int, default=3)
+    parser.add_argument("--hard_case_top_k", type=int, default=15)
     parser.add_argument("--dashscope_chat_model", default="qwen-turbo")
     parser.add_argument("--dashscope_embedding_model", default="text-embedding-v2")
     return parser.parse_args()
@@ -72,6 +76,19 @@ def normalize_hit(row: dict[str, Any], module: Any, focus: str) -> bool:
     return module.row_supports_target(row, focus) or module.row_matches_lookup_terms(row, focus_terms)
 
 
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
 def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     bad_rows = [row for row in rows if row.get("user_feedback_label") == "bad"]
     lexical_rows = [
@@ -99,6 +116,7 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
             or "post_filter_empty" in (row.get("route_reasons") or [])
         ),
         "retrieval_route_counts": {},
+        "route_reason_counts": {},
         "issue_bucket_counts": {},
     }
     for key in ("retrieval_route", "issue_bucket"):
@@ -109,7 +127,93 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 counts[value] = counts.get(value, 0) + 1
         target_key = "retrieval_route_counts" if key == "retrieval_route" else "issue_bucket_counts"
         summary[target_key] = counts
+    reason_counts: dict[str, int] = {}
+    for row in rows:
+        for value in row.get("route_reasons") or []:
+            token = str(value or "").strip()
+            if token:
+                reason_counts[token] = reason_counts.get(token, 0) + 1
+    summary["route_reason_counts"] = reason_counts
     return summary
+
+
+def compute_case_score(row: dict[str, Any]) -> tuple[int, int, int, int]:
+    issue = str(row.get("issue_bucket") or "").strip()
+    route = str(row.get("retrieval_route") or "").strip()
+    reasons = {str(item).strip() for item in (row.get("route_reasons") or []) if str(item).strip()}
+    return (
+        int(str(row.get("user_feedback_label") or "").strip() == "bad"),
+        int(issue == "retrieval_miss") + int("rpc_empty" in reasons) + int("post_filter_empty" in reasons),
+        int(route in {"lexical_fallback", "merged_vector_lexical"}),
+        -int(row.get("hit_count") or 0),
+    )
+
+
+def infer_manual_label(row: dict[str, Any]) -> str:
+    issue = str(row.get("issue_bucket") or "").strip()
+    reasons = {str(item).strip() for item in (row.get("route_reasons") or []) if str(item).strip()}
+    if issue == "retrieval_miss":
+        return "retrieval_miss"
+    if issue == "retrieval_low_relevance":
+        return "retrieval_low_relevance"
+    if "post_filter_empty" in reasons:
+        return "post_filter_too_strict"
+    if str(row.get("retrieval_route") or "").strip() in {"lexical_fallback", "merged_vector_lexical"}:
+        return "ok"
+    return "ok"
+
+
+def build_hard_cases(
+    rows: list[dict[str, Any]],
+    baseline_rows: list[dict[str, Any]],
+    top_k: int,
+) -> dict[str, Any]:
+    baseline_by_id = {str(row.get("case_id") or ""): row for row in baseline_rows if row.get("case_id")}
+    ranked_rows = sorted(rows, key=compute_case_score, reverse=True)
+    selected: list[dict[str, Any]] = []
+    for row in ranked_rows[:top_k]:
+        case_id = str(row.get("case_id") or "")
+        before_row = baseline_by_id.get(case_id, {})
+        selected.append({
+            "case_id": case_id,
+            "question": row.get("question"),
+            "group": row.get("group"),
+            "after_retrieval_route": row.get("retrieval_route"),
+            "before_retrieval_route": before_row.get("retrieval_route"),
+            "after_route_reasons": row.get("route_reasons", []),
+            "before_route_reasons": before_row.get("route_reasons", []),
+            "after_issue_bucket": row.get("issue_bucket"),
+            "before_issue_bucket": before_row.get("issue_bucket"),
+            "after_hit_count": row.get("hit_count"),
+            "before_hit_count": before_row.get("hit_count"),
+            "expected_focus": row.get("expected_focus", []),
+            "matched_focus": row.get("matched_focus", []),
+            "suggested_manual_label": infer_manual_label(row),
+            "evidence_preview": [
+                {
+                    "display_name": item.get("display_name"),
+                    "objects": item.get("objects", [])[:6],
+                }
+                for item in (row.get("evidence") or [])[:2]
+            ],
+        })
+    return {
+        "top_k": top_k,
+        "cases": selected,
+    }
+
+
+def render_count_delta(before_counts: dict[str, Any], after_counts: dict[str, Any]) -> list[str]:
+    keys = sorted(set(before_counts) | set(after_counts))
+    if not keys:
+        return ["<empty>"]
+    lines: list[str] = []
+    for key in keys:
+        before_value = int(before_counts.get(key, 0) or 0)
+        after_value = int(after_counts.get(key, 0) or 0)
+        delta = after_value - before_value
+        lines.append(f"- {key}: {before_value} -> {after_value} ({delta:+d})")
+    return lines
 
 
 def render_compare(before: dict[str, Any], after: dict[str, Any]) -> str:
@@ -142,6 +246,18 @@ def render_compare(before: dict[str, Any], after: dict[str, Any]) -> str:
         "## After Retrieval Routes",
         "",
         json.dumps(after.get("retrieval_route_counts", {}), ensure_ascii=False, indent=2),
+        "",
+        "## Retrieval Route Delta",
+        "",
+    ])
+    lines.extend(render_count_delta(before.get("retrieval_route_counts", {}), after.get("retrieval_route_counts", {})))
+    lines.extend([
+        "",
+        "## Route Reason Delta",
+        "",
+    ])
+    lines.extend(render_count_delta(before.get("route_reason_counts", {}), after.get("route_reason_counts", {})))
+    lines.extend([
         "",
         "## After Issue Buckets",
         "",
@@ -217,6 +333,12 @@ def main() -> None:
     summary = summarize_rows(rows)
     write_jsonl(Path(args.output_file), rows)
     write_json(Path(args.summary_file), summary)
+
+    baseline_rows: list[dict[str, Any]] = []
+    if args.baseline_jsonl:
+        baseline_rows = load_jsonl(Path(args.baseline_jsonl))
+    hard_cases = build_hard_cases(rows, baseline_rows, args.hard_case_top_k)
+    write_json(Path(args.hard_cases_file), hard_cases)
 
     if args.baseline_summary:
         before = json.loads(Path(args.baseline_summary).read_text(encoding="utf-8"))

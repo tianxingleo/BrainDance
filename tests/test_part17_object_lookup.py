@@ -22,19 +22,21 @@ def load_module():
 def test_normalize_lookup_terms_cleans_generic_suffixes():
     module = load_module()
 
-    terms = module.normalize_lookup_terms("洛天依模型", "显示器画面", "笔记本电脑相关内容")
+    terms = module.normalize_lookup_terms("洛天依模型", "显示器画面", "笔记本电脑相关内容", "学习类摆件")
 
     assert "洛天依" in terms
     assert "显示器" in terms
     assert "笔记本电脑" in terms
+    assert "地球仪" in terms
+    assert "手办" in terms
 
 
 def test_split_target_objects_splits_multi_target_entities():
     module = load_module()
 
-    targets = module.split_target_objects(["显示器和钢琴", "笔记本电脑、地球仪和钢琴"])
+    targets = module.split_target_objects(["显示器和钢琴", "笔记本电脑、地球仪和钢琴", "洛天依展台"])
 
-    assert targets == ["显示器", "钢琴", "笔记本电脑", "地球仪"]
+    assert targets == ["显示器", "钢琴", "笔记本电脑", "地球仪", "洛天依展台", "洛天依"]
 
 
 def test_select_object_lookup_queries_prefers_canonical_targets():
@@ -48,6 +50,19 @@ def test_select_object_lookup_queries_prefers_canonical_targets():
 
     assert queries[0] == "笔记本电脑"
     assert "画面" not in queries
+
+
+def test_select_object_lookup_queries_promotes_aliases_for_abstract_phrases():
+    module = load_module()
+
+    queries = module.select_object_lookup_queries(
+        "最近有洛天依展台相关记录吗",
+        ["洛天依展台"],
+        module.normalize_lookup_terms("洛天依展台"),
+    )
+
+    assert queries[0] == "洛天依"
+    assert "洛天依展台" in queries
 
 
 def test_merge_object_candidates_dedups_and_reranks_by_target_match_and_recency():
