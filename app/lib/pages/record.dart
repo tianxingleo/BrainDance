@@ -21,8 +21,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
 
-const double _kFovH = 65.0;
-const double _kFovV = 50.0;
 const double _kIdealAccelMin = 0.08;
 const double _kIdealAccelMax = 0.65;
 const double _kCautionAccelMax = 1.35;
@@ -31,13 +29,6 @@ const double _kInstantSpikeAccel = 2.60;
 const double _kJerkThreshold = 0.95;
 const int _kAccelHistoryLength = 40;
 const double _kFloatingNavReservedHeight = 112.0;
-
-class _CapturedFrame {
-  final double yaw;
-  final double pitch;
-
-  const _CapturedFrame(this.yaw, this.pitch);
-}
 
 enum _MotionState { steady, ideal, caution, danger }
 
@@ -55,8 +46,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
   late AnimationController _hudAnimController; // 用于HUD角点呼吸
 
   bool _showTips = false;
-  bool _isArMode = false;
-  bool _isArSampling = false;
+  bool _isMotionHudEnabled = false;
   bool _isMovingTooFast = false; // 用于异常运动警告
   int _warningEndTime = 0; // 用于抖动警告显示状态的防抖停留时长
 
@@ -66,7 +56,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
   StreamSubscription<MagnetometerEvent>? _magSub;
-  Timer? _sampleTimer;
 
   double _ax = 0;
   double _ay = 0;
@@ -89,7 +78,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _yaw = 0;
   double _pitch = 0;
 
-  final List<_CapturedFrame> _capturedFrames = [];
   final List<double> _accelHistory = [];
 
   @override
@@ -145,14 +133,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      if (_isArMode) {
+      if (_isMotionHudEnabled) {
         _stopSensors();
-        if (_isArSampling) {
-          setState(() {
-            _isArSampling = false;
-          });
-          _setGlobalRecording(false);
-        }
       }
 
       if (controller != null && controller.value.isInitialized) {
@@ -165,7 +147,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
             RecoConfig.disposeCamera();
             if (mounted) {
               setState(() {});
-              TDToast.showText(context: context, textLocalize('reco_app_switch'));
+              TDToast.showText(
+                context: context,
+                textLocalize('reco_app_switch'),
+              );
             }
           });
         } else {
@@ -179,7 +164,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       if (RecoConfig.cameraController == null) {
         RecoConfig.cameraInitialize();
       }
-      if (_isArMode) {
+      if (_isMotionHudEnabled) {
         _startSensors();
       }
     }
@@ -447,6 +432,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _hapticLoopState = null;
   }
 
+  void _resetMotionState() {
+    _linearAccel = 0;
+    _smoothedLinearAccel = 0;
+    _peakLinearAccel = 0;
+    _accelDelta = 0;
+    _motionMeter = 0;
+    _motionHint = textLocalize('reco_motion_steady');
+    _motionDetail = textLocalize('reco_motion_detail');
+    _motionState = _MotionState.steady;
+    _isMovingTooFast = false;
+    _warningEndTime = 0;
+    _accelHistory.clear();
+  }
+
   void _startSensors() {
     if (_accelSub != null || _userAccelSub != null || _magSub != null) {
       return;
@@ -478,14 +477,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
           _magZ = event.z;
           _computeOrientation();
         });
-
-    _sampleTimer ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (_isArMode && _isArSampling && mounted) {
-        setState(() {
-          _capturedFrames.add(_CapturedFrame(_yaw, _pitch));
-        });
-      }
-    });
   }
 
   void _stopSensors() {
@@ -496,61 +487,22 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _userAccelSub = null;
     _magSub?.cancel();
     _magSub = null;
-    _sampleTimer?.cancel();
-    _sampleTimer = null;
   }
 
-  void _toggleArMode() {
-    final isVideoRecording = ref.read(isRecordingProvider) && !_isArSampling;
-    if (isVideoRecording) {
-      return;
-    }
-
+  void _toggleMotionHud() {
     setState(() {
-      _isArMode = !_isArMode;
-      if (_isArMode) {
-        _capturedFrames.clear();
-        _linearAccel = 0;
-        _smoothedLinearAccel = 0;
-        _peakLinearAccel = 0;
-        _accelDelta = 0;
-        _motionMeter = 0;
-        _motionHint = textLocalize('reco_motion_steady');
-        _motionDetail = textLocalize('reco_motion_detail');
-        _motionState = _MotionState.steady;
-        _isMovingTooFast = false;
-        _warningEndTime = 0;
-        _accelHistory.clear();
+      _isMotionHudEnabled = !_isMotionHudEnabled;
+      if (_isMotionHudEnabled) {
+        _resetMotionState();
         _startSensors();
       } else {
         _stopSensors();
-        _isArSampling = false;
-        _setGlobalRecording(false);
+        _resetMotionState();
       }
     });
   }
 
-  void _toggleArSampling() {
-    if (!_isArMode) {
-      return;
-    }
-
-    setState(() {
-      _isArSampling = !_isArSampling;
-    });
-    _setGlobalRecording(_isArSampling);
-
-    if (mounted) {
-      TDToast.showText(_isArSampling ? textLocalize('reco_scan_start') : textLocalize('reco_scan_pause'), context: context);
-    }
-  }
-
   Future<void> _onRecordTap() async {
-    if (_isArMode) {
-      _toggleArSampling();
-      return;
-    }
-
     await _toggleVideoRecording();
   }
 
@@ -621,7 +573,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
                     await RecoConfig.trySwitchCameraDescription(i);
                   } catch (_) {
                     if (context.mounted) {
-                      TDToast.showText(textLocalize('reco_no_switch'), context: context);
+                      TDToast.showText(
+                        textLocalize('reco_no_switch'),
+                        context: context,
+                      );
                     }
                   }
                   return;
@@ -692,11 +647,57 @@ class _RecordPageState extends ConsumerState<RecordPage>
     return cameraSwitchButtons;
   }
 
+  int? _findPrimaryCameraIndex(CameraLensDirection direction) {
+    final cameras = RecoConfig.cameras;
+    for (var i = 0; i < cameras.length; i++) {
+      if (cameras[i].lensDirection == direction) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _switchPrimaryCamera() async {
+    if (!RecoConfig.cameraEnabled || RecoConfig.cameras.isEmpty) {
+      return;
+    }
+
+    final currentDirection =
+        RecoConfig.cameras[RecoConfig.camNum].lensDirection;
+    final targetDirection = currentDirection == CameraLensDirection.front
+        ? CameraLensDirection.back
+        : CameraLensDirection.front;
+    final targetIndex = _findPrimaryCameraIndex(targetDirection);
+
+    if (targetIndex == null || targetIndex == RecoConfig.camNum) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+      }
+      return;
+    }
+
+    try {
+      if (ref.read(isRecordingProvider)) {
+        await RecoConfig.trySwitchCameraDescription(targetIndex);
+      } else {
+        RecoConfig.camNum = targetIndex;
+        await RecoConfig.cameraInitialize();
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = AppConfig.isNightMode;
-    final isVideoRecording = ref.watch(isRecordingProvider) && !_isArSampling;
-    final isAnyRecording = isVideoRecording || _isArSampling;
+    final isVideoRecording = ref.watch(isRecordingProvider);
+    final isAnyRecording = isVideoRecording;
     final darkInput = const Color(0xFF23232A);
 
     Widget cameraView;
@@ -732,11 +733,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
       );
     }
 
-    final cameraSwitchButtons = _buildCameraSwitchButtons(
-      context,
-      isAnyRecording,
-    );
     final mediaQuery = MediaQuery.of(context);
+    final currentLensDirection = RecoConfig.cameras.isNotEmpty
+        ? RecoConfig.cameras[RecoConfig.camNum].lensDirection
+        : CameraLensDirection.back;
+    final canSwitchPrimaryCamera =
+        _findPrimaryCameraIndex(CameraLensDirection.front) != null &&
+        _findPrimaryCameraIndex(CameraLensDirection.back) != null;
+    final cornerControlBottom = mediaQuery.padding.bottom + 28;
     final bottomOffset =
         mediaQuery.padding.bottom +
         (isAnyRecording ? 36 : _kFloatingNavReservedHeight + 18);
@@ -749,85 +753,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
           Positioned.fill(
             child: CustomPaint(
               painter: RecordHUDPainter(
-                isWarning: _isMovingTooFast,
-                isCaution: _motionState == _MotionState.caution,
-                motionValue: _motionMeter,
+                isWarning: _isMotionHudEnabled && _isMovingTooFast,
+                isCaution:
+                    _isMotionHudEnabled && _motionState == _MotionState.caution,
+                motionValue: _isMotionHudEnabled ? _motionMeter : 0,
                 animation: _hudAnimController,
               ),
             ),
           ),
-          if (_isArMode)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _FogOfWarPainter(
-                  capturedFrames: _capturedFrames,
-                  currentYaw: _yaw,
-                  currentPitch: _pitch,
-                ),
-              ),
-            ),
-          Positioned(
-            top: mediaQuery.padding.top + 12,
-            left: 16,
-            right: 16,
-            child: _RecordOverlayPanel(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: cameraSwitchButtons,
-                ),
-              ),
-            ),
-          ),
-          if (!isVideoRecording)
-            Positioned(
-              top: mediaQuery.padding.top + 82,
-              right: 16,
-              child: _RecordOverlayPanel(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        TDIcons.scan,
-                        color: _isArMode
-                            ? BDDesign.colorPaperWhite
-                            : BDDesign.colorAshGray,
-                        size: 24,
-                      ),
-                      onPressed: _toggleArMode,
-                    ),
-                    if (!_isArMode)
-                      IconButton(
-                        icon: const Icon(
-                          TDIcons.refresh,
-                          color: BDDesign.colorAshGray,
-                          size: 24,
-                        ),
-                        onPressed: isAnyRecording
-                            ? null
-                            : () => RecoConfig.cameraSwitch(),
-                      ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.info_outline,
-                        color: BDDesign.colorAshGray,
-                        size: 24,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _showTips = true;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
           Positioned(
             top: mediaQuery.padding.top + 72,
             left: 20,
@@ -835,12 +768,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
               duration: BDMotion.durationFast,
               switchInCurve: BDMotion.curveEnter,
               switchOutCurve: BDMotion.curveExit,
-              child: !_isArMode
+              child: !_isMotionHudEnabled
                   ? const SizedBox.shrink()
                   : _MotionGuidanceCard(
                       yaw: _yaw,
                       pitch: _pitch,
-                      frameCount: _capturedFrames.length,
                       linearAccel: _linearAccel,
                       smoothedLinearAccel: _smoothedLinearAccel,
                       peakLinearAccel: _peakLinearAccel,
@@ -861,32 +793,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (isVideoRecording || _isArSampling) ...[
+                if (isVideoRecording) ...[
                   AnimatedSwitcher(
                     duration: BDMotion.durationFast,
                     switchInCurve: BDMotion.curveEnter,
                     switchOutCurve: BDMotion.curveExit,
-                    child: isVideoRecording
-                        ? _StatusPill(
-                            key: ValueKey<String>(
-                              'rec_${_recordSeconds}_${_capturedFrames.length}',
-                            ),
-                            label:
-                                'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
-                            color: Colors.redAccent,
-                            backgroundColor: darkInput,
-                            isSquareDot: true,
-                            compact: true,
-                          )
-                        : _StatusPill(
-                            key: ValueKey<String>(
-                              'scan_${_capturedFrames.length}',
-                            ),
-                            label: '${_capturedFrames.length} F',
-                            color: BDDesign.colorPaperWhite,
-                            backgroundColor: darkInput,
-                            compact: true,
-                          ),
+                    child: _StatusPill(
+                      key: ValueKey<String>('rec_$_recordSeconds'),
+                      label:
+                          'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                      color: Colors.redAccent,
+                      backgroundColor: darkInput,
+                      isSquareDot: true,
+                      compact: true,
+                    ),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -961,6 +881,100 @@ class _RecordPageState extends ConsumerState<RecordPage>
               ],
             ),
           ),
+          Positioned(
+            left: 16,
+            bottom: cornerControlBottom,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _RecordOverlayPanel(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      currentLensDirection == CameraLensDirection.front
+                          ? Icons.camera_front
+                          : Icons.camera_rear,
+                      color: canSwitchPrimaryCamera
+                          ? BDDesign.colorPaperWhite
+                          : BDDesign.colorAshGray,
+                      size: 24,
+                    ),
+                    onPressed: canSwitchPrimaryCamera
+                        ? _switchPrimaryCamera
+                        : null,
+                  ),
+                ),
+                if (!isVideoRecording) ...[
+                  const SizedBox(width: 12),
+                  _RecordOverlayPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        color: BDDesign.colorAshGray,
+                        size: 24,
+                      ),
+                      onPressed: () => Navigator.maybePop(context),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Positioned(
+            right: 16,
+            bottom: cornerControlBottom,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isVideoRecording) ...[
+                  _RecordOverlayPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.info_outline,
+                        color: BDDesign.colorAshGray,
+                        size: 24,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _showTips = true;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                _RecordOverlayPanel(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      _isMotionHudEnabled
+                          ? Icons.speed_rounded
+                          : Icons.speed_outlined,
+                      color: _isMotionHudEnabled
+                          ? BDDesign.colorPaperWhite
+                          : BDDesign.colorAshGray,
+                      size: 24,
+                    ),
+                    onPressed: _toggleMotionHud,
+                  ),
+                ),
+              ],
+            ),
+          ),
           if (_showTips)
             Positioned.fill(
               child: Container(
@@ -996,8 +1010,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
                               ),
                             ),
                             _StatusPill(
-                              label: _isArMode ? 'HUD' : 'VIDEO',
-                              color: _isArMode
+                              label: _isMotionHudEnabled
+                                  ? textLocalize('sensor_on')
+                                  : textLocalize('sensor_off'),
+                              color: _isMotionHudEnabled
                                   ? BDDesign.colorFadedOlive
                                   : BDDesign.colorMutedBlueLight,
                               backgroundColor: const Color(0xFF23232A),
@@ -1111,74 +1127,6 @@ class _TipBlock extends StatelessWidget {
   }
 }
 
-class _FogOfWarPainter extends CustomPainter {
-  final List<_CapturedFrame> capturedFrames;
-  final double currentYaw;
-  final double currentPitch;
-
-  const _FogOfWarPainter({
-    required this.capturedFrames,
-    required this.currentYaw,
-    required this.currentPitch,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final layerPaint = Paint()..color = Colors.black.withAlpha(217);
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), layerPaint);
-
-    final clearPaint = Paint()
-      ..blendMode = BlendMode.clear
-      ..style = PaintingStyle.fill;
-
-    for (final frame in capturedFrames) {
-      var dx = frame.yaw - currentYaw;
-      if (dx > 180) {
-        dx -= 360;
-      }
-      if (dx < -180) {
-        dx += 360;
-      }
-      final dy = frame.pitch - currentPitch;
-
-      final screenX = size.width / 2 + (dx / _kFovH) * size.width;
-      final screenY = size.height / 2 - (dy / _kFovV) * size.height;
-
-      canvas.drawRect(
-        Rect.fromCenter(
-          center: Offset(screenX, screenY),
-          width: size.width,
-          height: size.height,
-        ),
-        clearPaint,
-      );
-    }
-
-    canvas.restore();
-
-    final guidePaint = Paint()
-      ..color = Colors.white.withAlpha(77)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: size.center(Offset.zero),
-        width: size.width,
-        height: size.height,
-      ),
-      guidePaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_FogOfWarPainter oldDelegate) {
-    return oldDelegate.currentYaw != currentYaw ||
-        oldDelegate.currentPitch != currentPitch ||
-        oldDelegate.capturedFrames.length != capturedFrames.length;
-  }
-}
-
 class _StatusPill extends StatelessWidget {
   final String label;
   final Color color;
@@ -1259,7 +1207,6 @@ class _RecordOverlayPanel extends StatelessWidget {
 class _MotionGuidanceCard extends StatelessWidget {
   final double yaw;
   final double pitch;
-  final int frameCount;
   final double linearAccel;
   final double smoothedLinearAccel;
   final double peakLinearAccel;
@@ -1274,7 +1221,6 @@ class _MotionGuidanceCard extends StatelessWidget {
   const _MotionGuidanceCard({
     required this.yaw,
     required this.pitch,
-    required this.frameCount,
     required this.linearAccel,
     required this.smoothedLinearAccel,
     required this.peakLinearAccel,
@@ -1417,7 +1363,7 @@ class _MotionGuidanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'FRM $frameCount   RAW ${linearAccel.toStringAsFixed(2)}  建议让曲线尽量停在绿色带',
+            'RAW ${linearAccel.toStringAsFixed(2)}  建议让曲线尽量停在绿色带',
             style: TextStyle(
               color: BDDesign.colorAshGray.withAlpha(220),
               fontSize: 11,
