@@ -120,25 +120,20 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     unawaited(GenConfig.deleteVideoPathsFile());
   }
 
-  bool get _isZh =>
-      Localizations.localeOf(context).languageCode.toLowerCase().startsWith(
-        'zh',
-      );
-
   String _videoTaskTypeLabel(String taskType) {
     switch (taskType) {
       case 'video_dual_chain':
-        return _isZh ? '视频双链' : 'Video Dual Chain';
+        return textLocalize('gen_video_task_dual_chain');
       case 'video_3dgs':
-        return _isZh ? '视频3DGS' : 'Video 3DGS';
+        return textLocalize('gen_video_task_3dgs');
       case 'da3_feed_forward_3dgs':
-        return _isZh ? '视频前馈3DGS' : 'Video Feed-Forward 3DGS';
+        return textLocalize('gen_video_task_feed_forward');
       case 'da3_sugar':
-        return _isZh ? '视频SuGaR高质量' : 'Video SuGaR High Quality';
+        return textLocalize('gen_video_task_sugar');
       case 'da3_2dgs':
-        return _isZh ? '视频2DGS' : 'Video 2DGS';
+        return textLocalize('gen_video_task_2dgs');
       case 'sparse2dgs':
-        return _isZh ? '视频Sparse2DGS' : 'Video Sparse2DGS';
+        return textLocalize('gen_video_task_sparse2dgs');
       default:
         return taskType;
     }
@@ -147,17 +142,17 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   String _videoTaskTypeHint(String taskType) {
     switch (taskType) {
       case 'video_dual_chain':
-        return _isZh ? '先快后精，适合默认使用' : 'Fast first, then refine';
+        return textLocalize('gen_video_task_dual_chain_hint');
       case 'video_3dgs':
-        return _isZh ? '传统视频转 3DGS' : 'Classic video to 3DGS';
+        return textLocalize('gen_video_task_3dgs_hint');
       case 'da3_feed_forward_3dgs':
-        return _isZh ? '更快出结果的 3DGS' : 'Faster 3DGS generation';
+        return textLocalize('gen_video_task_feed_forward_hint');
       case 'da3_sugar':
-        return _isZh ? '更高质量，但更慢' : 'Higher quality, slower';
+        return textLocalize('gen_video_task_sugar_hint');
       case 'da3_2dgs':
-        return _isZh ? '输出 2DGS 路线' : '2DGS output pipeline';
+        return textLocalize('gen_video_task_2dgs_hint');
       case 'sparse2dgs':
-        return _isZh ? '抽帧后走 Sparse2DGS' : 'Sample frames into Sparse2DGS';
+        return textLocalize('gen_video_task_sparse2dgs_hint');
       default:
         return '';
     }
@@ -176,7 +171,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final completer = Completer<void>();
     TDActionSheet(
       context,
-      description: _isZh ? '选择这段视频要走的生成路线' : 'Choose the generation pipeline for this video',
+      description: textLocalize('gen_video_task_sheet_desc'),
       items: _videoTaskTypeOptions
           .map(
             (taskType) => TDActionSheetItem(
@@ -492,7 +487,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  _isZh ? '任务类型' : 'Task Type',
+                                  textLocalize('gen_video_task_title'),
                                   style: TextStyle(
                                     color: textColor,
                                     fontSize: 14,

@@ -1,6 +1,41 @@
 part of '../generate.dart';
 
 extension _GenerateSubmissionX on _GeneratePageState {
+  Map<String, dynamic>? _videoTaskParamsFor(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return {
+          'slow_pipeline': 'video_3dgs',
+        };
+      case 'da3_feed_forward_3dgs':
+        return {
+          'frame_interval': 5,
+          'conf_threshold': 0.5,
+        };
+      case 'da3_sugar':
+        return {
+          'regularization': 'dn_consistency',
+          'refinement_time': 'short',
+          'fast_mode': true,
+        };
+      case 'da3_2dgs':
+        return {
+          'iterations': 30000,
+          'extract_fps': 2.0,
+          'min_images': 24,
+        };
+      case 'sparse2dgs':
+        return {
+          'video_sample_count': 12,
+          'video_random_seed': 42,
+          'min_video_frame_gap': 3,
+          'video_max_edge': 0,
+        };
+      default:
+        return null;
+    }
+  }
+
   Future<String?> _showImageTaskTypeSheet() {
     final completer = Completer<String?>();
     TDActionSheet(
@@ -27,6 +62,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
   }
 
   void _showTextImagePreview(String prompt) {
+    var didConfirm = false;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -209,6 +245,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
                             onTap: (_isGenerating || _generatedImageUrl == null)
                                 ? () {}
                                 : () async {
+                                    didConfirm = true;
                                     Navigator.pop(sheetContext);
                                     await _confirmTextImage(prompt);
                                   },
@@ -233,7 +270,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      if (!mounted || didConfirm) {
+        return;
+      }
+      _refresh(() {
+        _generatedImageUrl = null;
+        _textEditingController.clear();
+        GenConfig.uploadedText = '';
+      });
+    });
   }
 
   Future<void> _confirmTextImage(String prompt) async {
@@ -441,6 +487,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
     try {
       final sceneId = _GeneratePageState._generateSceneId();
+      final taskType = _selectedVideoTaskType;
+      final taskParams = _videoTaskParamsFor(taskType);
       await _uploadAssetToStorage(
         userId: user.id,
         sceneId: sceneId,
@@ -453,7 +501,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
-        'task_params': {'mapper_type': 'da3'},
+        'task_type': taskType,
+        if (taskParams != null) 'task_params': taskParams,
       });
 
       if (mounted) {
@@ -461,6 +510,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         ref.read(pageIndexProvider.notifier).state = 0;
         final nav = Navigator.of(context);
         GenConfig.uploadedVideos.clear();
+        _selectedVideoTaskType = 'video_3dgs';
         nav.pushNamed('/tasks');
       }
     } catch (e) {
