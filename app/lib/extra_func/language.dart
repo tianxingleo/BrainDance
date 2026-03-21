@@ -20,7 +20,7 @@ enum Language {
       "gen_pic": "图片",
       "gen_text": "文本",
       "gen_video": "视频",
-      "gen_tip_pic": "请选择图片文件 (小于4MB)",
+      "gen_tip_pic": "请选择图片文件 (小于[FILE_SIZE])",
       "gen_tip_text": "请输入描述文本",
       "gen_tip_video": "请选择视频文件\n(清晰度小于等于 1080p 30fps，\n拍摄时长 3min 以内)",
       "gen_tip_textbox": "在此处键入文本",
@@ -306,7 +306,7 @@ enum Language {
       "gen_pic": "Image",
       "gen_text": "Text",
       "gen_video": "Video",
-      "gen_tip_pic": "Please select an image file (less than 4MB)",
+      "gen_tip_pic": "Please select an image file (less than [FILE_SIZE])",
       "gen_tip_text": "Please enter a description text",
       "gen_tip_video":
           "Please select a video file\n(Resolution ≤ 1080p 30fps,\nDuration within 3 minutes)",

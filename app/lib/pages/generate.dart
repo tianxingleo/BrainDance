@@ -133,7 +133,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final uploadLabel = _isGenerating
         ? textLocalize('gen_text_generating')
         : _isUploading
-        ? textLocalize('gen_upload_progress').replaceAll('%s', (_uploadProgress * 100).toStringAsFixed(0))
+        ? textLocalize(
+            'gen_upload_progress',
+          ).replaceAll('%s', (_uploadProgress * 100).toStringAsFixed(0))
         : currentSelectionCount == 0
         ? textLocalize('gen_waiting_material')
         : textLocalize('gen_ready_submit');
@@ -228,7 +230,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               children: [
                 _GenerateSectionHeading(
                   title: textLocalize('gen_section_image'),
-                  description: textLocalize('gen_tip_pic'),
+                  description: textLocalize(
+                    'gen_tip_pic',
+                  ).replaceAll('[FILE_SIZE]', _formatBytes(sizeLimit * 1024)),
                 ),
                 const SizedBox(height: 18),
                 BDPanelCard(
