@@ -115,10 +115,15 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     const double submitAreaBottomPadding =
         floatingNavHeight + floatingNavBottomMargin + submitBottomGap;
     const double contentBottomPadding = 36;
+    const double keyboardSubmitBottomPadding = 8;
     final textColor = isDark ? Colors.white : BDDesign.colorInkBlack;
     final bgCardColor = isDark
         ? const Color(0xFF1C1C1E)
         : BDDesign.colorPaperWhite;
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final submitBottomPadding = keyboardInset > 0
+        ? keyboardSubmitBottomPadding
+        : submitAreaBottomPadding;
 
     final currentSelectionCount = switch (_tabController.index) {
       0 => GenConfig.uploadedImages.length,
@@ -402,7 +407,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 children: [
                   BDPageHeader(
                     title: textLocalize('gen_top'),
-                    subtitle: textLocalize('gen_subtitle'),
+                    //subtitle: textLocalize('gen_subtitle'),
                     trailing: BDStatusPill(
                       label: uploadLabel,
                       icon: _isUploading || _isGenerating
@@ -511,7 +516,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                       20,
                       8,
                       20,
-                      submitAreaBottomPadding,
+                      0,
                     ),
                     child: TDButton(
                       onTap: (_isUploading || _isGenerating)
@@ -536,6 +541,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                           : textLocalize('gen_button'),
                     ),
                   ),
+                  SizedBox(height: submitBottomPadding),
                 ],
               ),
             ],
