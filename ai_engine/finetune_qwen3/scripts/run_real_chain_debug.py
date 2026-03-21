@@ -144,6 +144,8 @@ SEMANTIC_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "计算机科学": ("算法", "算法导论", "电脑", "笔记本电脑", "显示器", "机械键盘", "白板", "办公桌"),
     "计算机": ("电脑", "笔记本电脑", "显示器", "机械键盘", "办公桌", "白板"),
     "学习相关": ("教材", "词典", "算法导论", "高等数学", "白板", "笔记本电脑", "显示器"),
+    "学习氛围": ("教材", "词典", "地球仪", "白板", "办公桌", "笔记本电脑"),
+    "学习": ("教材", "词典", "地球仪", "白板", "办公桌", "笔记本电脑"),
     "学术": ("教材", "词典", "算法导论", "高等数学", "白板", "办公桌"),
 }
 OBJECT_LOOKUP_PHRASE_EXPANSIONS: dict[str, tuple[str, ...]] = {
@@ -182,6 +184,8 @@ RETRIEVAL_ROUTES = {
 }
 ANSWER_ROUTES = {
     "fixed_response",
+    "recent_answer_formatter",
+    "must_answer_focus_formatter",
     "inventory_formatter",
     "semantic_summary_formatter",
     "lora_generation",
@@ -649,6 +653,33 @@ def expand_semantic_terms(term: str) -> list[str]:
         if key in term:
             expanded.extend(values)
     return expanded
+
+
+def infer_semantic_terms_from_question(question: str) -> list[str]:
+    matched = [key for key in SEMANTIC_QUERY_EXPANSIONS if key in (question or "")]
+    return dedupe_preserve_order(matched)
+
+
+def collect_semantic_lookup_terms(lookup_terms: list[str]) -> list[str]:
+    expanded: list[str] = []
+    for term in lookup_terms:
+        expanded.extend(expand_semantic_terms(term))
+    return dedupe_preserve_order(expanded)
+
+
+def is_anchor_object_term(term: str) -> bool:
+    normalized = canonicalize_lookup_term(term) or str(term).strip()
+    if not normalized:
+        return False
+    return any(contains_term(normalized, anchor) or contains_term(anchor, normalized) for anchor in ANCHOR_OBJECT_HINTS)
+
+
+def is_abstract_semantic_query(target_objects: list[str], lookup_terms: list[str]) -> bool:
+    semantic_terms = collect_semantic_lookup_terms(lookup_terms)
+    if not semantic_terms:
+        return False
+    concrete_targets = [term for term in target_objects if is_anchor_object_term(term)]
+    return not concrete_targets
 
 
 def split_lookup_fragments(text: str) -> list[str]:
@@ -1125,6 +1156,8 @@ def detect_non_retrieval_answer(question: str) -> tuple[str, str] | None:
 
 
 def is_model_inventory_query(question: str, question_type: str, lookup_terms: list[str]) -> bool:
+    if any(key in question for key in SEMANTIC_QUERY_EXPANSIONS):
+        return False
     if question_type != "object_lookup" or not lookup_terms:
         return "模型" in question and any(hint in question for hint in MODEL_INVENTORY_HINTS)
     if any(term not in GENERIC_MODEL_TERMS for term in lookup_terms):
@@ -1186,7 +1219,142 @@ def build_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return evidence
 
 
-def build_model_inventory_answer(evidence: list[dict[str, Any]]) -> str | None:
+def dedupe_preserve_order(items: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        value = str(item or "").strip()
+        normalized = re.sub(r"\s+", "", value)
+        if value and normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped.append(value)
+    return deduped
+
+
+def join_natural_list(items: list[str]) -> str:
+    values = dedupe_preserve_order(items)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]}和{values[1]}"
+    return "、".join(values[:-1]) + f"和{values[-1]}"
+
+
+def join_answer_phrases(items: list[str]) -> str:
+    values = dedupe_preserve_order(items)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f"{values[0]}，以及{values[1]}"
+    return "，另外还有".join(values)
+
+
+def evidence_haystacks(item: dict[str, Any]) -> list[str]:
+    haystacks = [
+        str(item.get("display_name") or ""),
+        str(item.get("description") or ""),
+    ]
+    for key in ("objects", "tags"):
+        haystacks.extend(str(value) for value in (item.get(key) or []))
+    return [value for value in haystacks if value]
+
+
+def evidence_supports_term(item: dict[str, Any], term: str) -> bool:
+    normalized = normalize_match_text(term)
+    if not normalized:
+        return False
+    return any(normalized in normalize_match_text(text) for text in evidence_haystacks(item))
+
+
+def summarize_evidence_objects(
+    item: dict[str, Any],
+    *,
+    focus_terms: list[str] | None = None,
+    limit: int = 3,
+) -> list[str]:
+    focus_terms = [str(term).strip() for term in (focus_terms or []) if str(term).strip()]
+    raw_objects = [
+        simplify_object_name(str(obj))
+        for obj in (item.get("objects") or [])
+        if simplify_object_name(str(obj))
+    ]
+    objects = dedupe_preserve_order(raw_objects)
+    if not objects:
+        description = str(item.get("description") or "").strip()
+        if description:
+            first_clause = re.split(r"[。；;]", description, maxsplit=1)[0].strip()
+            if first_clause:
+                return [first_clause]
+        display_name = str(item.get("display_name") or "").strip()
+        return [display_name] if display_name else []
+
+    prioritized: list[str] = []
+    if focus_terms:
+        for obj in objects:
+            if any(
+                contains_term(obj, term)
+                or contains_term(term, obj)
+                or evidence_supports_term({"objects": [obj]}, term)
+                for term in focus_terms
+            ):
+                prioritized.append(obj)
+
+    fallback_objects = [obj for obj in objects if obj not in prioritized]
+    selected = prioritized + fallback_objects
+    return selected[:limit]
+
+
+def build_recent_answer(
+    question: str,
+    evidence: list[dict[str, Any]],
+    lookup_terms: list[str],
+) -> str | None:
+    if not evidence:
+        return None
+
+    sorted_evidence = sorted(
+        evidence,
+        key=lambda item: str(item.get("created_at") or ""),
+        reverse=True,
+    )
+
+    if lookup_terms:
+        focus_objects: list[str] = []
+        companions: list[str] = []
+        for item in sorted_evidence:
+            item_objects = summarize_evidence_objects(item, focus_terms=lookup_terms, limit=3)
+            companions.extend(item_objects)
+            for obj in item_objects:
+                if any(contains_term(obj, term) or contains_term(term, obj) for term in lookup_terms):
+                    focus_objects.append(obj)
+        focus_objects = dedupe_preserve_order(focus_objects)[:3]
+        companions = [obj for obj in dedupe_preserve_order(companions) if obj not in focus_objects][:2]
+        focus_label = canonicalize_lookup_term(lookup_terms[0]) or lookup_terms[0]
+
+        if focus_objects:
+            if companions:
+                return f"最近拍到的{focus_label}相关内容里，主要有{join_natural_list(focus_objects + companions)}。"
+            return f"最近拍到的{focus_label}相关内容里，主要有{join_natural_list(focus_objects)}。"
+        if companions:
+            return f"最近拍到的{focus_label}相关内容里，主要有{join_natural_list(companions)}。"
+
+    phrases: list[str] = []
+    for item in sorted_evidence[:2]:
+        objects = summarize_evidence_objects(item, limit=2)
+        phrase = join_natural_list(objects)
+        if phrase:
+            phrases.append(phrase)
+    phrases = dedupe_preserve_order(phrases)
+    if not phrases:
+        return None
+    return f"最近拍到的主要有{join_answer_phrases(phrases)}。"
+
+
+def build_model_inventory_answer(evidence: list[dict[str, Any]], *, include_scene_ids: bool = False) -> str | None:
     if not evidence:
         return None
 
@@ -1207,25 +1375,78 @@ def build_model_inventory_answer(evidence: list[dict[str, Any]]) -> str | None:
         return str(item.get("display_name") or item.get("scene_id") or "").strip()
 
     names: list[str] = []
-    seen: set[str] = set()
     for item in evidence[:3]:
         name = summarize_item(item)
-        normalized_name = re.sub(r"\s+", "", name)
-        if name and normalized_name not in seen:
-            seen.add(normalized_name)
+        if include_scene_ids:
+            scene_id = str(item.get("scene_id") or "").strip()
+            if name and scene_id:
+                name = f"{name}（{scene_id}）"
+        if name:
             names.append(name)
+    names = dedupe_preserve_order(names)
     if not names:
         return None
+    total_count = max(len(evidence), len(names))
     if len(names) == 1:
-        return f"最近生成过的模型主要是{names[0]}。"
-    if len(names) == 2:
-        return f"最近生成过的模型主要有{names[0]}和{names[1]}。"
-    return f"最近生成过的模型主要有{names[0]}、{names[1]}和{names[2]}。"
+        return f"最近生成过{total_count}个模型，主要是{names[0]}。"
+    return f"最近生成过{total_count}个模型，主要包括{join_natural_list(names[:3])}。"
+
+
+def build_must_answer_focus_answer(
+    question: str,
+    evidence: list[dict[str, Any]],
+    focus_terms: list[str],
+) -> str | None:
+    if not evidence or not focus_terms:
+        return None
+
+    ordered_focus_terms = dedupe_preserve_order(
+        [canonicalize_lookup_term(term) or term for term in focus_terms]
+    )
+    if not ordered_focus_terms:
+        return None
+    focus = ordered_focus_terms[0]
+    matched_items = [item for item in evidence if evidence_supports_term(item, focus)]
+    if not matched_items:
+        matched_items = evidence[:1]
+
+    primary_objects: list[str] = []
+    companion_objects: list[str] = []
+    for item in matched_items[:2]:
+        objects = summarize_evidence_objects(item, focus_terms=ordered_focus_terms, limit=3)
+        for obj in objects:
+            if contains_term(obj, focus) or contains_term(focus, obj):
+                primary_objects.append(obj)
+            else:
+                companion_objects.append(obj)
+
+    primary_objects = dedupe_preserve_order(primary_objects)
+    companion_objects = dedupe_preserve_order([obj for obj in companion_objects if obj not in primary_objects])
+
+    if focus in GENERIC_FOCUS_TERMS or focus in {"地球仪", "书架", "办公桌"}:
+        objects = primary_objects + companion_objects
+        objects = dedupe_preserve_order(objects)[:3]
+        if objects:
+            return f"最近拍到过{focus}相关内容，能看到{join_natural_list(objects)}。"
+        return f"最近拍到过{focus}相关内容。"
+
+    if primary_objects:
+        if companion_objects:
+            return f"最近拍到过{primary_objects[0]}，画面里也常一起出现{join_natural_list(companion_objects[:2])}。"
+        return f"最近拍到过{primary_objects[0]}。"
+
+    objects = dedupe_preserve_order(companion_objects)[:3]
+    if objects:
+        return f"最近拍到过{focus}相关内容，画面里主要有{join_natural_list(objects)}。"
+    return f"最近拍到过{focus}相关内容。"
 
 
 def build_semantic_lookup_answer(question: str, evidence: list[dict[str, Any]], lookup_terms: list[str]) -> str | None:
     if not evidence or not lookup_terms:
         return None
+    semantic_terms = collect_semantic_lookup_terms(lookup_terms)
+    if not semantic_terms:
+        semantic_terms = lookup_terms
 
     def add_unique(items: list[str], value: str, seen: set[str]) -> None:
         normalized = re.sub(r"\s+", "", value)
@@ -1238,12 +1459,16 @@ def build_semantic_lookup_answer(question: str, evidence: list[dict[str, Any]], 
     for item in evidence:
         for candidate in item.get("objects") or []:
             text = simplify_object_name(str(candidate))
-            if text and any(term in text for term in lookup_terms):
+            if text and any(term in text for term in semantic_terms):
                 add_unique(matched_items, text, seen_items)
         for candidate in item.get("tags") or []:
             text = str(candidate).strip()
-            if text and any(term in text for term in lookup_terms):
+            if text and any(term in text for term in semantic_terms):
                 add_unique(matched_items, text, seen_items)
+        description = str(item.get("description") or "").strip()
+        for term in semantic_terms:
+            if term and term in description:
+                add_unique(matched_items, term, seen_items)
 
     if not matched_items:
         return None
@@ -1266,23 +1491,26 @@ def build_semantic_lookup_answer(question: str, evidence: list[dict[str, Any]], 
         return (1, len(text), text)
 
     matched_items = sorted(matched_items, key=priority_score)
-    examples = "、".join(matched_items[:4])
+    examples = join_natural_list(matched_items[:3])
     if "计算机科学" in question or "计算机" in question:
-        return f"有，相关内容里能看到{examples}。"
+        return f"有，整体偏计算机科学方向，常见内容包括{examples}。"
     if "理工" in question or "学术" in question or "学习" in question:
-        return f"有，偏理工学习的内容里能看到{examples}。"
-    return f"有，相关内容里能看到{examples}。"
+        return f"有，整体偏理工学习氛围，常见内容包括{examples}。"
+    return f"有，相关内容里常见{examples}。"
 
 
 def infer_answer_route(
     *,
     query_class: str,
-    special_answer: str | None,
+    special_answer: str | None = None,
+    special_answer_route: str | None = None,
 ) -> str:
     if query_class in {"greeting", "persona", "non_retrieval"}:
         return "fixed_response"
     if query_class == "inventory":
         return "inventory_formatter"
+    if special_answer_route:
+        return special_answer_route
     if special_answer:
         return "semantic_summary_formatter"
     return "lora_generation"
@@ -1343,6 +1571,11 @@ def retrieve_real_chain_case(
     start_time = intent["start_time"]
     end_time = intent["end_time"]
     lookup_terms = normalize_lookup_terms(intent["search_text"], *target_objects)
+    if not lookup_terms:
+        lookup_terms = infer_semantic_terms_from_question(question)
+    abstract_semantic_query = is_abstract_semantic_query(target_objects, lookup_terms)
+    effective_target_objects = [] if abstract_semantic_query else target_objects
+    effective_lookup_terms = collect_semantic_lookup_terms(lookup_terms) if abstract_semantic_query else lookup_terms
 
     raw_rows: list[dict[str, Any]] = []
     support_map: dict[str, bool] = {}
@@ -1429,15 +1662,15 @@ def retrieve_real_chain_case(
         search_text = intent["search_text"] or " ".join(target_objects) or question
         object_like_recent_query = (
             question_type in {"recent_capture", "time_qa"}
-            and not target_objects
+            and not effective_target_objects
             and bool(intent["search_text"])
-            and bool(lookup_terms)
+            and bool(effective_lookup_terms)
         )
         if question_type == "object_lookup" or object_like_recent_query:
             raw_rows, retrieval_route, route_reasons, rpc_errors = build_object_lookup_candidates(
                 search_text=search_text,
-                target_objects=target_objects,
-                lookup_terms=lookup_terms,
+                target_objects=effective_target_objects,
+                lookup_terms=effective_lookup_terms,
                 dashscope_key=dashscope_key,
                 dashscope_base_url=dashscope_base_url,
                 embedding_model=embedding_model,
@@ -1483,15 +1716,15 @@ def retrieve_real_chain_case(
             else:
                 raw_rows = rows
 
-            semantic_query = any(expand_semantic_terms(term) for term in lookup_terms)
+            semantic_query = abstract_semantic_query
 
-            if (not raw_rows or (target_objects and not any(row_matches_lookup_terms(row, lookup_terms) for row in raw_rows))) and lookup_terms:
-                if raw_rows and not any(row_matches_lookup_terms(row, lookup_terms) for row in raw_rows):
+            if (not raw_rows or (effective_target_objects and not any(row_matches_lookup_terms(row, effective_lookup_terms) for row in raw_rows))) and effective_lookup_terms:
+                if raw_rows and not any(row_matches_lookup_terms(row, effective_lookup_terms) for row in raw_rows):
                     route_reasons.append("post_filter_empty")
                 lexical_rows = lexical_fallback_model_assets(
                     supabase_url,
                     supabase_key,
-                    lookup_terms=lookup_terms,
+                    lookup_terms=effective_lookup_terms,
                     start_time=start_time,
                     end_time=end_time,
                     limit=max(match_count, recent_limit),
@@ -1499,11 +1732,11 @@ def retrieve_real_chain_case(
                 if lexical_rows:
                     raw_rows = lexical_rows
                     retrieval_route = "lexical_fallback"
-            elif semantic_query and lookup_terms:
+            elif semantic_query and effective_lookup_terms:
                 lexical_rows = lexical_fallback_model_assets(
                     supabase_url,
                     supabase_key,
-                    lookup_terms=lookup_terms,
+                    lookup_terms=effective_lookup_terms,
                     start_time=start_time,
                     end_time=end_time,
                     limit=max(match_count, recent_limit),
@@ -1512,14 +1745,14 @@ def retrieve_real_chain_case(
                     raw_rows = merge_object_candidates(
                         raw_rows,
                         lexical_rows,
-                        lookup_terms=lookup_terms,
-                        target_objects=target_objects,
+                        lookup_terms=effective_lookup_terms,
+                        target_objects=effective_target_objects,
                         limit=max(match_count, recent_limit),
                     )
                     retrieval_route = "merged_vector_lexical"
                     route_reasons.append("low_confidence_vector")
 
-    semantic_query = any(expand_semantic_terms(term) for term in lookup_terms)
+    semantic_query = abstract_semantic_query
 
     if question_type in {"recent_capture", "time_qa"}:
         raw_rows = sorted(
@@ -1530,20 +1763,31 @@ def retrieve_real_chain_case(
 
     evidence = build_evidence(raw_rows)
     special_answer = None
+    special_answer_route = None
     if model_inventory_query:
         special_answer = build_model_inventory_answer(evidence)
-    elif semantic_query and question_type == "object_lookup" and not target_objects:
-        special_answer = build_semantic_lookup_answer(question, evidence, lookup_terms)
+        special_answer_route = "inventory_formatter" if special_answer else None
+    elif semantic_query:
+        special_answer = build_semantic_lookup_answer(question, evidence, effective_lookup_terms)
+        special_answer_route = "semantic_summary_formatter" if special_answer else None
+    elif question_type in {"recent_capture", "time_qa"}:
+        special_answer = build_recent_answer(question, evidence, effective_lookup_terms)
+        special_answer_route = "recent_answer_formatter" if special_answer else None
+    elif question_type == "object_lookup" and evidence:
+        focus_terms = effective_target_objects or effective_lookup_terms
+        special_answer = build_must_answer_focus_answer(question, evidence, focus_terms)
+        special_answer_route = "must_answer_focus_formatter" if special_answer else None
     answer_route = infer_answer_route(
         query_class=query_class,
         special_answer=special_answer,
+        special_answer_route=special_answer_route,
     )
     retrieval = {
         "query_class": query_class,
         "intent": normalize_retrieval_intent(
             question_type,
             hit_count=len(evidence),
-            target_objects=target_objects,
+            target_objects=effective_target_objects,
         ),
         "hit_count": len(evidence),
         "retrieval_route": retrieval_route,
@@ -1553,7 +1797,7 @@ def retrieve_real_chain_case(
         "rpc_errors": rpc_errors,
         "fallback_after_rpc_error": bool(rpc_errors) and retrieval_route in {"lexical_fallback", "merged_vector_lexical"},
         "raw_target_objects": raw_target_objects,
-        "normalized_lookup_terms": lookup_terms,
+        "normalized_lookup_terms": effective_lookup_terms,
         "route_reasons": route_reasons,
         "evidence": evidence,
     }
@@ -1567,7 +1811,7 @@ def retrieve_real_chain_case(
         "query_class": query_class,
         "answer_route": answer_route,
         "raw_target_objects": raw_target_objects,
-        "normalized_lookup_terms": lookup_terms,
+        "normalized_lookup_terms": effective_lookup_terms,
     }
 
 
