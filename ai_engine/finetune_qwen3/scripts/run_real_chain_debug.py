@@ -28,9 +28,10 @@ from pathlib import Path
 from typing import Any
 
 import requests
-import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+try:
+    import torch
+except ModuleNotFoundError:  # pragma: no cover - retrieval-only paths can run without torch.
+    torch = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -126,6 +127,17 @@ GENERIC_LOOKUP_NOISE_TOKENS = {
     "一找",
     "一下子",
 }
+GENERIC_OBJECT_PREFIXES = (
+    "关于",
+    "有关",
+    "相关",
+    "最近",
+    "最近有",
+    "最近有没有",
+    "最近拍到过",
+    "最近拍过",
+    "最近记录里",
+)
 SEMANTIC_QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "理工": ("算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"),
     "理工科": ("算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"),
@@ -659,6 +671,62 @@ def clean_lookup_fragment(text: str) -> str:
     return stripped
 
 
+def canonicalize_lookup_term(text: str) -> str:
+    value = clean_lookup_fragment(text)
+    if not value:
+        return ""
+    value = re.sub(r"(?:相关的|有关的)$", "", value).strip()
+    changed = True
+    while changed and len(value) >= 2:
+        changed = False
+        for prefix in GENERIC_OBJECT_PREFIXES:
+            if value.startswith(prefix) and len(value) > len(prefix):
+                value = value[len(prefix):].strip()
+                changed = True
+        for suffix in GENERIC_OBJECT_SUFFIXES:
+            if value.endswith(suffix) and len(value) > len(suffix):
+                value = value[: -len(suffix)].strip()
+                changed = True
+    return value.strip()
+
+
+def is_generic_lookup_token(text: str) -> bool:
+    token = canonicalize_lookup_term(text)
+    if not token:
+        return True
+    return token in GENERIC_SEARCH_TEXTS or token in GENERIC_OBJECT_SUFFIXES or len(token) < 2
+
+
+def split_target_objects(target_objects: list[str], search_text: str = "") -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        token = canonicalize_lookup_term(value)
+        if is_generic_lookup_token(token) or token in seen:
+            return
+        seen.add(token)
+        normalized.append(token)
+
+    inputs = [item for item in target_objects if str(item).strip()]
+    if search_text:
+        inputs.append(search_text)
+
+    for raw in inputs:
+        text = str(raw).strip()
+        if not text:
+            continue
+        if not any(separator in text for separator in LOOKUP_SPLIT_SEPARATORS):
+            add(text)
+        for fragment in split_lookup_fragments(text):
+            add(fragment)
+            cleaned = clean_lookup_fragment(fragment)
+            if cleaned and cleaned != fragment:
+                add(cleaned)
+
+    return normalized
+
+
 def normalize_lookup_terms(*terms: str) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -677,14 +745,18 @@ def normalize_lookup_terms(*terms: str) -> list[str]:
         add(base)
         cleaned = clean_lookup_fragment(base)
         add(cleaned)
+        add(canonicalize_lookup_term(base))
+        add(canonicalize_lookup_term(cleaned))
 
         for fragment in split_lookup_fragments(base):
             add(fragment)
             add(clean_lookup_fragment(fragment))
+            add(canonicalize_lookup_term(fragment))
 
         for fragment in split_lookup_fragments(cleaned):
             add(fragment)
             add(clean_lookup_fragment(fragment))
+            add(canonicalize_lookup_term(fragment))
 
         for extra in expand_semantic_terms(base):
             add(extra)
@@ -820,6 +892,32 @@ def merge_object_candidates(
     return ranked[:limit]
 
 
+def select_object_lookup_queries(
+    search_text: str,
+    target_objects: list[str],
+    lookup_terms: list[str],
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        token = canonicalize_lookup_term(value)
+        if is_generic_lookup_token(token) or token in seen:
+            return
+        seen.add(token)
+        ordered.append(token)
+
+    for target in target_objects:
+        add(target)
+    add(search_text)
+    for term in lookup_terms:
+        add(term)
+    if search_text:
+        for fragment in split_lookup_fragments(search_text):
+            add(fragment)
+    return ordered[:3]
+
+
 def build_object_lookup_candidates(
     *,
     search_text: str,
@@ -838,56 +936,45 @@ def build_object_lookup_candidates(
 ) -> tuple[list[dict[str, Any]], str, list[str], list[dict[str, str]]]:
     route_reasons: list[str] = []
     rpc_errors: list[dict[str, str]] = []
-    search_query = search_text or " ".join(target_objects)
-    vector_query = next(
-        (
-            candidate
-            for candidate in lookup_terms + target_objects + [search_query]
-            if candidate.strip() and candidate.strip() not in GENERIC_SEARCH_TEXTS
-        ),
-        search_query,
-    )
+    search_query = canonicalize_lookup_term(search_text) or search_text or " ".join(target_objects)
+    vector_queries = select_object_lookup_queries(search_query, target_objects, lookup_terms)
+    if not vector_queries and search_query:
+        vector_queries = [search_query]
 
-    embedding = create_embedding(dashscope_key, dashscope_base_url, embedding_model, search_query)
-    rows, rpc_error = safe_rpc_match_memory_poses(
-        supabase_url,
-        supabase_key,
-        query_embedding=embedding,
-        match_threshold=match_threshold,
-        match_count=match_count,
-        start_time=start_time,
-        end_time=end_time,
-    )
-    if rpc_error:
-        route_reasons.append("rpc_exception")
-        rpc_errors.append({
-            "stage": "main_lookup",
-            "target": search_query,
-            "error": rpc_error,
-        })
-
-    if not rows and vector_query and vector_query != search_query:
-        retry_embedding = create_embedding(dashscope_key, dashscope_base_url, embedding_model, vector_query)
-        retry_rows, retry_error = safe_rpc_match_memory_poses(
+    vector_result_groups: list[list[dict[str, Any]]] = []
+    vector_any_hit = False
+    for index, vector_query in enumerate(vector_queries):
+        embedding = create_embedding(dashscope_key, dashscope_base_url, embedding_model, vector_query)
+        rows, rpc_error = safe_rpc_match_memory_poses(
             supabase_url,
             supabase_key,
-            query_embedding=retry_embedding,
+            query_embedding=embedding,
             match_threshold=match_threshold,
             match_count=match_count,
             start_time=start_time,
             end_time=end_time,
         )
-        if retry_error:
+        if rpc_error:
+            route_reasons.append("rpc_exception")
             rpc_errors.append({
-                "stage": "normalized_retry",
+                "stage": "main_lookup" if index == 0 else "normalized_retry",
                 "target": vector_query,
-                "error": retry_error,
+                "error": rpc_error,
             })
-        if retry_rows:
-            rows = retry_rows
-            route_reasons.append("normalized_vector_retry")
+            continue
+        if rows:
+            vector_any_hit = True
+            vector_result_groups.append(enrich_match_rows(supabase_url, supabase_key, rows))
+            if index > 0:
+                route_reasons.append("normalized_vector_retry")
 
-    vector_rows = enrich_match_rows(supabase_url, supabase_key, rows) if rows else []
+    vector_rows = merge_object_candidates(
+        [row for group in vector_result_groups for row in group],
+        [],
+        lookup_terms=lookup_terms,
+        target_objects=target_objects,
+        limit=max(match_count, recent_limit),
+    ) if vector_result_groups else []
     if not vector_rows:
         route_reasons.append("rpc_empty")
 
@@ -912,7 +999,11 @@ def build_object_lookup_candidates(
             not candidate_rows
             or "post_filter_empty" in route_reasons
             or "rpc_empty" in route_reasons
-            or (entity_like and len(candidate_rows) < min(2, max(match_count, 1)))
+            or (
+                entity_like
+                and target_objects
+                and not any(row_supports_any_target(row, target_objects) for row in candidate_rows)
+            )
         )
     )
 
@@ -1174,11 +1265,11 @@ def retrieve_real_chain_case(
 
     intent = parse_query_intent(dashscope_key, dashscope_base_url, chat_model, question)
     question_type = intent["question_type"]
-    target_objects = intent["target_objects"]
+    raw_target_objects = list(intent["target_objects"])
+    target_objects = split_target_objects(raw_target_objects, intent["search_text"])
     start_time = intent["start_time"]
     end_time = intent["end_time"]
     lookup_terms = normalize_lookup_terms(intent["search_text"], *target_objects)
-    raw_target_objects = list(target_objects)
 
     raw_rows: list[dict[str, Any]] = []
     support_map: dict[str, bool] = {}
@@ -1407,7 +1498,7 @@ def retrieve_real_chain_case(
     }
 
 
-def apply_chat(tokenizer: AutoTokenizer, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
+def apply_chat(tokenizer: Any, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
     try:
         return tokenizer.apply_chat_template(
             messages,
@@ -1419,7 +1510,12 @@ def apply_chat(tokenizer: AutoTokenizer, messages: list[dict[str, str]], add_gen
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=add_generation_prompt)
 
 
-def load_generator(model_name: str, adapter_path: str = "") -> tuple[AutoTokenizer, Any, str]:
+def load_generator(model_name: str, adapter_path: str = "") -> tuple[Any, Any, str]:
+    if torch is None:
+        raise RuntimeError("当前环境未安装 torch，无法加载生成模型")
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -1445,13 +1541,13 @@ def unload_model(model: Any | None) -> None:
         return
     del model
     gc.collect()
-    if torch.cuda.is_available():
+    if torch is not None and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 
 def generate_answer(
     *,
-    tokenizer: AutoTokenizer,
+    tokenizer: Any,
     model: Any,
     device: str,
     question: str,
@@ -1472,6 +1568,8 @@ def generate_answer(
         add_generation_prompt=True,
     )
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    if torch is None:
+        raise RuntimeError("当前环境未安装 torch，无法执行生成")
     with torch.no_grad():
         generated = model.generate(
             **inputs,

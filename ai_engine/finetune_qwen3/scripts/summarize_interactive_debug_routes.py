@@ -120,6 +120,12 @@ def summarize_subset(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if str(row.get("fallback_trigger_reason") or "").strip() == "rpc_empty"
         or "rpc_empty" in (row.get("route_reasons") or [])
     )
+    post_filter_empty_count = sum(
+        1
+        for row in rows
+        if str(row.get("fallback_trigger_reason") or "").strip() == "post_filter_empty"
+        or "post_filter_empty" in (row.get("route_reasons") or [])
+    )
     return {
         "count": len(rows),
         "hit_rate": round(sum(1 for row in rows if int(row.get("hit_count") or 0) > 0) / max(1, len(rows)), 4),
@@ -132,6 +138,7 @@ def summarize_subset(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "fallback_rate": round(len(fallback_rows) / max(1, len(rows)), 4),
         "bad_rate": round(len(bad_rows) / max(1, len(rows)), 4),
         "rpc_empty_count": rpc_empty_count,
+        "post_filter_empty_count": post_filter_empty_count,
         "rpc_error_count": rpc_error_total,
         "rpc_error_rate": round(rpc_error_total / max(1, len(rows)), 4),
         "fallback_after_rpc_error_count": sum(1 for row in rows if row.get("fallback_after_rpc_error")),
@@ -245,6 +252,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- object_lookup_lexical_fallback_rate: {object_lookup['fallback_rate']}",
         f"- object_lookup_bad_rate: {object_lookup['bad_rate']}",
         f"- object_lookup_rpc_empty_count: {object_lookup['rpc_empty_count']}",
+        f"- object_lookup_post_filter_empty_count: {object_lookup['post_filter_empty_count']}",
         f"- object_lookup_rpc_error_count: {object_lookup['rpc_error_count']}",
         f"- object_lookup_fallback_after_rpc_error_count: {object_lookup['fallback_after_rpc_error_count']}",
         f"- object_lookup_retrieval_miss_bad_count: {object_lookup['retrieval_miss_bad_count']}",
@@ -290,6 +298,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
             lines.append(f"- fallback_rate: {item['fallback_rate']}")
             lines.append(f"- bad_rate: {item['bad_rate']}")
             lines.append(f"- rpc_empty_count: {item['rpc_empty_count']}")
+            lines.append(f"- post_filter_empty_count: {item['post_filter_empty_count']}")
             lines.append(f"- rpc_error_count: {item['rpc_error_count']}")
             lines.append(f"- rpc_error_rate: {item['rpc_error_rate']}")
             lines.append(f"- fallback_after_rpc_error_count: {item['fallback_after_rpc_error_count']}")

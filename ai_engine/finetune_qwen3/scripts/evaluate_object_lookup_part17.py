@@ -92,6 +92,12 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
             if str(row.get("fallback_trigger_reason") or "").strip() == "rpc_empty"
             or "rpc_empty" in (row.get("route_reasons") or [])
         ),
+        "object_lookup_post_filter_empty_count": sum(
+            1
+            for row in rows
+            if str(row.get("fallback_trigger_reason") or "").strip() == "post_filter_empty"
+            or "post_filter_empty" in (row.get("route_reasons") or [])
+        ),
         "retrieval_route_counts": {},
         "issue_bucket_counts": {},
     }
@@ -115,6 +121,7 @@ def render_compare(before: dict[str, Any], after: dict[str, Any]) -> str:
         "object_lookup_retrieval_miss_bad_count",
         "object_lookup_retrieval_low_relevance_bad_count",
         "object_lookup_rpc_empty_count",
+        "object_lookup_post_filter_empty_count",
     ]
     lines = [
         "# Object Lookup Before/After Compare",
