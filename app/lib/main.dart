@@ -10,8 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
-import 'pages/time_peeling.dart';
-import 'pages/community.dart';
+import 'pages/settings.dart';
 import 'pages/create_guide.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
@@ -30,6 +29,17 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+
+// OverviewCard 统计数据，recall 写入，manage 读取
+final overviewStatsProvider = StateProvider<Map<String, int>>(
+  (ref) => {
+    'allModelCount': 0,
+    'processingTaskCount': 0,
+    'ragCount': 0,
+    'recentCount': 0,
+  },
+);
+final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -393,7 +403,7 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
-  static const int _pageCount = 4;
+  static const int _pageCount = 3;
 
   int _previousIndex = 0;
   int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
@@ -437,11 +447,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
       case 0:
         page = const RecallPage();
       case 1:
-        page = const TimePeelingPage();
-      case 2:
-        page = const CommunityPage();
-      case 3:
         page = const CreateGuidePage();
+      case 2:
+        page = const SettingsPage();
       default:
         page = const RecallPage();
     }
@@ -483,7 +491,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // ── 4 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  // ── 3 个页面槽位，位置永远固定，保证 State 不被重建 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
                       // 占位：保持索引稳定，类型始终是 SizedBox
@@ -543,17 +551,13 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
-                          icon: Icons.layers_rounded,
-                          label: textLocalize("timepeeling"),
-                        ),
-                        NavIslandItem(
-                          icon: Icons.public_rounded,
-                          label: textLocalize("community"),
-                        ),
-                        NavIslandItem(
                           icon: Icons.add_rounded,
                           label: textLocalize("create"),
                           isLarge: true,
+                        ),
+                        NavIslandItem(
+                          icon: Icons.settings_rounded,
+                          label: textLocalize("manage"),
                         ),
                       ],
                     ),

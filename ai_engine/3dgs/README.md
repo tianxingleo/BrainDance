@@ -29,6 +29,7 @@
 - **任务驱动**：通过 Supabase 中的 `processing_tasks` 解耦前端和计算节点。
 - **自动流水线**：覆盖 `抽帧 -> 位姿解算 -> 训练 -> 后处理 -> 上传` 的基本过程。
 - **状态回写**：运行日志和任务状态会持续回写数据库，便于前端和 Dashboard 观察进度。
+- **Worker 注册**：每个实例会把自身 `worker_id`、心跳、当前任务和控制状态同步到 `worker_nodes`。
 - **双模式运行**：既支持云端监听模式，也支持直接处理本地文件的调试模式。
 
 ## 第三方依赖与论文引用
@@ -47,6 +48,8 @@
 BrainDance/
 ├── main.py                    # [入口] 程序启动入口 (模式选择器)
 ├── .env                       # [配置] 环境变量 (Supabase Key 等敏感信息)
+├── config/
+│   └── default.toml           # [配置] 非敏感默认工程参数
 ├── src/
 │   ├── config.py              # [配置] PipelineConfig 配置类定义
 │   ├── core/                  # [核心逻辑]
@@ -137,20 +140,65 @@ python -c "import nerfstudio, pathlib; print(pathlib.Path(nerfstudio.__file__).r
 # 预期路径包含: ai_engine/3dgs/src/libs/nerfstudio
 ```
 
-### 3. 环境变量配置 (.env)
+### 3. 配置文件说明
 
-在项目根目录下新建 `.env` 文件，填入你的 Supabase 配置：
+当前配置分为两层：
+
+1. `.env`
+   存放密钥和少量部署差异，例如 `SUPABASE_KEY`、`DASHSCOPE_API_KEY`
+2. `config/default.toml`
+   存放可版本化的默认工程参数，例如训练步数、最大图片数、仓库路径、交付格式
+
+推荐初始化方式：
+
+```bash
+cp .env.example .env
+# 如需修改默认工程参数，编辑 config/default.toml
+# 如需保留个人机器差异，新增 config/local.toml（不会被仓库默认覆盖）
+```
+
+`.env` 最小示例：
 
 ```ini
-# Supabase 连接信息
+# 密钥与部署变量
 SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_KEY=your_service_role_key_here
+DASHSCOPE_API_KEY=your_dashscope_key_here
 
 # 存储桶与表名配置
 SUPABASE_BUCKET=braindance-assets
 SUPABASE_TABLE=processing_tasks
+SUPABASE_WORKER_TABLE=worker_nodes
+
+# Worker 集群管理（可选）
+WORKER_ID=
+WORKER_HEARTBEAT_INTERVAL=10
+WORKER_ONLINE_TIMEOUT_SECONDS=30
+WORKER_SUPERVISOR_POLL_INTERVAL=3
+WORKER_INTERRUPT_GRACE_SECONDS=20
 
 ```
+
+`config/default.toml` 示例片段：
+
+```toml
+[training]
+training_iterations = 15000
+max_images = 300
+mapper_type = "glomap"
+
+[supabase]
+bucket = "braindance-assets"
+table = "processing_tasks"
+```
+
+配置优先级：
+
+1. `config/default.toml`
+2. `config/local.toml`
+3. `.env` / 系统环境变量
+
+也就是说，环境变量会覆盖 `TOML` 中的默认值。
 
 ## 数据库设计 (Supabase)
 
@@ -163,6 +211,7 @@ SUPABASE_TABLE=processing_tasks
 | `id` | `uuid` | 主键，自动生成 |
 | `user_id` | `text` | 用户 ID |
 | `scene_id` | `text` | 场景/项目唯一标识 |
+| `display_name` | `text` | 前端展示名称，Dashboard 和任务列表优先显示 |
 | `status` | `text` | 状态: `pending` (排队), `processing` (处理中), `completed` (完成), `failed` (失败) |
 | `logs` | `jsonb` | 实时日志数组，结构: `[{"ts": 123, "msg": "..."}]` |
 | `created_at` | `timestamp` | 创建时间 |
@@ -180,6 +229,26 @@ SUPABASE_TABLE=processing_tasks
 | `ply_path` | `text` | 模型文件路径 |
 | `preview_img_path` | `text` | 预览图路径 |
 | `meta_info` | `jsonb` | 质量分、引擎版本等附加信息 |
+
+### Table: `worker_nodes`
+
+该表用于 Worker 注册、心跳和集群控制，是最近新增的运维控制面。
+
+| 字段名 | 类型 | 描述 |
+| --- | --- | --- |
+| `worker_id` | `text` | Worker 实例唯一标识，主键 |
+| `hostname` | `text` | 节点主机名 |
+| `pid` | `integer` | 当前进程 PID |
+| `status` | `text` | `starting / idle / busy / stopping / offline / error` |
+| `current_task_id` | `uuid` | 当前执行中的任务 ID |
+| `current_scene_id` | `text` | 当前执行中的场景 ID |
+| `desired_state` | `text` | Dashboard 下发的目标状态，当前约定 `run / pause / interrupt` |
+| `control_note` | `text` | 控制备注 |
+| `control_requested_at` | `timestamptz` | 最近一次控制请求时间 |
+| `last_heartbeat` | `timestamptz` | 最近心跳时间 |
+| `started_at` | `timestamptz` | 实例启动时间 |
+| `stopped_at` | `timestamptz` | 实例停止时间 |
+| `metadata` | `jsonb` | 在线超时、停止原因等附加信息 |
 
 ### Table: `memory_poses`
 
@@ -205,6 +274,15 @@ SUPABASE_TABLE=processing_tasks
 python main.py
 
 ```
+
+启动后，Worker 会自动：
+
+- 向 `worker_nodes` 注册自己
+- 每隔 `WORKER_HEARTBEAT_INTERVAL` 秒写一次心跳
+- 在 Dashboard 将该实例显示为在线 / 忙碌 / 停止中 / 离线
+- 当 `worker_nodes.desired_state='pause'` 时，不再接新任务并优雅退出
+- 当 `worker_nodes.desired_state='interrupt'` 时，Supervisor 会尝试中断当前子 Worker 进程
+- 当 `worker_nodes.desired_state='run'` 时，Supervisor 会重新拉起实例
 
 输出示例：
 
@@ -269,9 +347,10 @@ python main.py /path/to/your/video.mp4
 ### 3) `sparse2dgs`（Sparse2DGS）
 
 - 用途：少量图片输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，输出 2DGS。
-- 输入：`{user_id}/{scene_id}/raw/images.zip`
+- 输入：优先 `{user_id}/{scene_id}/raw/images.zip`，若不存在则回退 `{user_id}/{scene_id}/raw/video.mp4`
 - 最低要求：至少 3 张有效图片（少于 3 张会直接失败）。
 - 典型场景：照片数量有限，但希望比常规少图流程有更强几何约束。
+- 视频输入行为：从视频中随机抽取若干帧，再复用同一套 COLMAP + Sparse2DGS 流程。
 
 常用参数（写入 `task_params`）：
 
@@ -285,6 +364,10 @@ python main.py /path/to/your/video.mp4
 | `sparse2dgs_repo_path` | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
 | `colmap_matcher` | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
 | `colmap_mapper` | `mapper` | COLMAP mapper（失败时会回退 `mapper`） |
+| `video_sample_count` | `12` | 视频输入时随机抽取的帧数 |
+| `video_random_seed` | `42` | 视频随机抽帧种子，便于复现 |
+| `min_video_frame_gap` | `3` | 随机抽帧时的最小帧间隔 |
+| `video_max_edge` | `0` | 视频抽帧后缩放长边上限，`0` 表示不缩放 |
 
 ### 选型建议
 

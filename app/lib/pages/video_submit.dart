@@ -117,6 +117,13 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       await client.from("processing_tasks").insert({
         'scene_id': sceneId,
         'user_id': user.id,
+        'display_name': nameController.text.trim().isEmpty ? null : nameController.text.trim(),
+        'task_type': 'video_dual_chain',
+        'task_params': {
+          'slow_pipeline': 'video_3dgs',
+          'sam3d_vram_threshold_gb': 25,
+          'best_frame_sample_count': 8,
+        },
         'status': 'pending',
         if (nameController.text.isNotEmpty) 'display_name': nameController.text,
         'task_params': {'mapper_type': 'da3'},

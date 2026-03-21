@@ -125,9 +125,12 @@ class BasePipeline(ABC):
         所有异常都会被捕获并记录为日志，不抛出。
         """
         try:
-            supabase_url = os.getenv("SUPABASE_URL", "")
-            supabase_key = os.getenv("SUPABASE_KEY", "")
-            bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
+            from src.config import PipelineConfig
+
+            cfg = PipelineConfig()
+            supabase_url = cfg.supabase_url
+            supabase_key = cfg.supabase_key
+            bucket = cfg.supabase_bucket
             scene_id = params.get("scene_id") or Path(ply_path).stem
 
             sb = self.context.get('supabase')

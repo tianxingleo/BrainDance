@@ -113,9 +113,10 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 2. **Backend as a Service (Supabase)**  
    提供 PostgreSQL、Storage、Auth、Realtime 与 Edge Functions：
    - **PostgreSQL + pgvector**：存储任务、资产与语义向量。
+   - **业务表**：当前主链路依赖 `processing_tasks`、`model_assets`、`memory_poses`、`community_posts`、`worker_nodes`。
    - **Storage**：统一管理原始素材、缩略图、模型文件和相关输出。
    - **Realtime**：为移动端与 Dashboard 提供状态同步。
-   - **RLS**：基于数据库策略控制用户资产访问权限。
+   - **RLS**：基于数据库策略控制用户资产访问权限，并为 Dashboard 提供只读读表策略。
 
 3. **Edge Functions (Deno)**  
    当前仓库已包含 `supabase/functions/search-models`，用于承载语义搜索接口，负责 Embedding 调用、时间解析与向量检索，是“搜索现实空间”这条链路的接口层。
@@ -141,7 +142,7 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 ```text
 BrainDance/
 ├── app/                  # [Flutter] 移动端客户端
-│   ├── lib/              #   - 页面、配置、服务
+│   ├── lib/              #   - 登录、录制、Recall、Community、设置等页面与服务
 │   ├── assets/           #   - 图标、字体、内置 WebGL 资源
 │   └── pubspec.yaml      #   - Flutter 依赖定义
 │
@@ -321,9 +322,11 @@ Storage 目前以 `braindance-assets` bucket 为中心，常见路径约定如�
 
 数据库中的关键表包括：
 
-- `processing_tasks`：任务状态、日志、质量分数、任务类型、参数
+- `processing_tasks`：任务状态、日志、质量分数、任务类型、参数与 `display_name`
 - `model_assets`：模型路径、描述、标签、对象与 Embedding
 - `memory_poses`：帧级空间锚点与向量
+- `community_posts`：社区贴文与地理位置索引
+- `worker_nodes`：Worker 注册、心跳与控制状态
 
 ## 语义搜索 (Semantic Search)
 

@@ -119,52 +119,68 @@ class SearchResultCard extends StatelessWidget {
                 itemBuilder: (context, frameIndex) {
                   final frame = matchedFrames[frameIndex];
                   final imageName = frame['image_name'];
-                  final transformMatrix = frame['transform_matrix'];
                   final frameSim = frame['similarity'] as double?;
 
                   final imageUrl =
                       "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
 
                   return GestureDetector(
-                    onTap: () => _navigateToViewer(context, transformMatrix),
+                    onTap: () => _navigateToViewer(context, frame),
                     child: Container(
                       width: 140,
                       margin: const EdgeInsets.only(right: 12.0),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8.0),
                         color: isDark ? darkInput : theme.grayColor3,
-                        image: DecorationImage(
-                          image: NetworkImage(imageUrl),
-                          fit: BoxFit.cover,
-                        ),
                       ),
-                      child: frameSim != null
-                          ? Stack(
-                              children: [
-                                Positioned(
-                                  bottom: 4,
-                                  left: 4,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withAlpha(100),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      '${(frameSim * 100).toStringAsFixed(1)}%',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8.0),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ColoredBox(
+                              color: isDark ? darkInput : theme.grayColor3,
+                              child: Padding(
+                                padding: const EdgeInsets.all(6.0),
+                                child: Image.network(
+                                  imageUrl,
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.center,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Center(
+                                        child: Icon(
+                                          Icons.broken_image,
+                                          color: Colors.grey,
+                                        ),
                                       ),
+                                ),
+                              ),
+                            ),
+                            if (frameSim != null)
+                              Positioned(
+                                bottom: 4,
+                                left: 4,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withAlpha(100),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${(frameSim * 100).toStringAsFixed(1)}%',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
                                     ),
                                   ),
                                 ),
-                              ],
-                            )
-                          : null,
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -185,6 +201,12 @@ class SearchResultCard extends StatelessWidget {
         model['display_name']?.toString() ??
         model['scene_id'] ??
         'Unknown Scene';
+    String? initialPoseId;
+
+    if (transformMatrix is Map) {
+      initialPoseId = transformMatrix['image_name']?.toString();
+      transformMatrix = transformMatrix['transform_matrix'];
+    }
 
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
@@ -209,6 +231,7 @@ class SearchResultCard extends StatelessWidget {
               posesUrl: posesUrl,
               sceneId: sceneId,
               initialPose: initialPose,
+              initialPoseId: initialPoseId,
             ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
