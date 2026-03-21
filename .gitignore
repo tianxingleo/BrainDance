@@ -147,6 +147,16 @@ ai_engine/**/*.jpg
 ai_engine/**/*.jpeg
 ai_engine/**/*.png
 ai_engine/**/*.gif
+ai_engine/**/*.webp
+ai_engine/**/*.bmp
+ai_engine/**/*.tif
+ai_engine/**/*.tiff
+ai_engine/**/*.heic
+ai_engine/**/*.heif
+ai_engine/**/*.mp3
+ai_engine/**/*.wav
+ai_engine/**/*.m4a
+ai_engine/**/*.flac
 
 # 忽略 3DGS 训练过程中的大型模型文件
 ai_engine/**/*.ply
