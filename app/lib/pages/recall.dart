@@ -61,7 +61,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   );
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
-  Timer? _searchDebounce;
+  Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
   _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
@@ -81,10 +81,13 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
+  bool _didFinishInitialModelLoad = false;
   bool _isTabActive = true;
   bool _shouldRefreshProcessingOnResume = false;
+  bool _isModelPollingInFlight = false;
   int _searchRequestId = 0;
   String? _lastSearchKey;
+  String _lastOwnModelSignature = '';
 
   @override
   void initState() {
@@ -96,7 +99,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   @override
   void dispose() {
-    _searchDebounce?.cancel();
+    _modelPollingTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
     _localModelUrlController.dispose();
@@ -117,6 +120,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _shouldRefreshProcessingOnResume = false;
       unawaited(_fetchProcessingTasks());
     }
+    _syncModelPollingState();
   }
 
   void _bootstrapPage() {
@@ -128,6 +132,113 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     unawaited(_fetchModels());
     unawaited(_fetchProcessingTasks());
     _setupRealtimeListener();
+    _syncModelPollingState();
+  }
+
+  void _syncModelPollingState() {
+    if (!_isTabActive) {
+      _modelPollingTimer?.cancel();
+      _modelPollingTimer = null;
+      return;
+    }
+    _modelPollingTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_pollModelUpdates()),
+    );
+  }
+
+  List<Map<String, dynamic>> _extractOwnModels(
+    List<Map<String, dynamic>> models,
+  ) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+    return models
+        .where((model) => model['user_id']?.toString() == currentUserId)
+        .map((model) => Map<String, dynamic>.from(model))
+        .toList();
+  }
+
+  String _buildModelSignature(List<Map<String, dynamic>> models) {
+    if (models.isEmpty) {
+      return '';
+    }
+    final parts = models
+        .map((model) {
+          final id = model['id']?.toString() ?? '';
+          final sceneId = model['scene_id']?.toString() ?? '';
+          final createdAt = model['created_at']?.toString() ?? '';
+          return '$id|$sceneId|$createdAt';
+        })
+        .toList()
+      ..sort();
+    return parts.join('||');
+  }
+
+  Future<String> _fetchRemoteOwnModelSignature() async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return '';
+    }
+    final response = await Supabase.instance.client
+        .from('model_assets')
+        .select('id, scene_id, created_at')
+        .eq('user_id', currentUserId)
+        .order('created_at', ascending: false);
+    final ownModels = List<Map<String, dynamic>>.from(response);
+    return _buildModelSignature(ownModels);
+  }
+
+  Future<void> _refreshModelsForCurrentState({
+    bool showLoadingIndicator = true,
+  }) async {
+    final query = _searchController.text.trim();
+    if (!mounted) return;
+    if (showLoadingIndicator) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+    final results = await Future.wait([
+      _fetchModels(
+        preserveExistingDataOnError: !showLoadingIndicator,
+        showErrorToast: showLoadingIndicator,
+      ),
+      _fetchProcessingTasks(),
+    ]);
+    final didRefreshModels = results.first as bool;
+    if (!mounted || !didRefreshModels || query.isEmpty) {
+      return;
+    }
+    await _searchModels(query);
+  }
+
+  Future<void> _pollModelUpdates() async {
+    if (!mounted ||
+        !_didFinishInitialModelLoad ||
+        !_isTabActive ||
+        _isLoading ||
+        _isModelPollingInFlight ||
+        _activeModelAction != null) {
+      return;
+    }
+
+    _isModelPollingInFlight = true;
+    try {
+      final remoteSignature = await _fetchRemoteOwnModelSignature();
+      if (!mounted) {
+        return;
+      }
+      if (remoteSignature == _lastOwnModelSignature) {
+        return;
+      }
+      await _refreshModelsForCurrentState(showLoadingIndicator: false);
+    } catch (_) {
+      // Ignore polling failures and retry on the next cycle.
+    } finally {
+      _isModelPollingInFlight = false;
+    }
   }
 
   Future<void> _restoreLocalModelPath() async {
@@ -496,7 +607,7 @@ $userQuestion
 
     final parts = <String>[
       '片段$index',
-      '场景：${model['display_name']?.toString() ?? model['scene_id']?.toString() ?? '未知场景'}',
+      '场景：${_modelDisplayName(model, fallback: '未知场景')}',
       '描述：${model['description']?.toString() ?? '暂无描述'}',
       if (tags.isNotEmpty) '标签：$tags',
       if (objects.isNotEmpty) '对象：$objects',
@@ -737,7 +848,10 @@ $userQuestion
     }
   }
 
-  Future<void> _fetchModels() async {
+  Future<bool> _fetchModels({
+    bool preserveExistingDataOnError = false,
+    bool showErrorToast = true,
+  }) async {
     try {
       final response = await Supabase.instance.client
           .from('model_assets')
@@ -783,33 +897,56 @@ $userQuestion
       }
 
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(models),
+        );
         setState(() {
           _allModels = models;
           _models = models;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
         _updateOverviewProvider();
       }
       _searchCache.clear();
       _lastSearchKey = null;
       await _syncLocalIndex(models);
+      return true;
     } catch (e) {
+      if (preserveExistingDataOnError) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return false;
+      }
+
       final demoModels = [_buildDemoModel()];
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(demoModels),
+        );
         setState(() {
           _allModels = demoModels;
           _models = demoModels;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
         _updateOverviewProvider();
-        TDToast.showText(
-          '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
-          context: context,
-        );
+        if (showErrorToast) {
+          TDToast.showText(
+            '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
+            context: context,
+          );
+        }
       }
       _searchCache.clear();
       _lastSearchKey = null;
       await _syncLocalIndex(demoModels);
+      return false;
     }
   }
 
@@ -878,10 +1015,7 @@ $userQuestion
   ) {
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final model in models) {
-      final name =
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          'Unknown';
+      final name = _modelDisplayName(model, fallback: 'Unknown');
       groups.putIfAbsent(name, () => []).add(model);
     }
     for (final list in groups.values) {
@@ -894,6 +1028,33 @@ $userQuestion
       });
     }
     return groups;
+  }
+
+  String _modelDisplayName(
+    Map<String, dynamic> model, {
+    String fallback = 'Unknown Scene',
+  }) {
+    final displayName = model['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final tags = model['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+
+    final sceneId = model['scene_id']?.toString().trim() ?? '';
+    if (sceneId.isNotEmpty) {
+      return sceneId;
+    }
+
+    return fallback;
   }
 
   // 更黑的夜间色值
@@ -939,10 +1100,7 @@ $userQuestion
                                 ),
                                 tooltip: textLocalize("recall_refresh"),
                                 onPressed: () {
-                                  setState(() {
-                                    _isLoading = true;
-                                  });
-                                  _fetchModels();
+                                  unawaited(_refreshModelsForCurrentState());
                                 },
                               ),
                             ],
@@ -998,7 +1156,6 @@ $userQuestion
                                                   IconButton(
                                                     onPressed: () {
                                                       _searchController.clear();
-                                                      _searchDebounce?.cancel();
                                                       _searchModels('');
                                                     },
                                                     icon: Icon(
@@ -1041,7 +1198,7 @@ $userQuestion
                                   onSubmitted: (value) {
                                     unawaited(_handleSearchSubmitted(value));
                                   },
-                                  onChanged: _onSearchChanged,
+                                  onChanged: _searchModels,
                                 ),
                               ),
                               if (_searchMode == _RecallSearchMode.localAi) ...[
@@ -1284,13 +1441,6 @@ $userQuestion
         ? (data['error'] ?? textLocalize('recall_unknown_error'))
         : textLocalize('recall_server_error');
     throw Exception(errMsg);
-  }
-
-  void _onSearchChanged(String value) {
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
-      _searchModels(value);
-    });
   }
 
   Future<void> _handleSearchSubmitted(String value) async {
@@ -1736,9 +1886,7 @@ $userQuestion
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId =
-        model['display_name']?.toString() ??
-        model['scene_id'] ??
-        'Unknown Scene';
+        _modelDisplayName(model);
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -1762,26 +1910,14 @@ $userQuestion
 
     Navigator.push(
       context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            WebGLViewerPage(
-              initialModelUrl: modelUrl,
-              posesUrl: posesUrl,
-              sceneId: sceneId,
-              initialPose: initialPose,
-              initialPoseId: initialPoseId,
-            ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
-          );
-        },
+      MaterialPageRoute(
+        builder: (context) => WebGLViewerPage(
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+          initialPoseId: initialPoseId,
+        ),
       ),
     );
   }
@@ -1833,13 +1969,13 @@ $userQuestion
       }
 
       final sizeMb = sizeBytes / 1024 / 1024;
-      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)} MB';
+      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)}MB';
     } catch (_) {
       return '';
     }
   }
 
-  void _showModelActions(Map<String, dynamic> model) {
+  Future<void> _showModelActions(Map<String, dynamic> model) async {
     final cardKey = _modelCardKeyFor(model);
     final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
     final overlayRenderBox =
@@ -1851,8 +1987,15 @@ $userQuestion
       ancestor: overlayRenderBox,
     );
     final rect = offset & renderBox.size;
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+    if (!mounted) {
+      return;
+    }
     setState(() {
-      _activeModelAction = model;
+      _activeModelAction = {
+        ...model,
+        if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+      };
       _activeModelActionRect = rect;
     });
   }
@@ -1885,9 +2028,10 @@ $userQuestion
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
     final displayName =
-        model['display_name']?.toString() ??
-        model['scene_id']?.toString() ??
-        textLocalize('recall_unnamed_model');
+        _modelDisplayName(
+          model,
+          fallback: textLocalize('recall_unnamed_model'),
+        );
 
     // 格式化日期
     String formatDate(String? raw) {
@@ -1977,7 +2121,7 @@ $userQuestion
                         : textLocalize('recall_detail_unknown'),
                     textColor: textColor,
                     hintColor: hintColor,
-                    trailing: qualityScore != null
+                    valueTrailing: qualityScore != null
                         ? _buildScoreBar(
                             (qualityScore as num).toDouble(),
                             isDark,
@@ -2030,7 +2174,7 @@ $userQuestion
     final sceneId = model['scene_id']?.toString();
     if (sceneId == null) return;
 
-    final currentName = model['display_name']?.toString() ?? sceneId;
+    final currentName = _modelDisplayName(model, fallback: sceneId);
     final newName = await showDialog<String>(
       context: context,
       builder: (_) => _RenameModelDialog(initialName: currentName),
@@ -2051,16 +2195,24 @@ $userQuestion
           textLocalize('recall_rename_success'),
           context: context,
         );
+        final targetKey = _modelKey(model);
         setState(() {
           for (final m in _allModels) {
-            if (m['scene_id'] == sceneId) {
+            if (_modelKey(m) == targetKey) {
               m['display_name'] = newName;
             }
           }
           for (final m in _models) {
-            if (m['scene_id'] == sceneId) {
+            if (_modelKey(m) == targetKey) {
               m['display_name'] = newName;
             }
+          }
+          if (_activeModelAction != null &&
+              _modelKey(_activeModelAction!) == targetKey) {
+            _activeModelAction = {
+              ..._activeModelAction!,
+              'display_name': newName,
+            };
           }
         });
       }
@@ -2166,9 +2318,10 @@ $userQuestion
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
       sceneId:
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          textLocalize('recall_unnamed_model'),
+          _modelDisplayName(
+            model,
+            fallback: textLocalize('recall_unnamed_model'),
+          ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
@@ -2196,6 +2349,7 @@ class _DetailRow extends StatelessWidget {
   final Color textColor;
   final Color hintColor;
   final Widget? trailing;
+  final Widget? valueTrailing;
 
   const _DetailRow({
     required this.icon,
@@ -2204,6 +2358,7 @@ class _DetailRow extends StatelessWidget {
     required this.textColor,
     required this.hintColor,
     this.trailing,
+    this.valueTrailing,
   });
 
   @override
@@ -2226,13 +2381,24 @@ class _DetailRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      value,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (valueTrailing != null) ...[
+                    const SizedBox(width: 10),
+                    valueTrailing!,
+                  ],
+                ],
               ),
             ],
           ),

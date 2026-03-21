@@ -8,6 +8,42 @@ import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
 import 'model_card.dart';
 
+String _modelDisplayName(
+  Map<String, dynamic> model, {
+  String fallback = 'Unknown Scene',
+}) {
+  final displayName = model['display_name']?.toString().trim() ?? '';
+  if (displayName.isNotEmpty) {
+    return displayName;
+  }
+
+  final tags = model['tags'];
+  if (tags is List) {
+    for (final tag in tags) {
+      final value = tag?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+  }
+
+  final sceneId = model['scene_id']?.toString().trim() ?? '';
+  if (sceneId.isNotEmpty) {
+    return sceneId;
+  }
+
+  return fallback;
+}
+
+Widget _buildSimilarityBadge({required Widget child}) {
+  return Tooltip(
+    message: '\u5339\u914D\u5EA6',
+    preferBelow: false,
+    verticalOffset: 12,
+    child: child,
+  );
+}
+
 class RecallModelGrid extends StatelessWidget {
   final TDThemeData theme;
   final bool isDark;
@@ -55,10 +91,8 @@ class RecallModelGrid extends StatelessWidget {
               final model = models[index];
               final cardKey = modelCardKeyFor(model);
               final isActionTarget = isSameModel(activeModelAction, model);
-              final sceneId =
-                  model['display_name']?.toString() ??
-                  model['scene_id'] ??
-                  'Unknown Scene';
+              final displayName = _modelDisplayName(model);
+              final sceneStorageId = model['scene_id']?.toString() ?? '';
               final desc = model['description'] ?? textLocalize("recall_no_desc");
               final similarity = model['similarity'] as double?;
               final userId = model['user_id'] ?? '';
@@ -101,7 +135,7 @@ class RecallModelGrid extends StatelessWidget {
                                           CrossAxisAlignment.start,
                                       children: [
                                         TDText(
-                                          sceneId,
+                                          displayName,
                                           font: theme.fontTitleMedium,
                                           fontWeight: FontWeight.w600,
                                           maxLines: 1,
@@ -118,21 +152,25 @@ class RecallModelGrid extends StatelessWidget {
                                     ),
                                   ),
                                   if (similarity != null)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: theme.brandColor4.withAlpha(220),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: TDText(
-                                        '${(similarity * 100).toStringAsFixed(1)}%',
-                                        font: theme.fontBodySmall,
-                                        textColor: isDark
-                                            ? const Color(0xFFFFFFFF)
-                                            : Colors.white,
+                                    _buildSimilarityBadge(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: theme.brandColor4.withAlpha(
+                                            220,
+                                          ),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: TDText(
+                                          '${(similarity * 100).toStringAsFixed(1)}%',
+                                          font: theme.fontBodySmall,
+                                          textColor: isDark
+                                              ? const Color(0xFFFFFFFF)
+                                              : Colors.white,
+                                        ),
                                       ),
                                     ),
                                 ],
@@ -160,7 +198,7 @@ class RecallModelGrid extends StatelessWidget {
                                       .storage
                                       .from('braindance-assets')
                                       .getPublicUrl(
-                                        '$userId/$sceneId/output/images/$imageName',
+                                        '$userId/$sceneStorageId/output/images/$imageName',
                                       );
 
                                   return GestureDetector(
@@ -280,6 +318,10 @@ class RecallModelActionOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localSizeLabel = model['_local_size_label']?.toString().trim() ?? '';
+    final deleteLabel = localSizeLabel.isEmpty
+        ? '\u5220\u9664\u6A21\u578B'
+        : '\u5220\u9664\u6A21\u578B($localSizeLabel)';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
@@ -412,7 +454,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                         children: [
                           _ActionMenuItem(
                             icon: Icons.info_outline_rounded,
-                            label: '查看详情',
+                            label: '\u67E5\u770B\u8BE6\u60C5',
                             isDark: isDark,
                             onTap: () async {
                               onDismiss();
@@ -422,7 +464,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.edit_rounded,
-                            label: '重命名',
+                            label: '\u91CD\u547D\u540D',
                             isDark: isDark,
                             onTap: () async {
                               onDismiss();
@@ -432,7 +474,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.delete_outline_rounded,
-                            label: '删除本地模型',
+                            label: deleteLabel,
                             isDark: isDark,
                             destructive: true,
                             onTap: () async {
@@ -443,7 +485,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.public_rounded,
-                            label: '分享到社区',
+                            label: '\u5206\u4EAB\u5230\u793E\u533A',
                             isDark: isDark,
                             onTap: () async {
                               onDismiss();
@@ -824,10 +866,7 @@ class RecallModelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId =
-        model['display_name']?.toString() ??
-        model['scene_id'] ??
-        'Unknown Scene';
+    final sceneId = _modelDisplayName(model);
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
     final plyPath = model['ply_path'] as String? ?? '';
@@ -885,21 +924,23 @@ class RecallModelTile extends StatelessWidget {
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.brandColor4.withAlpha(220),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: TDText(
-                        '${(similarity * 100).toStringAsFixed(1)}%',
-                        font: theme.fontBodyExtraSmall,
-                        textColor: isDark
-                            ? const Color(0xFFFFFFFF)
-                            : Colors.white,
+                    child: _buildSimilarityBadge(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.brandColor4.withAlpha(220),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: TDText(
+                          '${(similarity * 100).toStringAsFixed(1)}%',
+                          font: theme.fontBodyExtraSmall,
+                          textColor: isDark
+                              ? const Color(0xFFFFFFFF)
+                              : Colors.white,
+                        ),
                       ),
                     ),
                   ),
@@ -984,7 +1025,7 @@ class RecallModelMockCover extends StatelessWidget {
   }
 }
 
-/// Time Peeling: 按模型名称分组，每组一个水平滑动时间槽
+/// Time Peeling: group models by name, with a horizontal time strip for each group
 class TimePeelingList extends StatelessWidget {
   final TDThemeData theme;
   final bool isDark;
@@ -1075,7 +1116,7 @@ const double _kSlotWidth = _kCardWidth + _kCardGap;
 const double _kTimelineHeight = 58.0;
 const double _kNodeRadius = 7.0;
 const double _kLineHeight = 3.5;
-const Color _kTimelineColor = Color(0xFFCC9A5C); // 橙色微灰
+const Color _kTimelineColor = Color(0xFFCC9A5C); // muted orange
 
 class _TimePeelingSlot extends StatelessWidget {
   final String name;
@@ -1147,7 +1188,7 @@ class _TimePeelingSlot extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 标题行
+            // Title row
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
               child: Row(
@@ -1184,7 +1225,7 @@ class _TimePeelingSlot extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            // 卡片 + 时间轴，统一水平滚动
+            // Cards + timeline share one horizontal scroll area
             SizedBox(
               height: 220 + 10 + _kTimelineHeight,
               child: ListView.builder(
@@ -1192,7 +1233,7 @@ class _TimePeelingSlot extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 itemCount: models.length + 1, // +1 for add card
               itemBuilder: (context, i) {
-                // 第一个位置：添加卡片
+                // First slot: add card
                 if (i == 0) {
                   return SizedBox(
                     width: _kSlotWidth,
@@ -1239,7 +1280,7 @@ class _TimePeelingSlot extends StatelessWidget {
                             ),
                           ),
                         ),
-                        // 空白占位，与时间轴对齐
+                        // Empty spacer aligned with the timeline
                         const SizedBox(height: 10),
                         SizedBox(height: _kTimelineHeight),
                       ],
@@ -1261,7 +1302,7 @@ class _TimePeelingSlot extends StatelessWidget {
                   width: _kSlotWidth,
                   child: Column(
                     children: [
-                      // 卡片
+                      // Card
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.only(right: _kCardGap),
@@ -1302,9 +1343,9 @@ class _TimePeelingSlot extends StatelessWidget {
                           ),
                         ),
                       ),
-                      // 卡片与时间轴间距
+                      // Gap between card and timeline
                       const SizedBox(height: 10),
-                      // 时间轴
+                      // Timeline
                       SizedBox(
                         height: _kTimelineHeight,
                         child: _TimelineNode(
@@ -1328,7 +1369,7 @@ class _TimePeelingSlot extends StatelessWidget {
   }
 }
 
-/// 单个时间轴节点：横线 + 圆点 + 时间标签
+/// Single timeline node: line + dot + time label
 class _TimelineNode extends StatelessWidget {
   final bool isFirst;
   final bool isLast;
@@ -1350,13 +1391,13 @@ class _TimelineNode extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // 横线 + 节点
+        // Line + node
         SizedBox(
           height: _kNodeRadius * 2 + 4,
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // 横线
+              // Horizontal line
               Positioned(
                 left: isFirst ? _kSlotWidth / 2 : 0,
                 right: isLast ? _kSlotWidth / 2 : 0,
@@ -1365,7 +1406,7 @@ class _TimelineNode extends StatelessWidget {
                   color: lineColor,
                 ),
               ),
-              // 圆点，居中于卡片（含 gap 的一半偏移）
+              // Dot centered relative to the card, offset by half the gap
               Positioned(
                 left: (_kCardWidth - _kNodeRadius * 2) / 2,
                 child: Container(
@@ -1381,7 +1422,7 @@ class _TimelineNode extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        // 时间标签，居中于卡片
+        // Time label centered under the card
         SizedBox(
           width: _kCardWidth,
           child: Text(
