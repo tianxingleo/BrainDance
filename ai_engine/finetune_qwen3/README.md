@@ -38,19 +38,19 @@
 
 对应记录见：
 
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part16.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part17.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part18.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part19.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part20.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part21.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part22.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part27.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part28.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part29.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part30.md`
-- `docs/开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
-- `docs/开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part16.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part17.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part18.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part19.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part20.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part21.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part22.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part27.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part28.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part29.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录-Part30.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
+- `../../docs/04-本地问答与微调/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
 
 ---
 

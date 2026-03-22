@@ -105,47 +105,15 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 
 本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建，再到多端检索与浏览的端云协同流程。
 
-### 🧪 Qwen3 本地问答微调与部署（持续推进中）
+### 🧪 本地问答与大语言模型微调
 
-`ai_engine/finetune_qwen3` 已从早期 `Qwen3-1.7B + LoRA` 实验推进到部署候选筛选阶段，目前覆盖 `Part 16-29`：
+为了在移动端和边缘侧实现更快速、私密的空间检索交互，我们在云端大模型之外，构建了基于 Qwen3 的本地问答链路：
 
-- 检索路由可观测性与回归机制
-- `object_lookup` 检索专项优化
-- formatter 回答路由稳定化
-- 最小本地问答入口 `local_qa_cli.py`
-- `Qwen3-0.6B` LoRA 训练与 benchmark
-- `Qwen3-1.7B` merged HF 目录导出
-- `GGUF` 转换、`Q4_K_M` / `Q5_K_M` 量化与 strict 集复测
-- importance matrix (`imatrix`) 量化复测
-- Part 29 部署候选小样本验证与主线选择
+- **端云混合 RAG**：结合本地量化模型 (GGUF) 与检索增强，支持快速理解查询意图并定位空间锚点。
+- **场景专属微调**：针对空间查询、环境描述及多轮对话进行了参数高效微调 (LoRA)，在保持轻量级计算的同时提升专有场景下推理准确度。
+- **本地部署验证**：进行了 Q4/Q5 重要性矩阵 (imatrix) 量化与严格无泄露评估，支撑稳定的终端侧推理。
 
-当前状态说明：
-
-- `ai_engine/finetune_qwen3` 仍然是独立实验目录，但已不再只是“调试脚本集合”
-- Flutter Recall 的本地 AI 入口已经恢复，可复用当前 `GGUF + llamadart + local RAG` 链路
-- 当前部署主线已明确为 `1.7B Q5_K_M + imatrix GGUF`
-- 备用方案为 `0.6B LoRA`
-- 质量基线为 `1.7B merged`
-
-快速命令：
-
-```bash
-# 单轮问答
-python ai_engine/finetune_qwen3/scripts/local_qa_cli.py --question "我最近拍了什么？"
-
-# 回归测试
-pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
-```
-
-文档入口：
-
-- `ai_engine/finetune_qwen3/README.md`
-- `docs/开发文档/本地问答微调文档补充说明.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part27.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part28.md`
-- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part29.md`
-- `docs/开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
-- `docs/开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
+> 完整的模型探索、微调流程文档、基准测试，以及从 Part 1 到 Part 30 的全面技术演进记录，请参阅 `docs/` 下的开发记录文档，或 `ai_engine/finetune_qwen3/` 实验模块。
 
 系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
