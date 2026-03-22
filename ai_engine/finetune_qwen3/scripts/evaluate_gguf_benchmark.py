@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ubatch_size", type=int, default=256)
     parser.add_argument("--threads", type=int, default=max(1, os.cpu_count() or 1))
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--device", default="")
     parser.add_argument("--gpu_layers", default="all")
     parser.add_argument("--main_gpu", type=int, default=0)
@@ -129,6 +130,29 @@ def build_command(args: argparse.Namespace, system_prompt: str, user_prompt: str
     return command
 
 
+def run_with_retries(command: list[str], timeout: int, retries: int) -> subprocess.CompletedProcess[bytes]:
+    last_error: subprocess.CalledProcessError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return subprocess.run(
+                command,
+                capture_output=True,
+                timeout=timeout,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            last_error = exc
+            stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+            print(f"[gguf-benchmark] attempt {attempt + 1}/{retries + 1} failed with exit code {exc.returncode}")
+            if stderr.strip():
+                print(stderr.strip())
+            if attempt >= retries:
+                raise
+            time.sleep(1.0)
+    assert last_error is not None
+    raise last_error
+
+
 def main() -> None:
     args = parse_args()
     rows = load_jsonl(Path(args.benchmark_file))
@@ -148,12 +172,7 @@ def main() -> None:
         system_prompt, user_prompt = extract_chat_parts(row.get("messages") or [])
         command = build_command(args, system_prompt, user_prompt, use_device=use_device)
         started = time.perf_counter()
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            timeout=args.timeout,
-            check=True,
-        )
+        completed = run_with_retries(command, timeout=args.timeout, retries=args.retries)
         latency = time.perf_counter() - started
         latencies.append(latency)
         stdout = completed.stdout.decode("utf-8", errors="replace")

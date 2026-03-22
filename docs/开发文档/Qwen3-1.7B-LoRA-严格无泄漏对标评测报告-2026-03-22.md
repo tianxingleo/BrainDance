@@ -75,6 +75,36 @@
 
 说明：`composite` 为任务导向加权分（0-100），用于排序，不替代单项指标。
 
+## 4.0.1 本地部署变体补充总表（严格集新增）
+
+为了让严格集报告也能覆盖当前所有本地可部署版本，补充加入：
+
+- `0.6B LoRA`
+- `1.7B merged`
+- `1.7B Q4_K_M GGUF`
+
+它们在 **strict_no_leak_ood_v3（64 题）** 上的结果如下：
+
+| 本地版本 | false_no_answer | partial_hallucination | evidence_utilization | partial_precision | partial_false_negative | partial_missing_negation | must_answer_focus | natural_style |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1.7B LoRA（当前主模型） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8889 | 0.8281 |
+| 0.6B LoRA | **0.0000** | 0.0556 | **1.0000** | 0.9474 | **0.0000** | 0.0556 | **1.0000** | 0.8281 |
+| 1.7B merged | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.6667 | 0.7812 |
+| 1.7B Q4 GGUF | **0.0000** | 0.0556 | **1.0000** | 0.9474 | **0.0000** | 0.0556 | 0.6667 | 0.7188 |
+
+补充说明：
+
+- `0.6B LoRA` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_lora_gpu1.json`
+- `1.7B merged` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_merged_gpu1.json`
+- `1.7B Q4 GGUF` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q4_gguf_gpu1.json`
+
+这里最重要的补充观察是：
+
+1. `0.6B LoRA` 在严格集上并没有崩，反而维持了相当强的正确性
+2. `1.7B merged` 在严格集上与当前 `1.7B LoRA` 的任务指标几乎对齐，但体验侧更弱
+3. `1.7B Q4 GGUF` 在严格集上相比原始 benchmark 没有继续大幅恶化，但 `natural_style` 与 `must_answer_focus` 仍弱于非量化版本
+4. 因此从严格集口径看，`Q4` 更接近“正确性基本保住、体验侧回撤”的版本，而不是原始集里那种明显劣化的形态
+
 ## 4.1 1.7B 四象限对照（你要求的核心对比）
 
 同一 `Qwen3-1.7B` 基座，做“微调前后 × 有无工程优化”四象限：
@@ -121,16 +151,17 @@ xychart-beta
 
 ```mermaid
 xychart-beta
-  title "Qwen3-1.7B 四象限关键指标"
-  x-axis ["hallucination","partial_precision","must_answer_focus","natural_style"]
+  title "Qwen3-1.7B 四象限关键指标（单图无重叠）"
+  x-axis ["K1","K2","K3","K4","K5","K6","K7","K8","K9","K10","K11","K12","K13","K14","K15","K16"]
   y-axis "Rate" 0 --> 1
-  bar [0.6667,0.4286,0.2222,0.2031]
-  bar [0.3889,0.6818,1.0000,0.9688]
-  bar [0.7222,0.5000,0.3333,0.0781]
-  bar [0.0000,1.0000,0.8889,0.8281]
+  bar [0.6667,0.3889,0.7222,0.0000,0.4286,0.6818,0.5000,1.0000,0.2222,1.0000,0.3333,0.8889,0.2031,0.9688,0.0781,0.8281]
 ```
 
-注：四组柱依次对应 `Base+NoOpt`、`Base+Opt`、`LoRA+NoOpt`、`LoRA+Opt`。
+指标映射（按指标分组）：
+- `K1..K4`: hallucination = `Base+NoOpt` / `Base+Opt` / `LoRA+NoOpt` / `LoRA+Opt`
+- `K5..K8`: partial_precision = `Base+NoOpt` / `Base+Opt` / `LoRA+NoOpt` / `LoRA+Opt`
+- `K9..K12`: must_answer_focus = `Base+NoOpt` / `Base+Opt` / `LoRA+NoOpt` / `LoRA+Opt`
+- `K13..K16`: natural_style = `Base+NoOpt` / `Base+Opt` / `LoRA+NoOpt` / `LoRA+Opt`
 
 ### 5.2 有无优化同台竞技（同模型正面对打）
 
@@ -150,13 +181,23 @@ xychart-beta
 ```mermaid
 xychart-beta
   title "关键指标同台：partial_precision 与 anti_hallucination"
-  x-axis ["LoRA-1.7B","Qwen2.5-32B(opt)","Qwen3-32B(opt)","Qwen3-8B(opt)","Turbo(opt)","Base-1.7B","Qwen3-8B(noopt)","Qwen3-32B(noopt)","Qwen2.5-32B(noopt)"]
+  x-axis ["M1","M2","M3","M4","M5","M6","M7","M8","M9"]
   y-axis "Rate" 0 --> 1
   line [1.0000,0.9474,0.8889,0.8421,0.8824,0.6818,0.5385,0.5385,0.4828]
   line [1.0000,0.9444,0.8889,0.8333,0.8889,0.6111,0.3333,0.3333,0.1667]
 ```
 
 注：第二条线 `anti_hallucination = 1 - partial_hallucination_rate`（越高越好）。
+模型映射：
+- `M1`: LoRA-1.7B
+- `M2`: Qwen2.5-32B(opt)
+- `M3`: Qwen3-32B(opt)
+- `M4`: Qwen3-8B(opt)
+- `M5`: Turbo(opt)
+- `M6`: Base-1.7B
+- `M7`: Qwen3-8B(noopt)
+- `M8`: Qwen3-32B(noopt)
+- `M9`: Qwen2.5-32B(noopt)
 
 ### 5.4 参数量维度竞技（Qwen3 系列）
 
@@ -189,6 +230,20 @@ xychart-beta
 5. 真实可执行结论：在当前 BrainDance 问答场景中，优先级应是  
    `工程链路` > `任务化微调` > `盲目增大参数量`。
 
+## 6.1 从严格集看本地部署选择（新增）
+
+如果只比较当前本地 4 个版本：
+
+- `1.7B LoRA`：仍是严格集上的质量上界
+- `0.6B LoRA`：严格集表现比预期更稳，是很强的轻量端侧候选
+- `1.7B merged`：任务正确性和 `1.7B LoRA` 基本对齐，但聚焦度与自然度更弱
+- `1.7B Q4 GGUF`：严格集下正确性还能接受，但体验侧弱于未量化版本
+
+因此当前可以拆成两类判断：
+
+1. 如果目标是**本地质量上界**，还是 `1.7B LoRA / 1.7B merged`
+2. 如果目标是**端侧可部署版本**，则需要在 `0.6B LoRA` 与 `1.7B Q4 GGUF` 之间继续做体积、延迟、发热和 Flutter 集成取舍
+
 ## 7. 产物清单
 
 - 严格集构建脚本：`ai_engine/finetune_qwen3/scripts/build_strict_no_leak_benchmark.py`
@@ -198,6 +253,9 @@ xychart-beta
 - 严格集评测结果：
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_20260322.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_lora_gpu1.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_merged_gpu1.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q4_gguf_gpu1.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_local_noopt_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_local_noopt_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_qwen3_8b_strictv3.json`

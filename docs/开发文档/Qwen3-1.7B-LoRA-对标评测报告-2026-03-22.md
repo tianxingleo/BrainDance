@@ -97,6 +97,38 @@ B. 体验指标（决定“像不像产品”）
 | 云端 qwen-turbo | **0.0000** | 0.0625 | 0.9531 | 0.9333 | 0.1250 | 0.6875 | **1.0000** | 0.9875 |
 | 云端 qwen3-32b | 0.0156 | 0.1250 | 0.9688 | 0.8750 | 0.1250 | 0.1250 | **1.0000** | **1.0000** |
 
+### 3.1 本地部署变体补充总表（新增）
+
+上表主要服务于“本地 LoRA vs 云端模型”的主叙事。  
+如果从部署角度看，本地现在实际上已经有 4 个重要版本：
+
+1. `Qwen3-1.7B + LoRA` 当前最佳 adapter
+2. `Qwen3-0.6B + LoRA`
+3. `Qwen3-1.7B merged` 独立 HF 模型
+4. `Qwen3-1.7B Q4_K_M GGUF`
+
+它们在**原始 80 题 benchmark**上的结果如下：
+
+| 本地版本 | false_no_answer | partial_hallucination | evidence_utilization | partial_precision | partial_false_negative | partial_missing_negation | must_answer_focus | natural_style | 备注 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 1.7B LoRA（历史主报告口径） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8125 | 0.8500 | 当前主报告基线 |
+| 0.6B LoRA | **0.0000** | 0.0625 | 0.9844 | 0.9375 | 0.0625 | 0.1875 | 0.6875 | 0.8000 | 小模型端侧候选 |
+| 1.7B merged | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.0625 | 0.6875 | 0.8250 | 当前最稳 HF 部署版本 |
+| 1.7B Q4 GGUF | **0.0000** | 0.2500 | **1.0000** | 0.8000 | **0.0000** | 0.2500 | 0.5000 | 0.8375 | `llama.cpp` + CUDA 量化版本 |
+
+补充说明：
+
+- `0.6B LoRA` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_round1_gpu1.json`
+- `1.7B merged` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_merged_round4_1_patch_mixed_gpu1.json`
+- `1.7B Q4 GGUF` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_round4_1_patch_mixed_gpu1.json`
+
+就这 4 个本地版本看，可以得到更细的部署判断：
+
+- 如果优先看**任务正确性**，当前最强仍是 `1.7B LoRA`
+- 如果优先看**独立 HF 部署稳定性**，`1.7B merged` 最平衡
+- 如果优先看**体积与端侧可运行性**，`0.6B LoRA` 与 `1.7B Q4 GGUF` 才是更现实候选
+- 但当前 `1.7B Q4 GGUF` 在 `partial_hallucination / partial_precision / must_answer_focus` 上回退明显，不能直接视作 `merged` 的无损替代
+
 ## 4. 关键对比
 
 ### 4.1 Base vs LoRA（同基座）
@@ -115,6 +147,21 @@ Base -> LoRA 的核心任务指标变化：
 - 同量级：当前 LoRA 明显超过 `qwen3-1.7b`（尤其 partial coverage 相关指标）。
 - 中大模型：对比 `qwen3-8b`、`qwen3-32b`、`qwen-turbo`，LoRA 在当前高约束任务指标上仍有领先项，云端模型在 `natural_style` 更优。
 - 结论：LoRA 更像“任务最优解”，云端中大模型更像“表达更自然、开放泛化更强”的折中解。
+
+### 4.2.1 LoRA / 0.6B / merged / Q4 的部署向对比
+
+如果只在本地 4 个版本之间做选择：
+
+- `1.7B LoRA`：质量上界最高，但部署时仍依赖 adapter 机制
+- `0.6B LoRA`：小模型里表现已经可用，适合作为端侧第一候选
+- `1.7B merged`：部署最直接，质量也明显强于 `0.6B`
+- `1.7B Q4 GGUF`：已经能在 `llama.cpp` CUDA 上稳定跑，但当前质量仍低于 `1.7B merged`
+
+从工程角度，当前更准确的路线判断是：
+
+1. 想保质量：优先 `1.7B merged`
+2. 想上手机/端侧：优先比较 `0.6B LoRA` 与 `1.7B Q4 GGUF`
+3. 不要把 `Q4` 直接当作 `merged` 的等价部署版本
 
 ### 4.3 no-opt 对照（仅参数放大是否足够）
 
