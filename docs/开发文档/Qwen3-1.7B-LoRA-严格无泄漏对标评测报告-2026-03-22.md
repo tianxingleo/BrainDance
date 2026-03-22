@@ -75,6 +75,17 @@
 
 说明：`composite` 为任务导向加权分（0-100），用于排序，不替代单项指标。
 
+## 4.1 1.7B 四象限对照（你要求的核心对比）
+
+同一 `Qwen3-1.7B` 基座，做“微调前后 × 有无工程优化”四象限：
+
+| 组合 | false_no_answer | partial_hallucination | evidence_utilization | partial_precision | partial_false_negative | partial_missing_negation | must_answer_focus | natural_style | composite |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Base + Opt | 0.0545 | 0.3889 | 0.9455 | 0.6818 | 0.1667 | 0.7222 | 1.0000 | 0.9688 | 76.65 |
+| Base + NoOpt | 0.0000 | 0.6667 | 0.6182 | 0.4286 | 0.5000 | 0.5000 | 0.2222 | 0.2031 | 54.59 |
+| LoRA + Opt | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8889 | 0.8281 | **98.89** |
+| LoRA + NoOpt | 0.0000 | 0.7222 | 0.6727 | 0.5000 | 0.2778 | 0.6667 | 0.3333 | 0.0781 | 57.03 |
+
 ## 5. 图表
 
 ### 5.1 全模型同台竞技（综合分）
@@ -97,6 +108,29 @@ xychart-beta
 - `M7`: Qwen3-8B(noopt)
 - `M8`: Qwen3-32B(noopt)
 - `M9`: Qwen2.5-32B(noopt)
+
+### 5.1.1 1.7B 四象限同台图（微调前后 × 有无工程）
+
+```mermaid
+xychart-beta
+  title "Qwen3-1.7B 四象限对照（严格集）"
+  x-axis ["Base+NoOpt","Base+Opt","LoRA+NoOpt","LoRA+Opt"]
+  y-axis "Score" 0 --> 100
+  bar [54.59,76.65,57.03,98.89]
+```
+
+```mermaid
+xychart-beta
+  title "Qwen3-1.7B 四象限关键指标"
+  x-axis ["hallucination","partial_precision","must_answer_focus","natural_style"]
+  y-axis "Rate" 0 --> 1
+  bar [0.6667,0.4286,0.2222,0.2031]
+  bar [0.3889,0.6818,1.0000,0.9688]
+  bar [0.7222,0.5000,0.3333,0.0781]
+  bar [0.0000,1.0000,0.8889,0.8281]
+```
+
+注：四组柱依次对应 `Base+NoOpt`、`Base+Opt`、`LoRA+NoOpt`、`LoRA+Opt`。
 
 ### 5.2 有无优化同台竞技（同模型正面对打）
 
@@ -150,7 +184,9 @@ xychart-beta
 1. 在严格无泄漏评测集上，`工程优化 + LoRA + 1.7B` 依然保持显著优势，不是只靠数据重叠“刷满分”。  
 2. `1.7B+LoRA(opt)` 与 `32B(opt)` 已处在同一竞争档位，综合分分别为 `98.89 vs 97.54`。  
 3. “只增参数、不做工程与任务化微调”效果明显不足：`32B(no-opt)` 综合分约 `62`，远低于 `1.7B+LoRA(opt)`。  
-4. 真实可执行结论：在当前 BrainDance 问答场景中，优先级应是  
+4. 在 1.7B 四象限里，工程优化与 LoRA 都是强增益，但“LoRA + 工程”叠加效果最显著：  
+   `Base+NoOpt 54.59 -> Base+Opt 76.65 -> LoRA+Opt 98.89`。  
+5. 真实可执行结论：在当前 BrainDance 问答场景中，优先级应是  
    `工程链路` > `任务化微调` > `盲目增大参数量`。
 
 ## 7. 产物清单
@@ -162,6 +198,8 @@ xychart-beta
 - 严格集评测结果：
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_20260322.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_local_noopt_20260322.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_local_noopt_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_qwen3_8b_strictv3.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_qwen3_32b_strictv3.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_qwen2.5_32b_instruct_strictv3.json`
