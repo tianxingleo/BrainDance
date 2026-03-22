@@ -105,19 +105,27 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 
 本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建，再到多端检索与浏览的端云协同流程。
 
-### 🧪 Qwen3 本地问答微调（实验链路）
+### 🧪 Qwen3 本地问答微调与部署（持续推进中）
 
-`ai_engine/finetune_qwen3` 已沉淀 `Qwen3-1.7B + LoRA` 的本地问答实验能力（Part 16-19）：
+`ai_engine/finetune_qwen3` 已从早期 `Qwen3-1.7B + LoRA` 实验推进到部署候选筛选阶段，目前覆盖 `Part 16-29`：
 
 - 检索路由可观测性与回归机制
 - `object_lookup` 检索专项优化
 - formatter 回答路由稳定化
 - 最小本地问答入口 `local_qa_cli.py`
+- `Qwen3-0.6B` LoRA 训练与 benchmark
+- `Qwen3-1.7B` merged HF 目录导出
+- `GGUF` 转换、`Q4_K_M` / `Q5_K_M` 量化与 strict 集复测
+- importance matrix (`imatrix`) 量化复测
+- Part 29 部署候选小样本验证与主线选择
 
 当前状态说明：
 
-- 属于实验/调试链路
-- 尚未并入正式产品主流程
+- `ai_engine/finetune_qwen3` 仍然是独立实验目录，但已不再只是“调试脚本集合”
+- Flutter Recall 的本地 AI 入口已经恢复，可复用当前 `GGUF + llamadart + local RAG` 链路
+- 当前部署主线已明确为 `1.7B Q5_K_M + imatrix GGUF`
+- 备用方案为 `0.6B LoRA`
+- 质量基线为 `1.7B merged`
 
 快速命令：
 
@@ -133,6 +141,11 @@ pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tes
 
 - `ai_engine/finetune_qwen3/README.md`
 - `docs/开发文档/本地问答微调文档补充说明.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part27.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part28.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part29.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
 
 系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
@@ -184,12 +197,7 @@ BrainDance/
 │   │   ├── requirements.txt
 │   │   └── main.py
 │   ├── demo/             #   - 演示脚本与实验代码
-│   └── finetune_qwen3/   #   - Qwen3 本地问答微调、量化与评测实验链路
-│
-├── app/                  # [Flutter] 移动端客户端
-│   ├── lib/              #   - 登录、录制、Recall、Community、设置等页面与服务
-│   ├── assets/           #   - 图标、字体、内置 WebGL 资源
-│   └── pubspec.yaml      #   - Flutter 依赖定义
+│   └── finetune_qwen3/   #   - Qwen3 本地问答微调、量化、评测与部署候选验证
 │
 ├── supabase/             # [BaaS] 本地后端基础设施
 │   ├── migrations/       #   - SQL 迁移
@@ -337,7 +345,7 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-搜索接口的测试方法见 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+搜索接口的测试方法见 [tests/README.md](/ltx-data/BrainDance/tests/README.md)。
 
 ## 数据流与存储约定
 

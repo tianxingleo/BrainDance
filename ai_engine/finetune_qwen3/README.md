@@ -1,21 +1,21 @@
-# BrainDance Qwen3 本地问答微调（实验链路）
+# BrainDance Qwen3 本地问答微调与部署实验
 
 > 目录：`ai_engine/finetune_qwen3`  
-> 状态：实验/调试链路，当前尚未并入正式产品主流程。
+> 状态：独立实验目录，已推进到部署候选验证阶段，并与 Flutter Recall 本地 AI 入口形成可复用接入链路。
 
 ---
 
 ## 1. 目标
 
-本目录用于 BrainDance 本地问答方向的 `Qwen3-1.7B + LoRA` 实践，核心目标是：
+本目录用于 BrainDance 本地问答方向的 `Qwen3-1.7B / 0.6B` 实践，核心目标是：
 
 - 让模型学会“基于检索证据回答”，而不是记忆用户事实
 - 提升问答稳定性（有命中必答、无命中拒答）
-- 沉淀可回归的脚本、数据集和评测日志
+- 沉淀可回归的脚本、数据集、评测日志和部署候选结论
 
 ---
 
-## 2. 阶段结论（Part 16-22）
+## 2. 阶段结论（Part 16-30）
 
 - **Part 16**：可观测性补齐（route 级统计）
 - **Part 17**：`object_lookup` 检索专项优化
@@ -24,6 +24,17 @@
 - **Part 20**：LoRA merge / 量化准备 / `Qwen3-0.6B` 实验链路
 - **Part 21**：`Qwen3-0.6B` 首轮 LoRA 训练与 benchmark
 - **Part 22**：`Qwen3-1.7B` merge / GGUF / `Q4_K_M` 量化
+- **Part 27**：`Q5_K_M` 补测、退化定位与图表补齐
+- **Part 28**：importance matrix 量化复测，确认 `Q5_K_M + imatrix` 修复 strict 集回退
+- **Part 29**：`0.6B LoRA`、`1.7B merged`、`1.7B Q5_K_M + imatrix` 部署候选小样本验证
+- **Part 30**：仓库入口文档补齐与部署口径统一
+
+当前统一结论：
+
+- 当前部署主线：`1.7B Q5_K_M + imatrix GGUF`
+- 备用方案：`0.6B LoRA`
+- 质量基线：`1.7B merged`
+- Flutter Recall 本地 AI 当前推荐对接方式：`GGUF + llamadart + local RAG`
 
 对应记录见：
 
@@ -34,6 +45,12 @@
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part20.md`
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part21.md`
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part22.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part27.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part28.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part29.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part30.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
 
 ---
 
@@ -92,20 +109,23 @@ python ai_engine/finetune_qwen3/scripts/evaluate_experience_part18.py
 ### 4.4 部署与小模型实验
 
 ```bash
-# Qwen3-0.6B 训练
-bash ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_gpu0.sh
+# 统一使用 conda 环境
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_gpu1.sh
 
 # Qwen3-0.6B smoke eval
-bash ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_gpu0.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_gpu1.sh
 
 # 合并 1.7B LoRA 到独立 HF 模型目录
-bash ai_engine/finetune_qwen3/scripts/run_merge_qwen3_gpu0.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_merge_qwen3_gpu1.sh
 
 # 生成 GGUF / 量化计划
-bash ai_engine/finetune_qwen3/scripts/run_prepare_quantization_gpu0.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_prepare_quantization_gpu1.sh
 
 # Qwen3-0.6B benchmark
-bash ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_gpu0.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_gpu1.sh
+
+# Part 29 部署候选小样本验证
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_deployment_eval_part29_gpu1.sh
 ```
 
 ---

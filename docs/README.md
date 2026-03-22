@@ -28,11 +28,11 @@
 
 ## 常用入口
 
-- 根项目说明：[README.md](/home/ltx/projects/BrainDance/README.md)
-- AI Worker：[ai_engine/3dgs/README.md](/home/ltx/projects/BrainDance/ai_engine/3dgs/README.md)
-- Supabase 层：[supabase/README.md](/home/ltx/projects/BrainDance/supabase/README.md)
-- Dashboard：[dashboard/README.md](/home/ltx/projects/BrainDance/dashboard/README.md)
-- App：[app/README.md](/home/ltx/projects/BrainDance/app/README.md)
+- 根项目说明：[README.md](/ltx-data/BrainDance/README.md)
+- AI Worker：[ai_engine/3dgs/README.md](/ltx-data/BrainDance/ai_engine/3dgs/README.md)
+- Supabase 层：[supabase/README.md](/ltx-data/BrainDance/supabase/README.md)
+- Dashboard：[dashboard/README.md](/ltx-data/BrainDance/dashboard/README.md)
+- App：[app/README.md](/ltx-data/BrainDance/app/README.md)
 
 ## 说明
 
@@ -66,7 +66,13 @@
 |----------|------|--------|
 | [AI Engine 文档](../ai_engine/README.md) | AI 引擎整体说明、模块详解 | ⭐⭐⭐ 必备 |
 | [3DGS 引擎文档](../ai_engine/3dgs/README.md) | 3DGS 训练管线、Pipeline 说明 | ⭐⭐⭐ 必备 |
-| [Qwen3 微调实验文档](../ai_engine/finetune_qwen3/README.md) | 本地问答微调（Part16-19）、脚本与回归命令 | ⭐⭐ 推荐 |
+| [Qwen3 微调实验文档](../ai_engine/finetune_qwen3/README.md) | 本地问答微调、量化、评测与部署候选脚本入口 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 27](./开发文档/Qwen3-1.7B-微调实践记录-Part27.md) | Q5 strict 退化定位、Q5_K_M 补测与图表更新 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 28](./开发文档/Qwen3-1.7B-微调实践记录-Part28.md) | importance matrix 量化复测与 strict 集修复确认 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 29](./开发文档/Qwen3-1.7B-微调实践记录-Part29.md) | 0.6B LoRA / 1.7B merged / 1.7B Q5+imatrix 部署候选小样本验证 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 30](./开发文档/Qwen3-1.7B-微调实践记录-Part30.md) | 仓库文档补齐与当前部署口径统一 | ⭐⭐ 推荐 |
+| [Qwen3 总评测报告](./开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md) | 含 0.6B LoRA、1.7B merged、GGUF 量化变体的总评测对比 | ⭐⭐⭐ 推荐 |
+| [Qwen3 strict 总评测报告](./开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md) | 严格无泄漏口径下的全量 benchmark 对比 | ⭐⭐⭐ 推荐 |
 | [3DGS 测试指南](../ai_engine/3dgs/TEST_GUIDE.md) | 3DGS 测试脚本和用例 | ⭐⭐ 推荐 |
 
 ### 5️⃣ 开发规范
@@ -139,8 +145,8 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ## 🔄 文档版本与更新
 
 - **文档版本**: v1.0
-- **最后更新**: 2026-03-13
-- **主要更新**: 补充论文相关 Pipeline（DA3+SuGaR / DA3+2DGS / Sparse2DGS）的用途、参数与接入示例
+- **最后更新**: 2026-03-22
+- **主要更新**: 补充 Qwen3 Part 27-30、部署候选结论与仓库入口文档同步
 
 ---
 
