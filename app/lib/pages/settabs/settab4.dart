@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 
@@ -9,7 +10,7 @@ Widget setTab4(BuildContext context, ScrollController scrollController) {
     child: ListView(
       children: [
         Text(
-          '扩展列表',
+          textLocalize('set_tab4_title'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -20,7 +21,7 @@ Widget setTab4(BuildContext context, ScrollController scrollController) {
         ),
         const SizedBox(height: 8),
         Text(
-          '保留滚动测试内容，但外观切到新的面板系统里，避免这里还是默认列表气质。',
+          textLocalize('set_tab4_desc'),
           style: TextStyle(
             fontSize: 13,
             height: 1.45,

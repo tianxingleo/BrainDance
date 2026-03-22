@@ -1,4 +1,4 @@
-import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,6 +6,43 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
+import 'model_card.dart';
+
+String _modelDisplayName(
+  Map<String, dynamic> model, {
+  String fallback = 'Unknown Scene',
+}) {
+  final displayName = model['display_name']?.toString().trim() ?? '';
+  if (displayName.isNotEmpty) {
+    return displayName;
+  }
+
+  final tags = model['tags'];
+  if (tags is List) {
+    for (final tag in tags) {
+      final value = tag?.toString().trim() ?? '';
+      if (value.isNotEmpty) {
+        return value;
+      }
+    }
+  }
+
+  final sceneId = model['scene_id']?.toString().trim() ?? '';
+  if (sceneId.isNotEmpty) {
+    return sceneId;
+  }
+
+  return fallback;
+}
+
+Widget _buildSimilarityBadge({required Widget child}) {
+  return Tooltip(
+    message: '\u5339\u914D\u5EA6',
+    preferBelow: false,
+    verticalOffset: 12,
+    child: child,
+  );
+}
 
 class RecallModelGrid extends StatelessWidget {
   final TDThemeData theme;
@@ -18,6 +55,7 @@ class RecallModelGrid extends StatelessWidget {
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final void Function(Map<String, dynamic>) onShowModelActions;
+  final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
     super.key,
@@ -31,6 +69,7 @@ class RecallModelGrid extends StatelessWidget {
     required this.isSameModel,
     required this.onNavigateToViewer,
     required this.onShowModelActions,
+    required this.toPublicUrl,
   });
 
   @override
@@ -44,257 +83,203 @@ class RecallModelGrid extends StatelessWidget {
         models.isNotEmpty && models.first.containsKey('matched_frames');
 
     if (isSearchWithFrames) {
-      return ListView.builder(
+      return SliverPadding(
         padding: const EdgeInsets.fromLTRB(16.0, 6.0, 16.0, 16.0),
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: models.length,
-        itemBuilder: (context, index) {
-          final model = models[index];
-          final sceneId = model['scene_id'] ?? 'Unknown Scene';
-          final desc = model['description'] ?? '没有描述信息';
-          final similarity = model['similarity'] as double?;
-          final userId = model['user_id'] ?? '';
-          final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, index) {
+              final model = models[index];
+              final cardKey = modelCardKeyFor(model);
+              final isActionTarget = isSameModel(activeModelAction, model);
+              final displayName = _modelDisplayName(model);
+              final sceneStorageId = model['scene_id']?.toString() ?? '';
+              final desc = model['description'] ?? textLocalize("recall_no_desc");
+              final similarity = model['similarity'] as double?;
+              final userId = model['user_id'] ?? '';
+              final matchedFrames =
+                  model['matched_frames'] as List<dynamic>? ?? [];
 
-          return TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.0, end: 1.0),
-            duration:
-                BDMotion.durationNormal +
-                Duration(milliseconds: (index * 50).clamp(0, 400)),
-            curve: BDMotion.curveEnter,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(opacity: value, child: child),
-              );
-            },
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 16.0),
-              decoration: BoxDecoration(
-                color: isDark ? darkCard : BDDesign.colorPaperWhite,
-                borderRadius: BDDesign.radiusLarge,
-                boxShadow: isDark ? [] : [BDDesign.shadowLight],
-                border: Border.all(
-                  color: isDark ? const Color(0xFF2A2A30) : Colors.transparent,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  GestureDetector(
-                    onTap: () => onNavigateToViewer(model, null),
-                    onLongPress: () => onShowModelActions(model),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              return RepaintBoundary(
+                child: IgnorePointer(
+                  ignoring: isActionTarget,
+                  child: Opacity(
+                    opacity: isActionTarget ? 0.0 : 1.0,
+                    child: Container(
+                      key: cardKey,
+                      margin: const EdgeInsets.only(bottom: 16.0),
+                      decoration: BoxDecoration(
+                        color: isDark ? darkCard : BDDesign.colorPaperWhite,
+                        borderRadius: BDDesign.radiusLarge,
+                        boxShadow: isDark ? [] : [BDDesign.shadowLight],
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF2A2A30)
+                              : Colors.transparent,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                TDText(
-                                  sceneId,
-                                  font: theme.fontTitleMedium,
-                                  fontWeight: FontWeight.w600,
-                                  maxLines: 1,
-                                  textColor: textColor,
-                                ),
-                                const SizedBox(height: 4),
-                                TDText(
-                                  desc,
-                                  font: theme.fontBodySmall,
-                                  textColor: hintTextColor,
-                                  maxLines: 2,
-                                ),
-                              ],
+                          GestureDetector(
+                            onTap: () => onNavigateToViewer(model, null),
+                            onLongPressStart: (_) => onShowModelActions(model),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        TDText(
+                                          displayName,
+                                          font: theme.fontTitleMedium,
+                                          fontWeight: FontWeight.w600,
+                                          maxLines: 1,
+                                          textColor: textColor,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        TDText(
+                                          desc,
+                                          font: theme.fontBodySmall,
+                                          textColor: hintTextColor,
+                                          maxLines: 2,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (similarity != null)
+                                    _buildSimilarityBadge(
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: theme.brandColor4.withAlpha(
+                                            220,
+                                          ),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: TDText(
+                                          '${(similarity * 100).toStringAsFixed(1)}%',
+                                          font: theme.fontBodySmall,
+                                          textColor: isDark
+                                              ? const Color(0xFFFFFFFF)
+                                              : Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
-                          if (similarity != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: theme.brandColor4.withAlpha(220),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: TDText(
-                                '${(similarity * 100).toStringAsFixed(1)}%',
-                                font: theme.fontBodySmall,
-                                textColor: isDark
-                                    ? const Color(0xFFFFFFFF)
-                                    : Colors.white,
+                          if (matchedFrames.isNotEmpty)
+                            SizedBox(
+                              height: 120,
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0,
+                                ).copyWith(bottom: 16.0),
+                                itemCount: matchedFrames.length,
+                                itemBuilder: (context, frameIndex) {
+                                  final frame = matchedFrames[frameIndex];
+                                  final imageName = frame['image_name'];
+                                  final frameSim =
+                                      frame['similarity'] as double?;
+
+                                  final imageUrl = Supabase
+                                      .instance
+                                      .client
+                                      .storage
+                                      .from('braindance-assets')
+                                      .getPublicUrl(
+                                        '$userId/$sceneStorageId/output/images/$imageName',
+                                      );
+
+                                  return GestureDetector(
+                                    onTap: () =>
+                                        onNavigateToViewer(model, frame),
+                                    child: _AdaptiveFrameThumbnail(
+                                      imageUrl: imageUrl,
+                                      frameSim: frameSim,
+                                      height: 104,
+                                      backgroundColor: isDark
+                                          ? darkInput
+                                          : theme.grayColor3,
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                         ],
                       ),
                     ),
                   ),
-                  if (matchedFrames.isNotEmpty)
-                    SizedBox(
-                      height: 120,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                        ).copyWith(bottom: 16.0),
-                        itemCount: matchedFrames.length,
-                        itemBuilder: (context, frameIndex) {
-                          final frame = matchedFrames[frameIndex];
-                          final imageName = frame['image_name'];
-                          final transformMatrix = frame['transform_matrix'];
-                          final frameSim = frame['similarity'] as double?;
-
-                          final imageUrl = Supabase.instance.client.storage
-                              .from('braindance-assets')
-                              .getPublicUrl(
-                                '$userId/$sceneId/output/images/$imageName',
-                              );
-
-                          return GestureDetector(
-                            onTap: () =>
-                                onNavigateToViewer(model, transformMatrix),
-                            child: Container(
-                              width: 140,
-                              margin: const EdgeInsets.only(right: 12.0),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8.0),
-                                color: isDark ? darkInput : theme.grayColor3,
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8.0),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Image.network(
-                                      imageUrl,
-                                      fit: BoxFit.cover,
-                                      loadingBuilder:
-                                          (context, child, loadingProgress) {
-                                            if (loadingProgress == null) {
-                                              return child;
-                                            }
-                                            return Center(
-                                              child: CircularProgressIndicator(
-                                                value:
-                                                    loadingProgress.expectedTotalBytes !=
-                                                        null
-                                                    ? loadingProgress.cumulativeBytesLoaded /
-                                                          loadingProgress.expectedTotalBytes!
-                                                    : null,
-                                              ),
-                                            );
-                                          },
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return const Center(
-                                              child: Icon(
-                                                Icons.broken_image,
-                                                color: Colors.grey,
-                                              ),
-                                            );
-                                          },
-                                    ),
-                                    if (frameSim != null)
-                                      Positioned(
-                                        bottom: 4,
-                                        left: 4,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black.withAlpha(100),
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '${(frameSim * 100).toStringAsFixed(1)}%',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 10,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
+                ),
+              );
+            },
+            childCount: models.length,
+            addAutomaticKeepAlives: false,
+          ),
+        ),
       );
     }
 
-    return GridView.builder(
+    return SliverPadding(
       padding: const EdgeInsets.only(
         left: 16.0,
         right: 16.0,
         top: 14.0,
         bottom: 16.0,
       ),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 16.0,
-        mainAxisSpacing: 16.0,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: models.length,
-      itemBuilder: (context, index) {
-        final model = models[index];
-        final cardKey = modelCardKeyFor(model);
-        final isActionTarget = isSameModel(activeModelAction, model);
+      sliver: SliverGrid(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final model = models[index];
+            final cardKey = modelCardKeyFor(model);
+            final isActionTarget = isSameModel(activeModelAction, model);
 
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration:
-              BDMotion.durationNormal +
-              Duration(milliseconds: (index * 50).clamp(0, 400)),
-          curve: BDMotion.curveEnter,
-          builder: (context, value, child) {
-            return Transform.translate(
-              offset: Offset(0, 20 * (1 - value)),
-              child: Opacity(
-                opacity: isActionTarget ? 0.0 : value,
-                child: child,
+            return RepaintBoundary(
+              child: IgnorePointer(
+                ignoring: isActionTarget,
+                child: Opacity(
+                  opacity: isActionTarget ? 0.0 : 1.0,
+                  child: GestureDetector(
+                    onTap: () => onNavigateToViewer(model, null),
+                    onLongPressStart: (_) => onShowModelActions(model),
+                    child: Container(
+                      key: cardKey,
+                      child: RecallModelTile(
+                        model: model,
+                        theme: theme,
+                        isDark: isDark,
+                        darkCard: darkCard,
+                        darkInput: darkInput,
+                        textColor: textColor,
+                        hintTextColor: hintTextColor,
+                        toPublicUrl: toPublicUrl,
+                      ),
+                    ),
+                  ),
+                ),
               ),
             );
           },
-          child: IgnorePointer(
-            ignoring: isActionTarget,
-            child: GestureDetector(
-              onTap: () => onNavigateToViewer(model, null),
-              onLongPressStart: (_) => onShowModelActions(model),
-              child: Container(
-                key: cardKey,
-                child: RecallModelTile(
-                  model: model,
-                  theme: theme,
-                  isDark: isDark,
-                  darkCard: darkCard,
-                  darkInput: darkInput,
-                  textColor: textColor,
-                  hintTextColor: hintTextColor,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+          childCount: models.length,
+          addAutomaticKeepAlives: false,
+        ),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 16.0,
+          mainAxisSpacing: 16.0,
+          childAspectRatio: 0.85,
+        ),
+      ),
     );
   }
 }
@@ -308,7 +293,11 @@ class RecallModelActionOverlay extends StatelessWidget {
   final Rect rect;
   final VoidCallback onDismiss;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final Future<void> Function(Map<String, dynamic>) onShowModelDetails;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
+  final Future<void> Function(Map<String, dynamic>) onRenameModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
+  final String Function(String) toPublicUrl;
 
   const RecallModelActionOverlay({
     super.key,
@@ -320,18 +309,29 @@ class RecallModelActionOverlay extends StatelessWidget {
     required this.rect,
     required this.onDismiss,
     required this.onNavigateToViewer,
+    required this.onShowModelDetails,
     required this.onShareModelToCommunity,
+    required this.onRenameModel,
+    required this.onDeleteLocalModel,
+    required this.toPublicUrl,
   });
 
   @override
   Widget build(BuildContext context) {
+    final localSizeLabel = model['_local_size_label']?.toString().trim() ?? '';
+    final deleteLabel = localSizeLabel.isEmpty
+        ? '\u5220\u9664\u6A21\u578B'
+        : '\u5220\u9664\u6A21\u578B($localSizeLabel)';
     final screenWidth = MediaQuery.of(context).size.width;
+    const screenPadding = 16.0;
     const horizontalGap = 12.0;
-    const actionWidth = 112.0;
-    final actionLeft = (rect.right + horizontalGap + actionWidth <=
-            screenWidth - 16)
-        ? rect.right + horizontalGap
-        : rect.left + rect.width - actionWidth;
+    const actionWidth = 128.0;
+    final preferredLeft = rect.right + horizontalGap;
+    final maxLeft = screenWidth - screenPadding - actionWidth;
+    final actionLeft = preferredLeft.clamp(
+      screenPadding,
+      maxLeft,
+    ).toDouble();
 
     return Positioned.fill(
       child: GestureDetector(
@@ -348,7 +348,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                   opacity: value,
                   child: ClipRect(
                     child: BackdropFilter(
-                      filter: ImageFilter.blur(
+                      filter: ui.ImageFilter.blur(
                         sigmaX: 10 * value,
                         sigmaY: 10 * value,
                       ),
@@ -395,6 +395,7 @@ class RecallModelActionOverlay extends StatelessWidget {
                         ? const Color(0xFF888888)
                         : theme.fontGyColor3,
                     elevated: true,
+                    toPublicUrl: toPublicUrl,
                   ),
                 ),
               ),
@@ -407,8 +408,9 @@ class RecallModelActionOverlay extends StatelessWidget {
                 duration: const Duration(milliseconds: 260),
                 curve: Curves.easeOutBack,
                 builder: (context, value, child) {
+                  final safeOpacity = value.clamp(0.0, 1.0);
                   return Opacity(
-                    opacity: value,
+                    opacity: safeOpacity,
                     child: Transform.translate(
                       offset: Offset(18 * (1 - value), 0),
                       child: child,
@@ -450,25 +452,45 @@ class RecallModelActionOverlay extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            Icons.public_rounded,
-                            size: 18,
-                            color: isDark
-                                ? BDDesign.colorPaperWhite
-                                : BDDesign.colorInkBlack,
+                          _ActionMenuItem(
+                            icon: Icons.info_outline_rounded,
+                            label: '\u67E5\u770B\u8BE6\u60C5',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onShowModelDetails(model);
+                            },
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            '分享到社区',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              height: 1.2,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? BDDesign.colorPaperWhite
-                                  : BDDesign.colorInkBlack,
-                            ),
+                          _ActionMenuItem(
+                            icon: Icons.edit_rounded,
+                            label: '\u91CD\u547D\u540D',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onRenameModel(model);
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          _ActionMenuItem(
+                            icon: Icons.delete_outline_rounded,
+                            label: deleteLabel,
+                            isDark: isDark,
+                            destructive: true,
+                            onTap: () async {
+                              onDismiss();
+                              await onDeleteLocalModel(model);
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          _ActionMenuItem(
+                            icon: Icons.public_rounded,
+                            label: '\u5206\u4EAB\u5230\u793E\u533A',
+                            isDark: isDark,
+                            onTap: () async {
+                              onDismiss();
+                              await onShareModelToCommunity(model);
+                            },
                           ),
                         ],
                       ),
@@ -484,6 +506,338 @@ class RecallModelActionOverlay extends StatelessWidget {
   }
 }
 
+class _ActionMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  final bool destructive;
+  final Future<void> Function() onTap;
+
+  const _ActionMenuItem({
+    required this.icon,
+    required this.label,
+    required this.isDark,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive
+        ? const Color(0xFFD34C4C)
+        : (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdaptiveFrameThumbnail extends StatefulWidget {
+  final String imageUrl;
+  final double? frameSim;
+  final double height;
+  final Color backgroundColor;
+
+  const _AdaptiveFrameThumbnail({
+    required this.imageUrl,
+    required this.frameSim,
+    required this.height,
+    required this.backgroundColor,
+  });
+
+  @override
+  State<_AdaptiveFrameThumbnail> createState() =>
+      _AdaptiveFrameThumbnailState();
+}
+
+class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
+  static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
+
+  ui.Image? _resolvedImage;
+  Object? _lastError;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AdaptiveFrameThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _stopListening();
+      _resolvedImage = null;
+      _lastError = null;
+      _resolveImage();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  void _resolveImage() {
+    final cached = _imageCache[widget.imageUrl];
+    if (cached != null) {
+      _resolvedImage = cached;
+      return;
+    }
+
+    final provider = NetworkImage(widget.imageUrl);
+    final stream = provider.resolve(const ImageConfiguration());
+    _imageStream = stream;
+    _imageStreamListener = ImageStreamListener(
+      (ImageInfo info, bool synchronousCall) {
+        _imageCache[widget.imageUrl] = info.image;
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _resolvedImage = info.image;
+          _lastError = null;
+        });
+      },
+      onError: (Object error, StackTrace? stackTrace) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _lastError = error;
+        });
+      },
+    );
+    stream.addListener(_imageStreamListener!);
+  }
+
+  void _stopListening() {
+    final stream = _imageStream;
+    final listener = _imageStreamListener;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+    _imageStream = null;
+    _imageStreamListener = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedImage = _resolvedImage;
+    final aspectRatio = resolvedImage == null
+        ? 4 / 3
+        : resolvedImage.width / resolvedImage.height;
+    final width = (widget.height * aspectRatio).clamp(76.0, 220.0);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: width,
+      margin: const EdgeInsets.only(right: 12.0),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8.0),
+        color: widget.backgroundColor,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8.0),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ColoredBox(
+              color: widget.backgroundColor,
+              child: resolvedImage != null
+                  ? FittedBox(
+                      fit: BoxFit.cover,
+                      clipBehavior: Clip.hardEdge,
+                      child: SizedBox(
+                        width: resolvedImage.width.toDouble(),
+                        height: resolvedImage.height.toDouble(),
+                        child: RawImage(
+                          image: resolvedImage,
+                          filterQuality: FilterQuality.low,
+                        ),
+                      ),
+                    )
+                  : _lastError != null
+                  ? const Center(
+                      child: Icon(Icons.broken_image, color: Colors.grey),
+                    )
+                  : const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+            ),
+            if (widget.frameSim != null)
+              Positioned(
+                bottom: 4,
+                left: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(100),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${(widget.frameSim! * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoverNetworkImage extends StatefulWidget {
+  final String imageUrl;
+  final Color backgroundColor;
+  final Widget errorWidget;
+
+  const _CoverNetworkImage({
+    required this.imageUrl,
+    required this.backgroundColor,
+    required this.errorWidget,
+  });
+
+  @override
+  State<_CoverNetworkImage> createState() => _CoverNetworkImageState();
+}
+
+class _CoverNetworkImageState extends State<_CoverNetworkImage> {
+  static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
+
+  ui.Image? _resolvedImage;
+  Object? _lastError;
+  ImageStream? _imageStream;
+  ImageStreamListener? _imageStreamListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveImage();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CoverNetworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _stopListening();
+      _resolvedImage = null;
+      _lastError = null;
+      _resolveImage();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  void _resolveImage() {
+    final cached = _imageCache[widget.imageUrl];
+    if (cached != null) {
+      _resolvedImage = cached;
+      return;
+    }
+
+    final provider = NetworkImage(widget.imageUrl);
+    final stream = provider.resolve(const ImageConfiguration());
+    _imageStream = stream;
+    _imageStreamListener = ImageStreamListener(
+      (ImageInfo info, bool synchronousCall) {
+        _imageCache[widget.imageUrl] = info.image;
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _resolvedImage = info.image;
+          _lastError = null;
+        });
+      },
+      onError: (Object error, StackTrace? stackTrace) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _lastError = error;
+        });
+      },
+    );
+    stream.addListener(_imageStreamListener!);
+  }
+
+  void _stopListening() {
+    final stream = _imageStream;
+    final listener = _imageStreamListener;
+    if (stream != null && listener != null) {
+      stream.removeListener(listener);
+    }
+    _imageStream = null;
+    _imageStreamListener = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedImage = _resolvedImage;
+    if (_lastError != null) {
+      return widget.errorWidget;
+    }
+
+    return ColoredBox(
+      color: widget.backgroundColor,
+      child: resolvedImage != null
+          ? ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: resolvedImage.width.toDouble(),
+                  height: resolvedImage.height.toDouble(),
+                  child: RawImage(
+                    image: resolvedImage,
+                    filterQuality: FilterQuality.low,
+                  ),
+                ),
+              ),
+            )
+          : const Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
 class RecallModelTile extends StatelessWidget {
   final Map<String, dynamic> model;
   final TDThemeData theme;
@@ -493,6 +847,8 @@ class RecallModelTile extends StatelessWidget {
   final Color textColor;
   final Color hintTextColor;
   final bool elevated;
+  final String Function(String)? toPublicUrl;
+  final bool imageOnly;
 
   const RecallModelTile({
     super.key,
@@ -504,18 +860,25 @@ class RecallModelTile extends StatelessWidget {
     required this.textColor,
     required this.hintTextColor,
     this.elevated = false,
+    this.toPublicUrl,
+    this.imageOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId = _modelDisplayName(model);
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
+    final plyPath = model['ply_path'] as String? ?? '';
+    final modelUrl = plyPath.isNotEmpty && toPublicUrl != null
+        ? toPublicUrl!(plyPath)
+        : './models/scene_auto_sync_raw.ply';
+    final radius = BorderRadius.circular(28.0);
 
     return Container(
       decoration: BoxDecoration(
         color: isDark ? darkCard : theme.whiteColor1.withAlpha(220),
-        borderRadius: BorderRadius.circular(28.0),
+        borderRadius: radius,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withAlpha(elevated ? 46 : 20),
@@ -535,30 +898,25 @@ class RecallModelTile extends StatelessWidget {
                 Container(
                   decoration: BoxDecoration(
                     color: isDark ? darkInput : theme.grayColor3,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28.0),
-                    ),
+                    borderRadius: imageOnly
+                        ? radius
+                        : const BorderRadius.vertical(
+                            top: Radius.circular(28.0),
+                          ),
                   ),
                   clipBehavior: Clip.hardEdge,
                   child:
                       model['preview_img_path'] != null &&
                           model['preview_img_path'].toString().isNotEmpty
-                      ? Image.network(
-                          model['preview_img_path'],
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              RecallModelMockCover(
-                                isDark: isDark,
-                                theme: theme,
-                              ),
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) {
-                              return child;
-                            }
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          },
+                      ? _CoverNetworkImage(
+                          imageUrl: model['preview_img_path'].toString(),
+                          backgroundColor: isDark
+                              ? darkInput
+                              : theme.grayColor3,
+                          errorWidget: RecallModelMockCover(
+                            isDark: isDark,
+                            theme: theme,
+                          ),
                         )
                       : RecallModelMockCover(isDark: isDark, theme: theme),
                 ),
@@ -566,49 +924,56 @@ class RecallModelTile extends StatelessWidget {
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: theme.brandColor4.withAlpha(220),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: TDText(
-                        '${(similarity * 100).toStringAsFixed(1)}%',
-                        font: theme.fontBodyExtraSmall,
-                        textColor: isDark
-                            ? const Color(0xFFFFFFFF)
-                            : Colors.white,
+                    child: _buildSimilarityBadge(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.brandColor4.withAlpha(220),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: TDText(
+                          '${(similarity * 100).toStringAsFixed(1)}%',
+                          font: theme.fontBodyExtraSmall,
+                          textColor: isDark
+                              ? const Color(0xFFFFFFFF)
+                              : Colors.white,
+                        ),
                       ),
                     ),
                   ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TDText(
-                  sceneId,
-                  font: theme.fontTitleMedium,
-                  fontWeight: FontWeight.w600,
-                  maxLines: 1,
-                  textColor: textColor,
-                ),
-                const SizedBox(height: 4),
-                TDText(
-                  desc,
-                  font: theme.fontBodySmall,
-                  textColor: hintTextColor,
-                  maxLines: 2,
-                ),
-              ],
+          if (!imageOnly)
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TDText(
+                    sceneId,
+                    font: theme.fontTitleMedium,
+                    fontWeight: FontWeight.w600,
+                    maxLines: 1,
+                    textColor: textColor,
+                  ),
+                  const SizedBox(height: 4),
+                  TDText(
+                    desc,
+                    font: theme.fontBodySmall,
+                    textColor: hintTextColor,
+                    maxLines: 2,
+                  ),
+                  if (toPublicUrl != null) ...[
+                    const SizedBox(height: 6),
+                    ModelDownloadBadge(modelUrl: modelUrl, isDark: isDark, theme: theme),
+                  ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -656,6 +1021,419 @@ class RecallModelMockCover extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Time Peeling: group models by name, with a horizontal time strip for each group
+class TimePeelingList extends StatelessWidget {
+  final TDThemeData theme;
+  final bool isDark;
+  final Color darkCard;
+  final Color darkInput;
+  final Map<String, List<Map<String, dynamic>>> groupedModels;
+  final Map<String, dynamic>? activeModelAction;
+  final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
+  final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
+  final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(String name) onAddNewTask;
+
+  const TimePeelingList({
+    super.key,
+    required this.theme,
+    required this.isDark,
+    required this.darkCard,
+    required this.darkInput,
+    required this.groupedModels,
+    required this.activeModelAction,
+    required this.modelCardKeyFor,
+    required this.isSameModel,
+    required this.onNavigateToViewer,
+    required this.onShowModelActions,
+    required this.onAddNewTask,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark
+        ? const Color(0xFFCCCCCC)
+        : theme.fontGyColor3;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.55)
+        : BDDesign.colorMutedBlue;
+
+    final sortedKeys = groupedModels.keys.toList()..sort((a, b) {
+      final ta = _newestTime(groupedModels[a]!);
+      final tb = _newestTime(groupedModels[b]!);
+      return tb.compareTo(ta);
+    });
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(0, 6, 0, 16),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final name = sortedKeys[index];
+            final models = groupedModels[name]!;
+            return _TimePeelingSlot(
+              name: name,
+              models: models,
+              theme: theme,
+              isDark: isDark,
+              darkCard: darkCard,
+              darkInput: darkInput,
+              textColor: textColor,
+              hintTextColor: hintTextColor,
+              hintColor: hintColor,
+              activeModelAction: activeModelAction,
+              modelCardKeyFor: modelCardKeyFor,
+              isSameModel: isSameModel,
+              onNavigateToViewer: onNavigateToViewer,
+              onShowModelActions: onShowModelActions,
+              onAddNewTask: onAddNewTask,
+            );
+          },
+          childCount: sortedKeys.length,
+        ),
+      ),
+    );
+  }
+
+  DateTime _newestTime(List<Map<String, dynamic>> models) {
+    return models
+        .map((m) => DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime(0))
+        .reduce((a, b) => a.isAfter(b) ? a : b);
+  }
+}
+
+const double _kCardWidth = 170.0;
+const double _kCardGap = 12.0;
+const double _kSlotWidth = _kCardWidth + _kCardGap;
+const double _kTimelineHeight = 58.0;
+const double _kNodeRadius = 7.0;
+const double _kLineHeight = 3.5;
+const Color _kTimelineColor = Color(0xFFCC9A5C); // muted orange
+
+class _TimePeelingSlot extends StatelessWidget {
+  final String name;
+  final List<Map<String, dynamic>> models;
+  final TDThemeData theme;
+  final bool isDark;
+  final Color darkCard;
+  final Color darkInput;
+  final Color textColor;
+  final Color hintTextColor;
+  final Color hintColor;
+  final Map<String, dynamic>? activeModelAction;
+  final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
+  final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
+  final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
+  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(String name) onAddNewTask;
+
+  const _TimePeelingSlot({
+    required this.name,
+    required this.models,
+    required this.theme,
+    required this.isDark,
+    required this.darkCard,
+    required this.darkInput,
+    required this.textColor,
+    required this.hintTextColor,
+    required this.hintColor,
+    required this.activeModelAction,
+    required this.modelCardKeyFor,
+    required this.isSameModel,
+    required this.onNavigateToViewer,
+    required this.onShowModelActions,
+    required this.onAddNewTask,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lineColor = _kTimelineColor.withValues(alpha: 0.6);
+    final nodeColor = _kTimelineColor.withValues(alpha: 0.95);
+    final timeStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w500,
+      color: _kTimelineColor.withValues(alpha: 0.8),
+    );
+
+    final slotBg = isDark
+        ? Colors.white.withValues(alpha: 0.04)
+        : Colors.white.withValues(alpha: 0.55);
+    final slotBorder = isDark
+        ? Colors.white.withValues(alpha: 0.07)
+        : Colors.black.withValues(alpha: 0.06);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: slotBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: slotBorder, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: hintColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${models.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: hintColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            // Cards + timeline share one horizontal scroll area
+            SizedBox(
+              height: 220 + 10 + _kTimelineHeight,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                itemCount: models.length + 1, // +1 for add card
+              itemBuilder: (context, i) {
+                // First slot: add card
+                if (i == 0) {
+                  return SizedBox(
+                    width: _kSlotWidth,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: _kCardGap),
+                            child: GestureDetector(
+                              onTap: () => onAddNewTask(name),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.06)
+                                      : Colors.white.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(
+                                    color: _kTimelineColor.withValues(alpha: 0.35),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.add_rounded,
+                                        size: 36,
+                                        color: _kTimelineColor.withValues(alpha: 0.7),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        textLocalize("create"),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: _kTimelineColor.withValues(alpha: 0.7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Empty spacer aligned with the timeline
+                        const SizedBox(height: 10),
+                        SizedBox(height: _kTimelineHeight),
+                      ],
+                    ),
+                  );
+                }
+                final modelIndex = i - 1;
+                final model = models[modelIndex];
+                final cardKey = modelCardKeyFor(model);
+                final isActionTarget = isSameModel(activeModelAction, model);
+                final dt = DateTime.tryParse(
+                  model['created_at']?.toString() ?? '',
+                );
+                final timeLabel = dt != null
+                    ? '${dt.toLocal().month.toString().padLeft(2, '0')}/${dt.toLocal().day.toString().padLeft(2, '0')} ${dt.toLocal().hour.toString().padLeft(2, '0')}:${dt.toLocal().minute.toString().padLeft(2, '0')}'
+                    : '--';
+
+                return SizedBox(
+                  width: _kSlotWidth,
+                  child: Column(
+                    children: [
+                      // Card
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: _kCardGap),
+                          child: RepaintBoundary(
+                            child: IgnorePointer(
+                              ignoring: isActionTarget,
+                              child: Opacity(
+                                opacity: isActionTarget ? 0.0 : 1.0,
+                                child: GestureDetector(
+                                  onTap: () => onNavigateToViewer(model, null),
+                                  onLongPressStart: (_) =>
+                                      onShowModelActions(model),
+                                  child: Container(
+                                    key: cardKey,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(28),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? Colors.white.withValues(alpha: 0.08)
+                                            : Colors.black.withValues(alpha: 0.06),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: RecallModelTile(
+                                      model: model,
+                                      theme: theme,
+                                      isDark: isDark,
+                                      darkCard: darkCard,
+                                      darkInput: darkInput,
+                                      textColor: textColor,
+                                      hintTextColor: hintTextColor,
+                                      imageOnly: true,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Gap between card and timeline
+                      const SizedBox(height: 10),
+                      // Timeline
+                      SizedBox(
+                        height: _kTimelineHeight,
+                        child: _TimelineNode(
+                          isFirst: modelIndex == 0,
+                          isLast: modelIndex == models.length - 1,
+                          lineColor: lineColor,
+                          nodeColor: nodeColor,
+                          timeLabel: timeLabel,
+                          timeStyle: timeStyle,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ));
+  }
+}
+
+/// Single timeline node: line + dot + time label
+class _TimelineNode extends StatelessWidget {
+  final bool isFirst;
+  final bool isLast;
+  final Color lineColor;
+  final Color nodeColor;
+  final String timeLabel;
+  final TextStyle timeStyle;
+
+  const _TimelineNode({
+    required this.isFirst,
+    required this.isLast,
+    required this.lineColor,
+    required this.nodeColor,
+    required this.timeLabel,
+    required this.timeStyle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Line + node
+        SizedBox(
+          height: _kNodeRadius * 2 + 4,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Horizontal line
+              Positioned(
+                left: isFirst ? _kSlotWidth / 2 : 0,
+                right: isLast ? _kSlotWidth / 2 : 0,
+                child: Container(
+                  height: _kLineHeight,
+                  color: lineColor,
+                ),
+              ),
+              // Dot centered relative to the card, offset by half the gap
+              Positioned(
+                left: (_kCardWidth - _kNodeRadius * 2) / 2,
+                child: Container(
+                  width: _kNodeRadius * 2,
+                  height: _kNodeRadius * 2,
+                  decoration: BoxDecoration(
+                    color: nodeColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Time label centered under the card
+        SizedBox(
+          width: _kCardWidth,
+          child: Text(
+            timeLabel,
+            textAlign: TextAlign.center,
+            style: timeStyle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

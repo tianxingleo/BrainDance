@@ -1,0 +1,10 @@
+{
+  "release_name": "qwen3_0p6b_braindance_round1",
+  "base_model": "Qwen/Qwen3-0.6B",
+  "source_output_dir": "ai_engine/finetune_qwen3/outputs/qwen3_0p6b_lora_sft_round1",
+  "exported_at_utc": "2026-03-22T06:10:27Z",
+  "notes": [
+    "This release bundle contains the LoRA adapter and minimal metadata.",
+    "Load the tokenizer from the base model unless you intentionally publish a tokenizer override."
+  ]
+}

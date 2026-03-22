@@ -16,7 +16,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-bucket_name = "braindance-assets"
+bucket_name = os.getenv("SUPABASE_BUCKET", "braindance-assets")
 user_id = "test1"
 scene_id = "scene_party_001"
 file_path = f"{user_id}/{scene_id}/raw/video.mp4"
@@ -61,12 +61,16 @@ def upload_and_create_task():
         "user_id": user_id,
         "scene_id": scene_id,
         "status": "pending",
-        "task_type": "video_3dgs",
-        "task_params": {}
+        "task_type": "video_dual_chain",
+        "task_params": {
+            "slow_pipeline": "video_3dgs",
+            "sam3d_vram_threshold_gb": 25,
+            "best_frame_sample_count": 8,
+        }
     }
     
     try:
-        response = supabase.table("processing_tasks").insert(task_data).execute()
+        response = supabase.table(os.getenv("SUPABASE_TABLE", "processing_tasks")).insert(task_data).execute()
         print(f"✅ 成功创建任务！")
         print(f"任务详情: {response.data[0]}")
     except Exception as e:

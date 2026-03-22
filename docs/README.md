@@ -28,13 +28,135 @@
 
 ## 常用入口
 
-- 根项目说明：[README.md](/home/ltx/projects/BrainDance/README.md)
-- AI Worker：[ai_engine/3dgs/README.md](/home/ltx/projects/BrainDance/ai_engine/3dgs/README.md)
-- Supabase 层：[supabase/README.md](/home/ltx/projects/BrainDance/supabase/README.md)
-- Dashboard：[dashboard/README.md](/home/ltx/projects/BrainDance/dashboard/README.md)
-- App：[app/README.md](/home/ltx/projects/BrainDance/app/README.md)
+- 根项目说明：[README.md](/ltx-data/BrainDance/README.md)
+- AI Worker：[ai_engine/3dgs/README.md](/ltx-data/BrainDance/ai_engine/3dgs/README.md)
+- Supabase 层：[supabase/README.md](/ltx-data/BrainDance/supabase/README.md)
+- Dashboard：[dashboard/README.md](/ltx-data/BrainDance/dashboard/README.md)
+- App：[app/README.md](/ltx-data/BrainDance/app/README.md)
 
 ## 说明
+
+### 1️⃣ 入门指南
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [快速开始](01-入门指南/快速开始.md) | 5 步快速启动开发环境 | ⭐⭐⭐ 必备 |
+| [本地部署](01-入门指南/本地部署.md) | 本地 Supabase 开发环境搭建 | ⭐⭐⭐ 推荐 |
+
+### 2️⃣ 架构设计
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [项目架构](02-架构设计/项目架构.md) | 系统整体架构概览、组件关系、数据流转 | ⭐⭐⭐ 必备 |
+| [系统架构](02-架构设计/系统架构.md) | 详细架构说明、组件设计、技术选型 | ⭐⭐⭐ 必备 |
+| [技术栈清单](02-架构设计/技术栈清单.md) | 完整技术栈说明、数据流转、协同协议 | ⭐⭐⭐ 推荐 |
+
+### 3️⃣ API 参考
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [API 接口指南](03-API参考/API接口指南.md) | 前端接入规范、环境变量配置 | ⭐⭐⭐ 必备 |
+| [API 接入文档（镜像版）](API_DOC.md) | 与 API 接口指南同步的快捷入口 | ⭐⭐ 推荐 |
+| [数据库设计](03-API参考/数据库设计.md) | PostgreSQL 表结构、索引、函数设计 | ⭐⭐⭐ 必备 |
+| [API 测试报告](03-API参考/API测试报告.md) | 接口测试结果记录 | ⭐⭐ 推荐 |
+
+### 4️⃣ AI 引擎
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [AI Engine 文档](../ai_engine/README.md) | AI 引擎整体说明、模块详解 | ⭐⭐⭐ 必备 |
+| [3DGS 引擎文档](../ai_engine/3dgs/README.md) | 3DGS 训练管线、Pipeline 说明 | ⭐⭐⭐ 必备 |
+| [Qwen3 微调实验文档](../ai_engine/finetune_qwen3/README.md) | 本地问答微调、量化、评测与部署候选脚本入口 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 27](./开发文档/Qwen3-1.7B-微调实践记录-Part27.md) | Q5 strict 退化定位、Q5_K_M 补测与图表更新 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 28](./开发文档/Qwen3-1.7B-微调实践记录-Part28.md) | importance matrix 量化复测与 strict 集修复确认 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 29](./开发文档/Qwen3-1.7B-微调实践记录-Part29.md) | 0.6B LoRA / 1.7B merged / 1.7B Q5+imatrix 部署候选小样本验证 | ⭐⭐⭐ 推荐 |
+| [Qwen3 Part 30](./开发文档/Qwen3-1.7B-微调实践记录-Part30.md) | 仓库文档补齐与当前部署口径统一 | ⭐⭐ 推荐 |
+| [Qwen3 总评测报告](./开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md) | 含 0.6B LoRA、1.7B merged、GGUF 量化变体的总评测对比 | ⭐⭐⭐ 推荐 |
+| [Qwen3 strict 总评测报告](./开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md) | 严格无泄漏口径下的全量 benchmark 对比 | ⭐⭐⭐ 推荐 |
+| [3DGS 测试指南](../ai_engine/3dgs/TEST_GUIDE.md) | 3DGS 测试脚本和用例 | ⭐⭐ 推荐 |
+
+### 5️⃣ 开发规范
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [协作规范](05-开发规范/协作规范.md) | 团队协作协议、Git 工作流 | ⭐⭐⭐ 必备 |
+| [贡献指南](05-开发规范/贡献指南.md) | 代码贡献流程和规范 | ⭐⭐⭐ 推荐 |
+| [测试指南](05-开发规范/测试指南.md) | 测试策略、测试用例、测试规范 | ⭐⭐ 推荐 |
+| [CLAUDE.md](../CLAUDE.md) | AI 助手配置与代码规范 | ⭐⭐⭐ 推荐 |
+
+### 6️⃣ 部署与运维
+
+| 文档名称 | 说明 | 重要性 |
+|----------|------|--------|
+| [环境配置（详细版）](06-部署运维/环境配置（详细版）.md) | 详细的环境配置步骤和故障排除 | ⭐⭐⭐ 必备 |
+| [Supabase 后端文档](../supabase/README.md) | Supabase 配置、Edge Functions、数据库迁移 | ⭐⭐⭐ 必备 |
+
+### 7️⃣ 技术报告
+
+| 文档名称 | 说明 |
+|----------|------|
+| [技术前沿性分析](07-技术报告/技术前沿性分析.md) | 核心技术发布时间、学术来源与前沿性分析 |
+| [SAM3D 模型配置](07-技术报告/SAM3D模型配置.md) | SAM3D 配置与部署指南 |
+| [更多技术报告...](07-技术报告/) | RTX 5070、Nerfstudio、Colab、COLMAP 部署指南 |
+
+### 8️⃣ 待办事项
+
+| 文档名称 | 说明 |
+|----------|------|
+| [项目改进建议](08-待办事项/项目改进建议.md) | 项目改进建议 |
+| [认证迁移待办](08-待办事项/认证迁移待办.md) | 认证迁移任务 |
+| [更多待办...](08-待办事项/) | Pipeline 统一、Edge Function、消息队列优化 |
+
+### 9️⃣ 历史归档
+
+| 文档名称 | 说明 |
+|----------|------|
+| [归档说明](.archive/README.md) | 历史文档归档说明 |
+| [本地问答微调文档补充说明](开发文档/本地问答微调文档补充说明.md) | 微调阶段结论、脚本入口、统一口径说明 |
+
+---
+
+## 🔗 快速访问链接
+
+### 常用地址
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| Supabase Studio | http://127.0.0.1:54323 | 数据库管理界面 |
+| REST API | http://127.0.0.1:54321/rest/v1 | 数据库 API |
+
+### 常用命令速查
+
+```bash
+# 启动 Supabase 本地服务
+cd supabase && supabase start
+
+# 启动 AI Worker
+conda activate gs_linux_backup
+cd ai_engine/3dgs && python main.py
+
+# 启动 Edge Function
+cd supabase/functions/search-models
+supabase functions serve search-models --no-verify-jwt --env-file .env.local
+```
+
+---
+
+## 🔄 文档版本与更新
+
+- **文档版本**: v1.0
+- **最后更新**: 2026-03-22
+- **主要更新**: 补充 Qwen3 Part 27-30、部署候选结论与仓库入口文档同步
+
+---
+
+<div align="center">
+
+**BrainDance 文档中心**
+
+*物理世界注定走向无序，而我们在比特世界重建永恒。*
+
+</div>
 
 - `docs/` 里同时包含开发文档和比赛材料，口径不完全一致是正常的
 - 旧稿和废弃方案尽量放在 `.archive/`，但仍建议以根 README 和各模块 README 为准

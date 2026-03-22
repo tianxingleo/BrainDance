@@ -1,0 +1,256 @@
+[
+  {
+    "case_id": "part17d_obj_001",
+    "group": "explicit_entity",
+    "question": "帮我找一下洛天依模型",
+    "expected_focus": ["洛天依"],
+    "priority": "high",
+    "notes": "实体名 + 泛后缀。"
+  },
+  {
+    "case_id": "part17d_obj_002",
+    "group": "explicit_entity",
+    "question": "找一下洛天依",
+    "expected_focus": ["洛天依"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_003",
+    "group": "explicit_entity",
+    "question": "最近有没有洛天依相关内容",
+    "expected_focus": ["洛天依"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_004",
+    "group": "explicit_entity",
+    "question": "最近有没有显示器相关记录",
+    "expected_focus": ["显示器"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_005",
+    "group": "explicit_entity",
+    "question": "最近有笔记本电脑相关画面吗",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_006",
+    "group": "explicit_entity",
+    "question": "最近拍到过地球仪吗",
+    "expected_focus": ["地球仪"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_007",
+    "group": "explicit_entity",
+    "question": "帮我找找手办相关的内容",
+    "expected_focus": ["手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_008",
+    "group": "explicit_entity",
+    "question": "有没有书架相关的画面",
+    "expected_focus": ["书架"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_009",
+    "group": "explicit_entity",
+    "question": "最近办公桌相关内容有哪些",
+    "expected_focus": ["办公桌"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_010",
+    "group": "explicit_entity",
+    "question": "最近有洛天依展台相关记录吗",
+    "expected_focus": ["洛天依"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_011",
+    "group": "noisy_suffix",
+    "question": "笔记本电脑相关内容",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_012",
+    "group": "noisy_suffix",
+    "question": "显示器画面",
+    "expected_focus": ["显示器"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_013",
+    "group": "noisy_suffix",
+    "question": "书架相关记录",
+    "expected_focus": ["书架"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_014",
+    "group": "noisy_suffix",
+    "question": "手办场景",
+    "expected_focus": ["手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_015",
+    "group": "noisy_suffix",
+    "question": "地球仪模型",
+    "expected_focus": ["地球仪"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_016",
+    "group": "noisy_suffix",
+    "question": "办公桌内容",
+    "expected_focus": ["办公桌"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_017",
+    "group": "noisy_suffix",
+    "question": "洛天依主题内容",
+    "expected_focus": ["洛天依"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_018",
+    "group": "noisy_suffix",
+    "question": "蓝色地球仪摆件",
+    "expected_focus": ["地球仪"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_019",
+    "group": "noisy_suffix",
+    "question": "白色办公桌画面",
+    "expected_focus": ["办公桌"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_020",
+    "group": "noisy_suffix",
+    "question": "最近有没有手办摆件相关内容",
+    "expected_focus": ["手办"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_021",
+    "group": "abstract_phrase",
+    "question": "洛天依手办",
+    "expected_focus": ["洛天依", "手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_022",
+    "group": "abstract_phrase",
+    "question": "商业展台装置",
+    "expected_focus": ["洛天依"],
+    "priority": "high",
+    "notes": "抽象短语，观察是否仍需 lexical 或 semantic 支撑。"
+  },
+  {
+    "case_id": "part17d_obj_023",
+    "group": "abstract_phrase",
+    "question": "蓝色地球仪",
+    "expected_focus": ["地球仪"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_024",
+    "group": "abstract_phrase",
+    "question": "办公桌模型",
+    "expected_focus": ["办公桌"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_025",
+    "group": "abstract_phrase",
+    "question": "学习类摆件",
+    "expected_focus": ["地球仪", "手办", "书架"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_026",
+    "group": "abstract_phrase",
+    "question": "动漫收藏角",
+    "expected_focus": ["手办", "书架"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_027",
+    "group": "abstract_phrase",
+    "question": "桌面设备",
+    "expected_focus": ["显示器", "笔记本电脑"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_028",
+    "group": "abstract_phrase",
+    "question": "白色办公桌上的摆件",
+    "expected_focus": ["办公桌", "手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_029",
+    "group": "abstract_phrase",
+    "question": "书架角落的模型",
+    "expected_focus": ["书架", "地球仪", "手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17d_obj_030",
+    "group": "abstract_phrase",
+    "question": "词典和手办的收纳角",
+    "expected_focus": ["书架", "手办"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_031",
+    "group": "variant_prompt",
+    "question": "关于洛天依的记录",
+    "expected_focus": ["洛天依"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_032",
+    "group": "variant_prompt",
+    "question": "有关地球仪的画面",
+    "expected_focus": ["地球仪"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_033",
+    "group": "variant_prompt",
+    "question": "最近记录里有哪些显示器相关内容",
+    "expected_focus": ["显示器"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_034",
+    "group": "variant_prompt",
+    "question": "最近记录里有笔记本电脑吗",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_035",
+    "group": "variant_prompt",
+    "question": "最近关于手办的内容",
+    "expected_focus": ["手办"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17d_obj_036",
+    "group": "variant_prompt",
+    "question": "最近关于书架的记录",
+    "expected_focus": ["书架"],
+    "priority": "medium"
+  }
+]

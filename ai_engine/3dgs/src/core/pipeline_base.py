@@ -104,14 +104,21 @@ class BasePipeline(ABC):
             cfg = PipelineConfig()
             analyzer = SceneAnalyzer(cfg)
             self.log("🧠 [RAG] 开始语义分析...")
-            analysis = analyzer.analyze_single_image(input_path)
+            analysis = analyzer.analyze_single_image(input_path, log_callback=self.log)
+            if not analysis.get("ok"):
+                self.log(
+                    f"    -> ⚠️ RAG 分析未产出有效结果，跳过元数据回填: {analysis.get('reason', 'Unknown')}",
+                    level="WARN",
+                )
+                return {}
             rag_meta = {
                 "ai_description": analysis.get("description", ""),
                 "ai_tags": analysis.get("tags", []),
                 "ai_objects": analysis.get("objects", []),
-                "ai_score": analysis.get("score", 0),
                 "ai_reason": analysis.get("reason", "")
             }
+            if analysis.get("score") is not None:
+                rag_meta["ai_score"] = analysis.get("score")
             self.log(f"    -> ✅ RAG 分析完成: tags={rag_meta['ai_tags']}")
             return rag_meta
         except Exception as e:
@@ -125,9 +132,12 @@ class BasePipeline(ABC):
         所有异常都会被捕获并记录为日志，不抛出。
         """
         try:
-            supabase_url = os.getenv("SUPABASE_URL", "")
-            supabase_key = os.getenv("SUPABASE_KEY", "")
-            bucket = os.getenv("SUPABASE_BUCKET", "braindance-assets")
+            from src.config import PipelineConfig
+
+            cfg = PipelineConfig()
+            supabase_url = cfg.supabase_url
+            supabase_key = cfg.supabase_key
+            bucket = cfg.supabase_bucket
             scene_id = params.get("scene_id") or Path(ply_path).stem
 
             sb = self.context.get('supabase')

@@ -116,6 +116,35 @@ The system consists of four parts, decoupled through **Supabase**:
     - **Single Image**: Support SAM3D-based single-image 3DGS generation without video.
     - **Understanding**: Call multimodal large models (Qwen-VL) for scene understanding and auto-tagging.
 
+### 🧪 Qwen3 Local QA Fine-tuning (Experimental Track)
+
+`ai_engine/finetune_qwen3` contains the `Qwen3-1.7B + LoRA` local QA experiments (Part 16-19), including:
+
+- route-level observability and regression checks
+- `object_lookup` retrieval optimization
+- formatter-based answer stabilization
+- minimal local QA CLI: `local_qa_cli.py`
+
+Current status:
+
+- experimental/debug track
+- not yet integrated into the production app workflow
+
+Quick commands:
+
+```bash
+# single-turn QA
+python ai_engine/finetune_qwen3/scripts/local_qa_cli.py --question "What did I capture recently?"
+
+# regression
+pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
+```
+
+Docs:
+
+- `ai_engine/finetune_qwen3/README.md`
+- `docs/开发文档/本地问答微调文档补充说明.md`
+
 
 
 ------
@@ -145,6 +174,7 @@ BrainDance/
 │   │   ├── requirements.txt  #   - Python Dependencies
 │   │   └── main.py           #   - Program Entry Point
 │   ├── demo/              #   - Demo Scripts and Test Data
+│   ├── finetune_qwen3/    #   - Qwen3 local QA fine-tuning experimental track (Part16-19)
 │   ├── models/            #   - AI Model Cache Directory
 │   ├── rag/               #   - RAG Data Processing
 │   └── log/               #   - Log Files

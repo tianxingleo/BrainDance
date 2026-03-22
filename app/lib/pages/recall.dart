@@ -1,36 +1,44 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:dio/dio.dart';
-import 'package:llamadart/llamadart.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:llamadart/llamadart.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../main.dart'
+    show
+        overviewStatsProvider,
+        overviewLocalIndexingProvider,
+        pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
+import '../services/download_event_bus.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
 import 'recall/local_ai_panel.dart';
 import 'recall/model_grid.dart';
-import 'recall/overview_card.dart';
 import 'recall/processing_section.dart';
-import 'settings.dart';
 import 'webgl_viewer.dart';
 import 'task_list.dart';
+import 'recall/top_summary_card.dart';
+import 'recall/model_card.dart';
 
-enum _RecallSearchMode { local, cloud }
+enum _RecallSearchMode { cloud, local, localAi }
 
-class RecallPage extends StatefulWidget {
+class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
 
   @override
-  State<RecallPage> createState() => _RecallPageState();
+  ConsumerState<RecallPage> createState() => _RecallPageState();
 }
 
-class _RecallPageState extends State<RecallPage> {
+class _RecallPageState extends ConsumerState<RecallPage> {
   static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
   static const String _defaultModelDownloadUrl =
       'https://hf-mirror.com/jc-builds/Qwen3-1.7B-Q4_K_M-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true';
@@ -51,13 +59,11 @@ class _RecallPageState extends State<RecallPage> {
   final TextEditingController _localModelUrlController = TextEditingController(
     text: _defaultModelDownloadUrl,
   );
-  final TextEditingController _localQuestionController =
-      TextEditingController();
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
-  Timer? _searchDebounce;
+  Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
-  _RecallSearchMode _searchMode = _RecallSearchMode.local;
+  _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   String _localAnswer = '';
@@ -65,35 +71,174 @@ class _RecallPageState extends State<RecallPage> {
   String _localContextPreview = '';
   bool _isLocalModelLoading = false;
   bool _isLocalModelReady = false;
-  bool _isLocalAnswering = false;
   bool _isModelDownloading = false;
-  bool _isLocalAiPanelOpen = false;
   double? _modelDownloadProgress;
   int _modelDownloadedBytes = 0;
   int? _modelDownloadTotalBytes;
   final Map<String, GlobalKey> _modelCardKeys = {};
+  final Map<String, _RecallSearchCacheEntry> _searchCache = {};
+  final GlobalKey _actionOverlayStackKey = GlobalKey();
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
+  bool _didBootstrap = false;
+  bool _didFinishInitialModelLoad = false;
+  bool _isTabActive = true;
+  bool _shouldRefreshProcessingOnResume = false;
+  bool _isModelPollingInFlight = false;
+  int _searchRequestId = 0;
+  String? _lastSearchKey;
+  String _lastOwnModelSignature = '';
 
   @override
   void initState() {
     super.initState();
-    _restoreLocalModelPath();
-    _fetchModels();
-    _fetchProcessingTasks();
-    _setupRealtimeListener();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bootstrapPage();
+    });
   }
 
   @override
   void dispose() {
-    _searchDebounce?.cancel();
+    _modelPollingTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
     _localModelUrlController.dispose();
-    _localQuestionController.dispose();
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isTabActive = TickerMode.of(context);
+    if (_isTabActive == isTabActive) {
+      return;
+    }
+    _isTabActive = isTabActive;
+    if (_isTabActive && _shouldRefreshProcessingOnResume) {
+      _shouldRefreshProcessingOnResume = false;
+      unawaited(_fetchProcessingTasks());
+    }
+    _syncModelPollingState();
+  }
+
+  void _bootstrapPage() {
+    if (!mounted || _didBootstrap) {
+      return;
+    }
+    _didBootstrap = true;
+    unawaited(_restoreLocalModelPath());
+    unawaited(_fetchModels());
+    unawaited(_fetchProcessingTasks());
+    _setupRealtimeListener();
+    _syncModelPollingState();
+  }
+
+  void _syncModelPollingState() {
+    if (!_isTabActive) {
+      _modelPollingTimer?.cancel();
+      _modelPollingTimer = null;
+      return;
+    }
+    _modelPollingTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_pollModelUpdates()),
+    );
+  }
+
+  List<Map<String, dynamic>> _extractOwnModels(
+    List<Map<String, dynamic>> models,
+  ) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+    return models
+        .where((model) => model['user_id']?.toString() == currentUserId)
+        .map((model) => Map<String, dynamic>.from(model))
+        .toList();
+  }
+
+  String _buildModelSignature(List<Map<String, dynamic>> models) {
+    if (models.isEmpty) {
+      return '';
+    }
+    final parts = models
+        .map((model) {
+          final id = model['id']?.toString() ?? '';
+          final sceneId = model['scene_id']?.toString() ?? '';
+          final createdAt = model['created_at']?.toString() ?? '';
+          return '$id|$sceneId|$createdAt';
+        })
+        .toList()
+      ..sort();
+    return parts.join('||');
+  }
+
+  Future<String> _fetchRemoteOwnModelSignature() async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return '';
+    }
+    final response = await Supabase.instance.client
+        .from('model_assets')
+        .select('id, scene_id, created_at')
+        .eq('user_id', currentUserId)
+        .order('created_at', ascending: false);
+    final ownModels = List<Map<String, dynamic>>.from(response);
+    return _buildModelSignature(ownModels);
+  }
+
+  Future<void> _refreshModelsForCurrentState({
+    bool showLoadingIndicator = true,
+  }) async {
+    final query = _searchController.text.trim();
+    if (!mounted) return;
+    if (showLoadingIndicator) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+    final results = await Future.wait([
+      _fetchModels(
+        preserveExistingDataOnError: !showLoadingIndicator,
+        showErrorToast: showLoadingIndicator,
+      ),
+      _fetchProcessingTasks(),
+    ]);
+    final didRefreshModels = results.first as bool;
+    if (!mounted || !didRefreshModels || query.isEmpty) {
+      return;
+    }
+    await _searchModels(query);
+  }
+
+  Future<void> _pollModelUpdates() async {
+    if (!mounted ||
+        !_didFinishInitialModelLoad ||
+        !_isTabActive ||
+        _isLoading ||
+        _isModelPollingInFlight ||
+        _activeModelAction != null) {
+      return;
+    }
+
+    _isModelPollingInFlight = true;
+    try {
+      final remoteSignature = await _fetchRemoteOwnModelSignature();
+      if (!mounted) {
+        return;
+      }
+      if (remoteSignature == _lastOwnModelSignature) {
+        return;
+      }
+      await _refreshModelsForCurrentState(showLoadingIndicator: false);
+    } catch (_) {
+      // Ignore polling failures and retry on the next cycle.
+    } finally {
+      _isModelPollingInFlight = false;
+    }
   }
 
   Future<void> _restoreLocalModelPath() async {
@@ -217,7 +362,6 @@ class _RecallPageState extends State<RecallPage> {
     setState(() {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
-      _isLocalAnswering = false;
       _localAnswer = '';
       _localAnswerStatus = '正在加载 Qwen3-1.7B 端侧模型...';
     });
@@ -307,15 +451,14 @@ class _RecallPageState extends State<RecallPage> {
       setState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
-        _isLocalAnswering = false;
         _localAnswerStatus = '模型加载失败：$e';
       });
       TDToast.showText(context: context, '端侧模型加载失败：$e');
     }
   }
 
-  Future<void> _askLocalQuestion() async {
-    final userQuestion = _localQuestionController.text.trim();
+  Future<void> _askLocalQuestion({String? question}) async {
+    final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
       TDToast.showText(context: context, '请输入要提问的问题');
       return;
@@ -346,7 +489,6 @@ $userQuestion
     setState(() {
       _localAnswer = '';
       _localContextPreview = memoryContext;
-      _isLocalAnswering = true;
       _localAnswerStatus = '正在根据本地记忆片段生成回答...';
     });
 
@@ -397,7 +539,6 @@ $userQuestion
                 return;
               }
               setState(() {
-                _isLocalAnswering = false;
                 _localAnswerStatus = '端侧问答失败：$error';
               });
             },
@@ -409,7 +550,6 @@ $userQuestion
                 if (_localAnswer.trim().isEmpty) {
                   _localAnswer = '我不知道';
                 }
-                _isLocalAnswering = false;
                 _localAnswerStatus = '端侧回答完成';
               });
             },
@@ -420,7 +560,6 @@ $userQuestion
         return;
       }
       setState(() {
-        _isLocalAnswering = false;
         _localAnswerStatus = '端侧问答失败：$e';
       });
       TDToast.showText(context: context, '端侧问答失败：$e');
@@ -468,7 +607,7 @@ $userQuestion
 
     final parts = <String>[
       '片段$index',
-      '场景：${model['scene_id']?.toString() ?? '未知场景'}',
+      '场景：${_modelDisplayName(model, fallback: '未知场景')}',
       '描述：${model['description']?.toString() ?? '暂无描述'}',
       if (tags.isNotEmpty) '标签：$tags',
       if (objects.isNotEmpty) '对象：$objects',
@@ -587,6 +726,11 @@ $userQuestion
 
   /// 处理 Realtime 变化
   void _handleRealtimeChange(PostgresChangePayload payload) {
+    if (!_isTabActive) {
+      _shouldRefreshProcessingOnResume = true;
+      return;
+    }
+
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
     final taskId = (newData['id'] ?? oldData['id'])?.toString();
@@ -599,23 +743,26 @@ $userQuestion
       // 更新或添加 processing 任务
       final logsJson = newData['logs'] as List<dynamic>?;
       final allLogs = _parseAllLogMsgs(logsJson);
-
-      setState(() {
-        // 移除旧版本（如果存在）
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        // 添加更新后的任务
-        _processingTasks.add(Map<String, dynamic>.from(newData));
-        if (allLogs.isNotEmpty) {
-          _taskAllLogs[taskId] = allLogs;
-        }
-      });
+      if (mounted) {
+        setState(() {
+          // 移除旧版本（如果存在）
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          // 添加更新后的任务
+          _processingTasks.add(Map<String, dynamic>.from(newData));
+          if (allLogs.isNotEmpty) {
+            _taskAllLogs[taskId] = allLogs;
+          }
+        });
+      }
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
-      setState(() {
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        _taskAllLogs.remove(taskId);
-        _expandedTaskLogs.remove(taskId);
-      });
+      if (mounted) {
+        setState(() {
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          _taskAllLogs.remove(taskId);
+          _expandedTaskLogs.remove(taskId);
+        });
+      }
     }
   }
 
@@ -662,6 +809,7 @@ $userQuestion
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
+        _updateOverviewProvider();
       }
     } catch (e) {
       // 静默失败
@@ -700,7 +848,10 @@ $userQuestion
     }
   }
 
-  Future<void> _fetchModels() async {
+  Future<bool> _fetchModels({
+    bool preserveExistingDataOnError = false,
+    bool showErrorToast = true,
+  }) async {
     try {
       final response = await Supabase.instance.client
           .from('model_assets')
@@ -710,32 +861,92 @@ $userQuestion
           .order('created_at', ascending: false);
 
       final models = List<Map<String, dynamic>>.from(response);
+
+      // 从 processing_tasks 获取 display_name 并合并
+      try {
+        final sceneIds = models
+            .map((m) => m['scene_id']?.toString())
+            .where((s) => s != null)
+            .toList();
+        if (sceneIds.isNotEmpty) {
+          final tasksResp = await Supabase.instance.client
+              .from('processing_tasks')
+              .select('scene_id, display_name')
+              .inFilter('scene_id', sceneIds);
+          final tasksList = List<Map<String, dynamic>>.from(tasksResp);
+          final displayNameMap = <String, String>{};
+          for (final t in tasksList) {
+            final dn = t['display_name']?.toString();
+            if (dn != null && dn.isNotEmpty) {
+              displayNameMap[t['scene_id'].toString()] = dn;
+            }
+          }
+          for (final m in models) {
+            final sid = m['scene_id']?.toString();
+            if (sid != null && displayNameMap.containsKey(sid)) {
+              m['display_name'] = displayNameMap[sid];
+            }
+          }
+        }
+      } catch (_) {
+        // display_name 获取失败不影响主流程
+      }
+
       if (models.isEmpty) {
         models.add(_buildDemoModel());
       }
 
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(models),
+        );
         setState(() {
           _allModels = models;
           _models = models;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
+        _updateOverviewProvider();
       }
+      _searchCache.clear();
+      _lastSearchKey = null;
       await _syncLocalIndex(models);
+      return true;
     } catch (e) {
+      if (preserveExistingDataOnError) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return false;
+      }
+
       final demoModels = [_buildDemoModel()];
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(demoModels),
+        );
         setState(() {
           _allModels = demoModels;
           _models = demoModels;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
-        TDToast.showText(
-          '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
-          context: context,
-        );
+        _updateOverviewProvider();
+        if (showErrorToast) {
+          TDToast.showText(
+            '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
+            context: context,
+          );
+        }
       }
+      _searchCache.clear();
+      _lastSearchKey = null;
       await _syncLocalIndex(demoModels);
+      return false;
     }
   }
 
@@ -788,6 +999,64 @@ $userQuestion
     }).length;
   }
 
+  void _updateOverviewProvider() {
+    ref.read(overviewStatsProvider.notifier).state = {
+      'allModelCount': _allModels.length,
+      'processingTaskCount': _processingTasks.length,
+      'ragCount': _indexStats?.totalItems ?? _allModels.length,
+      'recentCount': _recentModelCount(),
+    };
+    ref.read(overviewLocalIndexingProvider.notifier).state = _isLocalIndexing;
+  }
+
+  /// 按模型名称分组，每组内按 created_at 降序排列（Time Peeling）
+  Map<String, List<Map<String, dynamic>>> _groupModelsByName(
+    List<Map<String, dynamic>> models,
+  ) {
+    final groups = <String, List<Map<String, dynamic>>>{};
+    for (final model in models) {
+      final name = _modelDisplayName(model, fallback: 'Unknown');
+      groups.putIfAbsent(name, () => []).add(model);
+    }
+    for (final list in groups.values) {
+      list.sort((a, b) {
+        final ta =
+            DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(0);
+        final tb =
+            DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(0);
+        return tb.compareTo(ta);
+      });
+    }
+    return groups;
+  }
+
+  String _modelDisplayName(
+    Map<String, dynamic> model, {
+    String fallback = 'Unknown Scene',
+  }) {
+    final displayName = model['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final tags = model['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+
+    final sceneId = model['scene_id']?.toString().trim() ?? '';
+    if (sceneId.isNotEmpty) {
+      return sceneId;
+    }
+
+    return fallback;
+  }
+
   // 更黑的夜间色值
   final darkBg = const Color(0xFF101014);
   final darkCard = const Color(0xFF18181C);
@@ -802,272 +1071,201 @@ $userQuestion
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
+        key: _actionOverlayStackKey,
         children: [
           BDPageBackdrop(
             child: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.only(bottom: 96.0),
-                child: Column(
-                  children: [
-                    BDPageHeader(
-                      title: textLocalize("home_page"),
-                      subtitle: '把空间、任务和检索线索压进同一条记忆流里。',
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          BDStatusPill(
-                            label: SupabaseConfig.isAdminMode ? 'ADMIN' : 'RLS',
-                            icon: SupabaseConfig.isAdminMode
-                                ? Icons.admin_panel_settings_rounded
-                                : Icons.verified_user_rounded,
-                            color: SupabaseConfig.isAdminMode
-                                ? BDDesign.colorDarkRed
-                                : BDDesign.colorMutedBlue,
-                          ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: AnimatedRotation(
-                              turns: _isLoading ? 1 : 0,
-                              duration: const Duration(milliseconds: 600),
-                              child: Icon(
-                                Icons.sync_rounded,
-                                color: isDark
-                                    ? BDDesign.colorPaperWhite
-                                    : BDDesign.colorInkBlack,
-                              ),
-                            ),
-                            tooltip: textLocalize("recall_refresh"),
-                            onPressed: () {
-                              setState(() {
-                                _isLoading = true;
-                              });
-                              _fetchModels();
-                            },
-                          ),
-                          IconButton(
-                            icon: Icon(
-                              Icons.settings_rounded,
-                              color: isDark
-                                  ? BDDesign.colorPaperWhite
-                                  : BDDesign.colorInkBlack,
-                            ),
-                            tooltip: textLocalize("settings"),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const SettingsPage(),
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    RecallOverviewCard(
-                      isDark: isDark,
-                      textColor: textColor,
-                      recentCount: _recentModelCount(),
-                      allModelCount: _allModels.length,
-                      processingTaskCount: _processingTasks.length,
-                      ragCount: _indexStats?.totalItems ?? _allModels.length,
-                      isLocalIndexing: _isLocalIndexing,
-                      onOpenTasks: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const TaskListPage(),
-                          ),
-                        );
-                      },
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-                      child: Column(
-                        children: [
-                          BDPanelCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: TextField(
-                              controller: _searchController,
-                              style: TextStyle(color: textColor, fontSize: 15),
-                              decoration: InputDecoration(
-                                hintText: textLocalize("recall_search_hint"),
-                                hintStyle: TextStyle(
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.45)
-                                      : BDDesign.colorMutedBlue.withValues(
-                                          alpha: 0.78,
-                                        ),
-                                  fontSize: 15,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.search_rounded,
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.5)
-                                      : BDDesign.colorMutedBlue,
-                                ),
-                                suffixIcon: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _buildSearchModeMenuButton(isDark),
-                                    if (_searchController.text
-                                        .trim()
-                                        .isNotEmpty)
-                                      IconButton(
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          _searchDebounce?.cancel();
-                                          _searchModels('');
-                                          setState(() {});
-                                        },
-                                        icon: Icon(
-                                          Icons.close_rounded,
-                                          color: isDark
-                                              ? Colors.white.withValues(
-                                                  alpha: 0.5,
-                                                )
-                                              : BDDesign.colorMutedBlue,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                filled: true,
-                                fillColor: Colors.transparent,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                  horizontal: 16,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: BorderSide.none,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: BorderSide.none,
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16.0),
-                                  borderSide: const BorderSide(
-                                    color: BDDesign.colorMutedBlue,
-                                    width: 1.5,
+              child: CustomScrollView(
+                cacheExtent: 1200,
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      children: [
+                        BDPageHeader(
+                          title: textLocalize("home_page"),
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: AnimatedRotation(
+                                  turns: _isLoading ? 1 : 0,
+                                  duration: const Duration(milliseconds: 600),
+                                  child: Icon(
+                                    Icons.sync_rounded,
+                                    color: isDark
+                                        ? BDDesign.colorPaperWhite
+                                        : BDDesign.colorInkBlack,
                                   ),
                                 ),
+                                tooltip: textLocalize("recall_refresh"),
+                                onPressed: () {
+                                  unawaited(_refreshModelsForCurrentState());
+                                },
                               ),
-                              onSubmitted: _searchModels,
-                              onChanged: _onSearchChanged,
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 10),
-                          BDPanelCard(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  _isLocalIndexing
-                                      ? Icons.memory_rounded
-                                      : Icons.privacy_tip_rounded,
-                                  size: 18,
-                                  color: isDark
-                                      ? BDDesign.colorPaperWhite
-                                      : BDDesign.colorInkBlack,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
+                          child: Column(
+                            children: [
+                              BDPanelCard(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    _searchMode == _RecallSearchMode.local
-                                        ? (_isLocalIndexing
-                                              ? textLocalize(
-                                                  'recall_local_indexing',
-                                                )
-                                              : '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}')
-                                        : textLocalize('recall_cloud_scope'),
-                                    style: TextStyle(
-                                      fontSize: 12.5,
+                                child: TextField(
+                                  controller: _searchController,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 15,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: _searchFieldHint(),
+                                    hintStyle: TextStyle(
                                       color: isDark
-                                          ? Colors.white.withValues(alpha: 0.72)
+                                          ? Colors.white.withValues(alpha: 0.45)
+                                          : BDDesign.colorMutedBlue.withValues(
+                                              alpha: 0.78,
+                                            ),
+                                      fontSize: 15,
+                                    ),
+                                    prefixIcon: Icon(
+                                      Icons.search_rounded,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.5)
                                           : BDDesign.colorMutedBlue,
-                                      height: 1.35,
+                                    ),
+                                    suffixIcon:
+                                        ValueListenableBuilder<
+                                          TextEditingValue
+                                        >(
+                                          valueListenable: _searchController,
+                                          builder: (context, value, _) {
+                                            final hasText = value.text
+                                                .trim()
+                                                .isNotEmpty;
+                                            return Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _buildSearchModeMenuButton(
+                                                  isDark,
+                                                ),
+                                                if (hasText)
+                                                  IconButton(
+                                                    onPressed: () {
+                                                      _searchController.clear();
+                                                      _searchModels('');
+                                                    },
+                                                    icon: Icon(
+                                                      Icons.close_rounded,
+                                                      color: isDark
+                                                          ? Colors.white
+                                                                .withValues(
+                                                                  alpha: 0.5,
+                                                                )
+                                                          : BDDesign
+                                                                .colorMutedBlue,
+                                                    ),
+                                                  ),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                    filled: true,
+                                    fillColor: Colors.transparent,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                      horizontal: 16,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16.0),
+                                      borderSide: const BorderSide(
+                                        color: BDDesign.colorMutedBlue,
+                                        width: 1.5,
+                                      ),
                                     ),
                                   ),
+                                  onSubmitted: (value) {
+                                    unawaited(_handleSearchSubmitted(value));
+                                  },
+                                  onChanged: _searchModels,
                                 ),
-                                if (_searchMode == _RecallSearchMode.local &&
-                                    _indexStats != null &&
-                                    !_isLocalIndexing)
-                                  BDStatusPill(
-                                    label:
-                                        '${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}',
-                                    icon: Icons.storage_rounded,
-                                    color: BDDesign.colorMutedBlue,
-                                  ),
+                              ),
+                              if (_searchMode == _RecallSearchMode.localAi) ...[
+                                const SizedBox(height: 10),
+                                RecallLocalAiPanel(
+                                  theme: theme,
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  darkInput: darkInput,
+                                  isLocalModelReady: _isLocalModelReady,
+                                  isModelDownloading: _isModelDownloading,
+                                  isLocalModelLoading: _isLocalModelLoading,
+                                  modelDownloadProgress: _modelDownloadProgress,
+                                  modelDownloadedBytes: _modelDownloadedBytes,
+                                  modelDownloadTotalBytes:
+                                      _modelDownloadTotalBytes,
+                                  localAnswer: _localAnswer,
+                                  localAnswerStatus: _localAnswerStatus,
+                                  localContextPreview: _localContextPreview,
+                                  defaultModelDownloadUrl:
+                                      _defaultModelDownloadUrl,
+                                  localModelUrlController:
+                                      _localModelUrlController,
+                                  localModelPathController:
+                                      _localModelPathController,
+                                  onDownloadModel: _downloadModelToPrivateDir,
+                                  onLoadModel: _loadLocalQnaModel,
+                                ),
                               ],
+                            ],
+                          ),
+                        ),
+                        if (_processingTasks.isNotEmpty)
+                          RepaintBoundary(
+                            child: RecallProcessingSection(
+                              theme: theme,
+                              isDark: isDark,
+                              textColor: textColor,
+                              darkInput: darkInput,
+                              isExpanded: _isProcessingExpanded,
+                              processingTasks: _processingTasks,
+                              taskAllLogs: _taskAllLogs,
+                              expandedTaskLogs: _expandedTaskLogs,
+                              onToggleExpanded: () {
+                                setState(() {
+                                  _isProcessingExpanded =
+                                      !_isProcessingExpanded;
+                                });
+                              },
+                              onToggleTaskLogs: (taskId) {
+                                setState(() {
+                                  if (_expandedTaskLogs.contains(taskId)) {
+                                    _expandedTaskLogs.remove(taskId);
+                                  } else {
+                                    _expandedTaskLogs.add(taskId);
+                                  }
+                                });
+                              },
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          RecallLocalAiPanel(
-                            theme: theme,
-                            isDark: isDark,
-                            textColor: textColor,
-                            darkInput: darkInput,
-                            isLocalAiPanelOpen: _isLocalAiPanelOpen,
-                            isLocalModelReady: _isLocalModelReady,
-                            isModelDownloading: _isModelDownloading,
-                            isLocalModelLoading: _isLocalModelLoading,
-                            isLocalAnswering: _isLocalAnswering,
-                            modelDownloadProgress: _modelDownloadProgress,
-                            modelDownloadedBytes: _modelDownloadedBytes,
-                            modelDownloadTotalBytes: _modelDownloadTotalBytes,
-                            localAnswer: _localAnswer,
-                            localAnswerStatus: _localAnswerStatus,
-                            localContextPreview: _localContextPreview,
-                            defaultModelDownloadUrl: _defaultModelDownloadUrl,
-                            localModelUrlController: _localModelUrlController,
-                            localModelPathController: _localModelPathController,
-                            localQuestionController: _localQuestionController,
-                            onToggleOpen: () {
-                              setState(() {
-                                _isLocalAiPanelOpen = !_isLocalAiPanelOpen;
-                              });
-                            },
-                            onDownloadModel: _downloadModelToPrivateDir,
-                            onLoadModel: _loadLocalQnaModel,
-                            onAskQuestion: _askLocalQuestion,
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
-                    if (_processingTasks.isNotEmpty)
-                      RecallProcessingSection(
-                        theme: theme,
-                        isDark: isDark,
-                        textColor: textColor,
-                        darkInput: darkInput,
-                        isExpanded: _isProcessingExpanded,
-                        processingTasks: _processingTasks,
-                        taskAllLogs: _taskAllLogs,
-                        expandedTaskLogs: _expandedTaskLogs,
-                        onToggleExpanded: () {
-                          setState(() {
-                            _isProcessingExpanded = !_isProcessingExpanded;
-                          });
-                        },
-                        onToggleTaskLogs: (taskId) {
-                          setState(() {
-                            if (_expandedTaskLogs.contains(taskId)) {
-                              _expandedTaskLogs.remove(taskId);
-                            } else {
-                              _expandedTaskLogs.add(taskId);
-                            }
-                          });
-                        },
-                      ),
-                    if (_isLoading)
-                      const Padding(
+                  ),
+                  if (_isLoading)
+                    const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Padding(
                         padding: EdgeInsets.symmetric(vertical: 96.0),
                         child: Center(
                           child: TDLoading(
@@ -1075,31 +1273,55 @@ $userQuestion
                             icon: TDLoadingIcon.circle,
                           ),
                         ),
-                      )
-                    else if (_models.isEmpty)
-                      Padding(
+                      ),
+                    )
+                  else if (_models.isEmpty)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Padding(
                         padding: const EdgeInsets.only(top: 16.0),
                         child: _searchController.text.trim().isEmpty
                             ? _buildEmptyState(theme, isDark)
                             : _buildSearchEmptyState(theme, isDark),
-                      )
-                    else
-                      RecallModelGrid(
-                        theme: theme,
-                        isDark: isDark,
-                        darkCard: darkCard,
-                        darkInput: darkInput,
-                        models: _models,
-                        activeModelAction: _activeModelAction,
-                        modelCardKeyFor: _modelCardKeyFor,
-                        isSameModel: _isSameModel,
-                        onNavigateToViewer: _navigateToViewer,
-                        onShowModelActions: (model) {
-                          unawaited(_showModelActions(model));
-                        },
                       ),
-                  ],
-                ),
+                    )
+                  else if (_models.isNotEmpty &&
+                      _models.first.containsKey('matched_frames'))
+                    RecallModelGrid(
+                      theme: theme,
+                      isDark: isDark,
+                      darkCard: darkCard,
+                      darkInput: darkInput,
+                      models: _models,
+                      activeModelAction: _activeModelAction,
+                      modelCardKeyFor: _modelCardKeyFor,
+                      isSameModel: _isSameModel,
+                      onNavigateToViewer: _navigateToViewer,
+                      toPublicUrl: _toPublicUrl,
+                      onShowModelActions: (model) {
+                        _showModelActions(model);
+                      },
+                    )
+                  else
+                    TimePeelingList(
+                      theme: theme,
+                      isDark: isDark,
+                      darkCard: darkCard,
+                      darkInput: darkInput,
+                      groupedModels: _groupModelsByName(_models),
+                      activeModelAction: _activeModelAction,
+                      modelCardKeyFor: _modelCardKeyFor,
+                      isSameModel: _isSameModel,
+                      onNavigateToViewer: _navigateToViewer,
+                      onShowModelActions: (model) {
+                        _showModelActions(model);
+                      },
+                      onAddNewTask: (name) {
+                        ref.read(pageIndexProvider.notifier).state = 1;
+                      },
+                    ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 96)),
+                ],
               ),
             ),
           ),
@@ -1111,9 +1333,13 @@ $userQuestion
               darkInput: darkInput,
               model: _activeModelAction!,
               rect: _activeModelActionRect!,
+              toPublicUrl: _toPublicUrl,
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
+              onShowModelDetails: _showModelDetails,
               onShareModelToCommunity: _shareModelToCommunity,
+              onRenameModel: _renameModel,
+              onDeleteLocalModel: _deleteLocalModel,
             ),
         ],
       ),
@@ -1121,30 +1347,72 @@ $userQuestion
   }
 
   Future<void> _searchModels(String query) async {
-    if (query.trim().isEmpty) {
+    final normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty) {
+      _lastSearchKey = null;
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
+        if (_searchMode == _RecallSearchMode.localAi) {
+          _localAnswer = '';
+          _localContextPreview = '';
+        }
         _isLoading = false;
       });
       return;
     }
 
+    final cacheKey = '${_searchMode.name}:$normalizedQuery';
+    final now = DateTime.now();
+    final cached = _searchCache[cacheKey];
+    if (cached != null &&
+        now.difference(cached.createdAt) < const Duration(minutes: 2)) {
+      _lastSearchKey = cacheKey;
+      if (!mounted) return;
+      setState(() {
+        _models = cached.results
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+        _isLoading = false;
+      });
+      return;
+    }
+
+    if (_lastSearchKey == cacheKey && !_isLoading) {
+      return;
+    }
+
+    final requestId = ++_searchRequestId;
+    _lastSearchKey = cacheKey;
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final results = _searchMode == _RecallSearchMode.local
-          ? await _localRagIndex.search(query)
-          : await _searchModelsFromCloud(query);
-      if (!mounted) return;
+      final results = _usesLocalIndex(_searchMode)
+          ? await _localRagIndex.search(normalizedQuery)
+          : await _searchModelsFromCloud(normalizedQuery);
+      if (!mounted || requestId != _searchRequestId) return;
+      _searchCache[cacheKey] = _RecallSearchCacheEntry(
+        createdAt: now,
+        results: results
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      );
+      if (_searchCache.length > 24) {
+        final oldestKey = _searchCache.entries.reduce((left, right) {
+          return left.value.createdAt.isBefore(right.value.createdAt)
+              ? left
+              : right;
+        }).key;
+        _searchCache.remove(oldestKey);
+      }
       setState(() {
         _models = results;
         _isLoading = false;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _isLoading = false;
         });
@@ -1169,16 +1437,63 @@ $userQuestion
       return List<Map<String, dynamic>>.from(data['results'] ?? []);
     }
 
-    final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
+    final errMsg = (data is Map)
+        ? (data['error'] ?? textLocalize('recall_unknown_error'))
+        : textLocalize('recall_server_error');
     throw Exception(errMsg);
   }
 
-  void _onSearchChanged(String value) {
-    setState(() {});
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
-      _searchModels(value);
-    });
+  Future<void> _handleSearchSubmitted(String value) async {
+    final query = value.trim();
+    if (_searchMode == _RecallSearchMode.localAi) {
+      await _searchModels(query);
+      if (query.isNotEmpty) {
+        await _askLocalQuestion(question: query);
+      }
+      return;
+    }
+    await _searchModels(query);
+  }
+
+  bool _usesLocalIndex(_RecallSearchMode mode) {
+    return mode == _RecallSearchMode.local || mode == _RecallSearchMode.localAi;
+  }
+
+  String _searchModeTitle(_RecallSearchMode mode) {
+    switch (mode) {
+      case _RecallSearchMode.cloud:
+        return textLocalize('recall_cloud_rag');
+      case _RecallSearchMode.local:
+        return textLocalize('recall_local_rag');
+      case _RecallSearchMode.localAi:
+        return textLocalize('recall_local_ai_rag');
+    }
+  }
+
+  String _searchModeSubtitle(_RecallSearchMode mode) {
+    switch (mode) {
+      case _RecallSearchMode.cloud:
+        return textLocalize('recall_cloud_scope');
+      case _RecallSearchMode.local:
+        if (_isLocalIndexing) {
+          return textLocalize('recall_local_indexing');
+        }
+        final base =
+            '${textLocalize('recall_local_ready')} · ${textLocalize('recall_local_scope')}';
+        if (_indexStats == null) {
+          return base;
+        }
+        return '$base · ${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}';
+      case _RecallSearchMode.localAi:
+        return textLocalize('recall_local_ai_scope');
+    }
+  }
+
+  String _searchFieldHint() {
+    if (_searchMode == _RecallSearchMode.localAi) {
+      return textLocalize('recall_local_ai_hint');
+    }
+    return textLocalize('recall_search_hint');
   }
 
   void _setSearchMode(_RecallSearchMode mode) {
@@ -1187,42 +1502,72 @@ $userQuestion
     }
     setState(() {
       _searchMode = mode;
+      if (mode != _RecallSearchMode.localAi) {
+        _localAnswer = '';
+        _localContextPreview = '';
+      }
     });
     final keyword = _searchController.text.trim();
     if (keyword.isNotEmpty) {
-      _searchModels(keyword);
+      unawaited(_searchModels(keyword));
     }
   }
 
   Widget _buildSearchModeMenuButton(bool isDark) {
-    final selectedLocal = _searchMode == _RecallSearchMode.local;
-    final icon = selectedLocal
-        ? Icons.privacy_tip_rounded
-        : Icons.cloud_rounded;
+    final icon = switch (_searchMode) {
+      _RecallSearchMode.cloud => Icons.cloud_rounded,
+      _RecallSearchMode.local => Icons.privacy_tip_rounded,
+      _RecallSearchMode.localAi => Icons.auto_awesome_rounded,
+    };
     final foreground = isDark
         ? Colors.white.withValues(alpha: 0.82)
         : BDDesign.colorInkBlack;
 
-    return IconButton(
-      tooltip: textLocalize('recall_search_mode'),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-      onPressed: _showSearchModeSheet,
-      icon: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.06)
-              : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+    return Tooltip(
+      message: textLocalize('recall_search_mode'),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showSearchModeSheet,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 68),
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: foreground),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    _searchModeTitle(_searchMode),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(Icons.expand_more_rounded, size: 16, color: foreground),
+              ],
+            ),
           ),
         ),
-        child: Icon(icon, size: 16, color: foreground),
       ),
     );
   }
@@ -1349,17 +1694,24 @@ $userQuestion
                   ),
                   const SizedBox(height: 16),
                   modeTile(
-                    mode: _RecallSearchMode.local,
-                    icon: Icons.privacy_tip_rounded,
-                    title: textLocalize('recall_local_rag'),
-                    subtitle: textLocalize('recall_local_scope'),
+                    mode: _RecallSearchMode.cloud,
+                    icon: Icons.cloud_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.cloud),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.cloud),
                   ),
                   const SizedBox(height: 10),
                   modeTile(
-                    mode: _RecallSearchMode.cloud,
-                    icon: Icons.cloud_rounded,
-                    title: textLocalize('recall_cloud_rag'),
-                    subtitle: textLocalize('recall_cloud_scope'),
+                    mode: _RecallSearchMode.local,
+                    icon: Icons.privacy_tip_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.local),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.local),
+                  ),
+                  const SizedBox(height: 10),
+                  modeTile(
+                    mode: _RecallSearchMode.localAi,
+                    icon: Icons.auto_awesome_rounded,
+                    title: _searchModeTitle(_RecallSearchMode.localAi),
+                    subtitle: _searchModeSubtitle(_RecallSearchMode.localAi),
                   ),
                 ],
               ),
@@ -1486,16 +1838,20 @@ $userQuestion
             ),
             const SizedBox(height: 18),
             TDText(
-              textLocalize('recall_local_rag'),
+              _searchModeTitle(_searchMode),
               font: theme.fontTitleLarge,
               textColor: textColor,
               fontWeight: FontWeight.w600,
             ),
             const SizedBox(height: 8),
             TDText(
-              _searchMode == _RecallSearchMode.local
-                  ? textLocalize('recall_local_empty')
-                  : textLocalize('recall_cloud_empty'),
+              switch (_searchMode) {
+                _RecallSearchMode.local => textLocalize('recall_local_empty'),
+                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                _RecallSearchMode.localAi => textLocalize(
+                  'recall_local_ai_empty',
+                ),
+              },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
             ),
@@ -1529,7 +1885,14 @@ $userQuestion
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId = model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        _modelDisplayName(model);
+    String? initialPoseId;
+
+    if (transformMatrix is Map) {
+      initialPoseId = transformMatrix['image_name']?.toString();
+      transformMatrix = transformMatrix['transform_matrix'];
+    }
 
     // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
@@ -1547,25 +1910,14 @@ $userQuestion
 
     Navigator.push(
       context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            WebGLViewerPage(
-              initialModelUrl: modelUrl,
-              posesUrl: posesUrl,
-              sceneId: sceneId,
-              initialPose: initialPose,
-            ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
-          );
-        },
+      MaterialPageRoute(
+        builder: (context) => WebGLViewerPage(
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+          initialPoseId: initialPoseId,
+        ),
       ),
     );
   }
@@ -1585,28 +1937,369 @@ $userQuestion
     if (!mounted) {
       return;
     }
-    TDToast.showText(context: context, '已发布到社区');
+    TDToast.showText(context: context, textLocalize('recall_published'));
+  }
+
+  Future<String> _getLocalModelSizeLabel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) {
+      return '';
+    }
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        return '';
+      }
+
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      if (!await localFile.exists()) {
+        return '';
+      }
+
+      final sizeBytes = await localFile.length();
+      if (sizeBytes <= 0) {
+        return '';
+      }
+
+      final sizeMb = sizeBytes / 1024 / 1024;
+      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)}MB';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<void> _showModelActions(Map<String, dynamic> model) async {
-    final key = _modelCardKeyFor(model);
-    final cardContext = key.currentContext;
-    final renderBox = cardContext?.findRenderObject() as RenderBox?;
-    final overlayBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null || overlayBox == null) {
-      return;
-    }
-
-    final topLeft = renderBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-
+    final cardKey = _modelCardKeyFor(model);
+    final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayRenderBox =
+        _actionOverlayStackKey.currentContext?.findRenderObject()
+            as RenderBox?;
+    if (renderBox == null || overlayRenderBox == null) return;
+    final offset = renderBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayRenderBox,
+    );
+    final rect = offset & renderBox.size;
+    final sizeLabel = await _getLocalModelSizeLabel(model);
     if (!mounted) {
       return;
     }
-
     setState(() {
-      _activeModelAction = model;
-      _activeModelActionRect = topLeft & renderBox.size;
+      _activeModelAction = {
+        ...model,
+        if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+      };
+      _activeModelActionRect = rect;
     });
+  }
+
+  Future<void> _showModelDetails(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+
+    // 从 processing_tasks 表获取详细信息
+    Map<String, dynamic>? taskInfo;
+    if (sceneId != null) {
+      try {
+        final resp = await Supabase.instance.client
+            .from('processing_tasks')
+            .select('created_at, updated_at, task_type, quality_score')
+            .eq('scene_id', sceneId)
+            .limit(1)
+            .maybeSingle();
+        taskInfo = resp;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+    final displayName =
+        _modelDisplayName(
+          model,
+          fallback: textLocalize('recall_unnamed_model'),
+        );
+
+    // 格式化日期
+    String formatDate(String? raw) {
+      if (raw == null || raw.isEmpty)
+        return textLocalize('recall_detail_unknown');
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) return raw;
+      final local = dt.toLocal();
+      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}  ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    }
+
+    final createdAt = formatDate(
+      taskInfo?['created_at']?.toString() ?? model['created_at']?.toString(),
+    );
+    final updatedAt = formatDate(taskInfo?['updated_at']?.toString());
+    final taskType =
+        taskInfo?['task_type']?.toString() ??
+        textLocalize('recall_detail_unknown');
+    final qualityScore = taskInfo?['quality_score'];
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 22,
+                        color: textColor,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _DetailRow(
+                    icon: Icons.calendar_today_rounded,
+                    label: textLocalize('recall_detail_created_at'),
+                    value: createdAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.update_rounded,
+                    label: textLocalize('recall_detail_updated_at'),
+                    value: updatedAt,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.category_rounded,
+                    label: textLocalize('recall_detail_task_type'),
+                    value: taskType,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                  ),
+                  const SizedBox(height: 12),
+                  _DetailRow(
+                    icon: Icons.star_rounded,
+                    label: textLocalize('recall_detail_quality_score'),
+                    value: qualityScore != null
+                        ? '$qualityScore / 100'
+                        : textLocalize('recall_detail_unknown'),
+                    textColor: textColor,
+                    hintColor: hintColor,
+                    valueTrailing: qualityScore != null
+                        ? _buildScoreBar(
+                            (qualityScore as num).toDouble(),
+                            isDark,
+                          )
+                        : null,
+                  ),
+                  if (sizeLabel.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _DetailRow(
+                      icon: Icons.storage_rounded,
+                      label: textLocalize('recall_detail_local_size'),
+                      value: sizeLabel.replaceAll(RegExp(r'[()]'), ''),
+                      textColor: textColor,
+                      hintColor: hintColor,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildScoreBar(double score, bool isDark) {
+    final ratio = (score / 100).clamp(0.0, 1.0);
+    final color = ratio >= 0.7
+        ? const Color(0xFF4CAF50)
+        : ratio >= 0.4
+        ? const Color(0xFFFFA726)
+        : const Color(0xFFEF5350);
+    return SizedBox(
+      width: 60,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: ratio,
+          minHeight: 6,
+          backgroundColor: isDark
+              ? Colors.white.withAlpha(20)
+              : Colors.black.withAlpha(15),
+          valueColor: AlwaysStoppedAnimation<Color>(color),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renameModel(Map<String, dynamic> model) async {
+    final sceneId = model['scene_id']?.toString();
+    if (sceneId == null) return;
+
+    final currentName = _modelDisplayName(model, fallback: sceneId);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameModelDialog(initialName: currentName),
+    );
+
+    if (newName == null || newName.isEmpty || !mounted) return;
+
+    try {
+      await Supabase.instance.client
+          .from('processing_tasks')
+          .update({'display_name': newName})
+          .eq('scene_id', sceneId)
+          .select();
+
+      // 立即更新本地数据
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_rename_success'),
+          context: context,
+        );
+        final targetKey = _modelKey(model);
+        setState(() {
+          for (final m in _allModels) {
+            if (_modelKey(m) == targetKey) {
+              m['display_name'] = newName;
+            }
+          }
+          for (final m in _models) {
+            if (_modelKey(m) == targetKey) {
+              m['display_name'] = newName;
+            }
+          }
+          if (_activeModelAction != null &&
+              _modelKey(_activeModelAction!) == targetKey) {
+            _activeModelAction = {
+              ..._activeModelAction!,
+              'display_name': newName,
+            };
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_rename_fail')}: $e',
+          context: context,
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) {
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_delete_local_none'),
+          context: context,
+        );
+      }
+      return;
+    }
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        if (mounted) {
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
+        }
+        return;
+      }
+
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
+      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
+
+      bool deleted = false;
+      if (await localFile.exists()) {
+        await localFile.delete();
+        deleted = true;
+      }
+      if (await tmpFile.exists()) {
+        await tmpFile.delete();
+        deleted = true;
+      }
+      if (await metaFile.exists()) {
+        await metaFile.delete();
+        deleted = true;
+      }
+
+      if (mounted) {
+        if (deleted) {
+          // 通知下载状态徽章重置为"未下载"
+          downloadEventBus.add(
+            ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
+          );
+          TDToast.showText(
+            textLocalize('recall_delete_local_success'),
+            context: context,
+          );
+        } else {
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_delete_local_fail')}: $e',
+          context: context,
+        );
+      }
+    }
   }
 
   void _dismissModelActions() {
@@ -1624,13 +2317,196 @@ $userQuestion
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId: model['scene_id']?.toString() ?? '未命名模型',
+      sceneId:
+          _modelDisplayName(
+            model,
+            fallback: textLocalize('recall_unnamed_model'),
+          ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
           : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,
+    );
+  }
+}
+
+class _RecallSearchCacheEntry {
+  const _RecallSearchCacheEntry({
+    required this.createdAt,
+    required this.results,
+  });
+
+  final DateTime createdAt;
+  final List<Map<String, dynamic>> results;
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color textColor;
+  final Color hintColor;
+  final Widget? trailing;
+  final Widget? valueTrailing;
+
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.textColor,
+    required this.hintColor,
+    this.trailing,
+    this.valueTrailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: hintColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      value,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (valueTrailing != null) ...[
+                    const SizedBox(width: 10),
+                    valueTrailing!,
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+      ],
+    );
+  }
+}
+
+class _RecallMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? accent;
+
+  const _RecallMetric({required this.label, required this.value, this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.58)
+                : BDDesign.colorMutedBlue,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color:
+                accent ??
+                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RenameModelDialog extends StatefulWidget {
+  final String initialName;
+  const _RenameModelDialog({required this.initialName});
+
+  @override
+  State<_RenameModelDialog> createState() => _RenameModelDialogState();
+}
+
+class _RenameModelDialogState extends State<_RenameModelDialog> {
+  static final _invalidChars = RegExp(r'[/\\:*?"<>|]');
+  late final TextEditingController _controller;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(textLocalize('recall_rename_model')),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: textLocalize('recall_rename_hint'),
+          errorText: _errorText,
+        ),
+        onChanged: (value) {
+          setState(() {
+            _errorText = _invalidChars.hasMatch(value)
+                ? textLocalize('recall_rename_invalid')
+                : null;
+          });
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(textLocalize('gen_cancel')),
+        ),
+        TextButton(
+          onPressed: () {
+            final text = _controller.text.trim();
+            if (text.isEmpty || _invalidChars.hasMatch(text)) return;
+            Navigator.pop(context, text);
+          },
+          child: Text(textLocalize('gen_button')),
+        ),
+      ],
     );
   }
 }

@@ -105,6 +105,48 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 
 本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建，再到多端检索与浏览的端云协同流程。
 
+### 🧪 Qwen3 本地问答微调与部署（持续推进中）
+
+`ai_engine/finetune_qwen3` 已从早期 `Qwen3-1.7B + LoRA` 实验推进到部署候选筛选阶段，目前覆盖 `Part 16-29`：
+
+- 检索路由可观测性与回归机制
+- `object_lookup` 检索专项优化
+- formatter 回答路由稳定化
+- 最小本地问答入口 `local_qa_cli.py`
+- `Qwen3-0.6B` LoRA 训练与 benchmark
+- `Qwen3-1.7B` merged HF 目录导出
+- `GGUF` 转换、`Q4_K_M` / `Q5_K_M` 量化与 strict 集复测
+- importance matrix (`imatrix`) 量化复测
+- Part 29 部署候选小样本验证与主线选择
+
+当前状态说明：
+
+- `ai_engine/finetune_qwen3` 仍然是独立实验目录，但已不再只是“调试脚本集合”
+- Flutter Recall 的本地 AI 入口已经恢复，可复用当前 `GGUF + llamadart + local RAG` 链路
+- 当前部署主线已明确为 `1.7B Q5_K_M + imatrix GGUF`
+- 备用方案为 `0.6B LoRA`
+- 质量基线为 `1.7B merged`
+
+快速命令：
+
+```bash
+# 单轮问答
+python ai_engine/finetune_qwen3/scripts/local_qa_cli.py --question "我最近拍了什么？"
+
+# 回归测试
+pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
+```
+
+文档入口：
+
+- `ai_engine/finetune_qwen3/README.md`
+- `docs/开发文档/本地问答微调文档补充说明.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part27.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part28.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part29.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-对标评测报告-2026-03-22.md`
+- `docs/开发文档/Qwen3-1.7B-LoRA-严格无泄漏对标评测报告-2026-03-22.md`
+
 系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
 1. **Client (Flutter)**  
@@ -113,9 +155,10 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 2. **Backend as a Service (Supabase)**  
    提供 PostgreSQL、Storage、Auth、Realtime 与 Edge Functions：
    - **PostgreSQL + pgvector**：存储任务、资产与语义向量。
+   - **业务表**：当前主链路依赖 `processing_tasks`、`model_assets`、`memory_poses`、`community_posts`、`worker_nodes`。
    - **Storage**：统一管理原始素材、缩略图、模型文件和相关输出。
    - **Realtime**：为移动端与 Dashboard 提供状态同步。
-   - **RLS**：基于数据库策略控制用户资产访问权限。
+   - **RLS**：基于数据库策略控制用户资产访问权限，并为 Dashboard 提供只读读表策略。
 
 3. **Edge Functions (Deno)**  
    当前仓库已包含 `supabase/functions/search-models`，用于承载语义搜索接口，负责 Embedding 调用、时间解析与向量检索，是“搜索现实空间”这条链路的接口层。
@@ -141,7 +184,7 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 ```text
 BrainDance/
 ├── app/                  # [Flutter] 移动端客户端
-│   ├── lib/              #   - 页面、配置、服务
+│   ├── lib/              #   - 登录、录制、Recall、Community、设置等页面与服务
 │   ├── assets/           #   - 图标、字体、内置 WebGL 资源
 │   └── pubspec.yaml      #   - Flutter 依赖定义
 │
@@ -153,7 +196,8 @@ BrainDance/
 │   │   ├── tests/        #       - 测试脚本
 │   │   ├── requirements.txt
 │   │   └── main.py
-│   └── demo/             #   - 演示脚本与实验代码
+│   ├── demo/             #   - 演示脚本与实验代码
+│   └── finetune_qwen3/   #   - Qwen3 本地问答微调、量化、评测与部署候选验证
 │
 ├── supabase/             # [BaaS] 本地后端基础设施
 │   ├── migrations/       #   - SQL 迁移
@@ -301,7 +345,7 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-搜索接口的测试方法见 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+搜索接口的测试方法见 [tests/README.md](/ltx-data/BrainDance/tests/README.md)。
 
 ## 数据流与存储约定
 
@@ -321,9 +365,11 @@ Storage 目前以 `braindance-assets` bucket 为中心，常见路径约定如�
 
 数据库中的关键表包括：
 
-- `processing_tasks`：任务状态、日志、质量分数、任务类型、参数
+- `processing_tasks`：任务状态、日志、质量分数、任务类型、参数与 `display_name`
 - `model_assets`：模型路径、描述、标签、对象与 Embedding
 - `memory_poses`：帧级空间锚点与向量
+- `community_posts`：社区贴文与地理位置索引
+- `worker_nodes`：Worker 注册、心跳与控制状态
 
 ## 语义搜索 (Semantic Search)
 

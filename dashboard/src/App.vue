@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
+import { ElMessage } from 'element-plus'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -70,6 +71,25 @@ interface EdgeFunctionCheck {
   message: string
 }
 
+interface WorkerNode {
+  worker_id: string
+  hostname: string | null
+  pid: number | null
+  status: string
+  current_task_id: string | null
+  current_scene_id: string | null
+  desired_state: 'run' | 'pause' | 'interrupt' | string
+  control_note: string | null
+  last_heartbeat: string
+  started_at: string | null
+  stopped_at: string | null
+  metadata?: {
+    online_timeout_seconds?: number
+    stop_reason?: string | null
+    desired_state_seen?: string | null
+  } | null
+}
+
 const loading = ref(true)
 const refreshing = ref(false)
 const storageLoading = ref(false)
@@ -78,6 +98,7 @@ const storageError = ref('')
 const lastUpdated = ref<string | null>(null)
 
 const taskRows = ref<ProcessingTask[]>([])
+const workerRows = ref<WorkerNode[]>([])
 const modelAssetCount = ref(0)
 const memoryPoseCount = ref(0)
 const userSummaries = ref<UserActivitySummary[]>([])
@@ -89,7 +110,7 @@ const autoRefresh = ref(true)
 const refreshSeconds = ref(60)
 const taskTrendRange = ref<'24h' | '7d' | '30d' | 'all'>('all')
 const isDarkTheme = ref(true)
-const accentColor = ref('#71839a')
+const accentColor = ref('#6b7a8f')
 
 const THEME_STORAGE_KEY = 'dashboard-theme-dark'
 const ACCENT_STORAGE_KEY = 'dashboard-theme-accent'
@@ -98,6 +119,7 @@ const channelState = ref<Record<string, string>>({
   processing_tasks: 'connecting',
   model_assets: 'connecting',
   memory_poses: 'connecting',
+  worker_nodes: 'connecting',
 })
 
 const storageStats = ref<BucketStat[]>([])
@@ -184,9 +206,17 @@ const taskFreshnessText = computed(() => {
   return `${Math.floor(diffSeconds / 3600)}h 前更新`
 })
 
-const workerOnline = computed(() => {
-  if (!latestTaskUpdatedAt.value) return false
-  return dayjs().diff(latestTaskUpdatedAt.value, 'second') <= 180
+const isWorkerRowOnline = (worker: WorkerNode) => {
+  const timeout = Number(worker.metadata?.online_timeout_seconds ?? 30)
+  return dayjs().diff(dayjs(worker.last_heartbeat), 'second') <= timeout && worker.status !== 'offline'
+}
+
+const onlineWorkerRows = computed(() => workerRows.value.filter((item) => isWorkerRowOnline(item)))
+const onlineWorkerCount = computed(() => onlineWorkerRows.value.length)
+const workerOnline = computed(() => onlineWorkerCount.value > 0)
+const workerSummaryText = computed(() => {
+  if (!workerRows.value.length) return '0 / 0'
+  return `${onlineWorkerCount.value} / ${workerRows.value.length}`
 })
 
 const realtimeHealthy = computed(() =>
@@ -292,7 +322,7 @@ const chartTheme = computed(() => ({
   area: hexToRgba(accentColor.value, isDarkTheme.value ? 0.18 : 0.14),
   accentSoft: hexToRgba(accentColor.value, isDarkTheme.value ? 0.26 : 0.18),
   paper: isDarkTheme.value ? '#101722' : '#f4f8fc',
-  pie: ['#8aa0bb', accentColor.value, '#78b39d', '#d27070'],
+  pie: ['#a0aab5', accentColor.value, '#6d8260', '#8b4747'],
 }))
 
 const dbRowsChartOption = computed(() => ({
@@ -315,7 +345,7 @@ const dbRowsChartOption = computed(() => ({
       type: 'bar',
       barWidth: 14,
       itemStyle: { color: accentColor.value, borderRadius: [0, 10, 10, 0] },
-      emphasis: { itemStyle: { color: '#f2a33c' } },
+      emphasis: { itemStyle: { color: '#8393a8' } },
       data: [
         dbCounts.value.processing_tasks,
         dbCounts.value.model_assets,
@@ -446,7 +476,7 @@ const taskTrendOption = computed(() => {
         data: labels.map((key) => bucketMap[key]),
         symbolSize: 7,
         lineStyle: { width: 3, color: accentColor.value },
-        itemStyle: { color: '#f2a33c', borderColor: accentColor.value, borderWidth: 2 },
+        itemStyle: { color: '#e4e8ed', borderColor: accentColor.value, borderWidth: 2 },
         areaStyle: { color: chartTheme.value.area },
       },
     ],
@@ -489,6 +519,29 @@ const statusPieOption = computed(() => ({
 
 const formatDisplayName = (task: ProcessingTask) => task.display_name || task.scene_id || task.id
 const formatDateTime = (iso: string) => dayjs(iso).format('YYYY-MM-DD HH:mm:ss')
+const formatWorkerLabel = (worker: WorkerNode) => worker.hostname || worker.worker_id
+const getWorkerStatusTag = (status: string) => {
+  if (status === 'idle') return 'success'
+  if (status === 'busy') return 'warning'
+  if (status === 'stopping') return 'danger'
+  if (status === 'offline') return 'info'
+  return 'info'
+}
+const getWorkerStatusLabel = (worker: WorkerNode) => {
+  if (isWorkerRowOnline(worker)) {
+    if (worker.status === 'busy') return '执行中'
+    if (worker.status === 'stopping') return '停止中'
+    if (worker.status === 'idle') return '空闲'
+    return '在线'
+  }
+  return worker.status === 'offline' ? '已离线' : '失联'
+}
+const formatHeartbeatAge = (iso: string) => {
+  const diffSeconds = dayjs().diff(dayjs(iso), 'second')
+  if (diffSeconds < 60) return `${diffSeconds}s 前`
+  if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}m 前`
+  return `${Math.floor(diffSeconds / 3600)}h 前`
+}
 
 const getProgressByStatus = (status: TaskStatus) => {
   if (status === 'pending') return 15
@@ -517,8 +570,57 @@ const applyTheme = () => {
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
+const updateWorkerDesiredState = async (
+  worker: WorkerNode,
+  desiredState: 'run' | 'pause' | 'interrupt',
+  successMessage: string,
+) => {
+  const { error } = await supabase
+    .from('worker_nodes')
+    .update({
+      desired_state: desiredState,
+      control_note:
+        desiredState === 'run'
+          ? 'Resumed from dashboard'
+          : desiredState === 'interrupt'
+            ? 'Interrupted from dashboard'
+            : 'Paused from dashboard',
+      control_requested_at: new Date().toISOString(),
+    })
+    .eq('worker_id', worker.worker_id)
+
+  if (error) {
+    ElMessage.error(`控制失败: ${error.message}`)
+    return
+  }
+
+  ElMessage.success(successMessage)
+  await refreshDashboard()
+}
+
+const requestWorkerPause = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'pause',
+    `已请求优雅暂停 ${formatWorkerLabel(worker)}，它会停止接新任务并在安全点退出。`,
+  )
+
+const requestWorkerInterrupt = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'interrupt',
+    `已请求中断 ${formatWorkerLabel(worker)}，Supervisor 会尝试立即打断当前任务。`,
+  )
+
+const requestWorkerResume = async (worker: WorkerNode) =>
+  updateWorkerDesiredState(
+    worker,
+    'run',
+    `已请求恢复 ${formatWorkerLabel(worker)}，Supervisor 会在轮询周期内拉起实例。`,
+  )
+
 const edgeFunctionNames = computed(() => {
-  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? 'search-models,test-timeout'
+  const raw = (import.meta.env.VITE_SUPABASE_EDGE_FUNCTIONS as string | undefined) ?? ''
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -526,6 +628,7 @@ const edgeFunctionNames = computed(() => {
 })
 
 const edgeStatusText = computed(() => {
+  if (!edgeFunctionNames.value.length) return '未配置探测'
   if (!edgeChecks.value.length) return '还没探测'
   if (edgeHealthyCount.value === edgeFunctionNames.value.length) return '全部在线'
   if (!edgeHealthyCount.value) return '全部失联'
@@ -566,9 +669,9 @@ const overviewCards = computed(() => [
   },
   {
     key: 'worker',
-    label: 'Worker',
-    value: workerOnline.value ? '在线' : '离线',
-    note: taskFreshnessText.value,
+    label: 'Workers',
+    value: workerSummaryText.value,
+    note: workerOnline.value ? '心跳正常' : '无在线实例',
     icon: 'lucide:bot',
     tone: workerSeverity.value,
   },
@@ -842,6 +945,12 @@ const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
 }
 
 const refreshEdgeChecks = async () => {
+  if (!edgeFunctionNames.value.length) {
+    edgeChecks.value = []
+    edgeLoading.value = false
+    return
+  }
+
   edgeLoading.value = true
   const checks = await Promise.all(edgeFunctionNames.value.map((name) => checkEdgeFunction(name)))
   edgeChecks.value = checks
@@ -969,6 +1078,7 @@ const refreshDashboard = async () => {
 
   const [
     tasksRes,
+    workerRes,
     processingTaskCountRes,
     assetCountRes,
     poseCountRes,
@@ -985,6 +1095,11 @@ const refreshDashboard = async () => {
       .select('id, display_name, scene_id, user_id, status, task_type, quality_score, created_at, updated_at, logs')
       .order('updated_at', { ascending: false })
       .limit(500),
+    supabase
+      .from('worker_nodes')
+      .select('worker_id, hostname, pid, status, current_task_id, current_scene_id, desired_state, control_note, last_heartbeat, started_at, stopped_at, metadata')
+      .order('last_heartbeat', { ascending: false })
+      .limit(100),
     supabase.from('processing_tasks').select('*', { count: 'exact', head: true }),
     supabase.from('model_assets').select('*', { count: 'exact', head: true }),
     supabase.from('memory_poses').select('*', { count: 'exact', head: true }),
@@ -1001,17 +1116,20 @@ const refreshDashboard = async () => {
     fetchAllRows<{ user_id: string; created_at: string }>('tasks', 'user_id, created_at'),
   ])
 
-  if (tasksRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
+  if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
     errorMessage.value =
       tasksRes.error?.message ||
+      workerRes.error?.message ||
       processingTaskCountRes.error?.message ||
       assetCountRes.error?.message ||
       poseCountRes.error?.message ||
       '数据读取失败'
   } else {
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
+    const workers = (workerRes.data ?? []) as WorkerNode[]
     const summaries = buildUserSummaries(processingTaskUsers, assetUsers, legacyTaskUsers)
     taskRows.value = tasks
+    workerRows.value = workers
     userSummaries.value = summaries
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
@@ -1101,6 +1219,7 @@ onMounted(async () => {
   bindChannel('processing_tasks', 'dashboard-processing-tasks')
   bindChannel('model_assets', 'dashboard-model-assets')
   bindChannel('memory_poses', 'dashboard-memory-poses')
+  bindChannel('worker_nodes', 'dashboard-worker-nodes')
 
   restartPolling()
 })
@@ -1242,7 +1361,7 @@ onUnmounted(() => {
                 <Icon icon="lucide:paintbrush-2" />
                 <el-color-picker
                   v-model="accentColor"
-                  :predefine="['#71839a', '#5f86c2', '#86a8a1', '#8d9bc4', '#a0afc7']"
+                  :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
                 />
               </div>
             </div>
@@ -1258,8 +1377,8 @@ onUnmounted(() => {
               <strong>{{ queueCount }}</strong>
             </article>
             <article class="summary-pill" :class="`tone-${workerSeverity}`">
-              <span>Worker</span>
-              <strong>{{ workerOnline ? '在线' : '离线' }}</strong>
+              <span>Workers</span>
+              <strong>{{ workerSummaryText }}</strong>
             </article>
           </div>
         </section>
@@ -1448,6 +1567,77 @@ onUnmounted(() => {
           </section>
 
           <section class="panel-grid panel-grid--resources">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">Worker 集群</div>
+                    <div class="header-meta">在线 {{ onlineWorkerCount }} / 总数 {{ workerRows.length }}，支持对单个实例发起优雅暂停。</div>
+                  </div>
+                </div>
+              </template>
+              <el-table :data="workerRows" stripe height="300" empty-text="还没有 worker 注册心跳">
+                <el-table-column label="Worker" min-width="240">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatWorkerLabel(scope.row) }}</div>
+                    <div class="task-sub">{{ scope.row.worker_id }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="120" align="center">
+                  <template #default="scope">
+                    <el-tag :type="getWorkerStatusTag(scope.row.status)">
+                      {{ getWorkerStatusLabel(scope.row) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="当前任务" min-width="180">
+                  <template #default="scope">
+                    {{ scope.row.current_scene_id || scope.row.current_task_id || '-' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="心跳" min-width="170">
+                  <template #default="scope">
+                    {{ formatDateTime(scope.row.last_heartbeat) }} / {{ formatHeartbeatAge(scope.row.last_heartbeat) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="控制" min-width="260" align="center">
+                  <template #default="scope">
+                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerPause(scope.row)"
+                      >
+                        优雅暂停
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="danger"
+                        plain
+                        :disabled="scope.row.desired_state === 'interrupt' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerInterrupt(scope.row)"
+                      >
+                        中断任务
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="success"
+                        plain
+                        :disabled="scope.row.desired_state === 'run' && isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerResume(scope.row)"
+                      >
+                        恢复实例
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="header-meta" style="margin-top: 12px;">
+                “优雅暂停” 会把 `desired_state` 设为 `pause`，实例不会再接新任务；“中断任务” 会把 `desired_state` 设为 `interrupt`，Supervisor 会尝试向子 Worker 转发中断信号，尽量打断当前任务；“恢复实例” 会把 `desired_state` 改回 `run` 并重新拉起实例。
+              </div>
+            </el-card>
+
             <el-card shadow="never" class="storage-card glass-card">
               <template #header>
                 <div>

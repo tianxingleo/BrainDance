@@ -1,0 +1,25 @@
+{
+  "benchmark_file": "ai_engine/finetune_qwen3/data/braindance_qwen3_benchmark.jsonl",
+  "train_files": [
+    "ai_engine/finetune_qwen3/data/braindance_qwen3_round4_train.jsonl",
+    "ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl",
+    "ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_train.jsonl"
+  ],
+  "fuzzy_threshold": 0.95,
+  "input_case_count": 80,
+  "removed_exact_overlap_count": 37,
+  "removed_fuzzy_overlap_count": 1,
+  "remaining_after_dedup_count": 49,
+  "backfilled_case_count": 7,
+  "rewritten_case_count": 49,
+  "ood_case_count": 15,
+  "final_case_count": 64,
+  "group_counts": {
+    "must_answer": 9,
+    "no_hit": 9,
+    "partial_coverage": 18,
+    "recent_hit": 9,
+    "stability": 19
+  },
+  "output_file": "ai_engine/finetune_qwen3/data/braindance_qwen3_benchmark_strict_no_leak_ood_20260322_v3.jsonl"
+}

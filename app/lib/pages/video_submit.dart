@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:braindance/configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,6 +33,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final TextEditingController nameController = TextEditingController();
   bool _isUploading = false;
   double _uploadProgress = 0.0;
+  int _uploadedBytes = 0;
+  int _totalFileSize = 0;
 
   static final Random _rdg = Random();
 
@@ -51,20 +54,20 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     if (user == null) {
       if (SupabaseConfig.isAdminMode) {
         if (mounted) {
-          TDToast.showText('当前为管理员浏览模式，未绑定用户，暂不支持上传任务。', context: context);
+          TDToast.showText(textLocalize('admin_mode_msg'), context: context);
         }
         return;
       }
       if (mounted) {
-        TDToast.showText('未登录，即将跳转登录页面...', context: context);
+        TDToast.showText(textLocalize('not_logged_in'), context: context);
         await Navigator.pushNamed(context, '/login');
       }
       user = client.auth.currentUser;
       if (user == null) {
-        if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+        if (mounted) TDToast.showText(textLocalize('login_cancelled'), context: context);
         return;
       } else {
-        if (mounted) TDToast.showText('登录成功，开始上传', context: context);
+        if (mounted) TDToast.showText(textLocalize('login_success_upload'), context: context);
       }
     }
 
@@ -83,6 +86,11 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
       final dio = Dio();
 
+      setState(() {
+        _totalFileSize = fileSize;
+        _uploadedBytes = 0;
+      });
+
       await dio.post(
         url,
         data: file.openRead(),
@@ -98,6 +106,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         onSendProgress: (count, total) {
           if (mounted) {
             setState(() {
+              _uploadedBytes = count;
               _uploadProgress = count / fileSize;
             });
           }
@@ -108,13 +117,20 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       await client.from("processing_tasks").insert({
         'scene_id': sceneId,
         'user_id': user.id,
+        'display_name': nameController.text.trim().isEmpty ? null : nameController.text.trim(),
+        'task_type': 'video_dual_chain',
+        'task_params': {
+          'slow_pipeline': 'video_3dgs',
+          'sam3d_vram_threshold_gb': 25,
+          'best_frame_sample_count': 8,
+        },
         'status': 'pending',
         if (nameController.text.isNotEmpty) 'display_name': nameController.text,
         'task_params': {'mapper_type': 'da3'},
       });
 
       if (mounted) {
-        TDToast.showText('提交成功，任务已创建', context: context);
+        TDToast.showText(textLocalize('gen_submit_success'), context: context);
         // 回到 Recall (也就是主页列表) 页面查看生成的模型状态
         ref.read(pageIndexProvider.notifier).state = 0;
         final nav = Navigator.of(context);
@@ -124,7 +140,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     } catch (e) {
       if (mounted) {
         debugPrint(e.toString());
-        TDToast.showText('提交失败: $e', context: context);
+        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -133,6 +149,15 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         });
       }
     }
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   @override
@@ -144,7 +169,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('视频信息提交')),
+      appBar: AppBar(title: Text(textLocalize('video_submit_title'))),
       body: Stack(
         children: [
           SingleChildScrollView(
@@ -152,17 +177,17 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('视频名称 (可选)', style: TextStyle(fontSize: 16)),
+                Text(textLocalize('video_submit_name'), style: TextStyle(fontSize: 16)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: nameController,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    hintText: '请输入视频名称',
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    hintText: textLocalize('video_submit_name_hint'),
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text('视频缩略图', style: TextStyle(fontSize: 16)),
+                Text(textLocalize('video_submit_thumbnail'), style: TextStyle(fontSize: 16)),
                 const SizedBox(height: 8),
                 Center(
                   child: Image.file(
@@ -177,7 +202,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _isUploading ? null : _submit,
-                    child: const Text('提交并上传'),
+                    child: Text(textLocalize('video_submit_btn')),
                   ),
                 ),
               ],
@@ -187,20 +212,41 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             Container(
               color: Colors.black45,
               child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text(
-                      '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 16),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: _uploadProgress,
+                          minHeight: 6,
+                          backgroundColor: Colors.white.withAlpha(40),
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF7AA2FF),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                        style: TextStyle(
+                          color: Colors.white.withAlpha(200),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

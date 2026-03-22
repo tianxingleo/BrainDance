@@ -2,7 +2,6 @@
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
-import { ArcballControls } from 'three/addons/controls/ArcballControls.js';
 import gsap from 'gsap';
 
 const containerRef = ref(null);
@@ -10,10 +9,16 @@ const isVRMode = ref(false);
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
+const VIEW_MODE = {
+  FREE: 'free',
+  ORBIT: 'orbit'
+};
+const currentViewMode = ref(VIEW_MODE.FREE);
 const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
 const activeTag = ref(''); // 当前激活的标签
+const activePoseId = ref(''); // 当前高亮的镜头项，不一定同步刷新右侧参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
@@ -23,7 +28,33 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const cinematicSpeed = ref(1);
+const cinematicProgress = ref(0);
+const cinematicLoop = ref(true);
+const isCinematicPlaying = ref(false);
+const isCinematicPaused = ref(false);
+const cinematicSmoothness = ref(0.68);
+const cinematicSubjectLock = ref(true);
+const showCinematicPanel = ref(false);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
+const DRAG_ROTATE_SENSITIVITY = 0.065;
+const DRAG_PAN_SENSITIVITY = 0.0022;
+const WHEEL_ZOOM_STEP = 0.08;
+const PINCH_ZOOM_STEP = 1.0;
+const ORBIT_YAW_SENSITIVITY = 0.0055;
+const ORBIT_PITCH_SENSITIVITY = 0.0042;
+const ORBIT_ROLL_SENSITIVITY = 1.0;
+const ORBIT_DOLLY_FACTOR = 0.35;
+const CINEMATIC_MIN_LOOK_AHEAD = 1.2;
+const CINEMATIC_MAX_LOOK_AHEAD = 8.0;
+const CINEMATIC_PATH_BLEND = 0.72;
+const CINEMATIC_CAMERA_DAMPING_FAST = 0.26;
+const CINEMATIC_CAMERA_DAMPING_SLOW = 0.1;
+const CINEMATIC_MAX_KEYFRAMES = 18;
+const CINEMATIC_MIN_KEYFRAMES = 6;
+const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
+
+const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -51,8 +82,29 @@ const searchAndFly = () => {
 
 let viewer;
 let particleSystem;
+const worldUp = new THREE.Vector3(0, 1, 0);
+let pendingInitialTarget = null;
+let didApplyInitialTarget = false;
+let didApplyDefaultPose = false;
+let posesFetchSettled = false;
+let cinematicFrameHandle = 0;
+
+const cinematicState = {
+  trajectory: null,
+  phase: 'main',
+  startTimeMs: 0,
+  elapsedMs: 0,
+  lastNearestPoseIndex: -1,
+  filteredSample: null,
+};
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
+const canPlayCinematic = computed(() => cameraPoses.value.length >= 2);
+const cinematicButtonLabel = computed(() => {
+  if (isCinematicPlaying.value) return '暂停运镜';
+  if (isCinematicPaused.value) return '继续运镜';
+  return '开始运镜';
+});
 
 const calcFovFromFocal = (focalPx, imageHeightPx) => {
   if (!focalPx || !imageHeightPx) return null;
@@ -106,6 +158,30 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
     try { viewer.update(); viewer.render(); } catch (_) {}
     refreshCurrentFocalInfo();
   }
+};
+
+const clampFocalPx = (focalPx) => {
+  if (!Number.isFinite(focalPx)) return null;
+  return Math.min(focalMax.value, Math.max(focalMin.value, focalPx));
+};
+
+const getActiveFocalPx = () => {
+  const focal = Number(
+    manualFocalPx.value || currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX
+  );
+  return clampFocalPx(focal);
+};
+
+const zoomByFocalScale = (scaleFactor) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(scaleFactor) || scaleFactor <= 0) return;
+  const currentFocal = getActiveFocalPx();
+  if (!currentFocal) return;
+
+  const nextFocal = clampFocalPx(currentFocal * scaleFactor);
+  if (!nextFocal) return;
+
+  manualFocalPx.value = Number(nextFocal.toFixed(1));
+  applyFocalLengthPx(nextFocal);
 };
 
 const focalMin = computed(() => {
@@ -168,8 +244,501 @@ const copyMatrixToClipboard = () => {
   console.log("Current Debug Camera Data:", data);
 };
 
+const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
+const getSceneRadius = () => {
+  const radius = Number(globalUniforms.uMaxRadius.value || 0);
+  return radius > 0 ? radius : 1;
+};
+
+const syncOrbitTarget = () => {};
+
+const cancelCinematicFrame = () => {
+  if (cinematicFrameHandle) {
+    cancelAnimationFrame(cinematicFrameHandle);
+    cinematicFrameHandle = 0;
+  }
+};
+
+const stopCameraTweens = () => {
+  if (!viewer || !viewer.camera) return;
+  gsap.killTweensOf(viewer.camera.position);
+  gsap.killTweensOf(viewer.camera.quaternion);
+  gsap.killTweensOf(viewer.camera);
+};
+
+const setActivePosePresentation = (poseData) => {
+  setActivePosePresentationState(poseData);
+};
+
+const getPosePresentationId = (poseData) => {
+  if (!poseData) return '';
+  return String(
+    poseData.id
+    || poseData.image_id
+    || poseData.imageId
+    || getPoseImageId(poseData)
+    || JSON.stringify(normalizeMatrixArray(poseData.matrix) || [])
+  );
+};
+
+const setActivePosePresentationState = (poseData, options = {}) => {
+  activePoseId.value = getPosePresentationId(poseData);
+
+  if (options.updateReference === false) return;
+
+  activeImage.value = poseData?.image_url || getPoseImageId(poseData);
+  activeTag.value = poseData?.tag || '';
+};
+
+const stopCinematicPlayback = (options = {}) => {
+  cancelCinematicFrame();
+  cinematicState.trajectory = null;
+  cinematicState.startTimeMs = 0;
+  cinematicState.elapsedMs = 0;
+  cinematicState.lastNearestPoseIndex = -1;
+  cinematicState.filteredSample = null;
+  isCinematicPlaying.value = false;
+  isCinematicPaused.value = false;
+  if (options.resetProgress !== false) {
+    cinematicProgress.value = 0;
+  }
+};
+
+const interruptCinematicPlayback = () => {
+  if (!isCinematicPlaying.value && !isCinematicPaused.value) return;
+  stopCinematicPlayback({ resetProgress: false });
+};
+
+const smoothVectorSeries = (vectors, amount) => {
+  if (!Array.isArray(vectors) || vectors.length < 3) return vectors.map(vec => vec.clone());
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 3));
+  const blend = 0.12 + strength * 0.26;
+  let result = vectors.map(vec => vec.clone());
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((vec, index) => {
+      if (index === 0 || index === result.length - 1) return vec.clone();
+      const blended = result[index - 1].clone()
+        .add(result[index].clone().multiplyScalar(2))
+        .add(result[index + 1])
+        .multiplyScalar(0.25);
+      return vec.clone().lerp(blended, blend);
+    });
+    result = nextSeries;
+  }
+
+  return result;
+};
+
+const smoothScalarSeries = (values, amount) => {
+  if (!Array.isArray(values) || values.length < 3) return values.slice();
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 2));
+  const blend = 0.1 + strength * 0.28;
+  let result = values.slice();
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((value, index) => {
+      if (index === 0 || index === result.length - 1) return value;
+      const averaged = (result[index - 1] + result[index] * 2 + result[index + 1]) / 4;
+      return THREE.MathUtils.lerp(value, averaged, blend);
+    });
+    result = nextSeries;
+  }
+
+  return result;
+};
+
+const makeLookQuaternion = (position, target) => {
+  const forward = target.clone().sub(position);
+  if (forward.lengthSq() < 1e-8) return new THREE.Quaternion();
+
+  const lookAtMatrix = new THREE.Matrix4().lookAt(position, target, worldUp);
+  return new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
+};
+
+const makeUprightQuaternion = (position, quaternion, fallbackTarget) => {
+  const forward = getCameraForward(quaternion);
+  let target = position.clone().add(forward);
+
+  if (fallbackTarget && forward.lengthSq() < 1e-8) {
+    target = fallbackTarget.clone();
+  }
+
+  return makeLookQuaternion(position, target);
+};
+
+const ensureQuaternionContinuity = (quaternions) => {
+  if (!Array.isArray(quaternions) || quaternions.length === 0) return [];
+
+  const result = [quaternions[0].clone().normalize()];
+  for (let i = 1; i < quaternions.length; i += 1) {
+    const next = quaternions[i].clone().normalize();
+    if (result[i - 1].dot(next) < 0) {
+      next.x *= -1;
+      next.y *= -1;
+      next.z *= -1;
+      next.w *= -1;
+    }
+    result.push(next);
+  }
+
+  return result;
+};
+
+const smoothQuaternionSeries = (quaternions, amount) => {
+  if (!Array.isArray(quaternions) || quaternions.length < 3) {
+    return ensureQuaternionContinuity(quaternions || []);
+  }
+
+  const strength = THREE.MathUtils.clamp(Number(amount) || 0, 0, 1);
+  const passes = Math.max(1, Math.round(1 + strength * 2));
+  const blend = 0.16 + strength * 0.22;
+  let result = ensureQuaternionContinuity(quaternions);
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    const nextSeries = result.map((quat, index) => {
+      if (index === 0 || index === result.length - 1) return quat.clone();
+
+      const prev = result[index - 1].clone();
+      const curr = result[index].clone();
+      const next = result[index + 1].clone();
+      const averaged = prev.slerp(next, 0.5);
+      return curr.slerp(averaged, blend).normalize();
+    });
+    result = ensureQuaternionContinuity(nextSeries);
+  }
+
+  return result;
+};
+
+const getCameraUpAlignment = (quaternion) => {
+  if (!quaternion) return 0;
+  const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion).normalize();
+  return Math.abs(cameraUp.dot(worldUp));
+};
+
+const getCameraForward = (quaternion) => {
+  return new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion).normalize();
+};
+
+const selectStableCinematicKeyframes = (keyframes) => {
+  if (!Array.isArray(keyframes) || keyframes.length <= CINEMATIC_MAX_KEYFRAMES) {
+    return keyframes;
+  }
+
+  const filtered = keyframes.filter((frame) => {
+    const alignment = getCameraUpAlignment(frame.quaternion);
+    return alignment >= CINEMATIC_UP_ALIGNMENT_MIN;
+  });
+
+  const pool = filtered.length >= CINEMATIC_MIN_KEYFRAMES ? filtered : keyframes.slice();
+  if (pool.length <= CINEMATIC_MAX_KEYFRAMES) return pool;
+
+  const scored = pool.map((frame, index, arr) => {
+    const prev = arr[Math.max(0, index - 1)];
+    const next = arr[Math.min(arr.length - 1, index + 1)];
+    const upAlignment = getCameraUpAlignment(frame.quaternion);
+    const prevDistance = index > 0 ? frame.position.distanceTo(prev.position) : 0;
+    const nextDistance = index < arr.length - 1 ? frame.position.distanceTo(next.position) : 0;
+    const avgDistance = (prevDistance + nextDistance) * 0.5;
+    const prevForward = getCameraForward(prev.quaternion);
+    const currForward = getCameraForward(frame.quaternion);
+    const nextForward = getCameraForward(next.quaternion);
+    const directionalContinuity = index > 0 && index < arr.length - 1
+      ? Math.max(0, prevForward.dot(currForward)) * 0.5 + Math.max(0, currForward.dot(nextForward)) * 0.5
+      : 1;
+
+    return {
+      frame,
+      index,
+      score: upAlignment * 2.2 + directionalContinuity * 1.4 + Math.min(avgDistance, 1.5) * 0.4,
+    };
+  });
+
+  const forcedIndices = new Set([0, pool.length - 1]);
+  const targetCount = Math.max(CINEMATIC_MIN_KEYFRAMES, Math.min(CINEMATIC_MAX_KEYFRAMES, pool.length));
+  const selected = scored
+    .filter(({ index }) => forcedIndices.has(index))
+    .map(({ frame }) => frame);
+
+  const remaining = scored
+    .filter(({ index }) => !forcedIndices.has(index))
+    .sort((a, b) => b.score - a.score);
+
+  for (const candidate of remaining) {
+    if (selected.length >= targetCount) break;
+    selected.push(candidate.frame);
+  }
+
+  selected.sort((a, b) => a.index - b.index);
+
+  if (selected.length < CINEMATIC_MIN_KEYFRAMES) {
+    const step = Math.max(1, Math.floor(pool.length / CINEMATIC_MIN_KEYFRAMES));
+    for (let i = 0; i < pool.length && selected.length < CINEMATIC_MIN_KEYFRAMES; i += step) {
+      const frame = pool[i];
+      if (!selected.includes(frame)) selected.push(frame);
+    }
+    selected.sort((a, b) => a.index - b.index);
+  }
+
+  return selected;
+};
+
+const unwrapCircularAngles = (angles) => {
+  if (!Array.isArray(angles) || angles.length === 0) return [];
+  const sorted = angles
+    .map((angle, index) => ({ angle, index }))
+    .sort((a, b) => a.angle - b.angle);
+
+  let largestGap = -1;
+  let splitIndex = 0;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const current = sorted[i].angle;
+    const next = sorted[(i + 1) % sorted.length].angle + (i === sorted.length - 1 ? Math.PI * 2 : 0);
+    const gap = next - current;
+    if (gap > largestGap) {
+      largestGap = gap;
+      splitIndex = (i + 1) % sorted.length;
+    }
+  }
+
+  const rotated = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    const item = sorted[(splitIndex + i) % sorted.length];
+    let angle = item.angle;
+    if (rotated.length > 0 && angle < rotated[rotated.length - 1].angle) {
+      angle += Math.PI * 2;
+    }
+    rotated.push({ ...item, angle });
+  }
+
+  return rotated;
+};
+
+const computeRouteTransitionCost = (from, to, worldCenter) => {
+  const distance = from.position.distanceTo(to.position);
+  const fromForward = getCameraForward(from.quaternion);
+  const toForward = getCameraForward(to.quaternion);
+  const forwardMismatch = 1 - Math.max(-1, Math.min(1, fromForward.dot(toForward)));
+  const fromTargetDir = worldCenter.clone().sub(from.position).normalize();
+  const toTargetDir = worldCenter.clone().sub(to.position).normalize();
+  const focusMismatch = 1 - Math.max(-1, Math.min(1, fromTargetDir.dot(toTargetDir)));
+  const heightDelta = Math.abs(from.position.y - to.position.y);
+  return distance * 1.25 + forwardMismatch * 1.4 + focusMismatch * 0.9 + heightDelta * 0.35;
+};
+
+const getDominantHorizontalAxis = (keyframes) => {
+  let bestA = keyframes[0]?.position || new THREE.Vector3(1, 0, 0);
+  let bestB = keyframes[keyframes.length - 1]?.position || new THREE.Vector3(0, 0, 0);
+  let bestDistSq = -1;
+
+  for (let i = 0; i < keyframes.length; i += 1) {
+    for (let j = i + 1; j < keyframes.length; j += 1) {
+      const distSq = keyframes[i].position.distanceToSquared(keyframes[j].position);
+      if (distSq > bestDistSq) {
+        bestDistSq = distSq;
+        bestA = keyframes[i].position;
+        bestB = keyframes[j].position;
+      }
+    }
+  }
+
+  const axis = bestB.clone().sub(bestA);
+  axis.y = 0;
+  if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0);
+  return axis.normalize();
+};
+
+const chooseLowerCostRouteDirection = (orderedKeyframes, worldCenter) => {
+  if (!Array.isArray(orderedKeyframes) || orderedKeyframes.length < 3) return orderedKeyframes;
+
+  const routeCost = (frames) => {
+    let total = 0;
+    for (let i = 1; i < frames.length; i += 1) {
+      total += computeRouteTransitionCost(frames[i - 1], frames[i], worldCenter);
+    }
+    return total;
+  };
+
+  const forward = orderedKeyframes.slice();
+  const reverse = orderedKeyframes.slice().reverse();
+  return routeCost(forward) <= routeCost(reverse) ? forward : reverse;
+};
+
+const planSmartCinematicRoute = (keyframes, worldCenter) => {
+  if (!Array.isArray(keyframes) || keyframes.length < 3) return keyframes;
+
+  const horizontalDistances = keyframes.map((frame) => {
+    const offset = frame.position.clone().sub(worldCenter);
+    offset.y = 0;
+    return offset.length();
+  });
+  const radiiMean = horizontalDistances.reduce((sum, value) => sum + value, 0) / horizontalDistances.length;
+  const radiiVariance = horizontalDistances.reduce((sum, value) => sum + ((value - radiiMean) ** 2), 0) / horizontalDistances.length;
+  const radiiStd = Math.sqrt(radiiVariance);
+  const yValues = keyframes.map((frame) => frame.position.y);
+  const heightSpread = Math.max(...yValues) - Math.min(...yValues);
+
+  const angles = keyframes.map((frame) => {
+    const offset = frame.position.clone().sub(worldCenter);
+    return Math.atan2(offset.z, offset.x);
+  });
+  const unwrappedAngles = unwrapCircularAngles(angles);
+  const angleSpread = unwrappedAngles.length > 1
+    ? unwrappedAngles[unwrappedAngles.length - 1].angle - unwrappedAngles[0].angle
+    : 0;
+
+  let routeMode = 'dolly';
+  if (angleSpread > 1.1 && radiiStd < Math.max(0.35, radiiMean * 0.28)) {
+    routeMode = 'orbit';
+  } else if (heightSpread > Math.max(0.8, radiiMean * 0.42)) {
+    routeMode = 'crane';
+  }
+
+  let ordered = keyframes.slice();
+
+  if (routeMode === 'orbit') {
+    const byAngle = unwrappedAngles.map(({ index }) => keyframes[index]);
+    ordered = chooseLowerCostRouteDirection(byAngle, worldCenter);
+  } else if (routeMode === 'crane') {
+    ordered = chooseLowerCostRouteDirection(
+      keyframes.slice().sort((a, b) => a.position.y - b.position.y),
+      worldCenter
+    );
+  } else {
+    const axis = getDominantHorizontalAxis(keyframes);
+    ordered = chooseLowerCostRouteDirection(
+      keyframes.slice().sort((a, b) => a.position.dot(axis) - b.position.dot(axis)),
+      worldCenter
+    );
+  }
+
+  return ordered.map((frame, index) => ({
+    ...frame,
+    routeIndex: index,
+    routeMode,
+  }));
+};
+
+const buildCinematicSegment = ({
+  keyframes,
+  positions,
+  targets,
+  focals,
+  durationMs,
+}) => {
+  const sceneRadius = getSceneRadius();
+  const stabilizedQuaternions = smoothQuaternionSeries(
+    positions.map((position, index) => makeUprightQuaternion(position, keyframes[index].quaternion, targets[index])),
+    cinematicSmoothness.value
+  );
+
+  const preparedKeyframes = keyframes.map((frame, index) => ({
+    ...frame,
+    position: positions[index],
+    target: targets[index],
+    stabilizedQuaternion: stabilizedQuaternions[index],
+    fl_y: focals[index] || frame.fl_y,
+  }));
+
+  const curve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.position.clone()),
+    false,
+    'centripetal'
+  );
+  const lookCurve = new THREE.CatmullRomCurve3(
+    preparedKeyframes.map(frame => frame.target.clone()),
+    false,
+    'centripetal'
+  );
+  const cumulativeDistances = [0];
+  for (let i = 1; i < preparedKeyframes.length; i += 1) {
+    const prev = preparedKeyframes[i - 1];
+    const next = preparedKeyframes[i];
+    cumulativeDistances.push(
+      cumulativeDistances[i - 1] + prev.position.distanceTo(next.position)
+    );
+  }
+
+  return {
+    keyframes: preparedKeyframes,
+    curve,
+    lookCurve,
+    cumulativeDistances,
+    totalDistance: Math.max(cumulativeDistances[cumulativeDistances.length - 1], 1e-5),
+    durationMs,
+    lookAheadDistance: THREE.MathUtils.clamp(
+      sceneRadius * (0.4 + cinematicSmoothness.value * 0.45),
+      CINEMATIC_MIN_LOOK_AHEAD,
+      CINEMATIC_MAX_LOOK_AHEAD
+    ),
+  };
+};
+
+const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
+  if (!mainSegment?.keyframes || mainSegment.keyframes.length < 2) return null;
+
+  const sceneRadius = getSceneRadius();
+  const first = mainSegment.keyframes[0];
+  const last = mainSegment.keyframes[mainSegment.keyframes.length - 1];
+  const directDistance = last.position.distanceTo(first.position);
+  if (directDistance < 1e-4) return null;
+
+  const liftAmount = Math.max(sceneRadius * 0.55, directDistance * 0.22, 0.9);
+  const radialPush = Math.max(sceneRadius * 0.18, directDistance * 0.08, 0.35);
+  const startOut = last.position.clone().sub(worldCenter).setY(0);
+  const endOut = first.position.clone().sub(worldCenter).setY(0);
+
+  if (startOut.lengthSq() < 1e-6) startOut.set(1, 0, 0);
+  if (endOut.lengthSq() < 1e-6) endOut.set(-1, 0, 0);
+
+  startOut.normalize().multiplyScalar(radialPush);
+  endOut.normalize().multiplyScalar(radialPush);
+
+  const centerLift = worldCenter.clone().add(new THREE.Vector3(0, sceneRadius * 0.15, 0));
+  const bridgePositions = [
+    last.position.clone(),
+    last.position.clone().add(new THREE.Vector3(0, liftAmount, 0)).add(startOut),
+    first.position.clone().add(new THREE.Vector3(0, liftAmount * 0.86, 0)).add(endOut),
+    first.position.clone(),
+  ];
+  const bridgeTargets = [
+    last.target.clone().lerp(centerLift, 0.4),
+    centerLift.clone(),
+    centerLift.clone(),
+    first.target.clone().lerp(centerLift, 0.28),
+  ];
+  const bridgeFocal = Math.max(
+    0,
+    Number(last.fl_y || first.fl_y || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX)
+  );
+  const bridgeDurationMs = THREE.MathUtils.clamp(
+    directDistance * 1350 + 1800,
+    2400,
+    6200
+  ) / cinematicSpeed.value;
+
+  return buildCinematicSegment({
+    keyframes: [
+      { index: last.index, pose: last.pose, quaternion: last.stabilizedQuaternion || last.quaternion, fl_y: bridgeFocal, h: last.h },
+      { index: last.index, pose: last.pose, quaternion: last.stabilizedQuaternion || last.quaternion, fl_y: bridgeFocal, h: last.h },
+      { index: first.index, pose: first.pose, quaternion: first.stabilizedQuaternion || first.quaternion, fl_y: bridgeFocal, h: first.h },
+      { index: first.index, pose: first.pose, quaternion: first.stabilizedQuaternion || first.quaternion, fl_y: bridgeFocal, h: first.h },
+    ],
+    positions: bridgePositions,
+    targets: bridgeTargets,
+    focals: [bridgeFocal, bridgeFocal, bridgeFocal, bridgeFocal],
+    durationMs: bridgeDurationMs,
+  });
+};
+
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
   if (viewer.controls) viewer.controls.enabled = false;
 
   if (axis === 'x') viewer.camera.translateX(dist);
@@ -181,6 +750,7 @@ const manualMove = (axis, dist) => {
 
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
 
   if (viewer.controls) viewer.controls.enabled = false;
 
@@ -411,52 +981,528 @@ const applyAdvancedShader = (mesh) => {
   material.needsUpdate = true;
 };
 
-// --- 5. 初始化 ---
-const flyToImage = (poseData) => {
-  if (!viewer || !viewer.camera) return;
+const normalizeMatrixArray = (input) => {
+  if (!Array.isArray(input)) return null;
 
-  const cam = viewer.camera;
-  const splatMesh = viewer.getSplatMesh(); // 获取当前加载的高斯模型
+  if (input.length === 16) {
+    const flat = input.map(value => Number(value));
+    return flat.every(Number.isFinite) ? flat : null;
+  }
 
-  // 更新参考图
-  activeImage.value = poseData.image_url;
-  activeTag.value = poseData.tag || '';
+  if (input.length === 4 && input.every(row => Array.isArray(row) && row.length === 4)) {
+    const flat = input.flat().map(value => Number(value));
+    return flat.every(Number.isFinite) ? flat : null;
+  }
 
-  // 1. 读取原始矩阵 (假设后端传来的是按列优先的 16 位数组)
-  const rawMatrix = new THREE.Matrix4().fromArray(poseData.matrix);
+  return null;
+};
 
-  // === 修正：移除多余的坐标系转换 ===
-  // 用户反馈：当前状态下再旋转X轴180度才正确。
-  // 原有的 makeScale(1, -1, -1) 本质就是X轴转180度。
-  // 如果还需要再转180度，说明不需要转，或者需要抵消。
-  // 我们先尝试直接移除这个转换，保持原始矩阵方向。
-  // const cvToGl = new THREE.Matrix4().makeScale(1, -1, -1);
-  // rawMatrix.multiply(cvToGl); 
+const normalizeImageId = (value) => {
+  if (value == null) return '';
 
-  // 如果移除后反了，说明 export_poses.py 也没转，那就需要取消注释下面这行来手动修正：
-  // const manualFix = new THREE.Matrix4().makeRotationX(Math.PI);
-  // rawMatrix.multiply(manualFix);
+  let text = String(value).trim();
+  if (!text) return '';
 
-  // === 核心修正 2：跟随模型的世界矩阵同步旋转/缩放 ===
-  // 将相机的原始矩阵，乘以高斯模型目前在 Three.js 世界中的矩阵
+  try {
+    text = decodeURIComponent(text);
+  } catch (_) {}
+
+  text = text.replace(/\\/g, '/');
+  const parts = text.split('/');
+  return (parts[parts.length - 1] || '').trim().toLowerCase();
+};
+
+const isRemoteHttpUrl = (value) => /^https?:\/\//i.test(String(value || ''));
+
+const toViewerSafeAssetUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const raw = value.trim();
+  if (!isRemoteHttpUrl(raw)) return raw;
+
+  if (window.location.origin.startsWith('http://127.0.0.1:')) {
+    return `${window.location.origin}/proxy/${encodeURIComponent(raw)}`;
+  }
+
+  return raw;
+};
+
+const getPoseImageId = (pose) => {
+  if (!pose) return '';
+  const directId = pose.id || pose.image_id || pose.imageId;
+  if (directId) return normalizeImageId(directId);
+
+  const imageUrl = pose.image_url;
+  if (typeof imageUrl !== 'string' || imageUrl.length === 0) return '';
+
+  const cleanUrl = imageUrl.split('?')[0];
+  return normalizeImageId(cleanUrl);
+};
+
+const findPoseByInitialTarget = (target) => {
+  if (!target || cameraPoses.value.length === 0) return null;
+
+  const targetImageId = normalizeImageId(target.imageId);
+  if (targetImageId) {
+    const matchedPose = cameraPoses.value.find((pose) => getPoseImageId(pose) === targetImageId);
+    if (matchedPose) return matchedPose;
+  }
+
+  const targetMatrix = normalizeMatrixArray(target.matrix);
+  if (!targetMatrix) return null;
+
+  let bestPose = null;
+  let bestDiff = Number.POSITIVE_INFINITY;
+
+  for (const pose of cameraPoses.value) {
+    const poseMatrix = normalizeMatrixArray(pose.matrix);
+    if (!poseMatrix) continue;
+
+    let maxDiff = 0;
+    for (let i = 0; i < 16; i += 1) {
+      const diff = Math.abs(poseMatrix[i] - targetMatrix[i]);
+      if (diff > maxDiff) maxDiff = diff;
+      if (maxDiff >= bestDiff) break;
+    }
+
+    if (maxDiff < bestDiff) {
+      bestDiff = maxDiff;
+      bestPose = pose;
+    }
+  }
+
+  return bestDiff <= 1e-4 ? bestPose : null;
+};
+
+const maybeApplyInitialTarget = (forceFallback = false) => {
+  if (!pendingInitialTarget || didApplyInitialTarget) return;
+
+  if (!pendingInitialTarget.imageId) {
+    const preferredDefaultPose = getPreferredDefaultPose();
+    if (preferredDefaultPose) {
+      didApplyInitialTarget = true;
+      flyToImage(preferredDefaultPose);
+      return;
+    }
+  }
+
+  const resolvedPose = findPoseByInitialTarget(pendingInitialTarget);
+  if (resolvedPose) {
+    didApplyInitialTarget = true;
+    flyToImage(resolvedPose);
+    return;
+  }
+
+  if (!forceFallback) return;
+  if (pendingInitialTarget.imageId && !posesFetchSettled) return;
+
+  const fallbackMatrix = normalizeMatrixArray(pendingInitialTarget.matrix);
+  if (!fallbackMatrix) return;
+
+  didApplyInitialTarget = true;
+  flyToImage({
+    matrix: fallbackMatrix,
+    image_url: pendingInitialTarget.imageId || '',
+  });
+};
+
+const hasUsablePoseImage = (pose) => {
+  const imageUrl = pose?.image_url;
+  return typeof imageUrl === 'string' && imageUrl.trim().length > 0;
+};
+
+const getPreferredDefaultPose = () => {
+  if (!Array.isArray(cameraPoses.value) || cameraPoses.value.length === 0) return null;
+
+  const taggedWithImage = cameraPoses.value.find((pose) => hasUsablePoseImage(pose) && pose.tag);
+  if (taggedWithImage) return taggedWithImage;
+
+  const firstWithImage = cameraPoses.value.find((pose) => hasUsablePoseImage(pose));
+  if (firstWithImage) return firstWithImage;
+
+  return cameraPoses.value[0] || null;
+};
+
+const getPreferredCinematicPoses = () => {
+  if (!Array.isArray(filteredPoses.value) || filteredPoses.value.length === 0) {
+    return cameraPoses.value;
+  }
+
+  const taggedFiltered = filteredPoses.value.filter((pose) => typeof pose?.tag === 'string' && pose.tag.trim().length > 0);
+  if (taggedFiltered.length >= 2) return taggedFiltered.slice(0, 12);
+  if (filteredPoses.value.length >= 2) return filteredPoses.value.slice(0, 12);
+
+  const taggedAll = cameraPoses.value.filter((pose) => typeof pose?.tag === 'string' && pose.tag.trim().length > 0);
+  if (taggedAll.length >= 2) return taggedAll.slice(0, 12);
+
+  return cameraPoses.value.slice(0, 12);
+};
+
+const maybeApplyDefaultPose = () => {
+  if (pendingInitialTarget || didApplyInitialTarget || didApplyDefaultPose) return;
+  const defaultPose = getPreferredDefaultPose();
+  if (!defaultPose) return;
+
+  didApplyDefaultPose = true;
+  flyToImage(defaultPose);
+};
+
+const resolvePoseCameraState = (poseData) => {
+  if (!viewer || !viewer.camera) return null;
+  const normalizedMatrix = normalizeMatrixArray(poseData?.matrix);
+  if (!normalizedMatrix) return null;
+
+  const splatMesh = viewer.getSplatMesh();
+  const rawMatrix = new THREE.Matrix4().fromArray(normalizedMatrix);
   const finalMatrix = new THREE.Matrix4();
+
   if (splatMesh) {
-    // 这样无论模型怎么被 `rotation: [1,0,0,0]` 旋转，相机都会跟过去
     splatMesh.updateMatrixWorld();
     finalMatrix.copy(splatMesh.matrixWorld).multiply(rawMatrix);
   } else {
     finalMatrix.copy(rawMatrix);
   }
 
-  // 提取最终对齐后的 位置 和 旋转
-  const targetPosition = new THREE.Vector3();
-  const targetQuaternion = new THREE.Quaternion();
-  const targetScale = new THREE.Vector3();
-  finalMatrix.decompose(targetPosition, targetQuaternion, targetScale);
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  finalMatrix.decompose(position, quaternion, scale);
+
+  return {
+    position,
+    quaternion,
+    fl_y: Number(poseData?.fl_y || sceneMetadata.value.fl_y || 0),
+    h: Number(poseData?.h || sceneMetadata.value.h || 0),
+  };
+};
+
+const buildCinematicTrajectory = () => {
+  const sourcePoses = getPreferredCinematicPoses();
+  if (!viewer || !Array.isArray(sourcePoses) || sourcePoses.length < 2) return null;
+  const worldCenter = getModelWorldCenter();
+
+  const keyframes = sourcePoses
+    .map((pose, index) => {
+      const cameraState = resolvePoseCameraState(pose);
+      if (!cameraState) return null;
+      const uprightQuaternion = makeUprightQuaternion(cameraState.position, cameraState.quaternion, worldCenter);
+      return {
+        index,
+        pose,
+        position: cameraState.position,
+        quaternion: uprightQuaternion,
+        fl_y: cameraState.fl_y,
+        h: cameraState.h,
+      };
+    })
+    .filter(Boolean);
+
+  if (keyframes.length < 2) return null;
+
+  const dedupedKeyframes = [keyframes[0]];
+  for (let i = 1; i < keyframes.length; i += 1) {
+    const prev = dedupedKeyframes[dedupedKeyframes.length - 1];
+    const next = keyframes[i];
+    const samePoint = prev.position.distanceToSquared(next.position) < 1e-6;
+    const sameAngle = Math.abs(prev.quaternion.dot(next.quaternion)) > 0.999999;
+    if (samePoint && sameAngle) continue;
+    dedupedKeyframes.push(next);
+  }
+
+  if (dedupedKeyframes.length < 2) return null;
+
+  const stableKeyframes = selectStableCinematicKeyframes(dedupedKeyframes);
+  if (stableKeyframes.length < 2) return null;
+
+  const orderedKeyframes = stableKeyframes;
+  const rawPositions = orderedKeyframes.map(frame => frame.position.clone());
+  const smoothedPositions = smoothVectorSeries(rawPositions, cinematicSmoothness.value);
+  const smoothedFocals = smoothScalarSeries(
+    orderedKeyframes.map(frame => frame.fl_y || 0),
+    cinematicSmoothness.value
+  );
+  const lookTargets = orderedKeyframes.map((frame, index) => {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(frame.quaternion).normalize();
+    const frameDistanceToCenter = Math.max(
+      0.8,
+      rawPositions[index].distanceTo(worldCenter)
+    );
+    const forwardTarget = rawPositions[index].clone().add(
+      forward.multiplyScalar(Math.max(2.2, frameDistanceToCenter * 0.9))
+    );
+
+    if (!cinematicSubjectLock.value) return forwardTarget;
+
+    return forwardTarget.lerp(
+      worldCenter,
+      THREE.MathUtils.clamp(0.48 + cinematicSmoothness.value * 0.26, 0, 0.9)
+    );
+  });
+  const smoothedLookTargets = smoothVectorSeries(lookTargets, cinematicSmoothness.value);
+  let totalDistance = 0;
+  for (let i = 1; i < smoothedPositions.length; i += 1) {
+    totalDistance += smoothedPositions[i - 1].distanceTo(smoothedPositions[i]);
+  }
+  const segmentCount = orderedKeyframes.length - 1;
+  const durationMs = THREE.MathUtils.clamp(
+    totalDistance * 1600 + segmentCount * 260,
+    7000,
+    42000
+  ) / cinematicSpeed.value;
+  const mainSegment = buildCinematicSegment({
+    keyframes: orderedKeyframes,
+    positions: smoothedPositions,
+    targets: smoothedLookTargets,
+    focals: smoothedFocals,
+    durationMs,
+  });
+
+  return {
+    ...mainSegment,
+    worldCenter: worldCenter.clone(),
+    loopBridge: buildLoopBridgeSegment(mainSegment, worldCenter),
+  };
+};
+
+const sampleCinematicTrajectory = (trajectory, normalizedT) => {
+  if (!trajectory) return null;
+
+  const t = THREE.MathUtils.clamp(normalizedT, 0, 1);
+  const distanceAlongPath = trajectory.totalDistance * t;
+  let segmentIndex = trajectory.keyframes.length - 2;
+
+  for (let i = 0; i < trajectory.cumulativeDistances.length - 1; i += 1) {
+    if (distanceAlongPath <= trajectory.cumulativeDistances[i + 1]) {
+      segmentIndex = i;
+      break;
+    }
+  }
+
+  const startDistance = trajectory.cumulativeDistances[segmentIndex];
+  const endDistance = trajectory.cumulativeDistances[segmentIndex + 1];
+  const segmentLength = Math.max(endDistance - startDistance, 1e-5);
+  const localT = THREE.MathUtils.smootherstep(
+    (distanceAlongPath - startDistance) / segmentLength,
+    0,
+    1
+  );
+  const from = trajectory.keyframes[segmentIndex];
+  const to = trajectory.keyframes[segmentIndex + 1];
+  const position = trajectory.curve.getPointAt(t);
+  const stabilizedQuaternion = from.stabilizedQuaternion
+    .clone()
+    .slerp(to.stabilizedQuaternion, localT)
+    .normalize();
+  const target = from.target.clone().lerp(to.target, localT);
+  const quaternion = stabilizedQuaternion;
+
+  return {
+    position,
+    quaternion,
+    target,
+    fl_y: from.fl_y && to.fl_y ? THREE.MathUtils.lerp(from.fl_y, to.fl_y, localT) : (from.fl_y || to.fl_y || 0),
+    h: from.h || to.h || sceneMetadata.value.h || 0,
+    nearestPoseIndex: localT < 0.5 ? from.index : to.index,
+  };
+};
+
+const applyCinematicSample = (sample) => {
+  if (!sample || !viewer || !viewer.camera) return;
+
+  const dampingAlpha = THREE.MathUtils.lerp(
+    CINEMATIC_CAMERA_DAMPING_FAST,
+    CINEMATIC_CAMERA_DAMPING_SLOW,
+    cinematicSmoothness.value
+  );
+
+  if (!cinematicState.filteredSample) {
+    cinematicState.filteredSample = {
+      position: sample.position.clone(),
+      quaternion: sample.quaternion.clone(),
+      fl_y: Number(sample.fl_y || 0),
+      h: Number(sample.h || sceneMetadata.value.h || 0),
+    };
+  } else {
+    cinematicState.filteredSample.position.lerp(sample.position, dampingAlpha);
+    cinematicState.filteredSample.quaternion.slerp(sample.quaternion, dampingAlpha).normalize();
+    if (sample.fl_y) {
+      cinematicState.filteredSample.fl_y = THREE.MathUtils.lerp(
+        cinematicState.filteredSample.fl_y || sample.fl_y,
+        sample.fl_y,
+        dampingAlpha * 0.85
+      );
+    }
+    if (sample.h) {
+      cinematicState.filteredSample.h = sample.h;
+    }
+  }
+
+  const cam = viewer.camera;
+  cam.position.copy(cinematicState.filteredSample.position);
+  cam.quaternion.copy(cinematicState.filteredSample.quaternion);
+
+  if (cinematicState.filteredSample.fl_y && cinematicState.filteredSample.h) {
+    sceneMetadata.value.h = cinematicState.filteredSample.h;
+    manualFocalPx.value = Number(cinematicState.filteredSample.fl_y.toFixed(1));
+    applyFocalLengthPx(cinematicState.filteredSample.fl_y);
+  } else {
+    renderCameraUpdate();
+  }
+
+  if (sample.nearestPoseIndex !== cinematicState.lastNearestPoseIndex) {
+    cinematicState.lastNearestPoseIndex = sample.nearestPoseIndex;
+    const nearestPose = cameraPoses.value[sample.nearestPoseIndex];
+    if (nearestPose) {
+      setActivePosePresentationState(nearestPose, { updateReference: false });
+    }
+  }
+};
+
+const stepCinematicPlayback = (now) => {
+  if (!cinematicState.trajectory || !viewer || !viewer.camera) {
+    stopCinematicPlayback({ resetProgress: false });
+    return;
+  }
+
+  const activeSegment = cinematicState.phase === 'loop-bridge' && cinematicState.trajectory.loopBridge
+    ? cinematicState.trajectory.loopBridge
+    : cinematicState.trajectory;
+  const durationMs = Math.max(activeSegment.durationMs, 1);
+  const elapsedMs = Math.max(0, now - cinematicState.startTimeMs);
+  cinematicState.elapsedMs = elapsedMs;
+
+  let normalizedT = elapsedMs / durationMs;
+  if (normalizedT >= 1) {
+    if (cinematicState.phase === 'loop-bridge') {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'main';
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else if (cinematicLoop.value && cinematicState.trajectory.loopBridge) {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'loop-bridge';
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else if (cinematicLoop.value) {
+      cinematicState.startTimeMs = now;
+      cinematicState.elapsedMs = 0;
+      cinematicState.phase = 'main';
+      cinematicState.lastNearestPoseIndex = -1;
+      normalizedT = 0;
+    } else {
+      normalizedT = 1;
+    }
+  }
+
+  cinematicProgress.value = cinematicState.phase === 'main' ? normalizedT : 1;
+  applyCinematicSample(sampleCinematicTrajectory(activeSegment, normalizedT));
+
+  if (!cinematicLoop.value && cinematicState.phase === 'main' && normalizedT >= 1) {
+    stopCinematicPlayback({ resetProgress: false });
+    cinematicProgress.value = 1;
+    return;
+  }
+
+  cinematicFrameHandle = requestAnimationFrame(stepCinematicPlayback);
+};
+
+const startCinematicPlayback = (options = {}) => {
+  if (!viewer || !viewer.camera) return;
+  const trajectory = buildCinematicTrajectory();
+  if (!trajectory) return;
+
+  stopCameraTweens();
+  cancelCinematicFrame();
+  cinematicState.trajectory = trajectory;
+  cinematicState.phase = 'main';
+  cinematicState.filteredSample = null;
+  cinematicState.elapsedMs = options.resume ? cinematicState.elapsedMs : 0;
+  cinematicState.startTimeMs = performance.now() - cinematicState.elapsedMs;
+  cinematicState.lastNearestPoseIndex = -1;
+  isCinematicPlaying.value = true;
+  isCinematicPaused.value = false;
+
+  if (!options.resume) {
+    cinematicProgress.value = 0;
+    applyCinematicSample(sampleCinematicTrajectory(trajectory, 0));
+  }
+
+  cinematicFrameHandle = requestAnimationFrame(stepCinematicPlayback);
+};
+
+const pauseCinematicPlayback = () => {
+  if (!isCinematicPlaying.value) return;
+  cancelCinematicFrame();
+  cinematicState.elapsedMs = Math.max(0, performance.now() - cinematicState.startTimeMs);
+  isCinematicPlaying.value = false;
+  isCinematicPaused.value = true;
+};
+
+const toggleCinematicPlayback = () => {
+  if (!canPlayCinematic.value) return;
+  if (isCinematicPlaying.value) {
+    pauseCinematicPlayback();
+    return;
+  }
+  startCinematicPlayback({ resume: isCinematicPaused.value });
+};
+
+const toggleCinematicPanel = () => {
+  if (!canPlayCinematic.value) return;
+  showCinematicPanel.value = !showCinematicPanel.value;
+};
+
+const rebuildCinematicAtCurrentProgress = () => {
+  const nextTrajectory = buildCinematicTrajectory();
+  if (!nextTrajectory) return;
+
+  cinematicState.trajectory = nextTrajectory;
+  cinematicState.phase = 'main';
+  cinematicState.lastNearestPoseIndex = -1;
+  applyCinematicSample(sampleCinematicTrajectory(nextTrajectory, cinematicProgress.value));
+
+  if (isCinematicPlaying.value) {
+    cinematicState.elapsedMs = nextTrajectory.durationMs * cinematicProgress.value;
+    cinematicState.startTimeMs = performance.now() - cinematicState.elapsedMs;
+  } else if (isCinematicPaused.value) {
+    cinematicState.elapsedMs = nextTrajectory.durationMs * cinematicProgress.value;
+  }
+};
+
+const onCinematicSpeedChange = () => {
+  cinematicSpeed.value = Number(
+    THREE.MathUtils.clamp(Number(cinematicSpeed.value) || 1, 0.25, 3).toFixed(2)
+  );
+
+  if (isCinematicPlaying.value || isCinematicPaused.value) rebuildCinematicAtCurrentProgress();
+};
+
+const onCinematicStyleChange = () => {
+  cinematicSmoothness.value = Number(
+    THREE.MathUtils.clamp(Number(cinematicSmoothness.value) || 0.68, 0, 1).toFixed(2)
+  );
+  if (isCinematicPlaying.value || isCinematicPaused.value) rebuildCinematicAtCurrentProgress();
+};
+
+// --- 5. 初始化 ---
+const flyToImage = (poseData, options = {}) => {
+  if (!viewer || !viewer.camera) return;
+  const targetCameraState = resolvePoseCameraState(poseData);
+  if (!targetCameraState) {
+    console.warn('[Viewer] Skip invalid pose matrix:', poseData);
+    return;
+  }
+  if (!options.keepCinematic) interruptCinematicPlayback();
+
+  const cam = viewer.camera;
+  const targetPosition = targetCameraState.position;
+  const targetQuaternion = targetCameraState.quaternion;
+  setActivePosePresentation(poseData);
 
   // === 核心修正 3：同步真实相机的视场角 (FOV) ===
-  const fl_y = poseData.fl_y || sceneMetadata.value.fl_y;
-  const h = poseData.h || sceneMetadata.value.h;
+  const fl_y = targetCameraState.fl_y;
+  const h = targetCameraState.h;
   if (fl_y && h) {
     sceneMetadata.value.h = h;
     manualFocalPx.value = Number(fl_y.toFixed(1));
@@ -469,10 +1515,6 @@ const flyToImage = (poseData) => {
     cam.updateProjectionMatrix();
   }
 
-  // 计算控制器焦点：看向相机正前方 5 个单位处
-  const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(targetQuaternion);
-  const targetLookAt = targetPosition.clone().add(forwardVector.multiplyScalar(5.0));
-
   // 停用当前控制
   isAutoRotate.value = false;
   if (viewer.controls) viewer.controls.enabled = false;
@@ -481,8 +1523,7 @@ const flyToImage = (poseData) => {
   const startQuat = cam.quaternion.clone();
   const animState = { t: 0 };
 
-  gsap.killTweensOf(cam.position);
-  gsap.killTweensOf(cam.quaternion);
+  stopCameraTweens();
   gsap.killTweensOf(animState);
 
   // 开始丝滑运镜
@@ -503,13 +1544,10 @@ const flyToImage = (poseData) => {
         z: (euler.z * 180 / Math.PI).toFixed(1)
       };
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
+      orbitTouchState.roll = 0;
       updateDebugInfo();
 
-      if (viewer.controls) {
-        viewer.controls.target.copy(targetLookAt);
-        viewer.controls.update();
-        viewer.controls.enabled = true;
-      }
+      if (viewer.controls) viewer.controls.enabled = true;
     }
   });
 };
@@ -532,10 +1570,55 @@ const getViewerConfig = () => {
 // 当前加载的 PLY 和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
 let currentPlyUrl = '/models/scene_auto_sync.ply';
 let currentPosesUrl = '/models/webgl_poses_with_tags.json';
+let hasInitializedFromExternalInput = false;
 
-const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
+const parseInitialInputFromUrl = () => {
+  const params = new URLSearchParams(window.location.search);
+  const payload = params.get('payload');
+  if (payload) {
+    try {
+      const decoded = JSON.parse(decodeURIComponent(payload));
+      return {
+        ply: decoded.ply || null,
+        poses: decoded.poses || null,
+        matrix: decoded.matrix || null,
+        imageId: decoded.imageId || null
+      };
+    } catch (error) {
+      console.warn('[Viewer] 无法解析 payload 查询参数:', error);
+    }
+  }
+
+  const ply = params.get('ply');
+  const poses = params.get('poses');
+  const matrix = params.get('matrix');
+  const imageId = params.get('imageId');
+
+  let parsedMatrix = null;
+  if (matrix) {
+    try {
+      parsedMatrix = JSON.parse(decodeURIComponent(matrix));
+    } catch (error) {
+      console.warn('[Viewer] 无法解析 matrix 查询参数:', error);
+    }
+  }
+
+  if (ply || poses || parsedMatrix) {
+    return {
+      ply: ply || null,
+      poses: poses || null,
+      matrix: parsedMatrix,
+      imageId: imageId || null
+    };
+  }
+
+  return null;
+};
+
+const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
+  stopCinematicPlayback();
 
   // 更新 URL（如果有新传入的值）
   if (plyUrl) currentPlyUrl = plyUrl;
@@ -554,6 +1637,10 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     globalUniforms.uParticleProgress.value = 0;
     globalUniforms.uGeoRadius.value = 0;
     globalUniforms.uColorRadius.value = 0;
+    pendingInitialTarget = null;
+    didApplyInitialTarget = false;
+    didApplyDefaultPose = false;
+    posesFetchSettled = false;
 
     const config = getViewerConfig();
     viewer = new GaussianSplats3D.Viewer(config);
@@ -580,6 +1667,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
     fetch(currentPosesUrl)
       .then(res => res.json())
       .then(data => {
+        posesFetchSettled = true;
         // 数据适配
         if (data.frames) {
           sceneMetadata.value = {
@@ -607,6 +1695,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
                 imgUrl = `${baseUrl}/${relPath}`;
               }
             }
+            imgUrl = toViewerSafeAssetUrl(imgUrl);
             return {
               id: frame.id,
               matrix: frame.matrix,
@@ -624,14 +1713,20 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
           } else {
             applyFocalLengthPx(DEFAULT_FOCAL_PX);
           }
+          maybeApplyInitialTarget(true);
+          maybeApplyDefaultPose();
         } else {
           cameraPoses.value = data; // 兼容旧格式
           applyFocalLengthPx(DEFAULT_FOCAL_PX);
+          maybeApplyInitialTarget(true);
+          maybeApplyDefaultPose();
         }
       })
       .catch(err => {
+        posesFetchSettled = true;
         console.error("加载位姿失败:", err);
         applyFocalLengthPx(DEFAULT_FOCAL_PX);
+        maybeApplyInitialTarget(true);
       });
 
     const splatMesh = viewer.getSplatMesh();
@@ -644,8 +1739,18 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
         // 然后应用 Shader
         applyAdvancedShader(splatMesh);
         
-          if (initialPoseMatrix) {
-            setTimeout(() => { flyToImage({ matrix: initialPoseMatrix }); }, 50);
+          if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
+            pendingInitialTarget = {
+              matrix: initialTarget.matrix || null,
+              imageId: initialTarget.imageId || null
+            };
+            maybeApplyInitialTarget(posesFetchSettled);
+            setTimeout(() => { maybeApplyInitialTarget(false); }, 50);
+            if (!initialTarget.imageId) {
+              setTimeout(() => { maybeApplyInitialTarget(true); }, 800);
+            }
+          } else {
+            setTimeout(() => { maybeApplyDefaultPose(); }, 80);
           }
 
         animationState.lastFrameTime = Date.now();
@@ -737,7 +1842,7 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
       }
     });
 
-    setupDesktopControls();
+    applyViewMode();
 
   } catch (error) {
     console.error("error:", error);
@@ -747,19 +1852,86 @@ const initViewer = async (plyUrl, posesUrl, initialPoseMatrix) => {
   }
 };
 
-const setupDesktopControls = () => {
-  if (!viewer) return;
-  // 清理现有控制器
-  if (viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
+const disposeControls = () => {
+  if (!viewer || !viewer.controls) return;
+  viewer.controls.dispose();
+  viewer.controls = null;
+};
 
-  // [DEBUG] 暂时禁用控制器
-  /*
-  const controls = new ArcballControls(viewer.camera, viewer.renderer.domElement, viewer.threeScene);
-  controls.setGizmosVisible(false);
-  controls.enableDamping = true;
-  viewer.controls = controls;
-  */
-  console.log("Controls explicitly disabled for debugging");
+const renderCameraUpdate = () => {
+  if (!viewer || !viewer.camera) return;
+  viewer.camera.updateProjectionMatrix();
+  refreshCurrentFocalInfo();
+  updateDebugInfo();
+  try { viewer.update(); viewer.render(); } catch (_) {}
+};
+
+const orbitRotate = (deltaYaw, deltaPitch) => {
+  if (!viewer || !viewer.camera) return;
+  viewer.camera.rotateOnWorldAxis(worldUp, -deltaYaw);
+  viewer.camera.rotateX(-deltaPitch);
+  renderCameraUpdate();
+};
+
+const orbitRoll = (deltaAngleRad) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
+  viewer.camera.rotateZ(deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  renderCameraUpdate();
+};
+
+const orbitZoom = (zoomFactor) => {
+  if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
+  const sceneDistance = Math.max(0.3, viewer.camera.position.distanceTo(getModelWorldCenter()));
+  const deltaZ = THREE.MathUtils.clamp(
+    (1 - zoomFactor) * sceneDistance * ORBIT_DOLLY_FACTOR,
+    -sceneDistance * 0.25,
+    sceneDistance * 0.25
+  );
+  viewer.camera.translateZ(deltaZ);
+  renderCameraUpdate();
+};
+
+const getTouchAngle = (touchA, touchB) => {
+  return Math.atan2(touchB.clientY - touchA.clientY, touchB.clientX - touchA.clientX);
+};
+
+const normalizeTouchAngleDelta = (delta) => {
+  if (delta > Math.PI) return delta - (Math.PI * 2);
+  if (delta < -Math.PI) return delta + (Math.PI * 2);
+  return delta;
+};
+
+const setupFreeControls = () => {
+  if (!viewer) return;
+  disposeControls();
+};
+
+const setupOrbitControls = () => {
+  if (!viewer) return;
+  disposeControls();
+  orbitTouchState.roll = 0;
+};
+
+const applyViewMode = () => {
+  if (!viewer) return;
+
+  if (isOrbitMode.value) {
+    setupOrbitControls();
+  } else {
+    setupFreeControls();
+  }
+};
+
+const switchViewMode = (mode) => {
+  if (mode !== VIEW_MODE.FREE && mode !== VIEW_MODE.ORBIT) return;
+  if (currentViewMode.value === mode) return;
+
+  currentViewMode.value = mode;
+  applyViewMode();
+
+  if (isOrbitMode.value) {
+    syncOrbitTarget();
+  }
 };
 
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
@@ -771,13 +1943,9 @@ const adjustControlsToModel = () => {
   const maxDim = globalUniforms.uMaxRadius.value / 0.7; // 还原回实际尺寸估计
   const distance = maxDim * 2.0;
 
-  if (viewer.controls) {
-    viewer.controls.target.copy(worldCenter);
-    viewer.controls.update();
-  }
-
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
   viewer.camera.lookAt(worldCenter);
+  syncOrbitTarget(worldCenter);
   refreshCurrentFocalInfo();
 };
 
@@ -786,7 +1954,7 @@ const onSessionStarted = (session) => {
   if (viewer && viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
   session.addEventListener('end', onSessionEnded);
 };
-const onSessionEnded = () => { isVRMode.value = false; setupDesktopControls(); };
+const onSessionEnded = () => { isVRMode.value = false; applyViewMode(); };
 const toggleVRMode = async () => {
   if (!isSecureContext.value) { alert("需HTTPS"); return; }
   if (isVRMode.value) { if (viewer.xr) viewer.xr.exitVR(); isVRMode.value = false; }
@@ -801,31 +1969,64 @@ const checkProtocol = () => {
 
 const isDragging = ref(false);
 const lastMouse = { x: 0, y: 0 };
+const pinchState = {
+  active: false,
+  distance: 0
+};
+const orbitTouchState = {
+  active: false,
+  angle: 0,
+  roll: 0
+};
 // const rotationDelta removed here
+
+const getTouchDistance = (touchA, touchB) => {
+  const dx = touchA.clientX - touchB.clientX;
+  const dy = touchA.clientY - touchB.clientY;
+  return Math.hypot(dx, dy);
+};
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  interruptCinematicPlayback();
+  if (isOrbitMode.value) {
+    if (e.button !== 0) return;
+    isDragging.value = true;
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    lastMouse.x = e.clientX;
+    lastMouse.y = e.clientY;
+    return;
+  }
   isDragging.value = true;
+  pinchState.active = false;
   lastMouse.x = e.clientX;
   lastMouse.y = e.clientY;
 };
 
 const onMouseMove = (e) => {
+  if (isOrbitMode.value) {
+    if (!isDragging.value || !viewer || !viewer.camera) return;
+    const dx = e.clientX - lastMouse.x;
+    const dy = e.clientY - lastMouse.y;
+    orbitRotate(dx * ORBIT_YAW_SENSITIVITY, dy * ORBIT_PITCH_SENSITIVITY);
+    lastMouse.x = e.clientX;
+    lastMouse.y = e.clientY;
+    return;
+  }
   if (!isDragging.value || !viewer || !viewer.camera) return;
 
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
-  const sensitivity = 0.2;
 
   // 计算增量
-  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
-  const panSensitivity = 0.01; // 平移灵敏度，根据模型大小可能需要调整
+  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
 
   // X轴旋转 (俯仰) - 本地轴
   viewer.camera.rotateX(deltaPitch * Math.PI / 180);
 
   // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * panSensitivity);
+  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
 
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
@@ -834,11 +2035,60 @@ const onMouseMove = (e) => {
   lastMouse.y = e.clientY;
 };
 
-const onMouseUp = () => { isDragging.value = false; };
+const onMouseUp = () => {
+  if (isOrbitMode.value) {
+    isDragging.value = false;
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    return;
+  }
+  isDragging.value = false;
+  pinchState.active = false;
+};
+
+const onWheel = (e) => {
+  if (!viewer || !viewer.camera) return;
+  interruptCinematicPlayback();
+  if (isOrbitMode.value) {
+    const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
+    orbitZoom(zoomFactor);
+    return;
+  }
+  const direction = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
+  zoomByFocalScale(direction);
+};
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
-  if (e.touches.length > 0) {
+  interruptCinematicPlayback();
+  if (isOrbitMode.value) {
+    if (e.touches.length >= 2) {
+      isDragging.value = false;
+      pinchState.active = true;
+      pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+      orbitTouchState.active = true;
+      orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      return;
+    }
+
+    pinchState.active = false;
+    orbitTouchState.active = false;
+    if (e.touches.length === 1) {
+      isDragging.value = true;
+      lastMouse.x = e.touches[0].clientX;
+      lastMouse.y = e.touches[0].clientY;
+    }
+    return;
+  }
+  if (e.touches.length >= 2) {
+    isDragging.value = false;
+    pinchState.active = true;
+    pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    return;
+  }
+
+  pinchState.active = false;
+  if (e.touches.length === 1) {
     isDragging.value = true;
     lastMouse.x = e.touches[0].clientX;
     lastMouse.y = e.touches[0].clientY;
@@ -846,20 +2096,63 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
-  if (!isDragging.value || !viewer || !viewer.camera || e.touches.length === 0) return;
+  if (isOrbitMode.value) {
+    if (!viewer || !viewer.camera || e.touches.length === 0) return;
+
+    if (e.touches.length >= 2) {
+      const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
+      const nextAngle = getTouchAngle(e.touches[0], e.touches[1]);
+
+      if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+        orbitZoom(nextDistance / pinchState.distance);
+      }
+      if (orbitTouchState.active) {
+        orbitRoll(normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle));
+      }
+
+      pinchState.active = true;
+      pinchState.distance = nextDistance;
+      orbitTouchState.active = true;
+      orbitTouchState.angle = nextAngle;
+      isDragging.value = false;
+      return;
+    }
+
+    if (!isDragging.value) return;
+
+    const dx = e.touches[0].clientX - lastMouse.x;
+    const dy = e.touches[0].clientY - lastMouse.y;
+    orbitRotate(dx * ORBIT_YAW_SENSITIVITY, dy * ORBIT_PITCH_SENSITIVITY);
+    lastMouse.x = e.touches[0].clientX;
+    lastMouse.y = e.touches[0].clientY;
+    return;
+  }
+  if (!viewer || !viewer.camera || e.touches.length === 0) return;
+
+  if (e.touches.length >= 2) {
+    const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
+    if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+      const scale = nextDistance / pinchState.distance;
+      zoomByFocalScale(1 + ((scale - 1) * PINCH_ZOOM_STEP));
+    }
+    pinchState.active = true;
+    pinchState.distance = nextDistance;
+    isDragging.value = false;
+    return;
+  }
+
+  if (!isDragging.value) return;
 
   const dx = e.touches[0].clientX - lastMouse.x;
   const dy = e.touches[0].clientY - lastMouse.y;
-  const sensitivity = 0.2;
 
-  const deltaPitch = dy * sensitivity; // 上下反转: -dy 变成 dy
-  const panSensitivity = 0.01; // 平移灵敏度
+  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
 
   rotationDelta.value.x += deltaPitch;
 
   viewer.camera.rotateX(deltaPitch * Math.PI / 180);
   // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * panSensitivity);
+  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
 
   viewer.camera.updateProjectionMatrix();
   updateDebugInfo();
@@ -868,7 +2161,47 @@ const onTouchMove = (e) => {
   lastMouse.y = e.touches[0].clientY;
 };
 
-const onTouchEnd = () => { isDragging.value = false; };
+const onTouchEnd = (e) => {
+  if (isOrbitMode.value) {
+    if (e.touches.length >= 2) {
+      pinchState.active = true;
+      pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+      orbitTouchState.active = true;
+      orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      isDragging.value = false;
+      return;
+    }
+
+    pinchState.active = false;
+    pinchState.distance = 0;
+    orbitTouchState.active = false;
+    orbitTouchState.angle = 0;
+    isDragging.value = false;
+
+    if (e.touches.length === 1) {
+      lastMouse.x = e.touches[0].clientX;
+      lastMouse.y = e.touches[0].clientY;
+      isDragging.value = true;
+    }
+    return;
+  }
+  if (e.touches.length >= 2) {
+    pinchState.active = true;
+    pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    isDragging.value = false;
+    return;
+  }
+
+  pinchState.active = false;
+  pinchState.distance = 0;
+  isDragging.value = false;
+
+  if (e.touches.length === 1) {
+    lastMouse.x = e.touches[0].clientX;
+    lastMouse.y = e.touches[0].clientY;
+    isDragging.value = true;
+  }
+};
 
 onMounted(() => {
   if (containerRef.value) {
@@ -884,8 +2217,11 @@ onMounted(() => {
         // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
         initViewer(input, null, null);
       } else if (typeof input === 'object' && input !== null) {
-        // 新版：同时传 PLY URL、poses URL 与 初始矩阵
-        initViewer(input.ply || null, input.poses || null, input.matrix || null);
+        // 新版：同时传 PLY URL、poses URL 与 初始目标
+        initViewer(input.ply || null, input.poses || null, {
+          matrix: input.matrix || null,
+          imageId: input.imageId || null
+        });
       } else {
         initViewer(null, null, null);
       }
@@ -895,8 +2231,17 @@ onMounted(() => {
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
     } else {
-      // 非 Flutter 环境（浏览器直接打开），用默认本地文件初始化
-      initViewer(null, null);
+      // 非 Flutter 环境（浏览器直接打开），优先使用 URL 参数启动
+      const initialInput = parseInitialInputFromUrl();
+      if (initialInput && !hasInitializedFromExternalInput) {
+        hasInitializedFromExternalInput = true;
+        initViewer(initialInput.ply, initialInput.poses, {
+          matrix: initialInput.matrix || null,
+          imageId: initialInput.imageId || null
+        });
+      } else {
+        initViewer(null, null);
+      }
     }
 
     // 绑定原生事件用于调试拖拽
@@ -910,6 +2255,7 @@ onBeforeUnmount(async () => {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
+  stopCinematicPlayback();
 
   if (viewer) {
     viewer.renderer.setAnimationLoop(null);
@@ -920,6 +2266,7 @@ onBeforeUnmount(async () => {
 
 <template>
   <div class="app-container" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
+    @wheel.prevent="onWheel"
     @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
     @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>
@@ -933,10 +2280,81 @@ onBeforeUnmount(async () => {
       </div>
 
       <div class="top-actions">
+        <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
+            @click="switchViewMode(VIEW_MODE.FREE)">
+            自由模式
+          </button>
+          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
+            @click="switchViewMode(VIEW_MODE.ORBIT)">
+            Orbit 模式
+          </button>
+        </div>
         <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
           @mousedown.stop @touchstart.stop @touchend.stop>
           {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
         </button>
+        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
+          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          <span class="cinematic-trigger-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path
+                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
+            </svg>
+          </span>
+          <span>运镜</span>
+        </button>
+        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
+          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+          <div class="cinematic-head">
+            <div>
+              <div class="eyebrow">Camera Move</div>
+              <div class="cinematic-title">自动运镜</div>
+            </div>
+            <div class="cinematic-head-actions">
+              <label class="cinematic-loop-toggle">
+                <input type="checkbox" v-model="cinematicLoop" />
+                <span>循环</span>
+              </label>
+              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
+                ×
+              </button>
+            </div>
+          </div>
+          <div class="cinematic-actions">
+            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
+              {{ cinematicButtonLabel }}
+            </button>
+            <button class="archive-btn archive-btn--ghost cinematic-secondary"
+              @click="stopCinematicPlayback()"
+              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
+              停止
+            </button>
+          </div>
+          <div class="cinematic-progress-row">
+            <span>进度</span>
+            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
+          </div>
+          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
+            step="1" disabled />
+          <div class="cinematic-progress-row">
+            <span>速度</span>
+            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
+            @input="onCinematicSpeedChange" />
+          <div class="cinematic-progress-row">
+            <span>平滑</span>
+            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
+            step="0.05" @input="onCinematicStyleChange" />
+          <label class="cinematic-focus-toggle">
+            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
+            <span>主体锁定</span>
+          </label>
+        </div>
         <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
     </div>
@@ -1029,14 +2447,14 @@ onBeforeUnmount(async () => {
     -->
 
     <!-- 镜头轨道小功能 -->
-    <div class="camera-track" v-if="filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
+    <div class="camera-track" v-if="!isOrbitMode && filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
       @touchend.stop>
       <div class="camera-track-header">
         <div class="eyebrow">Shot Strip</div>
         <div class="camera-track-copy">{{ searchQuery ? '按当前检索结果排序' : '优先显示已打标签镜头' }}</div>
       </div>
       <div v-for="(pose, index) in filteredPoses" :key="pose.id" class="camera-btn"
-        :class="{ active: activeImage === pose.image_url }" @click.stop="flyToImage(pose)">
+        :class="{ active: activePoseId === getPosePresentationId(pose) }" @click.stop="flyToImage(pose)">
         <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
         <div v-if="pose.tag" class="camera-tag-overlay">
           <div class="camera-tag-text">{{ pose.tag }}</div>
@@ -1116,8 +2534,8 @@ onBeforeUnmount(async () => {
   right: 18px;
   z-index: 120;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -1126,6 +2544,159 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+  align-self: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.view-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 18px;
+}
+
+.cinematic-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: auto;
+  padding-inline: 12px;
+}
+
+.cinematic-trigger.active {
+  background: #1e1e20;
+  color: #f5f4ef;
+  border-color: rgba(30, 30, 32, 0.2);
+}
+
+.cinematic-trigger-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.cinematic-trigger-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.cinematic-panel {
+  width: min(84vw, 280px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cinematic-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cinematic-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cinematic-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.cinematic-loop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.7);
+}
+
+.cinematic-close {
+  appearance: none;
+  border: 0;
+  background: rgba(107, 122, 143, 0.1);
+  color: #1e1e20;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinematic-close:hover {
+  background: rgba(107, 122, 143, 0.18);
+}
+
+.cinematic-focus-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.78);
+}
+
+.cinematic-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cinematic-primary,
+.cinematic-secondary {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.cinematic-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.72);
+}
+
+.cinematic-progress,
+.cinematic-speed {
+  width: 100%;
+  accent-color: #6d8260;
+}
+
+.cinematic-progress[disabled] {
+  opacity: 0.8;
+}
+
+.mode-chip {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.mode-chip.active {
+  background: #1e1e20;
+  color: #f5f4ef;
+  box-shadow: 0 8px 18px rgba(30, 30, 32, 0.16);
+}
+
+.mode-chip:not(.active):hover {
+  background: rgba(107, 122, 143, 0.12);
+  color: #273142;
 }
 
 .archive-btn {
@@ -1373,8 +2944,8 @@ button.active {
 .search-panel {
   position: static;
   z-index: auto;
-  width: min(520px, 100%);
-  max-width: 520px;
+  width: min(560px, 100%);
+  max-width: 560px;
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -1417,7 +2988,7 @@ button.active {
 
 .focal-settings-panel {
   position: absolute;
-  top: 74px;
+  top: 122px;
   right: 18px;
   z-index: 120;
   width: 236px;
@@ -1598,11 +3169,31 @@ input[type='range'] {
   }
 
   .top-actions {
+    align-self: stretch;
+    justify-content: space-between;
     gap: 8px;
   }
 
+  .view-mode-switch {
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .cinematic-panel {
+    width: 100%;
+  }
+
+  .cinematic-trigger {
+    justify-content: center;
+  }
+
+  .mode-chip {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
   .search-panel {
-    width: auto;
+    width: 100%;
     max-width: none;
     padding: 6px;
     gap: 6px;

@@ -1,25 +1,28 @@
-import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'dart:io';
+
+import 'package:braindance/configs/app_config.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:braindance/configs/app_config.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+import '../services/download_event_bus.dart';
 
 // ============================================================
-// 开发/生产模式切换
-// - 开发模式（kDebugMode）：连接本地 Vite dev server
-//   先在项目目录运行：npm run dev（https://localhost:5173）
-// - 生产模式：加载 assets/webgl/ 中的打包静态文件
-//   先在项目目录运行：npm run build-only，然后把 dist/ 内容复制到 app/assets/webgl/
+// Dev/prod mode notes
+// - Debug mode: connect to local Vite dev server
+// - Production mode: serve bundled files from assets/webgl/
 // ============================================================
 class WebGLViewerPage extends StatefulWidget {
   final String initialModelUrl;
-  final String? posesUrl; // 云端 webgl_poses.json 的公开 URL（可选）
+  final String? posesUrl;
   final String sceneId;
-  final List<double>? initialPose; // 从 RAG 视角跳转传入的坐标矩阵
+  final List<double>? initialPose;
+  final String? initialPoseId;
+  final bool useSparkViewer;
 
   const WebGLViewerPage({
     super.key,
@@ -27,6 +30,8 @@ class WebGLViewerPage extends StatefulWidget {
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
+    this.initialPoseId,
+    this.useSparkViewer = false,
   });
 
   @override
@@ -37,21 +42,48 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
+  bool _useExternalBrowserMode = false;
+  bool _isOpeningExternalViewer = false;
+  bool _didAttemptExternalOpen = false;
+  String? _externalViewerUrl;
   HttpServer? _localServer;
   int _localPort = 0;
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
+  int _downloadedBytes = 0;
+  int _totalBytes = -1;
   String? _localModelPath;
+  bool _downloadCancelled = false;
+  late bool _useSparkViewer;
+
+  void _attachViewerHeaders(HttpResponse response) {
+    response.headers.add('Access-Control-Allow-Origin', '*');
+    response.headers.add('Cross-Origin-Opener-Policy', 'same-origin');
+    response.headers.add('Cross-Origin-Embedder-Policy', 'require-corp');
+    response.headers.add('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+
+  String get _viewerAssetRoot =>
+      _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
+
+  String get _viewerLabel =>
+      _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
     super.initState();
-    // Flutter Web 和桌面端均不支持 webview_flutter（需 Android/iOS）
-    if (kIsWeb ||
-        defaultTargetPlatform == TargetPlatform.windows ||
+    _useSparkViewer = widget.useSparkViewer;
+
+    // Flutter Web is not supported here. Desktop uses the external browser mode.
+    if (kIsWeb) {
+      _isUnsupportedPlatform = true;
+    } else if (defaultTargetPlatform == TargetPlatform.windows ||
         defaultTargetPlatform == TargetPlatform.linux ||
         defaultTargetPlatform == TargetPlatform.macOS) {
-      _isUnsupportedPlatform = true;
+      _useExternalBrowserMode = true;
+      _startLocalServer().then((_) {
+        if (mounted) _prepareModelAndLoad();
+      });
     } else {
       try {
         _startLocalServer().then((_) {
@@ -66,17 +98,33 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   @override
   void dispose() {
+    _downloadCancelled = true;
     _localServer?.close();
     super.dispose();
+  }
+
+  void _stopDownload() {
+    _downloadCancelled = true;
+    if (mounted) {
+      setState(() {
+        _isDownloading = false;
+      });
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
   }
 
   Future<void> _startLocalServer() async {
     _localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _localPort = _localServer!.port;
     _localServer!.listen((HttpRequest request) async {
-      String path = request.uri.path;
+      var path = request.uri.path;
 
-      // ---- /proxy/ : Dart 端代理 HTTPS 请求，绕过 WebView 的 SSL 证书限制 ----
+      // /proxy/: proxy HTTPS requests through Dart to avoid WebView SSL issues.
       if (path.startsWith('/proxy/')) {
         final encodedTarget = path.substring('/proxy/'.length);
         final targetUrl = Uri.decodeComponent(encodedTarget);
@@ -88,7 +136,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           proxyReq.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
           final proxyResp = await proxyReq.close();
           request.response.statusCode = proxyResp.statusCode;
-          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          _attachViewerHeaders(request.response);
           final ct = proxyResp.headers.contentType;
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
@@ -100,14 +148,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         return;
       }
 
-      // ---- /local_models/ : 本地已下载文件 ----
+      // /local_models/: serve already-downloaded local model files.
       if (path.startsWith('/local_models/')) {
         final filePath = Uri.decodeComponent(
           path.substring('/local_models/'.length),
         );
         final file = File(filePath);
         if (await file.exists()) {
-          request.response.headers.add('Access-Control-Allow-Origin', '*');
+          _attachViewerHeaders(request.response);
           if (filePath.endsWith('.ply') ||
               filePath.endsWith('.splat') ||
               filePath.endsWith('.ksplat')) {
@@ -119,25 +167,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           await request.response.addStream(file.openRead());
           await request.response.close();
           return;
-        } else {
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
         }
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        return;
       }
 
       if (path == '/' || path.isEmpty) {
         path = '/index.html';
       }
 
-      // 将请求路径映射到 Flutter 的 assets/webgl 目录
-      String assetPath = 'assets/webgl$path';
+      final assetPath = '$_viewerAssetRoot$path';
 
       try {
-        final ByteData data = await rootBundle.load(assetPath);
-        final List<int> bytes = data.buffer.asUint8List();
+        final data = await rootBundle.load(assetPath);
+        final bytes = data.buffer.asUint8List();
 
-        String contentType = 'text/plain';
+        var contentType = 'text/plain';
         if (path.endsWith('.html')) {
           contentType = 'text/html; charset=utf-8';
         } else if (path.endsWith('.js')) {
@@ -155,11 +201,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
-        // 允许跨域
-        request.response.headers.add('Access-Control-Allow-Origin', '*');
+        _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
-      } catch (e) {
+      } catch (_) {
         request.response.statusCode = HttpStatus.notFound;
         request.response.write('Not Found');
         await request.response.close();
@@ -173,7 +218,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     if (originalUrl.startsWith('http://') ||
         originalUrl.startsWith('https://')) {
       try {
-        // Fix string containing spaces or unencoded characters causing 400 Bad Request
         final encodedUrl = Uri.encodeFull(Uri.decodeFull(originalUrl));
         final uri = Uri.parse(encodedUrl);
         final requestPath = uri.path;
@@ -187,52 +231,129 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         if (await localFile.exists()) {
           debugPrint('Using cached offline model: ${localFile.path}');
           _localModelPath = localFile.path;
-          if (mounted) _initWebView();
+          if (mounted) _launchViewer();
         } else {
+          final tmpFile = File('${localFile.path}.tmp');
+
+          int existingBytes = 0;
+          if (await tmpFile.exists()) {
+            existingBytes = await tmpFile.length();
+            debugPrint('Resuming download from byte $existingBytes');
+          }
+
           debugPrint('Starting download from: $originalUrl');
           setState(() {
             _isDownloading = true;
             _downloadProgress = 0.0;
+            _downloadedBytes = 0;
+            _totalBytes = -1;
           });
 
-          // 允许自托管 Supabase 的自签名或不被 Android 信任的证书
           final client = HttpClient()
             ..badCertificateCallback = (cert, host, port) => true;
           final request = await client.getUrl(uri);
           request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          if (existingBytes > 0) {
+            request.headers.set('Range', 'bytes=$existingBytes-');
+          }
           final response = await request.close();
 
-          if (response.statusCode != 200) {
-            String errorBody = '';
+          if (response.statusCode == 200 && existingBytes > 0) {
+            debugPrint('Server does not support Range, restarting download');
+            if (await tmpFile.exists()) await tmpFile.delete();
+            existingBytes = 0;
+          } else if (response.statusCode != 200 &&
+              response.statusCode != 206) {
+            var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
             } catch (_) {}
             throw Exception('HTTP Error ${response.statusCode}: $errorBody');
           }
 
-          final totalBytes = response.contentLength;
-          int receivedBytes = 0;
+          final contentLength = response.contentLength;
+          final totalBytes = contentLength > 0
+              ? contentLength + existingBytes
+              : -1;
+          var receivedBytes = existingBytes;
 
-          final sink = localFile.openWrite();
-          await response
-              .map((chunk) {
-                receivedBytes += chunk.length;
-                if (totalBytes > 0 && mounted) {
-                  setState(() {
-                    _downloadProgress = receivedBytes / totalBytes;
-                  });
-                }
-                return chunk;
-              })
-              .pipe(sink);
+          final metaFile = File('${localFile.path}.meta');
+          if (totalBytes > 0) {
+            await metaFile.writeAsString('$totalBytes');
+          }
 
-          debugPrint('Download complete: ${localFile.path}');
-          _localModelPath = localFile.path;
+          final sink = tmpFile.openWrite(
+            mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+          );
+
           if (mounted) {
             setState(() {
-              _isDownloading = false;
+              _downloadedBytes = receivedBytes;
+              _totalBytes = totalBytes;
+              _downloadProgress = totalBytes > 0
+                  ? receivedBytes / totalBytes
+                  : 0.0;
             });
-            _initWebView();
+          }
+
+          try {
+            await for (final chunk in response) {
+              if (_downloadCancelled) {
+                await sink.close();
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: _downloadProgress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                    isCancelled: true,
+                  ),
+                );
+                return;
+              }
+              sink.add(chunk);
+              receivedBytes += chunk.length;
+              if (totalBytes > 0 && mounted) {
+                final progress = receivedBytes / totalBytes;
+                setState(() {
+                  _downloadProgress = progress;
+                  _downloadedBytes = receivedBytes;
+                });
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: progress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                  ),
+                );
+              }
+            }
+            await sink.close();
+
+            await tmpFile.rename(localFile.path);
+            if (await metaFile.exists()) await metaFile.delete();
+            debugPrint('Download complete: ${localFile.path}');
+            _localModelPath = localFile.path;
+            downloadEventBus.add(
+              ModelDownloadEvent(
+                url: originalUrl,
+                progress: 1.0,
+                isComplete: true,
+                downloadedBytes: receivedBytes,
+                totalBytes: totalBytes,
+              ),
+            );
+            if (mounted) {
+              setState(() {
+                _isDownloading = false;
+              });
+              _initWebView();
+            }
+          } catch (e) {
+            await sink.close();
+            debugPrint('Download interrupted, tmp file preserved for resume');
+            rethrow;
           }
         }
       } catch (e) {
@@ -241,13 +362,92 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('下载模型失败: $e', context: context);
-          _initWebView();
+          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          _launchViewer();
         }
       }
     } else {
-      if (mounted) _initWebView();
+      if (mounted) _launchViewer();
     }
+  }
+
+  void _launchViewer() {
+    if (_useExternalBrowserMode) {
+      _openInExternalBrowser();
+      return;
+    }
+    _initWebView();
+  }
+
+  Map<String, dynamic> _buildViewerPayload() {
+    String targetUrl;
+    if (_localModelPath != null) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+    } else if (widget.initialModelUrl.startsWith('http://') ||
+        widget.initialModelUrl.startsWith('https://')) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
+    } else {
+      targetUrl = widget.initialModelUrl;
+    }
+
+    return {
+      'ply': targetUrl,
+      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
+        'poses': widget.posesUrl,
+      if (widget.initialPose != null) 'matrix': widget.initialPose,
+      if (widget.initialPoseId != null && widget.initialPoseId!.isNotEmpty)
+        'imageId': widget.initialPoseId,
+    };
+  }
+
+  Future<void> _openInExternalBrowser() async {
+    final payload = _buildViewerPayload();
+    final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
+    final url =
+        'http://127.0.0.1:$_localPort/index.html?payload=$encodedPayload';
+    _externalViewerUrl = url;
+
+    if (_didAttemptExternalOpen) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _didAttemptExternalOpen = true;
+    if (mounted) {
+      setState(() {
+        _isOpeningExternalViewer = true;
+      });
+    }
+
+    try {
+      await _openUrlOnDesktop(url);
+    } catch (e) {
+      debugPrint('Open external viewer failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpeningExternalViewer = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openUrlOnDesktop(String url) async {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await Process.start('cmd', ['/c', 'start', '', url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await Process.start('open', [url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      await Process.start('xdg-open', [url], runInShell: true);
+      return;
+    }
+    throw UnsupportedError('Unsupported desktop platform');
   }
 
   void _initWebView() {
@@ -258,21 +458,22 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         'BrainDanceChannel',
         onMessageReceived: (JavaScriptMessage message) {
           final data = jsonDecode(message.message);
+          debugPrint('BrainDanceChannel: ${message.message}');
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            // 优先使用本地路径或代理 URL，避免 WebView JS 直接访问 HTTPS
             _sendModelToVue();
-          } else if (data['status'] == 'success') {
+          } else if (data['status'] == 'error') {
             if (mounted) {
-              TDToast.showText(data['msg'], context: context);
+              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
             }
+          } else if (data['status'] == 'info') {
+            debugPrint('Spark info: ${data['msg']}');
           }
         },
       )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
-            // 后备方案：页面加载完 2 秒后如果还没收到 ready 信号，则主动触发
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
@@ -289,61 +490,118 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ),
       );
 
-    // 通知 Flutter 重建，让 WebViewWidget 真正挂载到树上
     if (mounted) setState(() {});
-
-    // Load the local HTML file matching the server port
     _loadLocalHtml();
   }
 
   Future<void> _loadLocalHtml() async {
     try {
-      final url = 'http://127.0.0.1:$_localPort/index.html';
+      await _controller?.clearCache();
+      final cacheBust = DateTime.now().millisecondsSinceEpoch;
+      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
     }
   }
 
-  /// 统一入口：决定传给 WebView 的模型 URL
-  /// - 如果已下载到本地 -> 使用本地 HTTP /local_models/ 路由
-  /// - 如果是远程 HTTPS URL  -> 转成本地 HTTP /proxy/ 路由，由 Dart 代理
-  /// - 如果是相对路径（本地 demo） -> 直接传递
   void _sendModelToVue() {
     if (!_isWebReady) return;
-    String targetUrl;
-    if (_localModelPath != null) {
-      // 已下载到本地：通过本地 HTTP 服务提供
-      targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
-    } else if (widget.initialModelUrl.startsWith('http://') ||
-        widget.initialModelUrl.startsWith('https://')) {
-      // 远程 URL：通过本地代理，避免 WebView 直接访问 HTTPS
-      targetUrl =
-          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
-    } else {
-      // 相对路径（本地 demo 模型）
-      targetUrl = widget.initialModelUrl;
-    }
+    final payloadData = _buildViewerPayload();
+    final targetUrl = payloadData['ply'];
 
     debugPrint('Sending model URL to WebView: $targetUrl');
+    final payload = jsonEncode(payloadData);
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+  }
 
-    if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty) {
-      // 新版：同时传模型 URL、webgl_poses.json 公网 URL 以及可能的初始视角矩阵
-      final payload = jsonEncode({
-        'ply': targetUrl, 
-        'poses': widget.posesUrl,
-        if (widget.initialPose != null) 'matrix': widget.initialPose,
-      });
-      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
-    } else {
-      // 旧版兼容：只传模型 URL，由 WebGL 内部使用默认位姿文件
-      final payload = jsonEncode({
-        'ply': targetUrl,
-        if (widget.initialPose != null) 'matrix': widget.initialPose,
-      });
-      _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+  Future<void> _switchViewer(bool useSpark) async {
+    if (_useSparkViewer == useSpark) return;
+    setState(() {
+      _useSparkViewer = useSpark;
+      _isWebReady = false;
+      _didAttemptExternalOpen = false;
+      _externalViewerUrl = null;
+    });
+
+    if (_useExternalBrowserMode) {
+      await _openInExternalBrowser();
+      return;
     }
+
+    await _loadLocalHtml();
+  }
+
+  Widget _buildFloatingCircleButton({
+    required IconData icon,
+    required VoidCallback? onPressed,
+    required bool isDark,
+    required String tooltip,
+  }) {
+    final foregroundColor = isDark
+        ? const Color(0xFFF7F7FB)
+        : const Color(0xFF202226);
+    final backgroundColor = isDark
+        ? const Color(0xCC1A1D24)
+        : const Color(0xEFFFFFFF);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: backgroundColor,
+        shape: const CircleBorder(),
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.22),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 46,
+            height: 46,
+            child: Icon(icon, color: foregroundColor, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloatingViewerToggle(bool isDark) {
+    return Material(
+      color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
+      borderRadius: BorderRadius.circular(18),
+      elevation: 10,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: ToggleButtons(
+          isSelected: [!_useSparkViewer, _useSparkViewer],
+          onPressed: (index) {
+            _switchViewer(index == 1);
+          },
+          borderRadius: BorderRadius.circular(14),
+          constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
+          fillColor: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : AppConfig.primaryColor.withValues(alpha: 0.10),
+          selectedColor: isDark
+              ? const Color(0xFFF7F7FB)
+              : const Color(0xFF202226),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.74)
+              : const Color(0xFF5B6470),
+          children: const [
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text('\u539f\u7248'),
+            ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text('Spark'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -357,21 +615,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ? const Color(0xFFEEEEEE)
         : const Color(0xFF333333);
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
-    final appBarBg = isDark ? const Color(0xFF101014) : Colors.white;
-    final appBarFg = textColor;
     final pageBg = isDark ? const Color(0xFF18181C) : Colors.white;
+
     return Scaffold(
       backgroundColor: pageBg,
-      appBar: AppBar(
-        title: Text(widget.sceneId, style: TextStyle(color: appBarFg)),
-        backgroundColor: appBarBg,
-        foregroundColor: appBarFg,
-        systemOverlayStyle: isDark
-            ? SystemUiOverlayStyle.light
-            : SystemUiOverlayStyle.dark,
-        elevation: 0,
-        iconTheme: IconThemeData(color: iconColor),
-      ),
+      extendBodyBehindAppBar: true,
       body: _isUnsupportedPlatform
           ? Center(
               child: Padding(
@@ -386,14 +634,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ),
                     const SizedBox(height: 16),
                     TDText(
-                      '当前平台不支持内嵌网页',
+                      textLocalize('platform_webview_unsupported'),
                       font: theme.fontTitleLarge,
                       fontWeight: FontWeight.w600,
                       textColor: textColor,
                     ),
                     const SizedBox(height: 12),
                     TDText(
-                      'Flutter 官方的 webview_flutter 插件目前仅支持 Android / iOS / Web 平台。\n如果你正在使用 Windows / macOS 调试，不支持直接原位打开 3D 模型。\n\n请在移动端模拟器（Android Emulator/iOS Simulator）或真实手机设备上调试 3D 查看功能！',
+                      '\u5f53\u524d\u5b9e\u73b0\u672a\u8986\u76d6 Flutter Web\u3002\u8bf7\u5728 Android / iOS \u4f7f\u7528\u5185\u5d4c\u67e5\u770b\u5668\uff0c\u6216\u5728\u684c\u9762\u7aef\u4f7f\u7528\u7cfb\u7edf\u6d4f\u89c8\u5668\u6253\u5f00 3D \u67e5\u770b\u5668\u3002',
                       font: theme.fontBodyMedium,
                       textColor: hintTextColor,
                       textAlign: TextAlign.center,
@@ -402,32 +650,177 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                 ),
               ),
             )
+          : _useExternalBrowserMode
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.open_in_browser_rounded,
+                      size: 72,
+                      color: iconColor,
+                    ),
+                    const SizedBox(height: 16),
+                    TDText(
+                      '\u684c\u9762\u7aef\u5df2\u5207\u6362\u4e3a\u6d4f\u89c8\u5668\u9884\u89c8\u6a21\u5f0f',
+                      font: theme.fontTitleLarge,
+                      fontWeight: FontWeight.w600,
+                      textColor: textColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    TDText(
+                      _isOpeningExternalViewer
+                          ? '\u6b63\u5728\u542f\u52a8\u672c\u5730\u67e5\u770b\u670d\u52a1\u5e76\u6253\u5f00\u7cfb\u7edf\u6d4f\u89c8\u5668...'
+                          : '\u5f53\u524d\u4f7f\u7528 $_viewerLabel \u67e5\u770b\u5668\u3002\u82e5\u6d4f\u89c8\u5668\u6ca1\u6709\u81ea\u52a8\u5f39\u51fa\uff0c\u53ef\u624b\u52a8\u91cd\u65b0\u6253\u5f00\u3002',
+                      font: theme.fontBodyMedium,
+                      textColor: hintTextColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_isDownloading) ...[
+                      const SizedBox(height: 18),
+                      CircularProgressIndicator(color: iconColor),
+                      const SizedBox(height: 12),
+                      TDText(
+                        '\u6b63\u5728\u51c6\u5907\u6a21\u578b...\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                        textAlign: TextAlign.center,
+                        font: theme.fontBodyMedium,
+                        textColor: hintTextColor,
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    ElevatedButton(
+                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
+                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                    ),
+                    if (_externalViewerUrl != null) ...[
+                      const SizedBox(height: 12),
+                      SelectableText(
+                        _externalViewerUrl!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: hintTextColor, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            )
           : Stack(
               children: [
                 if (_controller != null && !_isDownloading)
-                  AnimatedOpacity(
-                    opacity: _isWebReady ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 500),
-                    child: WebViewWidget(controller: _controller!),
+                  SizedBox.expand(
+                    child: AnimatedOpacity(
+                      opacity: _isWebReady ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 500),
+                      child: WebViewWidget(controller: _controller!),
+                    ),
                   ),
                 if (_isDownloading)
                   Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: iconColor),
-                        const SizedBox(height: 16),
-                        TDText(
-                          '正在下载云端模型...\n这只需下载一次，之后可离线查看。\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
-                          textAlign: TextAlign.center,
-                          font: theme.fontBodyMedium,
-                          textColor: hintTextColor,
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TDText(
+                            textLocalize('viewer_downloading_title'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodyMedium,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 4),
+                          TDText(
+                            textLocalize('viewer_downloading_subtitle'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor.withAlpha(150),
+                          ),
+                          const SizedBox(height: 24),
+                          TDText(
+                            '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                            font: theme.fontTitleLarge,
+                            fontWeight: FontWeight.w600,
+                            textColor: textColor,
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _downloadProgress,
+                              minHeight: 6,
+                              backgroundColor: isDark
+                                  ? Colors.white.withAlpha(20)
+                                  : Colors.black.withAlpha(15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                isDark
+                                    ? const Color(0xFF7AA2FF)
+                                    : AppConfig.primaryColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TDText(
+                            _totalBytes > 0
+                                ? '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}'
+                                : '${_formatBytes(_downloadedBytes)} / --',
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: 140,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                _stopDownload();
+                                Navigator.of(context).pop();
+                              },
+                              icon: const Icon(Icons.stop_rounded, size: 18),
+                              label: Text(textLocalize('viewer_stop_download')),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: isDark
+                                    ? const Color(0xFFFF6B6B)
+                                    : const Color(0xFFD32F2F),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFFFF6B6B)
+                                      : const Color(0xFFD32F2F),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   )
                 else if (!_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
+                if (!_isDownloading)
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildFloatingCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onPressed: () => Navigator.of(context).pop(),
+                            isDark: isDark,
+                            tooltip: '\u8fd4\u56de',
+                          ),
+                          const Spacer(),
+                          _buildFloatingViewerToggle(isDark),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
     );

@@ -1,0 +1,104 @@
+# BrainDance 3DGS 默认配置
+# 说明：
+# 1. 这里存放可版本化、非敏感的工程配置
+# 2. 密钥类配置仍然放在 ai_engine/3dgs/.env
+# 3. 如需本机覆盖，新增 config/local.toml，不要直接改 default.toml
+
+# 应用基础信息
+[app]
+env = "development"
+
+# 第三方服务与模型默认值
+[api]
+# 场景理解使用的视觉大模型
+dashscope_vl_model = "qwen3-vl-plus"
+# 向量检索使用的 embedding 模型
+dashscope_embedding_model = "text-embedding-v2"
+# DashScope OpenAI 兼容模式地址
+dashscope_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# Redis 默认连接地址
+redis_url = "redis://localhost:6379/0"
+
+# 本地存储相关配置
+[storage]
+# 向量数据库或本地检索缓存目录
+chroma_db_path = "./data_storage"
+
+# Supabase 非敏感默认配置
+[supabase]
+# 产物上传默认存储桶
+bucket = "braindance-assets"
+# Worker 默认监听的数据表
+table = "processing_tasks"
+
+# 训练与质检默认参数
+[training]
+# 兼容旧流程的默认训练步数
+iterations = 30000
+# Nerfstudio/3DGS 默认训练步数
+training_iterations = 15000
+# 单次训练最多保留的图片数量
+max_images = 300
+# AI 质检最低通过分
+min_quality_score = 40
+# 默认位姿/重建路线，可选 glomap 或 da3
+mapper_type = "glomap"
+# 默认 GPU 索引
+gpu_index = 0
+# COLMAP 是否启用 GPU
+colmap_use_gpu = true
+# COLMAP 内部使用的 GPU 索引
+colmap_gpu_index = "0"
+
+# 交付与压缩相关默认配置
+[delivery]
+# 默认交付格式，可选 ply / splat / ksplat
+model_delivery_format = "splat"
+# 压缩时的透明度裁剪阈值
+compression_opacity_threshold = 0.05
+# ksplat 转换时的 alpha 清理阈值
+ksplat_alpha_threshold = 1
+# 外部 ksplat 转换脚本路径；留空表示使用默认逻辑
+ksplat_script_path = ""
+
+# 运行时环境变量默认值
+[runtime]
+# HuggingFace 镜像地址
+hf_endpoint = "https://hf-mirror.com"
+# 统一代理地址（用于 HTTP/HTTPS/ALL_PROXY）；为空表示不覆盖系统代理
+proxy_url = "http://127.0.0.1:8080"
+# PyTorch 显存分配策略
+pytorch_alloc_conf = "expandable_segments:True"
+# 需要加入 no_proxy 的域名
+no_proxy = "huggingface.co,hf-mirror.com"
+
+# 项目内通用路径
+[paths]
+# 本地运行时临时工作目录
+work_root = "./temp_workspace"
+# 共享模型目录
+shared_model_dir = "../../models"
+
+# 外部仓库或模型路径
+[repos]
+# SAM3D 仓库路径
+sam3d_repo_path = "src/libs/sam-3d-objects"
+# SAM3D checkpoint 目录
+sam3d_checkpoint_dir = "../../models/sam3d/checkpoints"
+# SHARP 仓库路径
+sharp_repo_path = "src/libs/ml-sharp"
+# DA3 仓库路径
+da3_repo_path = "src/libs/Depth-Anything-3"
+# SuGaR 仓库路径
+sugar_repo_path = "src/libs/SuGaR"
+# 2DGS 仓库路径
+dgs2_repo_path = "src/libs/2d-gaussian-splatting"
+# Sparse2DGS 仓库路径
+sparse2dgs_repo_path = "src/libs/Sparse2DGS"
+# 运行 Sparse2DGS 时默认使用的 conda 环境名
+sparse2dgs_conda_env = "Braindance"
+
+# 可执行文件路径；留空时走 PATH 自动探测
+[executables]
+colmap_bin = ""
+glomap_bin = ""

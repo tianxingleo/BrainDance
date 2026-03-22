@@ -1,14 +1,49 @@
 part of '../generate.dart';
 
 extension _GenerateSubmissionX on _GeneratePageState {
+  Map<String, dynamic>? _videoTaskParamsFor(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return {
+          'slow_pipeline': 'video_3dgs',
+        };
+      case 'da3_feed_forward_3dgs':
+        return {
+          'frame_interval': 5,
+          'conf_threshold': 0.5,
+        };
+      case 'da3_sugar':
+        return {
+          'regularization': 'dn_consistency',
+          'refinement_time': 'short',
+          'fast_mode': true,
+        };
+      case 'da3_2dgs':
+        return {
+          'iterations': 30000,
+          'extract_fps': 2.0,
+          'min_images': 24,
+        };
+      case 'sparse2dgs':
+        return {
+          'video_sample_count': 12,
+          'video_random_seed': 42,
+          'min_video_frame_gap': 3,
+          'video_max_edge': 0,
+        };
+      default:
+        return null;
+    }
+  }
+
   Future<String?> _showImageTaskTypeSheet() {
     final completer = Completer<String?>();
     TDActionSheet(
       context,
-      description: '拍摄的内容为……（用于优化生成效果）',
+      description: textLocalize('gen_sheet_desc'),
       items: [
-        TDActionSheetItem(label: '物体'),
-        TDActionSheetItem(label: '场景'),
+        TDActionSheetItem(label: textLocalize('gen_sheet_object')),
+        TDActionSheetItem(label: textLocalize('gen_sheet_scene')),
       ],
       cancelText: textLocalize("gen_cancel"),
       onSelected: (item, index) {
@@ -27,6 +62,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
   }
 
   void _showTextImagePreview(String prompt) {
+    var didConfirm = false;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -78,7 +114,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                '先检查图像气质，再决定是否提交到生成流程。',
+                                textLocalize('gen_preview_subtitle'),
                                 style: TextStyle(
                                   color: hintColor,
                                   fontSize: 12.5,
@@ -130,7 +166,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
                                 errorBuilder: (context, error, stackTrace) {
                                   return Center(
                                     child: Text(
-                                      '图片加载失败',
+                                      textLocalize('gen_image_load_fail'),
                                       style: TextStyle(color: hintColor),
                                     ),
                                   );
@@ -172,14 +208,14 @@ extension _GenerateSubmissionX on _GeneratePageState {
                                         });
                                       } else if (mounted) {
                                         TDToast.showText(
-                                          '重新生成失败',
+                                          textLocalize('gen_regenerate_fail'),
                                           context: context,
                                         );
                                       }
                                     } catch (e) {
                                       if (mounted) {
                                         TDToast.showText(
-                                          '重新生成失败: $e',
+                                          '${textLocalize('gen_regenerate_fail')}: $e',
                                           context: context,
                                         );
                                       }
@@ -209,6 +245,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
                             onTap: (_isGenerating || _generatedImageUrl == null)
                                 ? () {}
                                 : () async {
+                                    didConfirm = true;
                                     Navigator.pop(sheetContext);
                                     await _confirmTextImage(prompt);
                                   },
@@ -233,7 +270,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      if (!mounted || didConfirm) {
+        return;
+      }
+      _refresh(() {
+        _generatedImageUrl = null;
+        _textEditingController.clear();
+        GenConfig.uploadedText = '';
+      });
+    });
   }
 
   Future<void> _confirmTextImage(String prompt) async {
@@ -247,7 +293,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         return;
       }
       if (mounted) {
-        TDToast.showText('未登录，即将跳转登录页面...', context: context);
+        TDToast.showText(textLocalize('not_logged_in'), context: context);
         await Navigator.pushNamed(context, '/login');
       }
       user = client.auth.currentUser;
@@ -270,7 +316,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       final data = response.data;
       if (data is Map && data['success'] == true) {
         if (mounted) {
-          TDToast.showText('提交成功，任务已创建', context: context);
+          TDToast.showText(textLocalize('gen_submit_success'), context: context);
           ref.read(pageIndexProvider.notifier).state = 0;
           final nav = Navigator.of(context);
           _generatedImageUrl = null;
@@ -279,16 +325,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           nav.pushNamed('/tasks');
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? '提交失败') : '服务器返回异常';
+        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_submit_fail')) : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('提交失败: ${e.details}', context: context);
+        TDToast.showText('${textLocalize('gen_submit_fail')}: ${e.details}', context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('提交失败: $e', context: context);
+        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -315,7 +361,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitImageTask() async {
     if (GenConfig.uploadedImages.isEmpty) {
-      if (mounted) TDToast.showText('请先选择图片', context: context);
+      if (mounted) TDToast.showText(textLocalize('gen_select_image'), context: context);
       return;
     }
 
@@ -326,7 +372,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
     final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
-      adminModeMessage: '当前为管理员浏览模式，未绑定用户，暂不支持上传任务。',
+      adminModeMessage: textLocalize('admin_mode_msg'),
     );
     if (user == null) {
       return;
@@ -354,7 +400,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       });
 
       if (mounted) {
-        TDToast.showText('提交成功，任务已创建', context: context);
+        TDToast.showText(textLocalize('gen_submit_success'), context: context);
         ref.read(pageIndexProvider.notifier).state = 0;
         final nav = Navigator.of(context);
         GenConfig.uploadedImages.clear();
@@ -362,7 +408,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('提交失败: $e', context: context);
+        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -376,7 +422,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
   Future<void> _submitTextTask() async {
     final prompt = _textEditingController.text.trim();
     if (prompt.isEmpty) {
-      if (mounted) TDToast.showText('请先输入描述文本', context: context);
+      if (mounted) TDToast.showText(textLocalize('gen_enter_text'), context: context);
       return;
     }
 
@@ -401,16 +447,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           _showTextImagePreview(prompt);
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? '生成失败') : '服务器返回异常';
+        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_generate_fail')) : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('生成失败: ${e.details}', context: context);
+        TDToast.showText('${textLocalize('gen_generate_fail')}: ${e.details}', context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('生成失败: $e', context: context);
+        TDToast.showText('${textLocalize('gen_generate_fail')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -423,13 +469,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitVideoTask() async {
     if (GenConfig.uploadedVideos.isEmpty) {
-      if (mounted) TDToast.showText('请先选择视频', context: context);
+      if (mounted) TDToast.showText(textLocalize('gen_select_video'), context: context);
       return;
     }
 
     final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
-      adminModeMessage: '当前为管理员浏览模式，未绑定用户，暂不支持上传任务。',
+      adminModeMessage: textLocalize('admin_mode_msg'),
     );
     if (user == null) {
       return;
@@ -441,6 +487,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
     try {
       final sceneId = _GeneratePageState._generateSceneId();
+      final taskType = _selectedVideoTaskType;
+      final taskParams = _videoTaskParamsFor(taskType);
       await _uploadAssetToStorage(
         userId: user.id,
         sceneId: sceneId,
@@ -453,19 +501,21 @@ extension _GenerateSubmissionX on _GeneratePageState {
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
-        'task_params': {'mapper_type': 'da3'},
+        'task_type': taskType,
+        if (taskParams != null) 'task_params': taskParams,
       });
 
       if (mounted) {
-        TDToast.showText('提交成功，任务已创建', context: context);
+        TDToast.showText(textLocalize('gen_submit_success'), context: context);
         ref.read(pageIndexProvider.notifier).state = 0;
         final nav = Navigator.of(context);
         GenConfig.uploadedVideos.clear();
+        _selectedVideoTaskType = 'video_3dgs';
         nav.pushNamed('/tasks');
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('提交失败: $e', context: context);
+        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -493,20 +543,20 @@ extension _GenerateSubmissionX on _GeneratePageState {
     }
 
     if (mounted) {
-      TDToast.showText('未登录，即将跳转登录页面...', context: context);
+      TDToast.showText(textLocalize('not_logged_in'), context: context);
       await Navigator.pushNamed(context, '/login');
     }
 
     user = client.auth.currentUser;
     if (user == null) {
       if (mounted) {
-        TDToast.showText('登录已取消或未完成', context: context);
+        TDToast.showText(textLocalize('login_cancelled'), context: context);
       }
       return null;
     }
 
     if (mounted) {
-      TDToast.showText('登录成功，开始上传', context: context);
+      TDToast.showText(textLocalize('login_success_upload'), context: context);
     }
     return user;
   }
@@ -526,6 +576,11 @@ extension _GenerateSubmissionX on _GeneratePageState {
         '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$storagePath';
     final dio = Dio();
 
+    _refresh(() {
+      _totalFileSize = fileSize;
+      _uploadedBytes = 0;
+    });
+
     await dio.post(
       url,
       data: file.openRead(),
@@ -540,6 +595,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       onSendProgress: (count, total) {
         if (mounted) {
           _refresh(() {
+            _uploadedBytes = count;
             _uploadProgress = count / fileSize;
           });
         }

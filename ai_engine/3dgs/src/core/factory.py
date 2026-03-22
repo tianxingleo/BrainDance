@@ -12,6 +12,8 @@ class PipelineFactory:
     def get_pipeline(task_type: str, context: dict):
         pipelines = {
             "video_3dgs": Video3DGSPipeline,
+            # video_dual_chain 由 worker 负责编排（快链+慢链），这里兜底映射到传统视频链
+            "video_dual_chain": Video3DGSPipeline,
             "multi_image": MultiImagePipeline,
             "single_image_sam3d": SingleImageSAM3DPipeline,
             "single_image_sharp": SingleImageSharpPipeline,
