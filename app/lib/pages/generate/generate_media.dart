@@ -74,6 +74,7 @@ extension _GenerateMediaX on _GeneratePageState {
       ],
       cancelText: textLocalize("gen_cancel"),
       onSelected: (item, index) async {
+        var shouldShowVideoTaskTypeSheet = false;
         if (index == 0) {
           final XFile? file;
           late final AssetEntity newAsset;
@@ -123,6 +124,7 @@ extension _GenerateMediaX on _GeneratePageState {
             if (msg.isNotEmpty && context.mounted) {
               TDToast.showText(msg, context: context);
             }
+            shouldShowVideoTaskTypeSheet = !isImage && msg.isEmpty;
           } catch (_) {
             if (context.mounted) {
               TDToast.showText(textLocalize("tip_fail"), context: context);
@@ -137,8 +139,12 @@ extension _GenerateMediaX on _GeneratePageState {
           if (msg.isNotEmpty && context.mounted) {
             TDToast.showText(msg, context: context);
           }
+          shouldShowVideoTaskTypeSheet = !isImage && msg.isEmpty;
         }
         _refresh(() {});
+        if (shouldShowVideoTaskTypeSheet && context.mounted) {
+          await _showVideoTaskTypeSheet();
+        }
       },
     ).show();
   }

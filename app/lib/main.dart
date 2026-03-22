@@ -401,23 +401,72 @@ class MainScreen extends ConsumerStatefulWidget {
   ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends ConsumerState<MainScreen> {
-  final List<Widget?> _pageCache = List<Widget?>.filled(3, null);
+class _MainScreenState extends ConsumerState<MainScreen>
+    with TickerProviderStateMixin {
+  static const int _pageCount = 3;
 
-  Widget _buildPage(int pageIndex) {
-    switch (pageIndex) {
-      case 0:
-        return const RecallPage(); // 页面0: 主页：过往回忆
-      case 1:
-        return const CreateGuidePage(); // 页面1: 创作引导
-      case 2:
-        return const SettingsPage(); // 页面2: 管理（设置）
-    }
-    return const RecallPage();
+  int _previousIndex = 0;
+  int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
+
+  late final AnimationController _animController;
+  bool _isAnimating = false;
+
+  /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
+  final List<Widget?> _cachedPages = List.filled(_pageCount, null);
+  final Set<int> _builtPages = {0}; // 首屏默认构建
+
+  @override
+  void initState() {
+    super.initState();
+    _animController =
+        AnimationController(
+          duration: const Duration(milliseconds: 360),
+          vsync: this,
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            if (mounted) {
+              setState(() {
+                _isAnimating = false;
+                _previousIndex = ref.read(pageIndexProvider);
+              });
+            }
+          }
+        });
   }
 
-  Widget _getOrCreatePage(int pageIndex) {
-    return _pageCache[pageIndex] ??= _buildPage(pageIndex);
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
+
+  Widget _ensurePage(int index) {
+    if (_cachedPages[index] != null) return _cachedPages[index]!;
+    late final Widget page;
+    switch (index) {
+      case 0:
+        page = const RecallPage();
+      case 1:
+        page = const CreateGuidePage();
+      case 2:
+        page = const SettingsPage();
+      default:
+        page = const RecallPage();
+    }
+    _cachedPages[index] = page;
+    return page;
+  }
+
+  void _switchToPage(int newIndex) {
+    final oldIndex = ref.read(pageIndexProvider);
+    if (newIndex == oldIndex) return;
+
+    _slideDirection = newIndex > oldIndex ? 1 : -1;
+    _previousIndex = oldIndex;
+    _builtPages.add(newIndex);
+    _isAnimating = true;
+    _animController.forward(from: 0);
+    ref.read(pageIndexProvider.notifier).state = newIndex;
   }
 
   @override
@@ -425,7 +474,15 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final bool isLoading = ref.watch(loadingProvider);
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
-    _getOrCreatePage(pageIndex);
+
+    // 外部改 pageIndex 时（如 provider 直接修改），同步方向
+    // _previousIndex 保留旧值供动画使用，动画结束后在回调中更新
+    if (pageIndex != _previousIndex && !_isAnimating) {
+      _slideDirection = pageIndex > _previousIndex ? 1 : -1;
+      _builtPages.add(pageIndex);
+      _isAnimating = true;
+      _animController.forward(from: 0);
+    }
 
     return Scaffold(
       extendBody: true,
@@ -434,25 +491,60 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  IndexedStack(
-                    index: pageIndex,
-                    children: List<Widget>.generate(3, (index) {
-                      final page = _pageCache[index] ?? const SizedBox.shrink();
-                      return TickerMode(
-                        enabled: index == pageIndex,
-                        child: KeyedSubtree(
-                          key: ValueKey<int>(index),
-                          child: page,
-                        ),
-                      );
-                    }),
-                  ),
+                  // ── 3 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  ...List.generate(_pageCount, (i) {
+                    if (!_builtPages.contains(i)) {
+                      // 占位：保持索引稳定，类型始终是 SizedBox
+                      return const SizedBox.shrink();
+                    }
+                    final isActive = i == pageIndex;
+                    final isLeaving =
+                        _isAnimating && i == _previousIndex && i != pageIndex;
+
+                    // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
+                    return AnimatedBuilder(
+                      animation: _animController,
+                      builder: (context, child) {
+                        Offset translation = Offset.zero;
+                        double opacity = isActive ? 1.0 : 0.0;
+
+                        if (_isAnimating && isActive) {
+                          // 入场：从侧面滑入 + 淡入
+                          final t = Curves.easeOutCubic.transform(
+                            _animController.value,
+                          );
+                          translation = Offset(
+                            0.15 * _slideDirection * (1.0 - t),
+                            0,
+                          );
+                          opacity = t;
+                        } else if (isLeaving) {
+                          // 离场：向反方向滑出 + 淡出
+                          final t = Curves.easeInCubic.transform(
+                            _animController.value,
+                          );
+                          translation = Offset(-0.15 * _slideDirection * t, 0);
+                          opacity = 1.0 - t;
+                        }
+
+                        return IgnorePointer(
+                          ignoring: !isActive,
+                          child: FractionalTranslation(
+                            translation: translation,
+                            child: Opacity(
+                              opacity: opacity.clamp(0.0, 1.0),
+                              child: RepaintBoundary(child: child),
+                            ),
+                          ),
+                        );
+                      },
+                      child: _ensurePage(i),
+                    );
+                  }),
                   if (!isRecording)
                     FloatingNavBar(
                       currentIndex: pageIndex,
-                      onTap: (index) {
-                        ref.read(pageIndexProvider.notifier).state = index;
-                      },
+                      onTap: _switchToPage,
                       items: [
                         NavIslandItem(
                           icon: Icons.history_edu_rounded,

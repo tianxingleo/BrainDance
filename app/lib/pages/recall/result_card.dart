@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:braindance/configs/app_config.dart';
 import '../webgl_viewer.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
@@ -29,8 +30,11 @@ class SearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
-    final desc = model['description'] ?? '没有描述信息';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
+    final desc = model['description'] ?? textLocalize('recall_no_desc');
     final similarity = model['similarity'] as double?;
     final userId = model['user_id'] ?? '';
     final matchedFrames = model['matched_frames'] as List<dynamic>? ?? [];
@@ -193,7 +197,10 @@ class SearchResultCard extends StatelessWidget {
         ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
-    final sceneId = model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -217,26 +224,14 @@ class SearchResultCard extends StatelessWidget {
 
     Navigator.push(
       context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            WebGLViewerPage(
-              initialModelUrl: modelUrl,
-              posesUrl: posesUrl,
-              sceneId: sceneId,
-              initialPose: initialPose,
-              initialPoseId: initialPoseId,
-            ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
-          );
-        },
+      MaterialPageRoute(
+        builder: (context) => WebGLViewerPage(
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+          initialPoseId: initialPoseId,
+        ),
       ),
     );
   }

@@ -21,8 +21,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
 
-const double _kFovH = 65.0;
-const double _kFovV = 50.0;
 const double _kIdealAccelMin = 0.08;
 const double _kIdealAccelMax = 0.65;
 const double _kCautionAccelMax = 1.35;
@@ -31,13 +29,6 @@ const double _kInstantSpikeAccel = 2.60;
 const double _kJerkThreshold = 0.95;
 const int _kAccelHistoryLength = 40;
 const double _kFloatingNavReservedHeight = 112.0;
-
-class _CapturedFrame {
-  final double yaw;
-  final double pitch;
-
-  const _CapturedFrame(this.yaw, this.pitch);
-}
 
 enum _MotionState { steady, ideal, caution, danger }
 
@@ -52,13 +43,12 @@ class _RecordPageState extends ConsumerState<RecordPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
-  late AnimationController _hudAnimController; // 用于HUD角点呼吸
+  late AnimationController _hudAnimController; // HUD animation
 
   bool _showTips = false;
-  bool _isArMode = false;
-  bool _isArSampling = false;
-  bool _isMovingTooFast = false; // 用于异常运动警告
-  int _warningEndTime = 0; // 用于抖动警告显示状态的防抖停留时长
+  bool _isMotionHudEnabled = false;
+  bool _isMovingTooFast = false; // fast movement warning state
+  int _warningEndTime = 0; // warning hold duration
 
   Timer? _recordTimer;
   int _recordSeconds = 0;
@@ -66,7 +56,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
   StreamSubscription<MagnetometerEvent>? _magSub;
-  Timer? _sampleTimer;
 
   double _ax = 0;
   double _ay = 0;
@@ -79,8 +68,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _peakLinearAccel = 0;
   double _accelDelta = 0;
   double _motionMeter = 0;
-  String _motionHint = '保持缓慢移动';
-  String _motionDetail = '把手机当作滑轨，沿目标外圈匀速平移';
+  String _motionHint = textLocalize('reco_motion_steady');
+  String _motionDetail = textLocalize('reco_motion_detail');
   int _lastFastToastTime = 0;
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
@@ -89,7 +78,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _yaw = 0;
   double _pitch = 0;
 
-  final List<_CapturedFrame> _capturedFrames = [];
   final List<double> _accelHistory = [];
 
   @override
@@ -145,14 +133,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      if (_isArMode) {
+      if (_isMotionHudEnabled) {
         _stopSensors();
-        if (_isArSampling) {
-          setState(() {
-            _isArSampling = false;
-          });
-          _setGlobalRecording(false);
-        }
       }
 
       if (controller != null && controller.value.isInitialized) {
@@ -165,7 +147,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
             RecoConfig.disposeCamera();
             if (mounted) {
               setState(() {});
-              TDToast.showText(context: context, '应用切换导致录像中断，已保存录制内容');
+              TDToast.showText(
+                context: context,
+                textLocalize('reco_app_switch'),
+              );
             }
           });
         } else {
@@ -179,7 +164,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       if (RecoConfig.cameraController == null) {
         RecoConfig.cameraInitialize();
       }
-      if (_isArMode) {
+      if (_isMotionHudEnabled) {
         _startSensors();
       }
     }
@@ -210,13 +195,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
     var file = await controller.stopVideoRecording();
 
     if (showToast && mounted) {
-      TDToast.showText('录制完成', context: context);
+      TDToast.showText(textLocalize('reco_done'), context: context);
     }
 
     final permissionState = await PhotoManager.requestPermissionExtend();
     if (!permissionState.isAuth) {
       if (showToast && mounted) {
-        TDToast.showText('无法保存视频到相册。视频文件暂存于缓存中，注意缓存清理。', context: context);
+        TDToast.showText(textLocalize('reco_save_fail'), context: context);
       }
     } else {
       try {
@@ -229,11 +214,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
         if (savedFile != null) {
           file = XFile(savedFile.path);
         } else if (mounted) {
-          TDToast.showText('保存视频到相册时发生错误', context: context);
+          TDToast.showText(textLocalize('reco_save_error'), context: context);
         }
       } catch (_) {
         if (mounted) {
-          TDToast.showText('保存视频到相册时发生错误', context: context);
+          TDToast.showText(textLocalize('reco_save_error'), context: context);
         }
       }
     }
@@ -319,6 +304,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
       smoothedAccel,
       linearAccel * 0.78 + accelDelta * 0.42,
     );
+    final displayMotionMeter =
+        (_motionMeter * 0.82) + (motionMeter * 0.18);
 
     final nextState = switch (motionMeter) {
       <= _kIdealAccelMin => _MotionState.steady,
@@ -340,16 +327,16 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final currentWarning = now < _warningEndTime;
     final effectiveState = currentWarning ? _MotionState.danger : nextState;
     final nextHint = switch (effectiveState) {
-      _MotionState.steady => '开始缓慢移动',
-      _MotionState.ideal => '速度合适，继续匀速扫描',
-      _MotionState.caution => '稍微有点快，再慢一点',
-      _MotionState.danger => '移动过快，请立刻放慢',
+      _MotionState.steady => textLocalize('reco_hint_steady'),
+      _MotionState.ideal => textLocalize('reco_hint_ideal'),
+      _MotionState.caution => textLocalize('reco_hint_caution'),
+      _MotionState.danger => textLocalize('reco_hint_danger'),
     };
     final nextDetail = switch (effectiveState) {
-      _MotionState.steady => '不要停太久，缓慢平移能让采样更连续',
-      _MotionState.ideal => '沿着目标外圈平滑移动，避免突然转向',
-      _MotionState.caution => '把步幅减小一些，尽量保持手腕稳定',
-      _MotionState.danger => '检测到明显抖动或突发加速，请像滑轨一样慢慢移动',
+      _MotionState.steady => textLocalize('reco_detail_steady'),
+      _MotionState.ideal => textLocalize('reco_detail_ideal'),
+      _MotionState.caution => textLocalize('reco_detail_caution'),
+      _MotionState.danger => textLocalize('reco_detail_danger'),
     };
 
     if (currentWarning != _isMovingTooFast) {
@@ -362,7 +349,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (_isMovingTooFast && mounted && now - _lastFastToastTime > 1800) {
       _lastFastToastTime = now;
-      TDToast.showText(context: context, '检测到加速度过大，请缓慢移动手机');
+      TDToast.showText(context: context, textLocalize('reco_accel_warning'));
     }
 
     _syncMotionHaptics(effectiveState);
@@ -382,7 +369,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _smoothedLinearAccel = smoothedAccel;
         _peakLinearAccel = nextPeak;
         _accelDelta = accelDelta;
-        _motionMeter = motionMeter;
+        _motionMeter = displayMotionMeter;
         _motionHint = nextHint;
         _motionDetail = nextDetail;
         _motionState = effectiveState;
@@ -392,7 +379,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _smoothedLinearAccel = smoothedAccel;
       _peakLinearAccel = nextPeak;
       _accelDelta = accelDelta;
-      _motionMeter = motionMeter;
+      _motionMeter = displayMotionMeter;
       _motionHint = nextHint;
       _motionDetail = nextDetail;
       _motionState = effectiveState;
@@ -447,6 +434,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _hapticLoopState = null;
   }
 
+  void _resetMotionState() {
+    _linearAccel = 0;
+    _smoothedLinearAccel = 0;
+    _peakLinearAccel = 0;
+    _accelDelta = 0;
+    _motionMeter = 0;
+    _motionHint = textLocalize('reco_motion_steady');
+    _motionDetail = textLocalize('reco_motion_detail');
+    _motionState = _MotionState.steady;
+    _isMovingTooFast = false;
+    _warningEndTime = 0;
+    _accelHistory.clear();
+  }
+
   void _startSensors() {
     if (_accelSub != null || _userAccelSub != null || _magSub != null) {
       return;
@@ -478,14 +479,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
           _magZ = event.z;
           _computeOrientation();
         });
-
-    _sampleTimer ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (_isArMode && _isArSampling && mounted) {
-        setState(() {
-          _capturedFrames.add(_CapturedFrame(_yaw, _pitch));
-        });
-      }
-    });
   }
 
   void _stopSensors() {
@@ -496,61 +489,22 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _userAccelSub = null;
     _magSub?.cancel();
     _magSub = null;
-    _sampleTimer?.cancel();
-    _sampleTimer = null;
   }
 
-  void _toggleArMode() {
-    final isVideoRecording = ref.read(isRecordingProvider) && !_isArSampling;
-    if (isVideoRecording) {
-      return;
-    }
-
+  void _toggleMotionHud() {
     setState(() {
-      _isArMode = !_isArMode;
-      if (_isArMode) {
-        _capturedFrames.clear();
-        _linearAccel = 0;
-        _smoothedLinearAccel = 0;
-        _peakLinearAccel = 0;
-        _accelDelta = 0;
-        _motionMeter = 0;
-        _motionHint = '保持缓慢移动';
-        _motionDetail = '把手机当作滑轨，沿目标外圈匀速平移';
-        _motionState = _MotionState.steady;
-        _isMovingTooFast = false;
-        _warningEndTime = 0;
-        _accelHistory.clear();
+      _isMotionHudEnabled = !_isMotionHudEnabled;
+      if (_isMotionHudEnabled) {
+        _resetMotionState();
         _startSensors();
       } else {
         _stopSensors();
-        _isArSampling = false;
-        _setGlobalRecording(false);
+        _resetMotionState();
       }
     });
   }
 
-  void _toggleArSampling() {
-    if (!_isArMode) {
-      return;
-    }
-
-    setState(() {
-      _isArSampling = !_isArSampling;
-    });
-    _setGlobalRecording(_isArSampling);
-
-    if (mounted) {
-      TDToast.showText(_isArSampling ? '开始扫描覆盖' : '已暂停扫描', context: context);
-    }
-  }
-
   Future<void> _onRecordTap() async {
-    if (_isArMode) {
-      _toggleArSampling();
-      return;
-    }
-
     await _toggleVideoRecording();
   }
 
@@ -589,15 +543,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
       late final String label;
       switch (cam.lensDirection) {
         case CameraLensDirection.back:
-          label = '后置$backCount';
+          label = 'Rear$backCount';
           backCount++;
           break;
         case CameraLensDirection.front:
-          label = '前置$frontCount';
+          label = 'Front$frontCount';
           frontCount++;
           break;
         case CameraLensDirection.external:
-          label = '外置$externalCount';
+          label = 'External$externalCount';
           externalCount++;
           break;
       }
@@ -621,7 +575,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
                     await RecoConfig.trySwitchCameraDescription(i);
                   } catch (_) {
                     if (context.mounted) {
-                      TDToast.showText('录像中无法直接切换传感器', context: context);
+                      TDToast.showText(
+                        textLocalize('reco_no_switch'),
+                        context: context,
+                      );
                     }
                   }
                   return;
@@ -692,11 +649,57 @@ class _RecordPageState extends ConsumerState<RecordPage>
     return cameraSwitchButtons;
   }
 
+  int? _findPrimaryCameraIndex(CameraLensDirection direction) {
+    final cameras = RecoConfig.cameras;
+    for (var i = 0; i < cameras.length; i++) {
+      if (cameras[i].lensDirection == direction) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _switchPrimaryCamera() async {
+    if (!RecoConfig.cameraEnabled || RecoConfig.cameras.isEmpty) {
+      return;
+    }
+
+    final currentDirection =
+        RecoConfig.cameras[RecoConfig.camNum].lensDirection;
+    final targetDirection = currentDirection == CameraLensDirection.front
+        ? CameraLensDirection.back
+        : CameraLensDirection.front;
+    final targetIndex = _findPrimaryCameraIndex(targetDirection);
+
+    if (targetIndex == null || targetIndex == RecoConfig.camNum) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+      }
+      return;
+    }
+
+    try {
+      if (ref.read(isRecordingProvider)) {
+        await RecoConfig.trySwitchCameraDescription(targetIndex);
+      } else {
+        RecoConfig.camNum = targetIndex;
+        await RecoConfig.cameraInitialize();
+      }
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = AppConfig.isNightMode;
-    final isVideoRecording = ref.watch(isRecordingProvider) && !_isArSampling;
-    final isAnyRecording = isVideoRecording || _isArSampling;
+    final isVideoRecording = ref.watch(isRecordingProvider);
+    final isAnyRecording = isVideoRecording;
     final darkInput = const Color(0xFF23232A);
 
     Widget cameraView;
@@ -732,11 +735,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
       );
     }
 
-    final cameraSwitchButtons = _buildCameraSwitchButtons(
-      context,
-      isAnyRecording,
-    );
     final mediaQuery = MediaQuery.of(context);
+    final currentLensDirection = RecoConfig.cameras.isNotEmpty
+        ? RecoConfig.cameras[RecoConfig.camNum].lensDirection
+        : CameraLensDirection.back;
+    final canSwitchPrimaryCamera =
+        _findPrimaryCameraIndex(CameraLensDirection.front) != null &&
+        _findPrimaryCameraIndex(CameraLensDirection.back) != null;
+    final cornerControlBottom = mediaQuery.padding.bottom + 28;
     final bottomOffset =
         mediaQuery.padding.bottom +
         (isAnyRecording ? 36 : _kFloatingNavReservedHeight + 18);
@@ -749,108 +755,28 @@ class _RecordPageState extends ConsumerState<RecordPage>
           Positioned.fill(
             child: CustomPaint(
               painter: RecordHUDPainter(
-                isWarning: _isMovingTooFast,
-                isCaution: _motionState == _MotionState.caution,
-                motionValue: _motionMeter,
+                isWarning: _isMotionHudEnabled && _isMovingTooFast,
+                isCaution:
+                    _isMotionHudEnabled && _motionState == _MotionState.caution,
+                motionValue: _isMotionHudEnabled ? _motionMeter : 0,
                 animation: _hudAnimController,
               ),
             ),
           ),
-          if (_isArMode)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _FogOfWarPainter(
-                  capturedFrames: _capturedFrames,
-                  currentYaw: _yaw,
-                  currentPitch: _pitch,
-                ),
-              ),
-            ),
           Positioned(
-            top: mediaQuery.padding.top + 12,
+            top: mediaQuery.padding.top + 16,
             left: 16,
-            right: 16,
-            child: _RecordOverlayPanel(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: cameraSwitchButtons,
-                ),
-              ),
-            ),
-          ),
-          if (!isVideoRecording)
-            Positioned(
-              top: mediaQuery.padding.top + 82,
-              right: 16,
-              child: _RecordOverlayPanel(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        TDIcons.scan,
-                        color: _isArMode
-                            ? BDDesign.colorPaperWhite
-                            : BDDesign.colorAshGray,
-                        size: 24,
-                      ),
-                      onPressed: _toggleArMode,
-                    ),
-                    if (!_isArMode)
-                      IconButton(
-                        icon: const Icon(
-                          TDIcons.refresh,
-                          color: BDDesign.colorAshGray,
-                          size: 24,
-                        ),
-                        onPressed: isAnyRecording
-                            ? null
-                            : () => RecoConfig.cameraSwitch(),
-                      ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.info_outline,
-                        color: BDDesign.colorAshGray,
-                        size: 24,
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          _showTips = true;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          Positioned(
-            top: mediaQuery.padding.top + 72,
-            left: 20,
             child: AnimatedSwitcher(
               duration: BDMotion.durationFast,
               switchInCurve: BDMotion.curveEnter,
               switchOutCurve: BDMotion.curveExit,
-              child: !_isArMode
+              child: !_isMotionHudEnabled
                   ? const SizedBox.shrink()
-                  : _MotionGuidanceCard(
-                      yaw: _yaw,
-                      pitch: _pitch,
-                      frameCount: _capturedFrames.length,
-                      linearAccel: _linearAccel,
-                      smoothedLinearAccel: _smoothedLinearAccel,
-                      peakLinearAccel: _peakLinearAccel,
-                      accelDelta: _accelDelta,
+                  : _SimpleMotionGuidanceCard(
                       motionMeter: _motionMeter,
                       motionState: _motionState,
-                      motionDetail: _motionDetail,
-                      accelHistory: _accelHistory,
-                      isMovingTooFast: _isMovingTooFast,
                       motionHint: _motionHint,
+                      motionDetail: _motionDetail,
                     ),
             ),
           ),
@@ -861,32 +787,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (isVideoRecording || _isArSampling) ...[
+                if (isVideoRecording) ...[
                   AnimatedSwitcher(
                     duration: BDMotion.durationFast,
                     switchInCurve: BDMotion.curveEnter,
                     switchOutCurve: BDMotion.curveExit,
-                    child: isVideoRecording
-                        ? _StatusPill(
-                            key: ValueKey<String>(
-                              'rec_${_recordSeconds}_${_capturedFrames.length}',
-                            ),
-                            label:
-                                'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
-                            color: Colors.redAccent,
-                            backgroundColor: darkInput,
-                            isSquareDot: true,
-                            compact: true,
-                          )
-                        : _StatusPill(
-                            key: ValueKey<String>(
-                              'scan_${_capturedFrames.length}',
-                            ),
-                            label: '${_capturedFrames.length} F',
-                            color: BDDesign.colorPaperWhite,
-                            backgroundColor: darkInput,
-                            compact: true,
-                          ),
+                    child: _StatusPill(
+                      key: ValueKey<String>('rec_$_recordSeconds'),
+                      label:
+                          'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                      color: Colors.redAccent,
+                      backgroundColor: darkInput,
+                      isSquareDot: true,
+                      compact: true,
+                    ),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -961,6 +875,100 @@ class _RecordPageState extends ConsumerState<RecordPage>
               ],
             ),
           ),
+          Positioned(
+            left: 16,
+            bottom: cornerControlBottom,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _RecordOverlayPanel(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      currentLensDirection == CameraLensDirection.front
+                          ? Icons.camera_front
+                          : Icons.camera_rear,
+                      color: canSwitchPrimaryCamera
+                          ? BDDesign.colorPaperWhite
+                          : BDDesign.colorAshGray,
+                      size: 24,
+                    ),
+                    onPressed: canSwitchPrimaryCamera
+                        ? _switchPrimaryCamera
+                        : null,
+                  ),
+                ),
+                if (!isVideoRecording) ...[
+                  const SizedBox(width: 12),
+                  _RecordOverlayPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.close,
+                        color: BDDesign.colorAshGray,
+                        size: 24,
+                      ),
+                      onPressed: () => Navigator.maybePop(context),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Positioned(
+            right: 16,
+            bottom: cornerControlBottom,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isVideoRecording) ...[
+                  _RecordOverlayPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.info_outline,
+                        color: BDDesign.colorAshGray,
+                        size: 24,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _showTips = true;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
+                _RecordOverlayPanel(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                  child: IconButton(
+                    icon: Icon(
+                      _isMotionHudEnabled
+                          ? Icons.speed_rounded
+                          : Icons.speed_outlined,
+                      color: _isMotionHudEnabled
+                          ? BDDesign.colorPaperWhite
+                          : BDDesign.colorAshGray,
+                      size: 24,
+                    ),
+                    onPressed: _toggleMotionHud,
+                  ),
+                ),
+              ],
+            ),
+          ),
           if (_showTips)
             Positioned.fill(
               child: Container(
@@ -985,9 +993,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       children: [
                         Row(
                           children: [
-                            const Expanded(
+                            Expanded(
                               child: Text(
-                                '扫描提示',
+                                textLocalize('reco_scan_tip'),
                                 style: TextStyle(
                                   color: BDDesign.colorPaperWhite,
                                   fontSize: 20,
@@ -996,8 +1004,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
                               ),
                             ),
                             _StatusPill(
-                              label: _isArMode ? 'HUD' : 'VIDEO',
-                              color: _isArMode
+                              label: _isMotionHudEnabled
+                                  ? textLocalize('sensor_on')
+                                  : textLocalize('sensor_off'),
+                              color: _isMotionHudEnabled
                                   ? BDDesign.colorFadedOlive
                                   : BDDesign.colorMutedBlueLight,
                               backgroundColor: const Color(0xFF23232A),
@@ -1034,7 +1044,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                           children: [
                             Expanded(
                               child: Text(
-                                '先把手机当作滑轨，再开始采集。',
+                                textLocalize('reco_scan_before'),
                                 style: TextStyle(
                                   color: Colors.white.withAlpha(168),
                                   fontSize: 12.5,
@@ -1050,7 +1060,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                                   _showTips = false;
                                 });
                               },
-                              text: '知道了',
+                              text: textLocalize('reco_scan_ok'),
                               style: TDButtonStyle(
                                 backgroundColor: BDDesign.colorMutedBlue,
                                 textColor: Colors.white,
@@ -1108,74 +1118,6 @@ class _TipBlock extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _FogOfWarPainter extends CustomPainter {
-  final List<_CapturedFrame> capturedFrames;
-  final double currentYaw;
-  final double currentPitch;
-
-  const _FogOfWarPainter({
-    required this.capturedFrames,
-    required this.currentYaw,
-    required this.currentPitch,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final layerPaint = Paint()..color = Colors.black.withAlpha(217);
-    canvas.saveLayer(Rect.fromLTWH(0, 0, size.width, size.height), Paint());
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), layerPaint);
-
-    final clearPaint = Paint()
-      ..blendMode = BlendMode.clear
-      ..style = PaintingStyle.fill;
-
-    for (final frame in capturedFrames) {
-      var dx = frame.yaw - currentYaw;
-      if (dx > 180) {
-        dx -= 360;
-      }
-      if (dx < -180) {
-        dx += 360;
-      }
-      final dy = frame.pitch - currentPitch;
-
-      final screenX = size.width / 2 + (dx / _kFovH) * size.width;
-      final screenY = size.height / 2 - (dy / _kFovV) * size.height;
-
-      canvas.drawRect(
-        Rect.fromCenter(
-          center: Offset(screenX, screenY),
-          width: size.width,
-          height: size.height,
-        ),
-        clearPaint,
-      );
-    }
-
-    canvas.restore();
-
-    final guidePaint = Paint()
-      ..color = Colors.white.withAlpha(77)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: size.center(Offset.zero),
-        width: size.width,
-        height: size.height,
-      ),
-      guidePaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_FogOfWarPainter oldDelegate) {
-    return oldDelegate.currentYaw != currentYaw ||
-        oldDelegate.currentPitch != currentPitch ||
-        oldDelegate.capturedFrames.length != capturedFrames.length;
   }
 }
 
@@ -1256,41 +1198,38 @@ class _RecordOverlayPanel extends StatelessWidget {
   }
 }
 
-class _MotionGuidanceCard extends StatelessWidget {
-  final double yaw;
-  final double pitch;
-  final int frameCount;
-  final double linearAccel;
-  final double smoothedLinearAccel;
-  final double peakLinearAccel;
-  final double accelDelta;
+class _SimpleMotionGuidanceCard extends StatelessWidget {
   final double motionMeter;
   final _MotionState motionState;
-  final String motionDetail;
-  final List<double> accelHistory;
-  final bool isMovingTooFast;
   final String motionHint;
+  final String motionDetail;
 
-  const _MotionGuidanceCard({
-    required this.yaw,
-    required this.pitch,
-    required this.frameCount,
-    required this.linearAccel,
-    required this.smoothedLinearAccel,
-    required this.peakLinearAccel,
-    required this.accelDelta,
+  const _SimpleMotionGuidanceCard({
     required this.motionMeter,
     required this.motionState,
-    required this.motionDetail,
-    required this.accelHistory,
-    required this.isMovingTooFast,
     required this.motionHint,
+    required this.motionDetail,
   });
 
   @override
   Widget build(BuildContext context) {
-    final safePeak = max(peakLinearAccel, _kInstantSpikeAccel);
-    final normalizedAccel = (motionMeter / safePeak).clamp(0.0, 1.0);
+    final size = MediaQuery.of(context).size;
+    final cardWidth = (size.width * 0.42).clamp(170.0, 220.0);
+    final progressValue = switch (motionState) {
+      _MotionState.steady => 0.18,
+      _MotionState.ideal => 0.42 + (motionMeter / _kIdealAccelMax) * 0.18,
+      _MotionState.caution =>
+        0.68 +
+            ((motionMeter - _kIdealAccelMax) /
+                    (_kCautionAccelMax - _kIdealAccelMax)) *
+                0.18,
+      _MotionState.danger =>
+        0.9 +
+            ((motionMeter - _kCautionAccelMax) /
+                    (_kInstantSpikeAccel - _kCautionAccelMax)) *
+                0.1,
+    };
+    final normalizedAccel = progressValue.clamp(0.0, 1.0);
     final guideColor = switch (motionState) {
       _MotionState.steady => BDDesign.colorMutedBlue,
       _MotionState.ideal => BDDesign.colorFadedOlive,
@@ -1298,18 +1237,18 @@ class _MotionGuidanceCard extends StatelessWidget {
       _MotionState.danger => BDDesign.colorDarkRed,
     };
     final stateLabel = switch (motionState) {
-      _MotionState.steady => '偏静止',
-      _MotionState.ideal => '平稳',
-      _MotionState.caution => '稍快',
-      _MotionState.danger => '过快',
+      _MotionState.steady => textLocalize('reco_state_steady'),
+      _MotionState.ideal => textLocalize('reco_state_ideal'),
+      _MotionState.caution => textLocalize('reco_state_caution'),
+      _MotionState.danger => textLocalize('reco_state_danger'),
     };
 
     return Container(
-      width: 260,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      width: cardWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: BDDesign.colorInkBlack.withAlpha(216),
-        borderRadius: BDDesign.radiusSmall,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: guideColor.withAlpha(160)),
         boxShadow: [BDDesign.shadowElevated],
       ),
@@ -1320,8 +1259,8 @@ class _MotionGuidanceCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 10,
-                height: 10,
+                width: 9,
+                height: 9,
                 decoration: BoxDecoration(
                   color: guideColor,
                   shape: BoxShape.circle,
@@ -1330,16 +1269,18 @@ class _MotionGuidanceCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  motionHint,
-                  style: TextStyle(
+                  textLocalize('sensor_on'),
+                  style: const TextStyle(
                     color: BDDesign.colorPaperWhite,
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: guideColor.withAlpha(36),
                   borderRadius: BorderRadius.circular(999),
@@ -1348,7 +1289,7 @@ class _MotionGuidanceCard extends StatelessWidget {
                   stateLabel,
                   style: TextStyle(
                     color: guideColor,
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1356,72 +1297,41 @@ class _MotionGuidanceCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(
-              minHeight: 8,
-              value: normalizedAccel,
-              backgroundColor: Colors.white.withAlpha(28),
-              valueColor: AlwaysStoppedAnimation<Color>(guideColor),
-            ),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: normalizedAccel),
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, _) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 9,
+                  value: value,
+                  backgroundColor: Colors.white.withAlpha(28),
+                  valueColor: AlwaysStoppedAnimation<Color>(guideColor),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           Text(
-            '实时 ${motionMeter.toStringAsFixed(2)}  平滑 ${smoothedLinearAccel.toStringAsFixed(2)}  峰值 ${peakLinearAccel.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: BDDesign.colorPaperWhite,
-              fontFamily: 'Courier',
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.8,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 68,
-            child: CustomPaint(
-              painter: _AccelHistoryPainter(
-                samples: accelHistory,
-                color: guideColor,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '推荐区间 ${_kIdealAccelMin.toStringAsFixed(2)} - ${_kIdealAccelMax.toStringAsFixed(2)} m/s^2',
-            style: TextStyle(
-              color: Colors.white.withAlpha(170),
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            motionDetail,
+            motionHint,
             style: TextStyle(
               color: Colors.white.withAlpha(210),
               fontSize: 11,
               height: 1.35,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           Text(
-            'YAW ${yaw.toStringAsFixed(1)}°   PTH ${pitch.toStringAsFixed(1)}°   Δ ${accelDelta.toStringAsFixed(2)}',
-            style: const TextStyle(
-              color: BDDesign.colorPaperWhite,
-              fontFamily: 'Courier',
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              letterSpacing: 0.8,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'FRM $frameCount   RAW ${linearAccel.toStringAsFixed(2)}  建议让曲线尽量停在绿色带',
+            motionDetail,
             style: TextStyle(
               color: BDDesign.colorAshGray.withAlpha(220),
-              fontSize: 11,
+              fontSize: 10,
+              height: 1.3,
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -1531,3 +1441,4 @@ class _AccelHistoryPainter extends CustomPainter {
     return oldDelegate.samples != samples || oldDelegate.color != color;
   }
 }
+

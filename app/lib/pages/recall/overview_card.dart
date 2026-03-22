@@ -1,6 +1,6 @@
+import 'package:braindance/configs/app_config.dart';
 import 'package:flutter/material.dart';
-
-import '../../configs/motion_tokens.dart';
+import 'package:braindance/configs/motion_tokens.dart';
 import '../../widgets/bd_surfaces.dart';
 
 class RecallOverviewCard extends StatelessWidget {
@@ -38,67 +38,32 @@ class RecallOverviewCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '空间档案概览',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: hintColor,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '把空间、任务和检索线索压进同一条记忆流里。',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          height: 1.4,
-                          color: hintColor.withValues(alpha: 0.88),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                IconButton(
-                  onPressed: onOpenTasks,
-                  icon: Icon(
-                    Icons.task_alt_rounded,
-                    color: hintColor,
-                    size: 20,
-                  ),
-                  tooltip: '任务列表',
-                  splashRadius: 20,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
-              ],
+            Text(
+              textLocalize('recall_summary_title'),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: hintColor,
+              ),
             ),
             const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
                   child: _RecallMetric(
-                    label: '空间',
+                    label: textLocalize('recall_label_space'),
                     value: allModelCount.toString(),
                   ),
                 ),
                 Expanded(
                   child: _RecallMetric(
-                    label: '处理中',
+                    label: textLocalize('recall_label_processing'),
                     value: processingTaskCount.toString(),
                   ),
                 ),
                 Expanded(
                   child: _RecallMetric(
-                    label: 'RAG',
+                    label: textLocalize('recall_label_rag'),
                     value: isLocalIndexing ? '...' : ragCount.toString(),
                     accent: textColor,
                   ),
@@ -106,23 +71,64 @@ class RecallOverviewCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _OverviewChip(
-                  label: '近日新增',
-                  value: recentCount.toString(),
-                  isDark: isDark,
-                ),
-                _OverviewChip(
-                  label: '已就绪空间',
-                  value: allModelCount.toString(),
-                  isDark: isDark,
-                ),
-              ],
+            _OverviewChip(
+              label: textLocalize('recall_recent_added'),
+              value: recentCount.toString(),
+              isDark: isDark,
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: _TaskButton(isDark: isDark, onTap: onOpenTasks),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskButton extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _TaskButton({required this.isDark, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDark
+        ? BDDesign.colorMutedBlueLight
+        : BDDesign.colorMutedBlue;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.11),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.task_alt_rounded, color: color, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  textLocalize('recall_task_list'),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: color, size: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -153,6 +159,7 @@ class _OverviewChip extends StatelessWidget {
         : BDDesign.colorInkBlack;
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: bgColor,
@@ -160,7 +167,6 @@ class _OverviewChip extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             value,

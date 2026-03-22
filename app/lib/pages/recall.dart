@@ -1,12 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:dio/dio.dart';
-import 'package:llamadart/llamadart.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:llamadart/llamadart.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,12 +18,16 @@ import '../main.dart'
         pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
+import '../services/download_event_bus.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
 import 'recall/local_ai_panel.dart';
 import 'recall/model_grid.dart';
 import 'recall/processing_section.dart';
 import 'webgl_viewer.dart';
+import 'task_list.dart';
+import 'recall/top_summary_card.dart';
+import 'recall/model_card.dart';
 
 enum _RecallSearchMode { cloud, local, localAi }
 
@@ -56,7 +61,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   );
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
-  Timer? _searchDebounce;
+  Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
   _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
@@ -72,13 +77,17 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   int? _modelDownloadTotalBytes;
   final Map<String, GlobalKey> _modelCardKeys = {};
   final Map<String, _RecallSearchCacheEntry> _searchCache = {};
+  final GlobalKey _actionOverlayStackKey = GlobalKey();
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
+  bool _didFinishInitialModelLoad = false;
   bool _isTabActive = true;
   bool _shouldRefreshProcessingOnResume = false;
+  bool _isModelPollingInFlight = false;
   int _searchRequestId = 0;
   String? _lastSearchKey;
+  String _lastOwnModelSignature = '';
 
   @override
   void initState() {
@@ -90,7 +99,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   @override
   void dispose() {
-    _searchDebounce?.cancel();
+    _modelPollingTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
     _localModelUrlController.dispose();
@@ -102,7 +111,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final isTabActive = TickerMode.valuesOf(context).enabled;
+    final isTabActive = TickerMode.of(context);
     if (_isTabActive == isTabActive) {
       return;
     }
@@ -111,6 +120,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _shouldRefreshProcessingOnResume = false;
       unawaited(_fetchProcessingTasks());
     }
+    _syncModelPollingState();
   }
 
   void _bootstrapPage() {
@@ -122,6 +132,113 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     unawaited(_fetchModels());
     unawaited(_fetchProcessingTasks());
     _setupRealtimeListener();
+    _syncModelPollingState();
+  }
+
+  void _syncModelPollingState() {
+    if (!_isTabActive) {
+      _modelPollingTimer?.cancel();
+      _modelPollingTimer = null;
+      return;
+    }
+    _modelPollingTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_pollModelUpdates()),
+    );
+  }
+
+  List<Map<String, dynamic>> _extractOwnModels(
+    List<Map<String, dynamic>> models,
+  ) {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+    return models
+        .where((model) => model['user_id']?.toString() == currentUserId)
+        .map((model) => Map<String, dynamic>.from(model))
+        .toList();
+  }
+
+  String _buildModelSignature(List<Map<String, dynamic>> models) {
+    if (models.isEmpty) {
+      return '';
+    }
+    final parts = models
+        .map((model) {
+          final id = model['id']?.toString() ?? '';
+          final sceneId = model['scene_id']?.toString() ?? '';
+          final createdAt = model['created_at']?.toString() ?? '';
+          return '$id|$sceneId|$createdAt';
+        })
+        .toList()
+      ..sort();
+    return parts.join('||');
+  }
+
+  Future<String> _fetchRemoteOwnModelSignature() async {
+    final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+    if (currentUserId == null || currentUserId.isEmpty) {
+      return '';
+    }
+    final response = await Supabase.instance.client
+        .from('model_assets')
+        .select('id, scene_id, created_at')
+        .eq('user_id', currentUserId)
+        .order('created_at', ascending: false);
+    final ownModels = List<Map<String, dynamic>>.from(response);
+    return _buildModelSignature(ownModels);
+  }
+
+  Future<void> _refreshModelsForCurrentState({
+    bool showLoadingIndicator = true,
+  }) async {
+    final query = _searchController.text.trim();
+    if (!mounted) return;
+    if (showLoadingIndicator) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+    final results = await Future.wait([
+      _fetchModels(
+        preserveExistingDataOnError: !showLoadingIndicator,
+        showErrorToast: showLoadingIndicator,
+      ),
+      _fetchProcessingTasks(),
+    ]);
+    final didRefreshModels = results.first as bool;
+    if (!mounted || !didRefreshModels || query.isEmpty) {
+      return;
+    }
+    await _searchModels(query);
+  }
+
+  Future<void> _pollModelUpdates() async {
+    if (!mounted ||
+        !_didFinishInitialModelLoad ||
+        !_isTabActive ||
+        _isLoading ||
+        _isModelPollingInFlight ||
+        _activeModelAction != null) {
+      return;
+    }
+
+    _isModelPollingInFlight = true;
+    try {
+      final remoteSignature = await _fetchRemoteOwnModelSignature();
+      if (!mounted) {
+        return;
+      }
+      if (remoteSignature == _lastOwnModelSignature) {
+        return;
+      }
+      await _refreshModelsForCurrentState(showLoadingIndicator: false);
+    } catch (_) {
+      // Ignore polling failures and retry on the next cycle.
+    } finally {
+      _isModelPollingInFlight = false;
+    }
   }
 
   Future<void> _restoreLocalModelPath() async {
@@ -490,7 +607,7 @@ $userQuestion
 
     final parts = <String>[
       '片段$index',
-      '场景：${model['display_name']?.toString() ?? model['scene_id']?.toString() ?? '未知场景'}',
+      '场景：${_modelDisplayName(model, fallback: '未知场景')}',
       '描述：${model['description']?.toString() ?? '暂无描述'}',
       if (tags.isNotEmpty) '标签：$tags',
       if (objects.isNotEmpty) '对象：$objects',
@@ -626,23 +743,26 @@ $userQuestion
       // 更新或添加 processing 任务
       final logsJson = newData['logs'] as List<dynamic>?;
       final allLogs = _parseAllLogMsgs(logsJson);
-
-      setState(() {
-        // 移除旧版本（如果存在）
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        // 添加更新后的任务
-        _processingTasks.add(Map<String, dynamic>.from(newData));
-        if (allLogs.isNotEmpty) {
-          _taskAllLogs[taskId] = allLogs;
-        }
-      });
+      if (mounted) {
+        setState(() {
+          // 移除旧版本（如果存在）
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          // 添加更新后的任务
+          _processingTasks.add(Map<String, dynamic>.from(newData));
+          if (allLogs.isNotEmpty) {
+            _taskAllLogs[taskId] = allLogs;
+          }
+        });
+      }
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
-      setState(() {
-        _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
-        _taskAllLogs.remove(taskId);
-        _expandedTaskLogs.remove(taskId);
-      });
+      if (mounted) {
+        setState(() {
+          _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
+          _taskAllLogs.remove(taskId);
+          _expandedTaskLogs.remove(taskId);
+        });
+      }
     }
   }
 
@@ -728,7 +848,10 @@ $userQuestion
     }
   }
 
-  Future<void> _fetchModels() async {
+  Future<bool> _fetchModels({
+    bool preserveExistingDataOnError = false,
+    bool showErrorToast = true,
+  }) async {
     try {
       final response = await Supabase.instance.client
           .from('model_assets')
@@ -739,23 +862,30 @@ $userQuestion
 
       final models = List<Map<String, dynamic>>.from(response);
 
-      // 从 processing_tasks 获取 display_name，关联到 model_assets
+      // 从 processing_tasks 获取 display_name 并合并
       try {
-        final tasks = await Supabase.instance.client
-            .from('processing_tasks')
-            .select('scene_id, display_name');
-        final nameMap = <String, String>{};
-        for (final t in tasks) {
-          final sid = t['scene_id']?.toString();
-          final dn = t['display_name']?.toString();
-          if (sid != null && dn != null && dn.isNotEmpty) {
-            nameMap[sid] = dn;
+        final sceneIds = models
+            .map((m) => m['scene_id']?.toString())
+            .where((s) => s != null)
+            .toList();
+        if (sceneIds.isNotEmpty) {
+          final tasksResp = await Supabase.instance.client
+              .from('processing_tasks')
+              .select('scene_id, display_name')
+              .inFilter('scene_id', sceneIds);
+          final tasksList = List<Map<String, dynamic>>.from(tasksResp);
+          final displayNameMap = <String, String>{};
+          for (final t in tasksList) {
+            final dn = t['display_name']?.toString();
+            if (dn != null && dn.isNotEmpty) {
+              displayNameMap[t['scene_id'].toString()] = dn;
+            }
           }
-        }
-        for (final m in models) {
-          final sid = m['scene_id']?.toString();
-          if (sid != null && nameMap.containsKey(sid)) {
-            m['display_name'] = nameMap[sid];
+          for (final m in models) {
+            final sid = m['scene_id']?.toString();
+            if (sid != null && displayNameMap.containsKey(sid)) {
+              m['display_name'] = displayNameMap[sid];
+            }
           }
         }
       } catch (_) {
@@ -767,33 +897,56 @@ $userQuestion
       }
 
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(models),
+        );
         setState(() {
           _allModels = models;
           _models = models;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
         _updateOverviewProvider();
       }
       _searchCache.clear();
       _lastSearchKey = null;
       await _syncLocalIndex(models);
+      return true;
     } catch (e) {
+      if (preserveExistingDataOnError) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return false;
+      }
+
       final demoModels = [_buildDemoModel()];
       if (mounted) {
+        final ownModelSignature = _buildModelSignature(
+          _extractOwnModels(demoModels),
+        );
         setState(() {
           _allModels = demoModels;
           _models = demoModels;
+          _didFinishInitialModelLoad = true;
           _isLoading = false;
+          _lastOwnModelSignature = ownModelSignature;
         });
         _updateOverviewProvider();
-        TDToast.showText(
-          '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
-          context: context,
-        );
+        if (showErrorToast) {
+          TDToast.showText(
+            '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
+            context: context,
+          );
+        }
       }
       _searchCache.clear();
       _lastSearchKey = null;
       await _syncLocalIndex(demoModels);
+      return false;
     }
   }
 
@@ -862,10 +1015,7 @@ $userQuestion
   ) {
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final model in models) {
-      final name =
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          'Unknown';
+      final name = _modelDisplayName(model, fallback: 'Unknown');
       groups.putIfAbsent(name, () => []).add(model);
     }
     for (final list in groups.values) {
@@ -878,6 +1028,33 @@ $userQuestion
       });
     }
     return groups;
+  }
+
+  String _modelDisplayName(
+    Map<String, dynamic> model, {
+    String fallback = 'Unknown Scene',
+  }) {
+    final displayName = model['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final tags = model['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+    }
+
+    final sceneId = model['scene_id']?.toString().trim() ?? '';
+    if (sceneId.isNotEmpty) {
+      return sceneId;
+    }
+
+    return fallback;
   }
 
   // 更黑的夜间色值
@@ -894,6 +1071,7 @@ $userQuestion
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
+        key: _actionOverlayStackKey,
         children: [
           BDPageBackdrop(
             child: SafeArea(
@@ -922,10 +1100,7 @@ $userQuestion
                                 ),
                                 tooltip: textLocalize("recall_refresh"),
                                 onPressed: () {
-                                  setState(() {
-                                    _isLoading = true;
-                                  });
-                                  _fetchModels();
+                                  unawaited(_refreshModelsForCurrentState());
                                 },
                               ),
                             ],
@@ -981,7 +1156,6 @@ $userQuestion
                                                   IconButton(
                                                     onPressed: () {
                                                       _searchController.clear();
-                                                      _searchDebounce?.cancel();
                                                       _searchModels('');
                                                     },
                                                     icon: Icon(
@@ -1024,7 +1198,7 @@ $userQuestion
                                   onSubmitted: (value) {
                                     unawaited(_handleSearchSubmitted(value));
                                   },
-                                  onChanged: _onSearchChanged,
+                                  onChanged: _searchModels,
                                 ),
                               ),
                               if (_searchMode == _RecallSearchMode.localAi) ...[
@@ -1123,8 +1297,9 @@ $userQuestion
                       modelCardKeyFor: _modelCardKeyFor,
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
+                      toPublicUrl: _toPublicUrl,
                       onShowModelActions: (model) {
-                        unawaited(_showModelActions(model));
+                        _showModelActions(model);
                       },
                     )
                   else
@@ -1139,7 +1314,7 @@ $userQuestion
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
                       onShowModelActions: (model) {
-                        unawaited(_showModelActions(model));
+                        _showModelActions(model);
                       },
                       onAddNewTask: (name) {
                         ref.read(pageIndexProvider.notifier).state = 1;
@@ -1158,6 +1333,7 @@ $userQuestion
               darkInput: darkInput,
               model: _activeModelAction!,
               rect: _activeModelActionRect!,
+              toPublicUrl: _toPublicUrl,
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
               onShowModelDetails: _showModelDetails,
@@ -1261,15 +1437,10 @@ $userQuestion
       return List<Map<String, dynamic>>.from(data['results'] ?? []);
     }
 
-    final errMsg = (data is Map) ? (data['error'] ?? '未知错误') : '服务器返回异常';
+    final errMsg = (data is Map)
+        ? (data['error'] ?? textLocalize('recall_unknown_error'))
+        : textLocalize('recall_server_error');
     throw Exception(errMsg);
-  }
-
-  void _onSearchChanged(String value) {
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
-      _searchModels(value);
-    });
   }
 
   Future<void> _handleSearchSubmitted(String value) async {
@@ -1715,7 +1886,7 @@ $userQuestion
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId =
-        model['display_name'] ?? model['scene_id'] ?? 'Unknown Scene';
+        _modelDisplayName(model);
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -1739,26 +1910,14 @@ $userQuestion
 
     Navigator.push(
       context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            WebGLViewerPage(
-              initialModelUrl: modelUrl,
-              posesUrl: posesUrl,
-              sceneId: sceneId,
-              initialPose: initialPose,
-              initialPoseId: initialPoseId,
-            ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: 0.95, end: 1.0).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            ),
-          );
-        },
+      MaterialPageRoute(
+        builder: (context) => WebGLViewerPage(
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+          initialPoseId: initialPoseId,
+        ),
       ),
     );
   }
@@ -1778,7 +1937,7 @@ $userQuestion
     if (!mounted) {
       return;
     }
-    TDToast.showText(context: context, '已发布到社区');
+    TDToast.showText(context: context, textLocalize('recall_published'));
   }
 
   Future<String> _getLocalModelSizeLabel(Map<String, dynamic> model) async {
@@ -1810,31 +1969,56 @@ $userQuestion
       }
 
       final sizeMb = sizeBytes / 1024 / 1024;
-      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)} MB';
+      return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)}MB';
     } catch (_) {
       return '';
     }
+  }
+
+  Future<void> _showModelActions(Map<String, dynamic> model) async {
+    final cardKey = _modelCardKeyFor(model);
+    final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayRenderBox =
+        _actionOverlayStackKey.currentContext?.findRenderObject()
+            as RenderBox?;
+    if (renderBox == null || overlayRenderBox == null) return;
+    final offset = renderBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayRenderBox,
+    );
+    final rect = offset & renderBox.size;
+    final sizeLabel = await _getLocalModelSizeLabel(model);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _activeModelAction = {
+        ...model,
+        if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+      };
+      _activeModelActionRect = rect;
+    });
   }
 
   Future<void> _showModelDetails(Map<String, dynamic> model) async {
     final sceneId = model['scene_id']?.toString();
     final sizeLabel = await _getLocalModelSizeLabel(model);
 
+    // 从 processing_tasks 表获取详细信息
     Map<String, dynamic>? taskInfo;
     if (sceneId != null) {
       try {
-        taskInfo = await Supabase.instance.client
+        final resp = await Supabase.instance.client
             .from('processing_tasks')
             .select('created_at, updated_at, task_type, quality_score')
             .eq('scene_id', sceneId)
             .limit(1)
             .maybeSingle();
+        taskInfo = resp;
       } catch (_) {}
     }
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     final isDark = AppConfig.isNightMode;
     final textColor = isDark
@@ -1844,30 +2028,31 @@ $userQuestion
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
     final displayName =
-        model['display_name']?.toString() ??
-        model['scene_id']?.toString() ??
-        '未命名模型';
+        _modelDisplayName(
+          model,
+          fallback: textLocalize('recall_unnamed_model'),
+        );
 
+    // 格式化日期
     String formatDate(String? raw) {
-      if (raw == null || raw.isEmpty) {
-        return '未知';
-      }
+      if (raw == null || raw.isEmpty)
+        return textLocalize('recall_detail_unknown');
       final dt = DateTime.tryParse(raw);
-      if (dt == null) {
-        return raw;
-      }
+      if (dt == null) return raw;
       final local = dt.toLocal();
-      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}  ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     }
 
     final createdAt = formatDate(
       taskInfo?['created_at']?.toString() ?? model['created_at']?.toString(),
     );
     final updatedAt = formatDate(taskInfo?['updated_at']?.toString());
-    final taskType = taskInfo?['task_type']?.toString() ?? '未知';
+    final taskType =
+        taskInfo?['task_type']?.toString() ??
+        textLocalize('recall_detail_unknown');
     final qualityScore = taskInfo?['quality_score'];
 
-    await showModalBottomSheet<void>(
+    await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
@@ -1906,7 +2091,7 @@ $userQuestion
                   const SizedBox(height: 18),
                   _DetailRow(
                     icon: Icons.calendar_today_rounded,
-                    label: '创建时间',
+                    label: textLocalize('recall_detail_created_at'),
                     value: createdAt,
                     textColor: textColor,
                     hintColor: hintColor,
@@ -1914,7 +2099,7 @@ $userQuestion
                   const SizedBox(height: 12),
                   _DetailRow(
                     icon: Icons.update_rounded,
-                    label: '更新时间',
+                    label: textLocalize('recall_detail_updated_at'),
                     value: updatedAt,
                     textColor: textColor,
                     hintColor: hintColor,
@@ -1922,7 +2107,7 @@ $userQuestion
                   const SizedBox(height: 12),
                   _DetailRow(
                     icon: Icons.category_rounded,
-                    label: '任务类型',
+                    label: textLocalize('recall_detail_task_type'),
                     value: taskType,
                     textColor: textColor,
                     hintColor: hintColor,
@@ -1930,11 +2115,13 @@ $userQuestion
                   const SizedBox(height: 12),
                   _DetailRow(
                     icon: Icons.star_rounded,
-                    label: '质量评分',
-                    value: qualityScore != null ? '$qualityScore / 100' : '未知',
+                    label: textLocalize('recall_detail_quality_score'),
+                    value: qualityScore != null
+                        ? '$qualityScore / 100'
+                        : textLocalize('recall_detail_unknown'),
                     textColor: textColor,
                     hintColor: hintColor,
-                    trailing: qualityScore != null
+                    valueTrailing: qualityScore != null
                         ? _buildScoreBar(
                             (qualityScore as num).toDouble(),
                             isDark,
@@ -1945,8 +2132,8 @@ $userQuestion
                     const SizedBox(height: 12),
                     _DetailRow(
                       icon: Icons.storage_rounded,
-                      label: '本地占用',
-                      value: sizeLabel,
+                      label: textLocalize('recall_detail_local_size'),
+                      value: sizeLabel.replaceAll(RegExp(r'[()]'), ''),
                       textColor: textColor,
                       hintColor: hintColor,
                     ),
@@ -1985,19 +2172,15 @@ $userQuestion
 
   Future<void> _renameModel(Map<String, dynamic> model) async {
     final sceneId = model['scene_id']?.toString();
-    if (sceneId == null) {
-      return;
-    }
+    if (sceneId == null) return;
 
-    final currentName = model['display_name']?.toString() ?? sceneId;
+    final currentName = _modelDisplayName(model, fallback: sceneId);
     final newName = await showDialog<String>(
       context: context,
       builder: (_) => _RenameModelDialog(initialName: currentName),
     );
 
-    if (newName == null || newName.isEmpty || !mounted) {
-      return;
-    }
+    if (newName == null || newName.isEmpty || !mounted) return;
 
     try {
       await Supabase.instance.client
@@ -2006,58 +2189,51 @@ $userQuestion
           .eq('scene_id', sceneId)
           .select();
 
-      if (!mounted) {
-        return;
+      // 立即更新本地数据
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_rename_success'),
+          context: context,
+        );
+        final targetKey = _modelKey(model);
+        setState(() {
+          for (final m in _allModels) {
+            if (_modelKey(m) == targetKey) {
+              m['display_name'] = newName;
+            }
+          }
+          for (final m in _models) {
+            if (_modelKey(m) == targetKey) {
+              m['display_name'] = newName;
+            }
+          }
+          if (_activeModelAction != null &&
+              _modelKey(_activeModelAction!) == targetKey) {
+            _activeModelAction = {
+              ..._activeModelAction!,
+              'display_name': newName,
+            };
+          }
+        });
       }
-
-      setState(() {
-        for (final item in _allModels) {
-          if (item['scene_id'] == sceneId) {
-            item['display_name'] = newName;
-          }
-        }
-        for (final item in _models) {
-          if (item['scene_id'] == sceneId) {
-            item['display_name'] = newName;
-          }
-        }
-      });
-      TDToast.showText(context: context, '模型名称已更新');
     } catch (e) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_rename_fail')}: $e',
+          context: context,
+        );
       }
-      TDToast.showText(context: context, '重命名失败：$e');
     }
   }
 
   Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('删除本地模型'),
-        content: const Text('只会删除当前设备上缓存的模型文件，不影响云端记录。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) {
-      return;
-    }
-
     final plyPath = model['ply_path'] as String? ?? '';
     if (plyPath.isEmpty) {
       if (mounted) {
-        TDToast.showText(context: context, '未找到本地模型缓存');
+        TDToast.showText(
+          textLocalize('recall_delete_local_none'),
+          context: context,
+        );
       }
       return;
     }
@@ -2066,7 +2242,10 @@ $userQuestion
       final modelUrl = _toPublicUrl(plyPath);
       if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
         if (mounted) {
-          TDToast.showText(context: context, '未找到本地模型缓存');
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
         }
         return;
       }
@@ -2082,7 +2261,7 @@ $userQuestion
       final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
       final metaFile = File('${dir.path}/$sanitizedFileName.meta');
 
-      var deleted = false;
+      bool deleted = false;
       if (await localFile.exists()) {
         await localFile.delete();
         deleted = true;
@@ -2096,38 +2275,31 @@ $userQuestion
         deleted = true;
       }
 
-      if (!mounted) {
-        return;
+      if (mounted) {
+        if (deleted) {
+          // 通知下载状态徽章重置为"未下载"
+          downloadEventBus.add(
+            ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
+          );
+          TDToast.showText(
+            textLocalize('recall_delete_local_success'),
+            context: context,
+          );
+        } else {
+          TDToast.showText(
+            textLocalize('recall_delete_local_none'),
+            context: context,
+          );
+        }
       }
-
-      TDToast.showText(context: context, deleted ? '本地模型已删除' : '未找到本地模型缓存');
     } catch (e) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_delete_local_fail')}: $e',
+          context: context,
+        );
       }
-      TDToast.showText(context: context, '删除本地模型失败：$e');
     }
-  }
-
-  Future<void> _showModelActions(Map<String, dynamic> model) async {
-    final key = _modelCardKeyFor(model);
-    final cardContext = key.currentContext;
-    final renderBox = cardContext?.findRenderObject() as RenderBox?;
-    final overlayBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null || overlayBox == null) {
-      return;
-    }
-
-    final topLeft = renderBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _activeModelAction = model;
-      _activeModelActionRect = topLeft & renderBox.size;
-    });
   }
 
   void _dismissModelActions() {
@@ -2146,9 +2318,10 @@ $userQuestion
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
       sceneId:
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          '未命名模型',
+          _modelDisplayName(
+            model,
+            fallback: textLocalize('recall_unnamed_model'),
+          ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
@@ -2176,6 +2349,7 @@ class _DetailRow extends StatelessWidget {
   final Color textColor;
   final Color hintColor;
   final Widget? trailing;
+  final Widget? valueTrailing;
 
   const _DetailRow({
     required this.icon,
@@ -2184,6 +2358,7 @@ class _DetailRow extends StatelessWidget {
     required this.textColor,
     required this.hintColor,
     this.trailing,
+    this.valueTrailing,
   });
 
   @override
@@ -2206,13 +2381,24 @@ class _DetailRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      value,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (valueTrailing != null) ...[
+                    const SizedBox(width: 10),
+                    valueTrailing!,
+                  ],
+                ],
               ),
             ],
           ),
@@ -2223,9 +2409,48 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
+class _RecallMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? accent;
+
+  const _RecallMetric({required this.label, required this.value, this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.58)
+                : BDDesign.colorMutedBlue,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color:
+                accent ??
+                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _RenameModelDialog extends StatefulWidget {
   final String initialName;
-
   const _RenameModelDialog({required this.initialName});
 
   @override
@@ -2233,7 +2458,9 @@ class _RenameModelDialog extends StatefulWidget {
 }
 
 class _RenameModelDialogState extends State<_RenameModelDialog> {
+  static final _invalidChars = RegExp(r'[/\\:*?"<>|]');
   late final TextEditingController _controller;
+  String? _errorText;
 
   @override
   void initState() {
@@ -2250,20 +2477,34 @@ class _RenameModelDialogState extends State<_RenameModelDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('重命名模型'),
+      title: Text(textLocalize('recall_rename_model')),
       content: TextField(
         controller: _controller,
         autofocus: true,
-        decoration: const InputDecoration(hintText: '输入新的模型名称'),
+        decoration: InputDecoration(
+          hintText: textLocalize('recall_rename_hint'),
+          errorText: _errorText,
+        ),
+        onChanged: (value) {
+          setState(() {
+            _errorText = _invalidChars.hasMatch(value)
+                ? textLocalize('recall_rename_invalid')
+                : null;
+          });
+        },
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(textLocalize('gen_cancel')),
         ),
         TextButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: const Text('确定'),
+          onPressed: () {
+            final text = _controller.text.trim();
+            if (text.isEmpty || _invalidChars.hasMatch(text)) return;
+            Navigator.pop(context, text);
+          },
+          child: Text(textLocalize('gen_button')),
         ),
       ],
     );

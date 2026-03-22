@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:braindance/configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
 
 class TopSummaryCard extends StatelessWidget {
@@ -30,10 +31,7 @@ class TopSummaryCard extends StatelessWidget {
       builder: (context, value, child) {
         return Transform.translate(
           offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(
-            opacity: value,
-            child: child,
-          ),
+          child: Opacity(opacity: value, child: child),
         );
       },
       child: Container(
@@ -54,21 +52,25 @@ class TopSummaryCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  "空间档案概览",
+                  textLocalize("recall_summary_title"),
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFFA0AAB5) : BDDesign.colorMutedBlue,
+                    color: isDark
+                        ? const Color(0xFFA0AAB5)
+                        : BDDesign.colorMutedBlue,
                   ),
                 ),
                 IconButton(
                   onPressed: onTaskTap,
                   icon: Icon(
                     Icons.task_alt_rounded,
-                    color: isDark ? const Color(0xFFA0AAB5) : BDDesign.colorMutedBlue,
+                    color: isDark
+                        ? const Color(0xFFA0AAB5)
+                        : BDDesign.colorMutedBlue,
                     size: 20,
                   ),
-                  tooltip: "任务列表",
+                  tooltip: textLocalize("recall_task_list"),
                   splashRadius: 20,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -79,14 +81,14 @@ class TopSummaryCard extends StatelessWidget {
             Row(
               children: [
                 _buildStatItem(
-                  "近日新增",
+                  textLocalize("recall_recent_added"),
                   recordCount.toString(),
                   textColor,
                   subTextColor,
                 ),
                 const SizedBox(width: 48),
                 _buildStatItem(
-                  "已就绪空间",
+                  textLocalize("recall_ready_spaces"),
                   completedCount.toString(),
                   textColor,
                   subTextColor,
@@ -118,13 +120,7 @@ class TopSummaryCard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: subTextColor,
-          ),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, color: subTextColor)),
       ],
     );
   }

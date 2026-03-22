@@ -134,7 +134,6 @@ class LocalRagIndexService {
     });
     return List<Map<String, dynamic>>.from(results as List<dynamic>);
   }
-
 }
 
 Map<String, dynamic> _prepareSyncPayload(Map<String, dynamic> payload) {

@@ -10,7 +10,7 @@ Widget setTab2(VoidCallback onUpdate, BuildContext context) {
     child: ListView(
       children: [
         Text(
-          '实验选项',
+          textLocalize('set_tab2_title'),
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -21,7 +21,7 @@ Widget setTab2(VoidCallback onUpdate, BuildContext context) {
         ),
         const SizedBox(height: 8),
         Text(
-          '把调试项和试验参数集中放在一个区块里，避免和主流程混在一起。',
+          textLocalize('set_tab2_desc'),
           style: TextStyle(
             fontSize: 13,
             height: 1.45,
