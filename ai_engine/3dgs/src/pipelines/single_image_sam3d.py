@@ -79,17 +79,24 @@ class SingleImageSAM3DPipeline(BasePipeline):
             cfg = PipelineConfig()
             analyzer = SceneAnalyzer(cfg)
             self.log("🧠 [RAG] 开始对单张图片进行语义分析...")
-            analysis = analyzer.analyze_single_image(input_path)
+            analysis = analyzer.analyze_single_image(input_path, log_callback=self.log)
 
-            rag_meta = {
-                "ai_description": analysis.get("description", ""),
-                "ai_tags": analysis.get("tags", []),
-                "ai_objects": analysis.get("objects", []),
-                "ai_score": analysis.get("score", 0),
-                "ai_reason": analysis.get("reason", "")
-            }
-            self.log(f"    -> 🏷️ Tags: {rag_meta['ai_tags']}")
-            self.log("    -> ✅ 单图 RAG 分析完成")
+            if analysis.get("ok"):
+                rag_meta = {
+                    "ai_description": analysis.get("description", ""),
+                    "ai_tags": analysis.get("tags", []),
+                    "ai_objects": analysis.get("objects", []),
+                    "ai_reason": analysis.get("reason", "")
+                }
+                if analysis.get("score") is not None:
+                    rag_meta["ai_score"] = analysis.get("score")
+                self.log(f"    -> 🏷️ Tags: {rag_meta.get('ai_tags', [])}")
+                self.log("    -> ✅ 单图 RAG 分析完成")
+            else:
+                self.log(
+                    f"    -> ⚠️ 单图 RAG 分析未产出有效结果，跳过元数据回填: {analysis.get('reason', 'Unknown')}",
+                    level="WARN",
+                )
 
         except Exception as e:
             self.log(f"    -> ⚠️ RAG 分析失败，已跳过: {e}", level="WARN")
@@ -97,13 +104,7 @@ class SingleImageSAM3DPipeline(BasePipeline):
         metadata = {"engine": "sam3d", "original_image": input_path, "preview_img_path": input_path}
         metadata.update(rag_meta)
 
-        # 已做过单图分析则不再重复调用，避免二次大模型请求导致等待时间翻倍。
-        if not rag_meta:
-            try:
-                rag_meta = self.run_rag_analysis(input_path)
-                metadata.update(rag_meta)
-            except Exception:
-                pass
+        # 单图流水线已经显式执行过一次 RAG，失败时不要重复请求同一张图。
 
         try:
             self.upload_and_record(ply_path, metadata, params)

@@ -99,6 +99,9 @@ doc/api/
 # 5. AI Engine: Python (算法端)
 # =========================
 # 字节码与缓存
+__pycache__/
+*.pyc
+.pytest_cache/
 ai_engine/**/__pycache__/
 ai_engine/**/*.pyc
 
@@ -109,6 +112,34 @@ ai_engine/env/
 
 # Jupyter Notebook 缓存
 ai_engine/.ipynb_checkpoints
+
+# Qwen3 fine-tuning artifacts
+# Generated logs and training outputs. If you want to publish an adapter,
+# export a clean release bundle under ai_engine/finetune_qwen3/releases/;
+# *.safetensors is already covered by Git LFS in the repo root .gitattributes.
+ai_engine/finetune_qwen3/logs/
+ai_engine/finetune_qwen3/outputs/
+# Local deployment artifacts; keep scripts/docs versioned, keep large runtime artifacts out of Git.
+ai_engine/finetune_qwen3/tools/llama.cpp/
+ai_engine/finetune_qwen3/releases/*_merged*/
+ai_engine/finetune_qwen3/releases/*_quantized*/
+# Generated datasets; rebuild via scripts/build_*dataset.py.
+# Keep benchmark/seed/template inputs versioned in normal Git for regression tracking.
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_val.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_manifest.json
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_train.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_val.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_manifest.json
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch_val.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_val.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_manifest.json
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_val.jsonl
 
 # =========================
 # 6. BrainDance Specific: Media & 3DGS Data (项目特有)
@@ -122,6 +153,16 @@ ai_engine/**/*.jpg
 ai_engine/**/*.jpeg
 ai_engine/**/*.png
 ai_engine/**/*.gif
+ai_engine/**/*.webp
+ai_engine/**/*.bmp
+ai_engine/**/*.tif
+ai_engine/**/*.tiff
+ai_engine/**/*.heic
+ai_engine/**/*.heif
+ai_engine/**/*.mp3
+ai_engine/**/*.wav
+ai_engine/**/*.m4a
+ai_engine/**/*.flac
 
 # 忽略 3DGS 训练过程中的大型模型文件
 ai_engine/**/*.ply

@@ -1,0 +1,184 @@
+[
+  {
+    "case_id": "part12_recent_001",
+    "group": "recent_hit",
+    "question": "我最近拍了什么？",
+    "expected_issue_tag": "recent_colloquial_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_recent_002",
+    "group": "recent_hit",
+    "question": "这两天我都拍了啥？",
+    "expected_issue_tag": "recent_colloquial_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_recent_003",
+    "group": "recent_hit",
+    "question": "最近又扫到什么了？",
+    "expected_issue_tag": "recent_colloquial_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_recent_004",
+    "group": "recent_hit",
+    "question": "最近有哪些桌面上的东西？",
+    "expected_issue_tag": "recent_colloquial_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_nohit_001",
+    "group": "no_hit",
+    "question": "我最近拍过钢琴吗？",
+    "expected_issue_tag": "no_hit_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_nohit_002",
+    "group": "no_hit",
+    "question": "我最近拍过小提琴吗？",
+    "expected_issue_tag": "no_hit_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_nohit_003",
+    "group": "no_hit",
+    "question": "最近扫到过吉他吗？",
+    "expected_issue_tag": "no_hit_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_nohit_004",
+    "group": "no_hit",
+    "question": "我最近拍到过架子鼓吗？",
+    "expected_issue_tag": "no_hit_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_001",
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_002",
+    "group": "partial_coverage",
+    "question": "我最近拍过地球仪和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_003",
+    "group": "partial_coverage",
+    "question": "我最近拍过显示器和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_004",
+    "group": "partial_coverage",
+    "question": "我最近拍过显示器和小提琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_005",
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑、地球仪和钢琴吗？",
+    "expected_issue_tag": "partial_triplet_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_006",
+    "group": "partial_coverage",
+    "question": "最近拍到过显示器、笔记本电脑和小提琴吗？",
+    "expected_issue_tag": "partial_triplet_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_007",
+    "group": "partial_coverage",
+    "question": "我最近拍过地球仪、手办和钢琴吗？",
+    "expected_issue_tag": "partial_triplet_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_partial_008",
+    "group": "partial_coverage",
+    "question": "最近拍到过办公桌和钢琴吗？",
+    "expected_issue_tag": "partial_focus_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_must_001",
+    "group": "must_answer",
+    "question": "最近拍到过什么笔记本电脑相关画面？",
+    "expected_issue_tag": "must_answer_focus_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_must_002",
+    "group": "must_answer",
+    "question": "最近拍到过什么显示器相关画面？",
+    "expected_issue_tag": "must_answer_focus_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_must_003",
+    "group": "must_answer",
+    "question": "最近拍到过什么办公桌上的东西？",
+    "expected_issue_tag": "must_answer_focus_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_must_004",
+    "group": "must_answer",
+    "question": "最近拍到过什么地球仪相关画面？",
+    "expected_issue_tag": "must_answer_focus_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_multi_001",
+    "group": "multi_hit_must_answer",
+    "question": "最近拍到过什么手办相关画面？",
+    "expected_issue_tag": "multi_hit_must_answer_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_multi_002",
+    "group": "multi_hit_must_answer",
+    "question": "最近拍到过什么书架相关画面？",
+    "expected_issue_tag": "multi_hit_must_answer_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_multi_003",
+    "group": "multi_hit_must_answer",
+    "question": "最近拍到过什么书籍相关内容？",
+    "expected_issue_tag": "multi_hit_must_answer_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_stability_001",
+    "group": "stability",
+    "question": "我这几天都拍到了什么？",
+    "expected_issue_tag": "stability_recent_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_stability_002",
+    "group": "stability",
+    "question": "最近有没有拍到笔记本电脑和钢琴？",
+    "expected_issue_tag": "stability_partial_probe",
+    "triage_label": ""
+  },
+  {
+    "case_id": "part12_stability_003",
+    "group": "stability",
+    "question": "这段时间拍到过什么办公桌上的东西？",
+    "expected_issue_tag": "stability_focus_probe",
+    "triage_label": ""
+  }
+]

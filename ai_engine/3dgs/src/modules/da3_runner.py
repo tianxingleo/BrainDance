@@ -29,6 +29,7 @@ class DA3Runner:
         
         self.env = os.environ.copy()
         self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self.env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         # 放宽 HuggingFace 超时，减少大模型下载时的瞬时网络失败。
         self.env.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
         self.env.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "120")

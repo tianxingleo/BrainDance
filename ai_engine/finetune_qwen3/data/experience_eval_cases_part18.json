@@ -1,0 +1,87 @@
+[
+  {
+    "case_id": "part18_recent_001",
+    "group": "recent_hit",
+    "question": "我最近拍了什么？"
+  },
+  {
+    "case_id": "part18_recent_002",
+    "group": "recent_hit",
+    "question": "这两天我都拍了啥？"
+  },
+  {
+    "case_id": "part18_recent_003",
+    "group": "recent_hit",
+    "question": "最近又扫到什么了？"
+  },
+  {
+    "case_id": "part18_recent_004",
+    "group": "recent_hit",
+    "question": "最近有哪些桌面上的东西？"
+  },
+  {
+    "case_id": "part18_must_001",
+    "group": "must_answer",
+    "question": "最近拍到过什么办公桌上的东西？"
+  },
+  {
+    "case_id": "part18_must_002",
+    "group": "must_answer",
+    "question": "最近拍到过什么地球仪相关画面？"
+  },
+  {
+    "case_id": "part18_must_003",
+    "group": "must_answer",
+    "question": "最近拍到过什么书架相关画面？"
+  },
+  {
+    "case_id": "part18_must_004",
+    "group": "must_answer",
+    "question": "最近拍到过什么笔记本电脑相关画面？"
+  },
+  {
+    "case_id": "part18_must_005",
+    "group": "must_answer",
+    "question": "最近有洛天依展台相关记录吗？"
+  },
+  {
+    "case_id": "part18_inventory_001",
+    "group": "inventory",
+    "question": "我有没有生成什么模型？"
+  },
+  {
+    "case_id": "part18_inventory_002",
+    "group": "inventory",
+    "question": "最近有哪些模型？"
+  },
+  {
+    "case_id": "part18_inventory_003",
+    "group": "inventory",
+    "question": "我最近做出来的模型有哪些？"
+  },
+  {
+    "case_id": "part18_inventory_004",
+    "group": "inventory",
+    "question": "最近生成过哪些模型？"
+  },
+  {
+    "case_id": "part18_semantic_001",
+    "group": "abstract_semantic",
+    "question": "有没有偏理工一点的模型？"
+  },
+  {
+    "case_id": "part18_semantic_002",
+    "group": "abstract_semantic",
+    "question": "最近拍到过计算机科学相关内容吗？"
+  },
+  {
+    "case_id": "part18_semantic_003",
+    "group": "abstract_semantic",
+    "question": "有没有学习氛围比较强的内容？"
+  },
+  {
+    "case_id": "part18_semantic_004",
+    "group": "abstract_semantic",
+    "question": "最近有学术一点的内容吗？"
+  }
+]

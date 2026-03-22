@@ -18,7 +18,7 @@ from .utils import generate_cpu_config
 from .masking import MaskGenerator
 
 class SAM3DEngine:
-    DIRECT_PIPELINE_VRAM_THRESHOLD_GB = 12.0
+    DIRECT_PIPELINE_VRAM_THRESHOLD_GB = 16.0
 
     def __init__(
         self,

@@ -4,12 +4,14 @@
 # 逻辑：1. 随机抽选图像 2. 调用Qwen-VL进行分析 3. 生成质量评分和场景描述 4. 返回分析结果
 # 包含：SceneAnalyzer类、图像编码方法、场景分析方法、质量评估算法
 import base64
+import io
 import json
 import os
 import random
 import re
 import ast
 from pathlib import Path
+from PIL import Image
 try:
     from openai import OpenAI
 except Exception:
@@ -17,6 +19,9 @@ except Exception:
 from src.config import PipelineConfig
 
 class SceneAnalyzer:
+    MAX_DATA_URI_BYTES = 10 * 1024 * 1024
+    TARGET_DATA_URI_BYTES = int(MAX_DATA_URI_BYTES * 0.9)
+
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
         self.api_key = self.cfg.dashscope_api_key
@@ -39,9 +44,153 @@ class SceneAnalyzer:
             )
         return self._client
 
-    def _encode_image(self, image_path):
+    def _data_uri_size(self, encoded: str, mime_subtype: str) -> int:
+        return len(f"data:image/{mime_subtype};base64,{encoded}".encode("utf-8"))
+
+    def _guess_mime_subtype(self, image_path: str) -> str:
+        suffix = Path(image_path).suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            return "jpeg"
+        if suffix == ".png":
+            return "png"
+        if suffix == ".webp":
+            return "webp"
+        return "jpeg"
+
+    def _encode_image(self, image_path, log_callback=None):
+        original_size = os.path.getsize(image_path)
         with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
+            raw_bytes = image_file.read()
+        encoded = base64.b64encode(raw_bytes).decode('utf-8')
+        mime_subtype = self._guess_mime_subtype(image_path)
+        encoded_size = self._data_uri_size(encoded, mime_subtype)
+        if encoded_size <= self.TARGET_DATA_URI_BYTES:
+            if log_callback:
+                log_callback(
+                    "🖼️ [Qwen-VL] 图像大小: "
+                    f"原始 {original_size / (1024 * 1024):.2f}MiB，"
+                    f"data-uri {encoded_size / (1024 * 1024):.2f}MiB，直接发送"
+                )
+            return encoded, mime_subtype
+
+        if log_callback:
+            log_callback(
+                "🖼️ [Qwen-VL] 图像过大: "
+                f"原始 {original_size / (1024 * 1024):.2f}MiB，"
+                f"data-uri {encoded_size / (1024 * 1024):.2f}MiB，开始压缩后发送"
+            )
+
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            width, height = img.size
+            best_payload = None
+            quality_candidates = [90, 80, 70, 60, 50, 40]
+            scale_candidates = [1.0, 0.85, 0.7, 0.55, 0.4]
+
+            for scale in scale_candidates:
+                resized = img
+                if scale < 1.0:
+                    resized = img.resize(
+                        (max(1, int(width * scale)), max(1, int(height * scale))),
+                        Image.Resampling.LANCZOS,
+                    )
+                for quality in quality_candidates:
+                    buffer = io.BytesIO()
+                    resized.save(buffer, format="JPEG", quality=quality, optimize=True)
+                    payload = buffer.getvalue()
+                    if best_payload is None or len(payload) < len(best_payload):
+                        best_payload = payload
+                    encoded_payload = base64.b64encode(payload).decode("utf-8")
+                    encoded_payload_size = self._data_uri_size(encoded_payload, "jpeg")
+                    if encoded_payload_size <= self.TARGET_DATA_URI_BYTES:
+                        if log_callback:
+                            log_callback(
+                                "🖼️ [Qwen-VL] 图像压缩完成: "
+                                f"{width}x{height} -> {resized.size[0]}x{resized.size[1]}, "
+                                f"{original_size / (1024 * 1024):.2f}MiB -> {len(payload) / (1024 * 1024):.2f}MiB, "
+                                f"data-uri {encoded_payload_size / (1024 * 1024):.2f}MiB"
+                            )
+                        return encoded_payload, "jpeg"
+
+            if best_payload is None:
+                raise RuntimeError(f"Failed to encode image for VLM: {image_path}")
+
+            if log_callback:
+                log_callback(
+                    "⚠️ [Qwen-VL] 图像压缩后仍偏大，发送当前最小版本: "
+                    f"{original_size / (1024 * 1024):.2f}MiB -> {len(best_payload) / (1024 * 1024):.2f}MiB"
+                )
+            return base64.b64encode(best_payload).decode("utf-8"), "jpeg"
+
+    def _build_image_data_url(self, image_path: str, log_callback=None) -> str:
+        encoded, mime_subtype = self._encode_image(image_path, log_callback=log_callback)
+        return f"data:image/{mime_subtype};base64,{encoded}"
+
+    def _extract_json_text(self, raw_text: str) -> str:
+        cleaned = str(raw_text).replace("```json", "").replace("```", "").strip()
+        match = re.search(r"(\{.*\})", cleaned, flags=re.S)
+        return match.group(1) if match else cleaned
+
+    def _parse_json_like(self, raw_text: str) -> dict:
+        json_text = self._extract_json_text(raw_text)
+        parse_errors = []
+        try:
+            return json.loads(json_text)
+        except Exception as e1:
+            parse_errors.append(str(e1))
+        try:
+            return json.loads(json_text.replace("'", '"'))
+        except Exception as e2:
+            parse_errors.append(str(e2))
+        try:
+            return ast.literal_eval(json_text)
+        except Exception as e3:
+            parse_errors.append(str(e3))
+        raise ValueError(f"Failed to parse model JSON output. Attempts: {parse_errors}. Raw: {raw_text}")
+
+    def _coerce_text_list(self, value) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            parts = re.split(r"[,\n，、;；]+", value)
+            return [item.strip() for item in parts if item and item.strip()]
+        if isinstance(value, (list, tuple, set)):
+            items = []
+            for item in value:
+                text = str(item).strip()
+                if text:
+                    items.append(text)
+            return items
+        text = str(value).strip()
+        return [text] if text else []
+
+    def _normalize_single_image_result(self, result: dict) -> dict:
+        tags = self._coerce_text_list(result.get("tags", []))
+        objects = self._coerce_text_list(result.get("objects", []))
+        description = str(result.get("description", "") or "").strip()
+        reason = str(result.get("reason", "") or "").strip()
+
+        if not tags and objects:
+            tags = objects[:]
+        if not description and objects:
+            description = f"图中主要物体包括：{'、'.join(objects)}。"
+
+        raw_score = result.get("score", None)
+        score = None
+        if raw_score not in (None, ""):
+            try:
+                score = max(0, min(100, int(raw_score)))
+            except Exception:
+                score = None
+
+        return {
+            "ok": bool(tags or objects or description or score is not None),
+            "score": score,
+            "reason": reason,
+            "tags": tags,
+            "description": description,
+            "objects": objects,
+        }
 
     def run(self, images_dir, log_callback=None):
         """
@@ -84,7 +233,13 @@ class SceneAnalyzer:
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                *[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(str(Path(images_dir) / f))}"}} for f in selected_files]
+                *[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": self._build_image_data_url(str(Path(images_dir) / f), log_callback=log_callback)},
+                    }
+                    for f in selected_files
+                ]
             ]}
         ]
 
@@ -97,38 +252,17 @@ class SceneAnalyzer:
             )
             
             resp = str(completion.choices[0].message.content)
-            cleaned = resp.replace("```json", "").replace("```", "").strip()
-            m = re.search(r"(\{.*\})", cleaned, flags=re.S)
-            json_text = m.group(1) if m else cleaned
-
-            # 兼容模型偶发的 JSON 格式偏差
-            result = None
-            parse_errors = []
-            try:
-                result = json.loads(json_text)
-            except Exception as e1:
-                parse_errors.append(str(e1))
-                try:
-                    result = json.loads(json_text.replace("'", '"'))
-                except Exception as e2:
-                    parse_errors.append(str(e2))
-                    try:
-                        result = ast.literal_eval(json_text)
-                    except Exception as e3:
-                        parse_errors.append(str(e3))
-
-            if result is None:
-                raise ValueError(f"Failed to parse model JSON output. Attempts: {parse_errors}. Raw: {resp}")
+            result = self._parse_json_like(resp)
             
             # 解析结果
             score = int(result.get("score", 0))
             reason = result.get("reason", "Unknown")
-            tags = result.get("tags", [])
+            tags = self._coerce_text_list(result.get("tags", []))
             passed = score >= self.cfg.min_quality_score
             
             # 🟢 [新增] 提取描述信息
-            description = result.get("description", "")
-            objects = result.get("objects", [])
+            description = str(result.get("description", "") or "").strip()
+            objects = self._coerce_text_list(result.get("objects", []))
 
             # 模型未识别到图片时，避免错误阻断主流程
             no_image_markers = ("未提供任何图片", "没有图片", "no image", "no images")
@@ -162,7 +296,7 @@ class SceneAnalyzer:
         if not self.api_key:
             if log_callback:
                 log_callback("⚠️ [SceneAnalyzer] 未配置 DASHSCOPE_API_KEY，跳过单图分析")
-            return {"score": 0, "reason": "No API Key", "tags": [], "description": "", "objects": []}
+            return {"ok": False, "score": None, "reason": "No API Key", "tags": [], "description": "", "objects": []}
 
         # 构造 Prompt（简洁，要求直接返回纯 JSON）
         prompt = """
@@ -181,7 +315,7 @@ class SceneAnalyzer:
             {"role": "system", "content": "You are a helpful image analysis assistant."},
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(image_path)}"}}
+                {"type": "image_url", "image_url": {"url": self._build_image_data_url(image_path, log_callback=log_callback)}}
             ]}
         ]
 
@@ -192,49 +326,17 @@ class SceneAnalyzer:
             client = self._get_client()
             completion = client.chat.completions.create(model=self.model, messages=messages, temperature=0.1)
 
-            resp = completion.choices[0].message.content
-            # 清洗模型可能返回的代码块标记
-            resp = str(resp).replace("```json", "").replace("```", "").strip()
-
-            # 尝试提取第一个 JSON 对象（模型有时会返回多余文本）
-            m = re.search(r"(\{.*\})", resp, flags=re.S)
-            json_text = m.group(1) if m else resp
-
-            # 多轮解析尝试：标准 json -> 替换单引号 -> ast.literal_eval
-            result = None
-            parse_errors = []
-            try:
-                result = json.loads(json_text)
-            except Exception as e1:
-                parse_errors.append(str(e1))
-                try:
-                    # 有些模型会用单引号或python dict格式返回
-                    alt = json_text.replace("'", '"')
-                    result = json.loads(alt)
-                except Exception as e2:
-                    parse_errors.append(str(e2))
-                    try:
-                        result = ast.literal_eval(json_text)
-                    except Exception as e3:
-                        parse_errors.append(str(e3))
-
-            if result is None:
-                raise ValueError(f"Failed to parse model JSON output. Attempts: {parse_errors}. Raw: {resp}")
-
-            # 规范化输出字段
-            return {
-                "score": int(result.get("score", 0)),
-                "reason": result.get("reason", ""),
-                "tags": result.get("tags", []),
-                "description": result.get("description", ""),
-                "objects": result.get("objects", [])
-            }
+            resp = str(completion.choices[0].message.content)
+            normalized = self._normalize_single_image_result(self._parse_json_like(resp))
+            if not normalized["ok"] and log_callback:
+                log_callback("⚠️ [SceneAnalyzer] 单图分析返回空结果，已视为失败")
+            return normalized
 
         except Exception as e:
             if log_callback:
                 log_callback(f"⚠️ [SceneAnalyzer] 单图分析出错: {e}")
             # 返回安全默认值，保证流水线继续
-            return {"score": 0, "reason": "Analysis Error", "tags": [], "description": "", "objects": []}
+            return {"ok": False, "score": None, "reason": f"Analysis Error: {e}", "tags": [], "description": "", "objects": []}
 
     def select_best_preview(self, frames: list, images_dir: str, log_callback=None) -> tuple[int, str]:
         """
@@ -398,7 +500,7 @@ class SceneAnalyzer:
                 if os.path.exists(path):
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(path)}"}
+                        "image_url": {"url": self._build_image_data_url(path, log_callback=log_callback)}
                     })
 
             if len(content) == 1:

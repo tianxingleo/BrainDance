@@ -1,0 +1,42 @@
+[
+  {
+    "group": "recent_hit",
+    "question": "这几天我拍了什么？",
+    "expected_issue_tag": "style_probe"
+  },
+  {
+    "group": "no_hit",
+    "question": "我最近拍过钢琴吗？",
+    "expected_issue_tag": "no_hit"
+  },
+  {
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe"
+  },
+  {
+    "group": "partial_coverage",
+    "question": "我最近拍过地球仪和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe"
+  },
+  {
+    "group": "partial_coverage",
+    "question": "我最近拍过显示器和钢琴吗？",
+    "expected_issue_tag": "partial_missing_negation_probe"
+  },
+  {
+    "group": "must_answer",
+    "question": "最近拍到过什么笔记本电脑相关画面？",
+    "expected_issue_tag": "must_answer_too_broad_probe"
+  },
+  {
+    "group": "must_answer",
+    "question": "最近拍到过什么显示器相关画面？",
+    "expected_issue_tag": "must_answer_too_broad_probe"
+  },
+  {
+    "group": "must_answer",
+    "question": "最近拍到过什么办公桌上的东西？",
+    "expected_issue_tag": "must_answer_too_broad_probe"
+  }
+]
