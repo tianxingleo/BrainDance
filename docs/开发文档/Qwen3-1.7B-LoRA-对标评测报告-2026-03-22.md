@@ -204,6 +204,62 @@ xychart-beta
 - `neg` = `partial_missing_negation_rate`
 - `focus` = `must_answer_focus_rate`
 
+#### 3.1.4 importance matrix 量化补测（新增）
+
+为了确认 `Q5` 在 strict 集上的回退是否能通过更稳定的量化方式修复，又补做了一轮 `importance matrix` 量化。
+
+本轮使用：
+
+- 校准语料：`benchmark + strict benchmark + sft_train`
+- 语料规模：`256` 条
+- `llama-imatrix`：`128 chunks`
+- 量化产物：
+  - `Q4_K_M + imatrix`
+  - `Q5_K_M + imatrix`
+
+原始 80 题 benchmark 结果如下：
+
+| 量化版本 | false_no_answer | partial_hallucination | partial_precision | partial_missing_negation | must_answer_focus | natural_style | 综合分 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Q4_K_M | 0.0000 | 0.2500 | 0.8000 | 0.2500 | 0.5000 | 0.8375 | 84.50 |
+| Q5_K_M | 0.0156 | 0.1250 | 0.8824 | 0.2500 | 0.8750 | 0.9500 | 90.82 |
+| Q4_K_M + imatrix | 0.0000 | 0.1250 | 0.8889 | 0.1875 | 0.4375 | 0.7250 | 88.33 |
+| Q5_K_M + imatrix | 0.0000 | 0.0625 | 0.9412 | 0.0625 | 0.6875 | 0.8375 | 94.12 |
+
+这里最值得注意的是：
+
+- `Q5_K_M + imatrix` 把 `partial_missing_negation` 从 `0.2500` 进一步压到 `0.0625`
+- `Q5_K_M + imatrix` 同时把 `partial_hallucination` 压到了 `0.0625`
+- `Q4_K_M + imatrix` 虽然比原始 `Q4` 好，但仍然明显弱于 `Q5_K_M + imatrix`
+
+因此在原始集口径下，当前最强的量化版本已经从 `Q5_K_M` 变成了 `Q5_K_M + imatrix`。
+
+```mermaid
+xychart-beta
+  title "GGUF 4 版本综合分（原始 80 题）"
+  x-axis ["Q4_K_M","Q5_K_M","Q4+imatrix","Q5+imatrix"]
+  y-axis "Score" 0 --> 100
+  bar [84.50,90.82,88.33,94.12]
+```
+
+```mermaid
+xychart-beta
+  title "GGUF 4 版本关键指标（原始集，展开单序列）"
+  x-axis ["Q4-hallu","Q4-neg","Q4-focus","Q5-hallu","Q5-neg","Q5-focus","Q4i-hallu","Q4i-neg","Q4i-focus","Q5i-hallu","Q5i-neg","Q5i-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.2500,0.2500,0.5000,0.1250,0.2500,0.8750,0.1250,0.1875,0.4375,0.0625,0.0625,0.6875]
+```
+
+注：
+
+- `Q4i` = `Q4_K_M + imatrix`
+- `Q5i` = `Q5_K_M + imatrix`
+- `hallu` = `partial_hallucination_rate`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+
+但这轮实验的真正判定标准仍然是 strict 集，详细结果见严格报告中的新增章节。
+
 ## 4. 关键对比
 
 ### 4.1 Base vs LoRA（同基座）
@@ -484,5 +540,10 @@ pytest -q \
 - `ai_engine/finetune_qwen3/logs/benchmark_cloud_no_opt_qwen3_32b_20260322_noopt.json`
 - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_20260322_rerun.json`
 - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_20260322_rerun.json`
+- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_round4_1_patch_mixed_gpu1.json`
+- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q5_gguf_round4_1_patch_mixed_gpu1.json`
+- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_imatrix_v1_round4_1_patch_mixed_gpu1.json`
+- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q5_gguf_imatrix_v1_round4_1_patch_mixed_gpu1.json`
+- `ai_engine/finetune_qwen3/logs/q4_vs_q5_strict_regression_analysis.json`
 - `ai_engine/finetune_qwen3/logs/latency_observation_20260322.jsonl`
 - `ai_engine/finetune_qwen3/logs/latency_generation_observation_20260322.jsonl`

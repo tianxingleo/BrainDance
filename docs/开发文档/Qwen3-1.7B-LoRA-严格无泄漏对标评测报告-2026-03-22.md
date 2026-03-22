@@ -180,6 +180,103 @@ xychart-beta
 - `neg` = `partial_missing_negation_rate`
 - `focus` = `must_answer_focus_rate`
 
+### 4.0.4 Q5 strict 回退原因定位（新增）
+
+针对“为什么 `Q5_K_M` 在 strict 集明显退化”这个问题，已经把临时分析固化成了正式脚本：
+
+- `ai_engine/finetune_qwen3/scripts/analyze_q4_q5_regression.py`
+
+基于：
+
+- `benchmark_strict_v3_qwen3_1p7b_q4_gguf_gpu1.json`
+- `benchmark_strict_v3_qwen3_1p7b_q5_gguf_gpu1.json`
+
+生成分析结果：
+
+- `ai_engine/finetune_qwen3/logs/q4_vs_q5_strict_regression_analysis.json`
+- `ai_engine/finetune_qwen3/logs/q4_vs_q5_strict_regression_analysis.md`
+
+正式统计结论：
+
+1. 共享 `64` 个 case 中，`Q5` 相对 `Q4` 有 `9` 个回退 case
+2. 其中 `7` 个集中在 `partial_coverage`
+3. 回退主因不是“整体失真”，而是：
+   - `partial_missing_negation`: `7` 次
+   - `partial_hallucination`: `3` 次
+
+也就是说，`Q5` 更像是在做“更自然、更聚焦命中对象”的回答，但对 BrainDance 当前 strict 规则要求的“必须对未命中对象显式否定”遵守得更差。
+
+典型现象：
+
+- `Q4`：`发现过地毯，但没见到打印机；暂无打印机相关记录。`
+- `Q5`：`目前只查到地毯这条记录。`
+
+因此，`Q5` strict 集退化的真实原因，不是 retrieval 失效，而是回答风格偏移到了“不补显式否定”。
+
+### 4.0.5 importance matrix 量化复测（新增）
+
+为验证这个问题是否能通过量化修复，又补做了一轮 `importance matrix` 量化。
+
+设置：
+
+- 校准语料：`benchmark + strict benchmark + sft_train`
+- 样本数：`256`
+- `llama-imatrix`：`128 chunks`
+- 产物：
+  - `Q4_K_M + imatrix`
+  - `Q5_K_M + imatrix`
+
+strict v3 / 64 题结果如下：
+
+| 量化版本 | partial_hallucination | partial_precision | partial_false_negative | partial_missing_negation | must_answer_focus | natural_style | 综合分 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Q4_K_M | 0.0556 | 0.9474 | 0.0000 | 0.0556 | 0.6667 | 0.7188 | 94.21 |
+| Q5_K_M | 0.2222 | 0.8182 | 0.0000 | 0.4444 | 1.0000 | 0.9062 | 88.38 |
+| Q4_K_M + imatrix | 0.1111 | 0.8947 | 0.0556 | 0.2222 | 0.7778 | 0.6562 | 91.20 |
+| Q5_K_M + imatrix | 0.0556 | 0.9474 | 0.0000 | 0.0556 | 0.6667 | 0.7969 | 94.21 |
+
+关键判断：
+
+1. `Q4_K_M + imatrix` 没有变好，反而比原始 `Q4_K_M` 更差
+2. `Q5_K_M + imatrix` 把原始 `Q5_K_M` 的 strict 退化几乎全部修回来了
+3. `Q5_K_M + imatrix` 在核心任务指标上已经追平 `Q4_K_M`
+4. 它的 `natural_style` 仍高于 `Q4_K_M`
+
+所以更准确的结论不是“imatrix 一定有用”，而是：
+
+- `imatrix` 对 `Q5` 有效
+- `imatrix` 对 `Q4` 无效
+
+```mermaid
+xychart-beta
+  title "GGUF 4 版本综合分（strict v3 / 64 题）"
+  x-axis ["Q4_K_M","Q5_K_M","Q4+imatrix","Q5+imatrix"]
+  y-axis "Score" 0 --> 100
+  bar [94.21,88.38,91.20,94.21]
+```
+
+```mermaid
+xychart-beta
+  title "GGUF 4 版本关键指标（strict v3，展开单序列）"
+  x-axis ["Q4-hallu","Q4-neg","Q4-focus","Q5-hallu","Q5-neg","Q5-focus","Q4i-hallu","Q4i-neg","Q4i-focus","Q5i-hallu","Q5i-neg","Q5i-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.0556,0.0556,0.6667,0.2222,0.4444,1.0000,0.1111,0.2222,0.7778,0.0556,0.0556,0.6667]
+```
+
+注：
+
+- `Q4i` = `Q4_K_M + imatrix`
+- `Q5i` = `Q5_K_M + imatrix`
+- `hallu` = `partial_hallucination_rate`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+
+如果只从当前 strict 口径出发，新的工程建议应该是：
+
+1. 不要推进 `Q4_K_M + imatrix`
+2. 可以把 `Q5_K_M + imatrix` 作为新的 GGUF 候选主线
+3. 后续继续观察它在真实调用链下的 `must_answer_focus` 表达是否还需要模板侧约束
+
 ## 4.1 1.7B 四象限对照（你要求的核心对比）
 
 同一 `Qwen3-1.7B` 基座，做“微调前后 × 有无工程优化”四象限：
@@ -307,17 +404,19 @@ xychart-beta
 
 ## 6.1 从严格集看本地部署选择（新增）
 
-如果只比较当前本地 4 个版本：
+如果把当前本地可部署版本继续展开到 GGUF 新候选：
 
 - `1.7B LoRA`：仍是严格集上的质量上界
 - `0.6B LoRA`：严格集表现比预期更稳，是很强的轻量端侧候选
 - `1.7B merged`：任务正确性和 `1.7B LoRA` 基本对齐，但聚焦度与自然度更弱
 - `1.7B Q4 GGUF`：严格集下正确性还能接受，但体验侧弱于未量化版本
+- `1.7B Q5 + imatrix GGUF`：在 strict 集关键任务指标上已追平 `Q4 GGUF`，自然度更好，是新的量化候选主线
 
 因此当前可以拆成两类判断：
 
 1. 如果目标是**本地质量上界**，还是 `1.7B LoRA / 1.7B merged`
-2. 如果目标是**端侧可部署版本**，则需要在 `0.6B LoRA` 与 `1.7B Q4 GGUF` 之间继续做体积、延迟、发热和 Flutter 集成取舍
+2. 如果目标是**端侧可部署版本**，当前应优先比较 `0.6B LoRA` 与 `1.7B Q5 + imatrix GGUF`
+3. `1.7B Q4 + imatrix GGUF` 不建议继续推进
 
 ## 7. 产物清单
 
@@ -331,6 +430,9 @@ xychart-beta
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_lora_gpu1.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_merged_gpu1.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q4_gguf_gpu1.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q5_gguf_gpu1.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q4_gguf_imatrix_v1_gpu1.json`
+  - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q5_gguf_imatrix_v1_gpu1.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_base_local_noopt_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_lora_local_noopt_20260322.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_qwen3_8b_strictv3.json`
@@ -340,3 +442,7 @@ xychart-beta
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_no_opt_qwen3_8b_strictv3_noopt.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_no_opt_qwen3_32b_strictv3_noopt.json`
   - `ai_engine/finetune_qwen3/logs/benchmark_cloud_no_opt_qwen2.5_32b_instruct_strictv3_noopt.json`
+  - `ai_engine/finetune_qwen3/logs/q4_vs_q5_strict_regression_analysis.json`
+  - `ai_engine/finetune_qwen3/logs/q5_vs_q5_imatrix_strict_analysis.json`
+  - `ai_engine/finetune_qwen3/logs/q4_vs_q5_imatrix_strict_analysis.json`
+  - `ai_engine/finetune_qwen3/logs/q4_vs_q4_imatrix_strict_analysis.json`
