@@ -1,0 +1,47 @@
+{
+  "generated_at_utc": "2026-03-22T05:54:46Z",
+  "model_name": "Qwen/Qwen3-0.6B",
+  "model_slug": "qwen3_0p6b",
+  "adapter_path": null,
+  "train_file": "ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl",
+  "val_file": "ai_engine/finetune_qwen3/data/braindance_qwen3_sft_val.jsonl",
+  "output_dir": "ai_engine/finetune_qwen3/outputs/qwen3_0p6b_lora_sft_round1",
+  "cutoff_len": 1536,
+  "num_train_epochs": 2.0,
+  "learning_rate": 3e-05,
+  "per_device_train_batch_size": 2,
+  "per_device_eval_batch_size": 2,
+  "gradient_accumulation_steps": 8,
+  "warmup_ratio": 0.05,
+  "logging_steps": 10,
+  "save_strategy": "epoch",
+  "save_steps": null,
+  "eval_strategy": "epoch",
+  "eval_steps": null,
+  "lora": {
+    "rank": 8,
+    "alpha": 16,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ]
+  },
+  "torch_dtype": "auto_bf16",
+  "attn_implementation": "sdpa",
+  "report_to": [
+    "tensorboard"
+  ],
+  "run_name": null,
+  "resume_from_checkpoint": null,
+  "trainable_params": 5046272,
+  "total_params": 601096192,
+  "trainable_ratio": 0.8395,
+  "steps_per_epoch_estimate": 57,
+  "seed": 42
+}

@@ -117,6 +117,10 @@ ai_engine/.ipynb_checkpoints
 # *.safetensors is already covered by Git LFS in the repo root .gitattributes.
 ai_engine/finetune_qwen3/logs/
 ai_engine/finetune_qwen3/outputs/
+# Local deployment artifacts; keep scripts/docs versioned, keep large runtime artifacts out of Git.
+ai_engine/finetune_qwen3/tools/llama.cpp/
+ai_engine/finetune_qwen3/releases/*_merged*/
+ai_engine/finetune_qwen3/releases/*_quantized*/
 # Generated datasets; rebuild via scripts/build_*dataset.py.
 # Keep benchmark/seed/template inputs versioned in normal Git for regression tracking.
 ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl

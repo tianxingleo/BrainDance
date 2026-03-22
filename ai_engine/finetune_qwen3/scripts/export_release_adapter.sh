@@ -34,8 +34,11 @@ required_files=(
 
 optional_files=(
   "final_metrics.json"
+  "training_spec.json"
   "README.md"
   "chat_template.jinja"
+  "merge_metadata.json"
+  "quantization_plan.json"
 )
 
 if [[ ! -d "$SOURCE_DIR" ]]; then

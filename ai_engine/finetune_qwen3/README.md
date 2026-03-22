@@ -15,12 +15,15 @@
 
 ---
 
-## 2. 阶段结论（Part 16-19）
+## 2. 阶段结论（Part 16-22）
 
 - **Part 16**：可观测性补齐（route 级统计）
 - **Part 17**：`object_lookup` 检索专项优化
 - **Part 18**：formatter 路由与体验层打磨
 - **Part 19**：最小可用本地问答入口 `local_qa_cli.py`
+- **Part 20**：LoRA merge / 量化准备 / `Qwen3-0.6B` 实验链路
+- **Part 21**：`Qwen3-0.6B` 首轮 LoRA 训练与 benchmark
+- **Part 22**：`Qwen3-1.7B` merge / GGUF / `Q4_K_M` 量化
 
 对应记录见：
 
@@ -28,6 +31,9 @@
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part17.md`
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part18.md`
 - `docs/开发文档/Qwen3-1.7B-微调实践记录-Part19.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part20.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part21.md`
+- `docs/开发文档/Qwen3-1.7B-微调实践记录-Part22.md`
 
 ---
 
@@ -83,17 +89,40 @@ python ai_engine/finetune_qwen3/scripts/evaluate_object_lookup_part17.py
 python ai_engine/finetune_qwen3/scripts/evaluate_experience_part18.py
 ```
 
+### 4.4 部署与小模型实验
+
+```bash
+# Qwen3-0.6B 训练
+bash ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_gpu0.sh
+
+# Qwen3-0.6B smoke eval
+bash ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_gpu0.sh
+
+# 合并 1.7B LoRA 到独立 HF 模型目录
+bash ai_engine/finetune_qwen3/scripts/run_merge_qwen3_gpu0.sh
+
+# 生成 GGUF / 量化计划
+bash ai_engine/finetune_qwen3/scripts/run_prepare_quantization_gpu0.sh
+
+# Qwen3-0.6B benchmark
+bash ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_gpu0.sh
+```
+
 ---
 
 ## 5. 回归命令
 
 ```bash
 pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
+pytest -q tests/test_qwen3_workflow_scripts.py
 
 python -m py_compile \
   ai_engine/finetune_qwen3/scripts/run_real_chain_debug.py \
   ai_engine/finetune_qwen3/scripts/evaluate_experience_part18.py \
-  ai_engine/finetune_qwen3/scripts/local_qa_cli.py
+  ai_engine/finetune_qwen3/scripts/local_qa_cli.py \
+  ai_engine/finetune_qwen3/scripts/train_lora_sft.py \
+  ai_engine/finetune_qwen3/scripts/merge_lora_adapter.py \
+  ai_engine/finetune_qwen3/scripts/prepare_quantization_artifacts.py
 ```
 
 ---
@@ -109,4 +138,3 @@ python -m py_compile \
 - 不提交 `outputs/` 训练工作目录
 - 发布包放在 `releases/`
 - 使用 `export_release_adapter.sh` 导出清洁产物
-
