@@ -1,30 +1,61 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:braindance/floating_nav_bar.dart';
+import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:braindance/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('floating nav shows selected label and handles tap', (
+    WidgetTester tester,
+  ) async {
+    var selectedIndex = 0;
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              const Positioned.fill(
+                child: BDPageBackdrop(child: SizedBox.expand()),
+              ),
+              StatefulBuilder(
+                builder: (context, setState) {
+                  return FloatingNavBar(
+                    currentIndex: selectedIndex,
+                    onTap: (index) {
+                      setState(() {
+                        selectedIndex = index;
+                      });
+                    },
+                    items: [
+                      NavIslandItem(
+                        icon: Icons.history_edu_rounded,
+                        label: 'Recall',
+                      ),
+                      NavIslandItem(
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Record',
+                      ),
+                      NavIslandItem(
+                        icon: Icons.auto_awesome_rounded,
+                        label: 'Generate',
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(find.text('Recall'), findsOneWidget);
+    expect(find.text('Record'), findsNothing);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.tap(find.byType(GestureDetector).at(1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Record'), findsOneWidget);
+    expect(selectedIndex, 1);
   });
 }

@@ -1,5 +1,5 @@
+import 'dart:io';
 import 'package:supabase/supabase.dart';
-import 'lib/configs/supabase_config.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
@@ -8,8 +8,8 @@ void main() async {
   final supabase = SupabaseClient('http://172.28.97.38:54321', '');
   try {
     final response = await supabase.functions.invoke('search-models', body: {'query': 'test'});
-    print(response.data);
+    stdout.writeln(response.data);
   } catch(e) {
-    print("Error: \$e");
+    stdout.writeln("Error: $e");
   }
 }

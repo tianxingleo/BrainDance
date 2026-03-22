@@ -1,0 +1,1099 @@
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import * as THREE from 'three';
+import gsap from 'gsap';
+import { SparkControls, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import TopHud from './TopHud.vue';
+import FocalPanel from './FocalPanel.vue';
+import StatusRibbon from './StatusRibbon.vue';
+import CameraTrack from './CameraTrack.vue';
+import ReferenceCard from './ReferenceCard.vue';
+import {
+  DEFAULT_FOCAL_PX,
+  DEFAULT_SCENE_RADIUS,
+  calcFocalFromFov,
+  calcFovFromFocal,
+  clampFocalPx,
+} from '../lib/cameraMath';
+import {
+  deriveHighlightPointFromPose,
+  findPoseByInitialTarget,
+  normalizeMatrixArray,
+  parseInitialInputFromUrl,
+  resolveImageUrl,
+} from '../lib/poseUtils';
+import {
+  createClipPlaneEffect,
+  createSphereHighlightEffect,
+  updateClipPlaneEffect,
+  updateSphereHighlight,
+} from '../lib/sparkEffects';
+import { notifyFlutter } from '../lib/viewerBridge';
+
+const containerRef = ref(null);
+const cameraPoses = ref([]);
+const searchQuery = ref('');
+const activeImage = ref('');
+const activeTag = ref('');
+const sceneMetadata = ref({});
+const loadError = ref('');
+const isLoading = ref(false);
+const currentFps = ref(0);
+const showFocalSettings = ref(false);
+const currentViewFov = ref(0);
+const currentViewFocalPx = ref(0);
+const manualFocalPx = ref(null);
+const highlightEnabled = ref(true);
+const highlightStatus = ref('待命');
+const clipEnabled = ref(false);
+const clipOffset = ref(0);
+const currentModelUrl = ref('./models/scene_auto_sync_raw.ply');
+const currentPosesPath = ref('/models/webgl_poses_with_tags.json');
+
+const filteredPoses = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  if (!query) {
+    const withTags = cameraPoses.value.filter((pose) => pose.tag);
+    return withTags.length > 0 ? withTags : cameraPoses.value.slice(0, 60);
+  }
+  return cameraPoses.value.filter((pose) => {
+    const tag = typeof pose.tag === 'string' ? pose.tag.toLowerCase() : '';
+    return tag.includes(query);
+  });
+});
+
+const focalMin = computed(() => {
+  const base = Number(sceneMetadata.value.fl_y || 0);
+  if (base > 0) return Math.max(50, Math.floor(base * 0.4));
+  return 50;
+});
+
+const focalMax = computed(() => {
+  const base = Number(sceneMetadata.value.fl_y || 0);
+  if (base > 0) return Math.max(500, Math.ceil(base * 2.5));
+  return 3000;
+});
+
+let scene = null;
+let camera = null;
+let renderer = null;
+let spark = null;
+let controls = null;
+let splatMesh = null;
+let highlightEffect = null;
+let clipEffect = null;
+let sceneCenter = new THREE.Vector3(0, 0, 0);
+let sceneRadius = DEFAULT_SCENE_RADIUS;
+let resizeHandler = null;
+let pendingInitialTarget = null;
+let didApplyInitialTarget = false;
+let posesFetchSettled = false;
+let hasInitializedFromExternalInput = false;
+let fpsFrames = 0;
+let fpsTimestamp = 0;
+
+const refreshCurrentFocalInfo = () => {
+  if (!camera) return;
+  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  currentViewFov.value = Number(camera.fov || 0);
+  if (h && currentViewFov.value > 0 && currentViewFov.value < 179) {
+    const focal = calcFocalFromFov(currentViewFov.value, h);
+    currentViewFocalPx.value = focal ? Number(focal.toFixed(1)) : 0;
+  }
+};
+
+const renderOnce = () => {
+  if (!renderer || !scene || !camera) return;
+  renderer.render(scene, camera);
+  refreshCurrentFocalInfo();
+};
+
+const syncHighlight = (point, radius = null) => {
+  updateSphereHighlight(highlightEffect, {
+    enabled: highlightEnabled.value,
+    point,
+    radius,
+  });
+};
+
+const syncClipPlane = () => {
+  if (!clipEffect) return;
+  const normal = new THREE.Vector3(1, 0, 0);
+  const point = sceneCenter.clone().add(new THREE.Vector3(sceneRadius * clipOffset.value, 0, 0));
+  updateClipPlaneEffect(clipEffect, {
+    enabled: clipEnabled.value,
+    point,
+    normal,
+  });
+};
+
+const applyFocalLengthPx = (focalPx, options = {}) => {
+  if (!camera) return;
+  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  if (!h || !focalPx) return;
+
+  const targetFov = calcFovFromFocal(focalPx, h);
+  if (!targetFov || !Number.isFinite(targetFov)) return;
+
+  const duration = options.duration ?? 0;
+  if (duration > 0) {
+    gsap.to(camera, {
+      fov: targetFov,
+      duration,
+      ease: options.ease || 'power2.out',
+      onUpdate: () => {
+        camera.updateProjectionMatrix();
+        renderOnce();
+      },
+    });
+    return;
+  }
+
+  camera.fov = targetFov;
+  camera.updateProjectionMatrix();
+  renderOnce();
+};
+
+const onManualFocalChange = () => {
+  const value = clampFocalPx(Number(manualFocalPx.value), focalMin.value, focalMax.value);
+  if (!value) return;
+  manualFocalPx.value = Number(value.toFixed(1));
+  applyFocalLengthPx(value);
+};
+
+const resetFocalToCapture = () => {
+  const captureFocal = Number(sceneMetadata.value.fl_y || 0);
+  if (!captureFocal) return;
+  manualFocalPx.value = Number(captureFocal.toFixed(1));
+  applyFocalLengthPx(captureFocal, { duration: 0.45, ease: 'power2.inOut' });
+};
+
+const toggleFocalSettings = () => {
+  showFocalSettings.value = !showFocalSettings.value;
+  if (showFocalSettings.value && !manualFocalPx.value) {
+    manualFocalPx.value = Number(
+      (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1),
+    );
+  }
+};
+
+const frameScene = () => {
+  if (!camera) return;
+  const distance = Math.max(sceneRadius * 2.4, 2.5);
+  camera.position.copy(sceneCenter).add(new THREE.Vector3(0, sceneRadius * 0.3, distance));
+  camera.lookAt(sceneCenter);
+  camera.updateProjectionMatrix();
+  refreshCurrentFocalInfo();
+  syncHighlight(sceneCenter, Math.max(sceneRadius * 0.16, 0.08));
+  syncClipPlane();
+};
+
+const flyToImage = (poseData) => {
+  if (!camera) return;
+
+  const normalizedMatrix = normalizeMatrixArray(poseData?.matrix);
+  if (!normalizedMatrix) {
+    console.warn('[SparkViewer] Skip invalid pose matrix:', poseData);
+    return;
+  }
+
+  const targetMatrix = new THREE.Matrix4().fromArray(normalizedMatrix);
+  const targetPosition = new THREE.Vector3();
+  const targetQuaternion = new THREE.Quaternion();
+  const targetScale = new THREE.Vector3();
+  targetMatrix.decompose(targetPosition, targetQuaternion, targetScale);
+
+  gsap.killTweensOf(camera.position);
+  gsap.killTweensOf(camera.quaternion);
+
+  gsap.to(camera.position, {
+    x: targetPosition.x,
+    y: targetPosition.y,
+    z: targetPosition.z,
+    duration: 0.9,
+    ease: 'power2.inOut',
+    onUpdate: renderOnce,
+  });
+
+  gsap.to(camera.quaternion, {
+    x: targetQuaternion.x,
+    y: targetQuaternion.y,
+    z: targetQuaternion.z,
+    w: targetQuaternion.w,
+    duration: 0.9,
+    ease: 'power2.inOut',
+    onUpdate: renderOnce,
+  });
+
+  activeImage.value = poseData.image_url || '';
+  activeTag.value = poseData.tag || '';
+
+  const focal = Number(poseData.fl_y || sceneMetadata.value.fl_y || 0);
+  if (focal > 0) {
+    manualFocalPx.value = Number(focal.toFixed(1));
+    applyFocalLengthPx(focal, { duration: 0.65, ease: 'power2.out' });
+  }
+
+  syncHighlight(
+    deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
+    Math.max(sceneRadius * 0.12, 0.08),
+  );
+  highlightStatus.value = activeTag.value ? `高亮镜头: ${activeTag.value}` : '高亮当前视角区域';
+};
+
+const searchAndFly = () => {
+  if (filteredPoses.value.length > 0) {
+    flyToImage(filteredPoses.value[0]);
+  } else {
+    alert('场景中没有找到符合该描述的视角哦~');
+  }
+};
+
+const maybeApplyInitialTarget = (forceFallback = false) => {
+  if (!pendingInitialTarget || didApplyInitialTarget) return;
+
+  const resolvedPose = findPoseByInitialTarget(pendingInitialTarget, cameraPoses.value);
+  if (resolvedPose) {
+    didApplyInitialTarget = true;
+    flyToImage(resolvedPose);
+    return;
+  }
+
+  if (!forceFallback) return;
+  if (pendingInitialTarget.imageId && !posesFetchSettled) return;
+
+  const fallbackMatrix = normalizeMatrixArray(pendingInitialTarget.matrix);
+  if (!fallbackMatrix) return;
+
+  didApplyInitialTarget = true;
+  flyToImage({
+    matrix: fallbackMatrix,
+    image_url: pendingInitialTarget.imageId || '',
+  });
+};
+
+const loadPoses = async () => {
+  posesFetchSettled = false;
+  cameraPoses.value = [];
+
+  try {
+    const response = await fetch(currentPosesPath.value);
+    const data = await response.json();
+
+    posesFetchSettled = true;
+
+    if (data.frames) {
+      sceneMetadata.value = {
+        w: data.w,
+        h: data.h,
+        fl_x: data.fl_x,
+        fl_y: data.fl_y,
+      };
+
+      cameraPoses.value = data.frames.map((frame) => ({
+        id: frame.id,
+        matrix: frame.matrix,
+        image_url: resolveImageUrl(frame.image_url, currentPosesPath.value),
+        tag: frame.tag,
+        fl_x: frame.fl_x || data.fl_x,
+        fl_y: frame.fl_y || data.fl_y,
+        w: frame.w || data.w,
+        h: frame.h || data.h,
+      }));
+    } else {
+      cameraPoses.value = Array.isArray(data) ? data : [];
+    }
+
+    const focal = Number(sceneMetadata.value.fl_y || 0);
+    if (focal > 0) {
+      manualFocalPx.value = Number(focal.toFixed(1));
+      applyFocalLengthPx(focal);
+    } else {
+      manualFocalPx.value = DEFAULT_FOCAL_PX;
+      applyFocalLengthPx(DEFAULT_FOCAL_PX);
+    }
+
+    maybeApplyInitialTarget(true);
+  } catch (error) {
+    posesFetchSettled = true;
+    console.error('[SparkViewer] 加载位姿失败:', error);
+    manualFocalPx.value = DEFAULT_FOCAL_PX;
+    applyFocalLengthPx(DEFAULT_FOCAL_PX);
+    maybeApplyInitialTarget(true);
+  }
+};
+
+const disposeViewer = () => {
+  if (renderer) {
+    renderer.setAnimationLoop(null);
+  }
+
+  controls = null;
+
+  if (splatMesh) {
+    splatMesh.removeFromParent();
+    splatMesh.dispose();
+    splatMesh = null;
+  }
+
+  highlightEffect = null;
+  clipEffect = null;
+
+  if (spark) {
+    spark.removeFromParent();
+    spark = null;
+  }
+
+  if (renderer) {
+    renderer.dispose();
+    if (renderer.domElement?.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
+    renderer = null;
+  }
+
+  scene = null;
+  camera = null;
+};
+
+const setupResizeHandler = () => {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler);
+  }
+
+  resizeHandler = () => {
+    if (!containerRef.value || !camera || !renderer) return;
+    const width = containerRef.value.clientWidth || window.innerWidth;
+    const height = containerRef.value.clientHeight || window.innerHeight;
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height, false);
+    renderOnce();
+  };
+
+  window.addEventListener('resize', resizeHandler);
+};
+
+const initViewer = async (plyUrl, posesUrl, initialTarget) => {
+  if (isLoading.value) return;
+  isLoading.value = true;
+  loadError.value = '';
+  pendingInitialTarget = null;
+  didApplyInitialTarget = false;
+
+  if (plyUrl) currentModelUrl.value = plyUrl;
+  if (posesUrl) currentPosesPath.value = posesUrl;
+
+  try {
+    disposeViewer();
+
+    scene = new THREE.Scene();
+
+    const width = containerRef.value?.clientWidth || window.innerWidth;
+    const height = containerRef.value?.clientHeight || window.innerHeight;
+
+    camera = new THREE.PerspectiveCamera(60, width / height, 0.01, 2000);
+    scene.add(camera);
+
+    renderer = new THREE.WebGLRenderer({
+      antialias: false,
+      alpha: true,
+      powerPreference: 'high-performance',
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(width, height, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    containerRef.value.innerHTML = '';
+    containerRef.value.appendChild(renderer.domElement);
+
+    spark = new SparkRenderer({
+      renderer,
+      maxStdDev: Math.sqrt(7),
+      preUpdate: false,
+      view: {
+        sortRadial: true,
+      },
+    });
+    scene.add(spark);
+
+    controls = new SparkControls({ canvas: renderer.domElement });
+    controls.fpsMovement.enable = false;
+    controls.pointerControls.rotateSpeed = 0.0018;
+    controls.pointerControls.slideSpeed = 0.0045;
+    controls.pointerControls.scrollSpeed = 0.0013;
+
+    splatMesh = new SplatMesh({
+      url: currentModelUrl.value,
+      editable: true,
+    });
+    scene.add(splatMesh);
+
+    renderer.setAnimationLoop(() => {
+      if (!renderer || !scene || !camera) return;
+      controls?.update(camera);
+      renderer.render(scene, camera);
+      fpsFrames += 1;
+      const now = performance.now();
+      if (now - fpsTimestamp >= 1000) {
+        currentFps.value = fpsFrames;
+        fpsFrames = 0;
+        fpsTimestamp = now;
+      }
+    });
+
+    setupResizeHandler();
+    frameScene();
+    manualFocalPx.value = DEFAULT_FOCAL_PX;
+
+    await splatMesh.initialized;
+
+    const bbox = splatMesh.getBoundingBox(true);
+    const size = bbox.getSize(new THREE.Vector3());
+    sceneCenter = bbox.getCenter(new THREE.Vector3());
+    sceneRadius = Math.max(size.length() * 0.32, DEFAULT_SCENE_RADIUS);
+
+    frameScene();
+    highlightEffect = createSphereHighlightEffect(sceneRadius, highlightEnabled.value);
+    splatMesh.add(highlightEffect.edit);
+    clipEffect = createClipPlaneEffect(sceneRadius, clipEnabled.value);
+    splatMesh.add(clipEffect.edit);
+    highlightStatus.value = '局部高亮已挂载';
+    notifyFlutter({ status: 'success', msg: 'Spark 模型加载完成' });
+
+    if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
+      pendingInitialTarget = {
+        matrix: initialTarget.matrix || null,
+        imageId: initialTarget.imageId || null,
+      };
+    }
+
+    await loadPoses();
+    maybeApplyInitialTarget(true);
+    highlightStatus.value = 'Spark 渲染器已接管场景';
+  } catch (error) {
+    console.error('[SparkViewer] init error:', error);
+    loadError.value = (error && (error.message || String(error))) || 'Spark 模型加载失败';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const toggleHighlight = () => {
+  highlightEnabled.value = !highlightEnabled.value;
+  syncHighlight(highlightEffect?.sdf?.position || sceneCenter, highlightEffect?.sdf?.radius || null);
+  highlightStatus.value = highlightEnabled.value ? '局部高亮已开启' : '局部高亮已关闭';
+  renderOnce();
+};
+
+const toggleClip = () => {
+  clipEnabled.value = !clipEnabled.value;
+  syncClipPlane();
+  highlightStatus.value = clipEnabled.value ? '剖切预览已开启' : '剖切预览已关闭';
+  renderOnce();
+};
+
+const onClipOffsetChange = (value) => {
+  clipOffset.value = value;
+  syncClipPlane();
+  if (clipEnabled.value) {
+    highlightStatus.value = `剖切位置: ${(value * sceneRadius).toFixed(2)}`;
+  }
+  renderOnce();
+};
+
+onMounted(() => {
+  notifyFlutter({ status: 'ready' });
+
+  window.loadModelFromFlutter = (input) => {
+    console.log('[Flutter->SparkViewer] 收到加载请求:', input);
+    if (typeof input === 'string') {
+      initViewer(input, null, null);
+      return;
+    }
+
+    if (typeof input === 'object' && input !== null) {
+      initViewer(input.ply || null, input.poses || null, {
+        matrix: input.matrix || null,
+        imageId: input.imageId || null,
+      });
+      return;
+    }
+
+    initViewer(null, null, null);
+  };
+
+  const initialInput = parseInitialInputFromUrl();
+  if (window.BrainDanceChannel) {
+    return;
+  }
+
+  if (initialInput && !hasInitializedFromExternalInput) {
+    hasInitializedFromExternalInput = true;
+    initViewer(initialInput.ply, initialInput.poses, {
+      matrix: initialInput.matrix || null,
+      imageId: initialInput.imageId || null,
+    });
+    return;
+  }
+
+  initViewer(null, null, null);
+});
+
+onBeforeUnmount(() => {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler);
+    resizeHandler = null;
+  }
+
+  if (window.loadModelFromFlutter) {
+    delete window.loadModelFromFlutter;
+  }
+
+  disposeViewer();
+});
+</script>
+
+<template>
+  <div class="app-shell">
+    <div ref="containerRef" class="viewer-layer"></div>
+    <div class="ambient-mask"></div>
+
+    <TopHud
+      :current-fps="currentFps"
+      :highlight-enabled="highlightEnabled"
+      :search-query="searchQuery"
+      :show-focal-settings="showFocalSettings"
+      @update:search-query="searchQuery = $event"
+      @search="searchAndFly"
+      @toggle-focal="toggleFocalSettings"
+      @toggle-highlight="toggleHighlight"
+    />
+
+    <div v-if="isLoading" class="overlay">
+      <div class="status-card">
+        <div class="status-dot"></div>
+        <div class="status-title">Spark 渲染器正在接管场景</div>
+        <div class="status-copy">模型、位姿和局部特效模块正在初始化。</div>
+      </div>
+    </div>
+
+    <div v-if="loadError" class="overlay">
+      <div class="status-card status-card--error">
+        <div class="eyebrow">Load Failed</div>
+        <div class="status-title">Spark 备选查看器未能正常打开</div>
+        <div class="status-copy">{{ loadError }}</div>
+        <button class="panel-btn panel-btn--solid" @click="initViewer(currentModelUrl, currentPosesPath, null)">
+          重新载入
+        </button>
+      </div>
+    </div>
+
+    <FocalPanel
+      v-if="showFocalSettings"
+      :focal-max="focalMax"
+      :focal-min="focalMin"
+      :manual-focal-px="manualFocalPx"
+      :current-view-fov="currentViewFov"
+      :current-view-focal-px="currentViewFocalPx"
+      @update:manual-focal-px="manualFocalPx = $event"
+      @input-focal="onManualFocalChange"
+      @change-focal="onManualFocalChange"
+      @reset-focal="resetFocalToCapture"
+    />
+
+    <StatusRibbon
+      :clip-enabled="clipEnabled"
+      :clip-offset="clipOffset"
+      :current-model-url="currentModelUrl"
+      :current-poses-path="currentPosesPath"
+      :highlight-status="highlightStatus"
+      @toggle-clip="toggleClip"
+      @update:clip-offset="onClipOffsetChange"
+    />
+
+    <CameraTrack
+      :active-image="activeImage"
+      :filtered-poses="filteredPoses"
+      :search-query="searchQuery"
+      @select-pose="flyToImage"
+    />
+
+    <ReferenceCard
+      :active-image="activeImage"
+      :active-tag="activeTag"
+      :scene-metadata="sceneMetadata"
+      @close="activeImage = ''; activeTag = ''"
+    />
+  </div>
+</template>
+
+<style>
+.app-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  color: #1e1e20;
+  background:
+    radial-gradient(circle at top left, rgba(237, 225, 198, 0.2), transparent 28%),
+    radial-gradient(circle at top right, rgba(121, 138, 142, 0.18), transparent 30%),
+    linear-gradient(180deg, #f6f1e8 0%, #ddd8cf 100%);
+  font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+}
+
+.viewer-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.ambient-mask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(22, 25, 28, 0.1), transparent 18%, transparent 82%, rgba(22, 25, 28, 0.16)),
+    radial-gradient(circle at center, transparent 58%, rgba(22, 25, 28, 0.12) 100%);
+}
+
+.hud {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.panel-card {
+  background: rgba(250, 248, 243, 0.86);
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  border-radius: 22px;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.search-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(580px, 100%);
+  padding: 8px;
+}
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  background: rgba(255, 255, 255, 0.7);
+  outline: none;
+  color: #1e1e20;
+  font-size: 13px;
+}
+
+.search-input:focus {
+  border-color: rgba(97, 109, 118, 0.42);
+  box-shadow: 0 0 0 4px rgba(97, 109, 118, 0.08);
+}
+
+.panel-btn {
+  appearance: none;
+  border-radius: 14px;
+  border: 1px solid rgba(97, 109, 118, 0.18);
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: transform 180ms ease-out, box-shadow 180ms ease-out, background-color 180ms ease-out;
+}
+
+.panel-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.07);
+}
+
+.panel-btn--solid {
+  background: #c86b3c;
+  border-color: #c86b3c;
+  color: #fbf8f3;
+}
+
+.panel-btn--solid:hover {
+  background: #b85d31;
+  border-color: #b85d31;
+}
+
+.panel-btn--ghost {
+  background: rgba(250, 248, 243, 0.86);
+  color: #1e1e20;
+}
+
+.fps-chip {
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: rgba(250, 248, 243, 0.86);
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(30, 30, 32, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+.status-card {
+  min-width: min(84vw, 340px);
+  padding: 24px 20px;
+  border-radius: 24px;
+  background: rgba(250, 248, 243, 0.93);
+  border: 1px solid rgba(97, 109, 118, 0.18);
+  box-shadow: 0 20px 34px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.status-card--error .status-title {
+  color: #8d453e;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: #c86b3c;
+  box-shadow: 0 0 0 10px rgba(200, 107, 60, 0.12);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.status-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.status-copy {
+  margin-top: 8px;
+  line-height: 1.6;
+  font-size: 13px;
+  color: rgba(30, 30, 32, 0.68);
+  word-break: break-word;
+}
+
+.status-ribbon {
+  position: absolute;
+  top: 86px;
+  right: 18px;
+  z-index: 60;
+  width: min(26vw, 320px);
+  min-width: 220px;
+  padding: 14px 16px;
+}
+
+.status-line {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.status-subline {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(30, 30, 32, 0.62);
+  word-break: break-all;
+}
+
+.clip-controls {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clip-toggle {
+  width: 100%;
+}
+
+.clip-slider {
+  width: 100%;
+  accent-color: #c86b3c;
+}
+
+.focal-panel {
+  position: absolute;
+  top: 128px;
+  right: 18px;
+  z-index: 70;
+  width: 240px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e1e20;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #66757f;
+}
+
+.focal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(30, 30, 32, 0.72);
+}
+
+.focal-number {
+  width: 100px;
+  border-radius: 10px;
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.camera-track-dock {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.camera-track-toggle {
+  padding: 9px 12px;
+  border-radius: 999px;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.07);
+}
+
+.camera-track {
+  position: absolute;
+  left: 0;
+  bottom: 48px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: min(540px, calc(100vw - 36px));
+  overflow-x: auto;
+  padding: 12px 14px;
+}
+
+.track-copy {
+  min-width: 110px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.track-text {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(30, 30, 32, 0.68);
+}
+
+.camera-item {
+  position: relative;
+  width: 84px;
+  height: 60px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(97, 109, 118, 0.12);
+  background: rgba(255, 255, 255, 0.74);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+  color: #333;
+}
+
+.camera-item:hover,
+.camera-item.active {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 18px rgba(97, 109, 118, 0.12);
+}
+
+.camera-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.9;
+}
+
+.camera-tag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 8px 7px 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(180deg, transparent, rgba(30, 30, 32, 0.74));
+}
+
+.reference-card {
+  position: absolute;
+  top: 260px;
+  right: 18px;
+  z-index: 60;
+  width: min(22vw, 152px);
+  min-width: 118px;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.reference-image {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(97, 109, 118, 0.12);
+  margin: 6px 0;
+}
+
+.reference-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.meta-chip {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(228, 232, 237, 0.78);
+  font-size: 9px;
+  color: rgba(30, 30, 32, 0.75);
+}
+
+.meta-chip--accent {
+  color: #c86b3c;
+}
+
+.reference-hint {
+  font-size: 9px;
+  color: rgba(30, 30, 32, 0.48);
+}
+
+input[type='range'] {
+  accent-color: #c86b3c;
+}
+
+button {
+  font-family: inherit;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.16);
+    opacity: 0.72;
+  }
+}
+
+@media (max-width: 768px) {
+  .hud {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    gap: 8px;
+  }
+
+  .toolbar {
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .search-panel {
+    width: 100%;
+    padding: 6px;
+  }
+
+  .search-input {
+    font-size: 12px;
+    padding: 9px 10px;
+  }
+
+  .panel-btn {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+
+  .status-ribbon {
+    top: 112px;
+    right: 12px;
+    width: min(68vw, 280px);
+  }
+
+  .focal-panel {
+    top: 212px;
+    right: 12px;
+  }
+
+  .reference-card {
+    top: 412px;
+    right: 12px;
+    width: 112px;
+    min-width: 112px;
+  }
+
+  .camera-track-dock {
+    left: 12px;
+    bottom: 12px;
+  }
+
+  .camera-track {
+    width: min(360px, calc(100vw - 24px));
+    bottom: 44px;
+    padding: 12px;
+  }
+
+  .track-copy {
+    min-width: 96px;
+  }
+
+  .camera-item {
+    width: 78px;
+    height: 56px;
+  }
+}
+</style>
+
+

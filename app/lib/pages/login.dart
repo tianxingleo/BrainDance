@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
+import '../configs/app_theme.dart';
+import '../configs/supabase_config.dart';
+import '../extra_func/dynamic_background.dart';
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -70,91 +74,156 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: TDTheme.of(context).grayColor1,
-      appBar: AppBar(
-        title: TDText(
-          _isSignUp ? '注册' : '登录',
-          font: TDTheme.of(context).fontHeadlineSmall,
-          fontWeight: FontWeight.w600,
-          textColor: TDTheme.of(context).fontGyColor1,
-        ),
-        backgroundColor: TDTheme.of(context).whiteColor1,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
-            decoration: BoxDecoration(
-              color: TDTheme.of(context).whiteColor1.withValues(alpha: 0.8),
-              borderRadius: BorderRadius.circular(TDTheme.of(context).radiusExtraLarge),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 20,
-                  spreadRadius: 5,
-                )
-              ],
-            ),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (Widget child, Animation<double> animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0.0, 0.05),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                );
-              },
+    final theme = TDTheme.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (SupabaseConfig.isAdminMode) {
+      return Scaffold(
+        backgroundColor: context.appPageBackground,
+        appBar: AppBar(title: const Text('Admin Mode')),
+        body: DynamicGradientBackground(
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 480),
+              margin: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.all(24.0),
+              decoration: BoxDecoration(
+                color: context.appSurfaceMutedColor,
+                borderRadius: BorderRadius.circular(theme.radiusExtraLarge),
+                border: Border.all(color: context.appBorderColor),
+                boxShadow: context.appCardShadow,
+              ),
               child: Column(
-                key: ValueKey<bool>(_isSignUp),
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TDInput(
-                    controller: _emailController,
-                    type: TDInputType.normal,
-                    leftLabel: '邮箱',
-                    hintText: '请输入验证邮箱',
+                  Icon(
+                    Icons.admin_panel_settings,
+                    size: 64,
+                    color: colorScheme.primary,
                   ),
                   const SizedBox(height: 16),
-                  TDInput(
-                    controller: _passwordController,
-                    type: TDInputType.normal,
-                    obscureText: true,
-                    leftLabel: '密码',
-                    hintText: '请输入密码(至少6位)',
+                  Text(
+                    '当前 .env 使用的是 secret key，应用已进入管理员模式。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: colorScheme.onSurface),
                   ),
-                  const SizedBox(height: 32),
-                  _isLoading
-                      ? const CircularProgressIndicator()
-                      : TDButton(
-                          text: _isSignUp ? '注册新账号' : '登录',
-                          type: TDButtonType.fill,
-                          theme: TDButtonTheme.primary,
-                          shape: TDButtonShape.round,
-                          size: TDButtonSize.large,
-                          isBlock: true,
-                          onTap: _handleAuth,
-                        ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
+                  Text(
+                    '管理员模式会绕过 RLS，可直接查看全部模型与任务。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: colorScheme.onSurface.withValues(alpha: 0.72),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   TDButton(
-                    text: _isSignUp ? '已有账号？去登录' : '没有账号？去注册',
-                    type: TDButtonType.text,
-                    theme: TDButtonTheme.primary,
+                    text: '进入首页',
                     onTap: () {
-                      setState(() {
-                        _isSignUp = !_isSignUp;
-                      });
+                      Navigator.of(context).pushReplacementNamed('/');
                     },
                   ),
                 ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: context.appPageBackground,
+      appBar: AppBar(
+        title: TDText(
+          _isSignUp ? '注册' : '登录',
+          font: theme.fontHeadlineSmall,
+          fontWeight: FontWeight.w600,
+          textColor: colorScheme.onSurface,
+        ),
+        centerTitle: true,
+      ),
+      body: DynamicGradientBackground(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 480),
+              padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+              decoration: BoxDecoration(
+                color: context.appSurfaceMutedColor,
+                borderRadius: BorderRadius.circular(theme.radiusExtraLarge),
+                border: Border.all(color: context.appBorderColor),
+                boxShadow: context.appCardShadow,
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.0, 0.05),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: Column(
+                  key: ValueKey<bool>(_isSignUp),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TDText(
+                      _isSignUp ? '创建 Brain Dance 账号' : '登录 Brain Dance',
+                      font: theme.fontTitleLarge,
+                      fontWeight: FontWeight.w700,
+                      textColor: colorScheme.onSurface,
+                    ),
+                    const SizedBox(height: 8),
+                    TDText(
+                      _isSignUp ? '注册后请前往邮箱完成验证。' : '输入邮箱和密码继续。',
+                      font: theme.fontBodyMedium,
+                      textColor: colorScheme.onSurface.withValues(alpha: 0.68),
+                    ),
+                    const SizedBox(height: 28),
+                    TDInput(
+                      controller: _emailController,
+                      type: TDInputType.normal,
+                      leftLabel: '邮箱',
+                      hintText: '请输入验证邮箱',
+                    ),
+                    const SizedBox(height: 16),
+                    TDInput(
+                      controller: _passwordController,
+                      type: TDInputType.normal,
+                      obscureText: true,
+                      leftLabel: '密码',
+                      hintText: '请输入密码(至少6位)',
+                    ),
+                    const SizedBox(height: 32),
+                    _isLoading
+                        ? const CircularProgressIndicator()
+                        : TDButton(
+                            text: _isSignUp ? '注册新账号' : '登录',
+                            type: TDButtonType.fill,
+                            theme: TDButtonTheme.primary,
+                            shape: TDButtonShape.round,
+                            size: TDButtonSize.large,
+                            isBlock: true,
+                            onTap: _handleAuth,
+                          ),
+                    const SizedBox(height: 16),
+                    TDButton(
+                      text: _isSignUp ? '已有账号？去登录' : '没有账号？去注册',
+                      type: TDButtonType.text,
+                      theme: TDButtonTheme.primary,
+                      onTap: () {
+                        setState(() {
+                          _isSignUp = !_isSignUp;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

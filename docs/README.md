@@ -1,22 +1,40 @@
-# 🕯️ BrainDance 项目文档中心
+# BrainDance 文档索引
 
-> 面向空间计算时代的三维语义记忆引擎 - 完整文档索引与导航
+`docs/` 是 BrainDance 的项目文档目录，包含入门说明、架构设计、API 参考、开发规范、部署记录和技术报告。
 
----
+## 阅读顺序
 
-## 📚 文档概览
+如果你是第一次进入这个仓库，建议按下面的顺序看：
 
-本文档是 BrainDance 项目的**核心文档索引**，采用模块化组织结构，涵盖 8 大核心模块。
+1. [01-入门指南/快速开始.md](./01-入门指南/快速开始.md)
+2. [01-入门指南/本地部署.md](./01-入门指南/本地部署.md)
+3. [02-架构设计/项目架构.md](./02-架构设计/项目架构.md)
+4. [02-架构设计/系统架构.md](./02-架构设计/系统架构.md)
+5. [03-API参考/数据库设计.md](./03-API参考/数据库设计.md)
+6. [03-API参考/API接口指南.md](./03-API参考/API接口指南.md)
 
-### 项目简介
+## 目录说明
 
-BrainDance（流光·记）是一个面向移动端的"可检索三维记忆库"项目。该项目利用 **3D Gaussian Splatting（高斯泼溅）** 等计算机图形学前沿技术，将现实世界的物理空间以 1:1 的高保真度转化为数字资产。结合 **Multimodal AI（多模态大模型）** 与 **RAG（检索增强生成）** 技术，BrainDance 让三维场景具备了"语义"，实现了"搜索现实世界"的能力。
+- `01-入门指南/`：快速开始和本地部署
+- `02-架构设计/`：系统结构、技术栈和数据流
+- `03-API参考/`：接口、数据库和测试报告
+- `04-AI引擎/`：AI 相关文档
+- `05-开发规范/`：协作规范、贡献指南、测试指南
+- `06-部署运维/`：环境配置和部署记录
+- `07-技术报告/`：专项技术报告
+- `08-待办事项/`：整理后的待办与改进建议
+- `开发文档/`：比赛材料、设计分析等文档
+- `.archive/`：历史归档
 
-**核心价值主张**：对抗时间熵增，为每个人、每座城留下一份可以穿越时间的空间档案。
+## 常用入口
 
----
+- 根项目说明：[README.md](/home/ltx/projects/BrainDance/README.md)
+- AI Worker：[ai_engine/3dgs/README.md](/home/ltx/projects/BrainDance/ai_engine/3dgs/README.md)
+- Supabase 层：[supabase/README.md](/home/ltx/projects/BrainDance/supabase/README.md)
+- Dashboard：[dashboard/README.md](/home/ltx/projects/BrainDance/dashboard/README.md)
+- App：[app/README.md](/home/ltx/projects/BrainDance/app/README.md)
 
-## 📂 文档目录索引
+## 说明
 
 ### 1️⃣ 入门指南
 
@@ -133,3 +151,6 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 *物理世界注定走向无序，而我们在比特世界重建永恒。*
 
 </div>
+
+- `docs/` 里同时包含开发文档和比赛材料，口径不完全一致是正常的
+- 旧稿和废弃方案尽量放在 `.archive/`，但仍建议以根 README 和各模块 README 为准

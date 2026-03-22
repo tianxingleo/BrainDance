@@ -12,8 +12,8 @@ class AppConfig {
   static bool isNightMode = false;
   static bool hasReadRecordTip = false;
 
-  static final Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
-  static final Color accentColor = Color.fromRGBO(232, 234, 220, 1);
+  static const Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
+  static const Color accentColor = Color.fromRGBO(232, 234, 220, 1);
   static void initializeAppConfig() {
     try {
       AppConfig.langMap = Localize.getLangMap(Platform.localeName);

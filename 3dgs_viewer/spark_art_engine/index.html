@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spark Generative Art Engine - BrainDance</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background-color: #000; color: #fff; font-family: monospace; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* 独立DOM层级的VJ现场控制台 */
+        #vj-console {
+            position: absolute; top: 20px; right: 20px; z-index: 9999;
+            background: rgba(10, 10, 15, 0.85); border: 1px solid #333; backdrop-filter: blur(10px);
+            padding: 20px; width: 300px; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        #vj-console h2 { margin: 0 0 15px 0; font-size: 16px; color: #00ffcc; text-transform: uppercase; letter-spacing: 2px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-size: 11px; color: #aaa; margin-bottom: 5px; }
+        select, input[type="range"], button { width: 100%; box-sizing: border-box; background: #000; color: #0f0; border: 1px solid #444; padding: 6px; font-family: monospace; }
+        input[type="range"] { accent-color: #00ffcc; }
+        button { background: #00ffcc; color: #000; font-weight: bold; cursor: pointer; border: none; padding: 10px; text-transform: uppercase; margin-top: 10px; transition: 0.2s; }
+        button:hover { background: #fff; }
+        
+        /* 视觉输入视频流 */
+        #ai-feed { position: absolute; bottom: 20px; right: 20px; width: 160px; height: 120px; z-index: 9999; opacity: 0.6; border: 1px solid #333; border-radius: 4px; pointer-events: none;}
+        #stats { position: absolute; top: 20px; left: 20px; z-index: 9999; }
+    </style>
+    
+    <!-- Import Maps: 物理工程解耦依赖 -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "gsap": "https://cdn.jsdelivr.net/npm/gsap@3.12.5/index.js"
+        }
+    }
+    </script>
+    
+    <!-- MediaPipe 注入 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div id="vj-console">
+        <h2>Spark VJ Dashboard</h2>
+        <div class="control-group">
+            <label>Vector Field Topology (矢量场算法)</label>
+            <select id="ui-vf-select">
+                <option value="0">00 - Curl Noise Entropy</option>
+                <option value="1">01 - Inverse Particle Growth</option>
+                <option value="2">02 - Topological Shatter</option>
+                <option value="3">03 - Polar Fluid Dynamics</option>
+                <option value="4">04 - Multi-Dim Space Fold</option>
+                <option value="5">05 - SDF Magnetic Core</option>
+                <!-- 预留至30个状态 -->
+            </select>
+        </div>
+        <div class="control-group">
+            <label>AI Pinch Progress (双向绑定进度 uProgress)</label>
+            <input type="range" id="ui-progress" min="0" max="1" step="0.001" value="0.0">
+        </div>
+        <div class="control-group">
+            <label>Cinematography Sequence (运镜序列)</label>
+            <button id="ui-cam-trigger">TRIGGER NEXT C-SEQ</button>
+        </div>
+    </div>
+    
+    <video class="input_video" id="ai-feed" autoplay playsinline></video>
+    <div id="stats"></div>
+
+    <!-- 严格执行 1 HTML + 4 JS 解耦 -->
+    <script type="module" src="./core.js"></script>
+</body>
+</html>
