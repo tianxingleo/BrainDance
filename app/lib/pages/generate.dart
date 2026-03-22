@@ -51,8 +51,12 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   bool _isUploading = false;
   double _uploadProgress = 0.0;
+  int _uploadedBytes = 0;
+  int _totalFileSize = 0;
   String? _generatedImageUrl;
   bool _isGenerating = false;
+  String _selectedVideoTaskType = 'video_3dgs';
+  bool _wasGeneratePageActive = false;
 
   static String _generateSceneId() {
     final time = DateTime.now();
@@ -66,6 +70,15 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   void _refresh(VoidCallback fn) {
     setState(fn);
+  }
+
+  static String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
   @override
@@ -88,14 +101,114 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   @override
   void dispose() {
+    _clearGenerateDraft();
     _tabController.dispose();
     _scrollController.dispose();
     _textEditingController.dispose();
     super.dispose();
   }
 
+  void _clearGenerateDraft() {
+    GenConfig.uploadedImages.clear();
+    GenConfig.uploadedVideos.clear();
+    GenConfig.uploadedText = "";
+    _generatedImageUrl = null;
+    _selectedVideoTaskType = 'video_3dgs';
+    _textEditingController.clear();
+    unawaited(GenConfig.deleteImagePathsFile());
+    unawaited(GenConfig.deleteTextFile());
+    unawaited(GenConfig.deleteVideoPathsFile());
+  }
+
+  String _videoTaskTypeLabel(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return textLocalize('gen_video_task_dual_chain');
+      case 'video_3dgs':
+        return textLocalize('gen_video_task_3dgs');
+      case 'da3_feed_forward_3dgs':
+        return textLocalize('gen_video_task_feed_forward');
+      case 'da3_sugar':
+        return textLocalize('gen_video_task_sugar');
+      case 'da3_2dgs':
+        return textLocalize('gen_video_task_2dgs');
+      case 'sparse2dgs':
+        return textLocalize('gen_video_task_sparse2dgs');
+      default:
+        return taskType;
+    }
+  }
+
+  String _videoTaskTypeHint(String taskType) {
+    switch (taskType) {
+      case 'video_dual_chain':
+        return textLocalize('gen_video_task_dual_chain_hint');
+      case 'video_3dgs':
+        return textLocalize('gen_video_task_3dgs_hint');
+      case 'da3_feed_forward_3dgs':
+        return textLocalize('gen_video_task_feed_forward_hint');
+      case 'da3_sugar':
+        return textLocalize('gen_video_task_sugar_hint');
+      case 'da3_2dgs':
+        return textLocalize('gen_video_task_2dgs_hint');
+      case 'sparse2dgs':
+        return textLocalize('gen_video_task_sparse2dgs_hint');
+      default:
+        return '';
+    }
+  }
+
+  List<String> get _videoTaskTypeOptions => const [
+    'video_3dgs',
+    'video_dual_chain',
+    'da3_feed_forward_3dgs',
+    'da3_sugar',
+    'da3_2dgs',
+    'sparse2dgs',
+  ];
+
+  Future<void> _showVideoTaskTypeSheet() async {
+    final completer = Completer<void>();
+    TDActionSheet(
+      context,
+      description: textLocalize('gen_video_task_sheet_desc'),
+      items: _videoTaskTypeOptions
+          .map(
+            (taskType) => TDActionSheetItem(
+              label: _videoTaskTypeLabel(taskType),
+            ),
+          )
+          .toList(),
+      cancelText: textLocalize("gen_cancel"),
+      onSelected: (item, index) {
+        _refresh(() {
+          _selectedVideoTaskType = _videoTaskTypeOptions[index];
+        });
+        completer.complete();
+      },
+      onCancel: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+      onClose: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+    ).show();
+    await completer.future;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isGeneratePageActive = ref.watch(pageIndexProvider) == 1;
+    if (isGeneratePageActive) {
+      _wasGeneratePageActive = true;
+    } else if (_wasGeneratePageActive) {
+      _wasGeneratePageActive = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _refresh(_clearGenerateDraft);
+      });
+    }
+
     final theme = TDTheme.of(context);
     final isDark = AppConfig.isNightMode;
     const double floatingNavHeight = 68;
@@ -104,10 +217,15 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     const double submitAreaBottomPadding =
         floatingNavHeight + floatingNavBottomMargin + submitBottomGap;
     const double contentBottomPadding = 36;
+    const double keyboardSubmitBottomPadding = 8;
     final textColor = isDark ? Colors.white : BDDesign.colorInkBlack;
     final bgCardColor = isDark
         ? const Color(0xFF1C1C1E)
         : BDDesign.colorPaperWhite;
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final submitBottomPadding = keyboardInset > 0
+        ? keyboardSubmitBottomPadding
+        : submitAreaBottomPadding;
 
     final currentSelectionCount = switch (_tabController.index) {
       0 => GenConfig.uploadedImages.length,
@@ -122,10 +240,12 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final uploadLabel = _isGenerating
         ? textLocalize('gen_text_generating')
         : _isUploading
-        ? '上传 ${(_uploadProgress * 100).toStringAsFixed(0)}%'
+        ? textLocalize(
+            'gen_upload_progress',
+          ).replaceAll('%s', (_uploadProgress * 100).toStringAsFixed(0))
         : currentSelectionCount == 0
-        ? '等待素材'
-        : '可提交';
+        ? textLocalize('gen_waiting_material')
+        : textLocalize('gen_ready_submit');
 
     final List<Widget> tabContents = [
       Padding(
@@ -216,8 +336,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '图像输入',
-                  description: textLocalize('gen_tip_pic'),
+                  title: textLocalize('gen_section_image'),
+                  description: textLocalize(
+                    'gen_tip_pic',
+                  ).replaceAll('[FILE_SIZE]', _formatBytes(sizeLimit * 1024)),
                 ),
                 const SizedBox(height: 18),
                 BDPanelCard(
@@ -252,7 +374,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '文本草稿',
+                  title: textLocalize('gen_section_text'),
                   description: textLocalize('gen_tip_text'),
                 ),
                 const SizedBox(height: 18),
@@ -304,6 +426,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 for (final f in files) {
                   GenConfig.uploadedVideos.remove(f);
                 }
+                if (GenConfig.uploadedVideos.isEmpty) {
+                  _selectedVideoTaskType = 'video_3dgs';
+                }
                 break;
               case TDUploadType.replace:
                 break;
@@ -331,7 +456,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _GenerateSectionHeading(
-                  title: '视频采集',
+                  title: textLocalize('gen_section_video'),
                   description: textLocalize('gen_tip_video'),
                 ),
                 const SizedBox(height: 18),
@@ -345,6 +470,63 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                     child: upload,
                   ),
                 ),
+                if (GenConfig.uploadedVideos.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  BDPanelCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 16,
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: _showVideoTaskTypeSheet,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  textLocalize('gen_video_task_title'),
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _videoTaskTypeLabel(_selectedVideoTaskType),
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _videoTaskTypeHint(_selectedVideoTaskType),
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.62)
+                                        : theme.fontGyColor3,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.tune_rounded,
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.72)
+                                : BDDesign.colorMutedBlue,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -387,7 +569,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 children: [
                   BDPageHeader(
                     title: textLocalize('gen_top'),
-                    subtitle: '把素材、状态和提交动作压进同一条生成流程里，不再像旧表单页。',
+                    //subtitle: textLocalize('gen_subtitle'),
                     trailing: BDStatusPill(
                       label: uploadLabel,
                       icon: _isUploading || _isGenerating
@@ -406,19 +588,19 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                         children: [
                           Expanded(
                             child: _GenerateMetric(
-                              label: '模式',
+                              label: textLocalize('gen_label_mode'),
                               value: modeLabel,
                             ),
                           ),
                           Expanded(
                             child: _GenerateMetric(
-                              label: '素材',
+                              label: textLocalize('gen_label_material'),
                               value: currentSelectionCount.toString(),
                             ),
                           ),
                           Expanded(
                             child: _GenerateMetric(
-                              label: '状态',
+                              label: textLocalize('gen_label_status'),
                               value: uploadLabel,
                             ),
                           ),
@@ -427,13 +609,76 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_isUploading)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: BDPanelCard(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.cloud_upload_outlined,
+                                  size: 14,
+                                  color: isDark
+                                      ? const Color(0xFFFFB74D)
+                                      : const Color(0xFFF57C00),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? const Color(0xFFFFB74D)
+                                        : const Color(0xFFF57C00),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.58)
+                                        : BDDesign.colorMutedBlue,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(3),
+                              child: LinearProgressIndicator(
+                                value: _uploadProgress,
+                                minHeight: 5,
+                                backgroundColor: isDark
+                                    ? Colors.white.withAlpha(20)
+                                    : Colors.black.withAlpha(15),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  isDark
+                                      ? const Color(0xFFFFB74D)
+                                      : const Color(0xFFF57C00),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   Expanded(child: Column(children: tabContents)),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       20,
                       8,
                       20,
-                      submitAreaBottomPadding,
+                      0,
                     ),
                     child: TDButton(
                       onTap: (_isUploading || _isGenerating)
@@ -454,10 +699,11 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                       text: (_isUploading || _isGenerating)
                           ? (_isGenerating
                                 ? textLocalize('gen_text_generating')
-                                : '正在上传... ${(_uploadProgress * 100).toStringAsFixed(1)}%')
+                                : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%')
                           : textLocalize('gen_button'),
                     ),
                   ),
+                  SizedBox(height: submitBottomPadding),
                 ],
               ),
             ],

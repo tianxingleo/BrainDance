@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:braindance/configs/app_config.dart';
 
 import '../configs/app_theme.dart';
 import '../configs/supabase_config.dart';
@@ -39,7 +40,7 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showText('注册成功！请检查邮箱完成验证。', context: context);
+          TDToast.showText(textLocalize('login_signup_success'), context: context);
           setState(() {
             _isSignUp = false; // 注册成功后切回登录界面
           });
@@ -51,17 +52,17 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showSuccess('登录成功', context: context);
+          TDToast.showSuccess(textLocalize('login_success'), context: context);
           Navigator.of(context).pushReplacementNamed('/'); // 回到首页
         }
       }
     } on AuthException catch (e) {
       if (mounted) {
-        TDToast.showText('认证失败: ${e.message}', context: context);
+        TDToast.showText('${textLocalize('login_auth_fail')}: ${e.message}', context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('发生错误: $e', context: context);
+        TDToast.showText('${textLocalize('login_error')}: $e', context: context);
       }
     } finally {
       if (mounted) {
@@ -103,13 +104,13 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '当前 .env 使用的是 secret key，应用已进入管理员模式。',
+                    textLocalize('login_admin_secret'),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: colorScheme.onSurface),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '管理员模式会绕过 RLS，可直接查看全部模型与任务。',
+                    textLocalize('login_admin_rls'),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: colorScheme.onSurface.withValues(alpha: 0.72),
@@ -117,7 +118,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 24),
                   TDButton(
-                    text: '进入首页',
+                    text: textLocalize('login_enter_home'),
                     onTap: () {
                       Navigator.of(context).pushReplacementNamed('/');
                     },
@@ -134,7 +135,7 @@ class _LoginPageState extends State<LoginPage> {
       backgroundColor: context.appPageBackground,
       appBar: AppBar(
         title: TDText(
-          _isSignUp ? '注册' : '登录',
+          _isSignUp ? textLocalize('login_signup') : textLocalize('login_login'),
           font: theme.fontHeadlineSmall,
           fontWeight: FontWeight.w600,
           textColor: colorScheme.onSurface,
@@ -173,14 +174,14 @@ class _LoginPageState extends State<LoginPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     TDText(
-                      _isSignUp ? '创建 Brain Dance 账号' : '登录 Brain Dance',
+                      _isSignUp ? textLocalize('login_create_account') : textLocalize('login_welcome'),
                       font: theme.fontTitleLarge,
                       fontWeight: FontWeight.w700,
                       textColor: colorScheme.onSurface,
                     ),
                     const SizedBox(height: 8),
                     TDText(
-                      _isSignUp ? '注册后请前往邮箱完成验证。' : '输入邮箱和密码继续。',
+                      _isSignUp ? textLocalize('login_signup_hint') : textLocalize('login_hint'),
                       font: theme.fontBodyMedium,
                       textColor: colorScheme.onSurface.withValues(alpha: 0.68),
                     ),
@@ -188,22 +189,22 @@ class _LoginPageState extends State<LoginPage> {
                     TDInput(
                       controller: _emailController,
                       type: TDInputType.normal,
-                      leftLabel: '邮箱',
-                      hintText: '请输入验证邮箱',
+                      leftLabel: textLocalize('login_email'),
+                      hintText: textLocalize('login_email_hint'),
                     ),
                     const SizedBox(height: 16),
                     TDInput(
                       controller: _passwordController,
                       type: TDInputType.normal,
                       obscureText: true,
-                      leftLabel: '密码',
-                      hintText: '请输入密码(至少6位)',
+                      leftLabel: textLocalize('login_password'),
+                      hintText: textLocalize('login_password_hint'),
                     ),
                     const SizedBox(height: 32),
                     _isLoading
                         ? const CircularProgressIndicator()
                         : TDButton(
-                            text: _isSignUp ? '注册新账号' : '登录',
+                            text: _isSignUp ? textLocalize('login_signup_btn') : textLocalize('login_login'),
                             type: TDButtonType.fill,
                             theme: TDButtonTheme.primary,
                             shape: TDButtonShape.round,
@@ -213,7 +214,7 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                     const SizedBox(height: 16),
                     TDButton(
-                      text: _isSignUp ? '已有账号？去登录' : '没有账号？去注册',
+                      text: _isSignUp ? textLocalize('login_goto_login') : textLocalize('login_goto_signup'),
                       type: TDButtonType.text,
                       theme: TDButtonTheme.primary,
                       onTap: () {

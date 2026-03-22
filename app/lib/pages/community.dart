@@ -84,7 +84,7 @@ class _CommunityPageState extends State<CommunityPage>
       _selectedMapIndex = 0;
     });
 
-    TDToast.showText(context: context, '记忆已加入社区流');
+    TDToast.showText(context: context, textLocalize('community_joined'));
   }
 
   void _openViewer(CommunityPost post) {
@@ -207,7 +207,7 @@ class _CommunityPageState extends State<CommunityPage>
                         ? BDDesign.colorPaperWhite
                         : BDDesign.colorInkBlack,
                   ),
-                  tooltip: '分享记忆',
+                  tooltip: textLocalize('community_share_tooltip'),
                 ),
               ),
               Padding(
@@ -216,18 +216,18 @@ class _CommunityPageState extends State<CommunityPage>
                   children: [
                     Expanded(
                       child: _CommunityMetricCard(
-                        label: '社区记忆',
+                        label: textLocalize('community_label_memories'),
                         value: '${posts.length}',
-                        hint: '当前可浏览的空间贴文',
+                        hint: textLocalize('community_label_memories_hint'),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _CommunityMetricCard(
-                        label: '地点节点',
+                        label: textLocalize('community_label_nodes'),
                         value:
                             '${posts.map((post) => post.placeName).toSet().length}',
-                        hint: '地图上的可探索坐标',
+                        hint: textLocalize('community_label_nodes_hint'),
                       ),
                     ),
                   ],
@@ -253,9 +253,9 @@ class _CommunityPageState extends State<CommunityPage>
                     unselectedLabelColor: isDark
                         ? Colors.white.withValues(alpha: 0.56)
                         : BDDesign.colorMutedBlue,
-                    tabs: const [
-                      Tab(text: '流式浏览'),
-                      Tab(text: '地图探索'),
+                    tabs: [
+                      Tab(text: textLocalize('community_tab_feed')),
+                      Tab(text: textLocalize('community_tab_map')),
                     ],
                   ),
                 ),
@@ -408,7 +408,7 @@ class _CommunityMapView extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '点地图上的记忆节点，会展开同地点用户拍到的空间内容。',
+                            textLocalize('community_map_hint'),
                             style: TextStyle(color: hintColor, height: 1.35),
                           ),
                         ],
@@ -732,7 +732,7 @@ class _CommunityFeedCard extends StatelessWidget {
                         child: FilledButton.icon(
                           onPressed: onOpenViewer,
                           icon: const Icon(Icons.play_circle_fill_rounded),
-                          label: const Text('进入记忆'),
+                          label: Text(textLocalize('community_enter_memory')),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -743,7 +743,7 @@ class _CommunityFeedCard extends StatelessWidget {
                           color: isDark ? BDDesign.colorPaperWhite : textColor,
                         ),
                         label: Text(
-                          '地点内容',
+                          textLocalize('community_location_content'),
                           style: TextStyle(
                             color: isDark
                                 ? BDDesign.colorPaperWhite
@@ -849,7 +849,7 @@ class _SelectedLocationCard extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onOpenViewer,
                   icon: const Icon(Icons.travel_explore_rounded),
-                  label: const Text('打开当前模型'),
+                  label: Text(textLocalize('community_open_model')),
                 ),
               ),
               const SizedBox(width: 10),
@@ -857,7 +857,7 @@ class _SelectedLocationCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onOpenLocationHub,
                   icon: const Icon(Icons.map_rounded),
-                  label: const Text('查看同地点内容'),
+                  label: Text(textLocalize('community_view_location')),
                 ),
               ),
             ],
@@ -1103,7 +1103,7 @@ class _CommunityEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               Text(
-                '社区流暂时为空',
+                textLocalize('community_empty_feed'),
                 style: TextStyle(
                   color: isDark
                       ? BDDesign.colorPaperWhite
@@ -1114,7 +1114,7 @@ class _CommunityEmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                '先分享一个带地点的记忆模型，地图和流式浏览会同时出现。',
+                textLocalize('community_empty_hint'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: isDark
@@ -1226,7 +1226,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '分享你的地点记忆',
+                                  textLocalize('community_share_title'),
                                   style: TextStyle(
                                     color: textColor,
                                     fontSize: 22,
@@ -1235,7 +1235,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
-                                  '先选择一个你已有的模型，再给它补上地点和一句简短说明。',
+                                  textLocalize('community_share_hint'),
                                   style: TextStyle(
                                     color: hintColor,
                                     height: 1.4,
@@ -1269,8 +1269,8 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                       else
                         DropdownButtonFormField<CommunityModelOption>(
                           initialValue: _selectedModel,
-                          decoration: const InputDecoration(
-                            labelText: '选择要分享的模型',
+                          decoration: InputDecoration(
+                            labelText: textLocalize('community_select_model'),
                           ),
                           items: widget.models
                               .map(
@@ -1289,20 +1289,20 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                       const SizedBox(height: 12),
                       TextField(
                         controller: _titleController,
-                        decoration: const InputDecoration(labelText: '标题'),
+                        decoration: InputDecoration(labelText: textLocalize('community_input_title')),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _captionController,
                         minLines: 3,
                         maxLines: 5,
-                        decoration: const InputDecoration(
-                          labelText: '这段记忆想让别人看到什么',
+                        decoration: InputDecoration(
+                          labelText: textLocalize('community_input_caption'),
                         ),
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        '快速地点预设',
+                        textLocalize('community_location_preset'),
                         style: TextStyle(
                           color: textColor,
                           fontWeight: FontWeight.w700,
@@ -1330,7 +1330,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                       const SizedBox(height: 12),
                       TextField(
                         controller: _placeController,
-                        decoration: const InputDecoration(labelText: '地点名称'),
+                        decoration: InputDecoration(labelText: textLocalize('community_input_place')),
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -1343,8 +1343,8 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                                     decimal: true,
                                     signed: true,
                                   ),
-                              decoration: const InputDecoration(
-                                labelText: '纬度',
+                              decoration: InputDecoration(
+                                labelText: textLocalize('community_input_lat'),
                               ),
                             ),
                           ),
@@ -1357,8 +1357,8 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                                     decimal: true,
                                     signed: true,
                                   ),
-                              decoration: const InputDecoration(
-                                labelText: '经度',
+                              decoration: InputDecoration(
+                                labelText: textLocalize('community_input_lng'),
                               ),
                             ),
                           ),
@@ -1380,7 +1380,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
                                   ),
                                 )
                               : const Icon(Icons.send_rounded),
-                          label: Text(_isSubmitting ? '发布中...' : '发布到社区'),
+                          label: Text(_isSubmitting ? textLocalize('community_publishing') : textLocalize('community_publish')),
                         ),
                       ),
                     ],
@@ -1408,7 +1408,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
         title.isEmpty ||
         caption.isEmpty ||
         place.isEmpty) {
-      TDToast.showText(context: context, '请把模型、标题、文案和地点都填完整');
+      TDToast.showText(context: context, textLocalize('community_fill_all'));
       return;
     }
 
@@ -1629,15 +1629,15 @@ class CommunityRepository {
 
         return CommunityPost(
           id: map['id'].toString(),
-          title: map['title']?.toString() ?? '未命名记忆',
+          title: map['title']?.toString() ?? textLocalize('community_unnamed_memory'),
           caption:
               map['caption']?.toString() ??
               model['description']?.toString() ??
               '',
-          placeName: map['place_name']?.toString() ?? '未标注地点',
+          placeName: map['place_name']?.toString() ?? textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName: map['user_id']?.toString() ?? '匿名用户',
+          authorName: map['user_id']?.toString() ?? textLocalize('community_anonymous'),
           modelName:
               map['model_name']?.toString() ??
               model['display_name']?.toString() ??
@@ -1686,7 +1686,7 @@ class CommunityRepository {
         final publicUrl = _publicModelUrl(path);
         return CommunityModelOption(
           id: map['id'].toString(),
-          sceneId: map['display_name']?.toString() ?? map['scene_id']?.toString() ?? '未命名模型',
+          sceneId: map['display_name']?.toString() ?? map['scene_id']?.toString() ?? textLocalize('community_unnamed_model'),
           description: map['description']?.toString() ?? '',
           modelUrl: publicUrl.isEmpty
               ? './models/scene_auto_sync_raw.ply'
