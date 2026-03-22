@@ -123,10 +123,10 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           'slow_pipeline': 'video_3dgs',
           'sam3d_vram_threshold_gb': 25,
           'best_frame_sample_count': 8,
+          'mapper_type': 'da3',
         },
         'status': 'pending',
         if (nameController.text.isNotEmpty) 'display_name': nameController.text,
-        'task_params': {'mapper_type': 'da3'},
       });
 
       if (mounted) {
