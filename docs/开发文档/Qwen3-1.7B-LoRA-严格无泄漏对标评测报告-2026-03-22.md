@@ -105,6 +105,81 @@
 3. `1.7B Q4 GGUF` 在严格集上相比原始 benchmark 没有继续大幅恶化，但 `natural_style` 与 `must_answer_focus` 仍弱于非量化版本
 4. 因此从严格集口径看，`Q4` 更接近“正确性基本保住、体验侧回撤”的版本，而不是原始集里那种明显劣化的形态
 
+### 4.0.2 本地 4 版本图表（严格集新增）
+
+先看综合分：
+
+```mermaid
+xychart-beta
+  title "本地 4 版本综合任务分（strict v3 / 64 题）"
+  x-axis ["1.7B-LoRA","0.6B-LoRA","1.7B-merged","1.7B-Q4"]
+  y-axis "Score" 0 --> 100
+  bar [98.89,97.54,96.67,94.21]
+```
+
+再看关键任务指标：
+
+```mermaid
+xychart-beta
+  title "本地 4 版本关键指标（strict v3，展开单序列）"
+  x-axis ["L-hallu","L-neg","L-focus","0.6-hallu","0.6-neg","0.6-focus","M-hallu","M-neg","M-focus","Q4-hallu","Q4-neg","Q4-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.0000,0.0000,0.8889,0.0556,0.0556,1.0000,0.0000,0.0000,0.6667,0.0556,0.0556,0.6667]
+```
+
+注：
+
+- `hallu` = `partial_hallucination_rate`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+- `L` = `1.7B LoRA`
+- `M` = `1.7B merged`
+
+### 4.0.3 strict v3 下 Q4_K_M vs Q5_K_M（新增）
+
+同一套 strict v3（64 题）下，再额外比较 `Q4_K_M` 和 `Q5_K_M`：
+
+| 量化版本 | false_no_answer | partial_hallucination | partial_precision | partial_missing_negation | must_answer_focus | natural_style | 综合分 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Q4_K_M | 0.0000 | 0.0556 | 0.9474 | 0.0556 | 0.6667 | 0.7188 | 94.21 |
+| Q5_K_M | 0.0000 | 0.2222 | 0.8182 | 0.4444 | 1.0000 | 0.9062 | 88.38 |
+
+这里的结论与原始集不同：
+
+- `Q5_K_M` 在 strict 集上没有继续改善 `Q4_K_M`
+- 相反，`partial_hallucination / partial_precision / partial_missing_negation` 都明显变差
+- 它只在 `must_answer_focus` 与 `natural_style` 上更好
+
+因此，当前更稳妥的结论不是“Q5 一定优于 Q4”，而是：
+
+- `Q5` 在原始集上看起来更像修复
+- 但在 strict 集上并不稳，不能作为当前默认升级方向
+
+这意味着接下来如果继续推进端侧量化，不能只看原始 benchmark，必须同时看 strict 口径。
+
+```mermaid
+xychart-beta
+  title "Q4_K_M vs Q5_K_M 综合分（strict v3 / 64 题）"
+  x-axis ["Q4_K_M","Q5_K_M"]
+  y-axis "Score" 0 --> 100
+  bar [94.21,88.38]
+```
+
+```mermaid
+xychart-beta
+  title "Q4_K_M vs Q5_K_M 关键指标（strict v3，展开单序列）"
+  x-axis ["Q4-hallu","Q4-prec","Q4-neg","Q4-focus","Q5-hallu","Q5-prec","Q5-neg","Q5-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.0556,0.9474,0.0556,0.6667,0.2222,0.8182,0.4444,1.0000]
+```
+
+注：
+
+- `hallu` = `partial_hallucination_rate`
+- `prec` = `partial_hit_precision`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+
 ## 4.1 1.7B 四象限对照（你要求的核心对比）
 
 同一 `Qwen3-1.7B` 基座，做“微调前后 × 有无工程优化”四象限：

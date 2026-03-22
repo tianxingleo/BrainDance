@@ -129,6 +129,81 @@ B. 体验指标（决定“像不像产品”）
 - 如果优先看**体积与端侧可运行性**，`0.6B LoRA` 与 `1.7B Q4 GGUF` 才是更现实候选
 - 但当前 `1.7B Q4 GGUF` 在 `partial_hallucination / partial_precision / must_answer_focus` 上回退明显，不能直接视作 `merged` 的无损替代
 
+#### 3.1.1 本地 4 版本综合分图
+
+这里沿用正文已有综合分公式，单独把本地 4 个版本放在一张图里：
+
+```mermaid
+xychart-beta
+  title "本地 4 版本综合任务分（原始 80 题 benchmark）"
+  x-axis ["1.7B-LoRA","0.6B-LoRA","1.7B-merged","1.7B-Q4"]
+  y-axis "Score" 0 --> 100
+  bar [98.12,91.95,93.44,84.50]
+```
+
+#### 3.1.2 本地 4 版本关键指标图
+
+```mermaid
+xychart-beta
+  title "本地 4 版本关键指标（展开单序列，越低越好）"
+  x-axis ["L-hallu","L-neg","L-focus","0.6-hallu","0.6-neg","0.6-focus","M-hallu","M-neg","M-focus","Q4-hallu","Q4-neg","Q4-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.0000,0.0000,0.8125,0.0625,0.1875,0.6875,0.0625,0.0625,0.6875,0.2500,0.2500,0.5000]
+```
+
+注：
+
+- `hallu` = `partial_hallucination_rate`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+- `L` = `1.7B LoRA`
+- `M` = `1.7B merged`
+
+#### 3.1.3 Q4_K_M vs Q5_K_M 补测（新增）
+
+在 `1.7B GGUF` 线上，又额外补测了 `Q5_K_M`：
+
+| 量化版本 | 文件大小 | false_no_answer | partial_hallucination | partial_precision | partial_missing_negation | must_answer_focus | natural_style | 综合分 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Q4_K_M | `1.1G` | 0.0000 | 0.2500 | 0.8000 | 0.2500 | 0.5000 | 0.8375 | 84.50 |
+| Q5_K_M | `1.2G` | 0.0156 | 0.1250 | 0.8824 | 0.2500 | 0.8750 | 0.9500 | 90.82 |
+
+原始 80 题 benchmark 下，`Q5_K_M` 相比 `Q4_K_M` 的确有改善，尤其是：
+
+- `partial_hallucination`: `0.2500 -> 0.1250`
+- `partial_precision`: `0.8000 -> 0.8824`
+- `must_answer_focus`: `0.5000 -> 0.8750`
+
+但它也不是纯收益：
+
+- `false_no_answer_rate`: `0.0000 -> 0.0156`
+- `partial_missing_negation_rate`: 仍然维持 `0.2500`
+
+因此在原始 benchmark 口径下，可以说 `Q5_K_M` 比 `Q4_K_M` 更像一个“有一定修复效果”的版本。
+
+```mermaid
+xychart-beta
+  title "Q4_K_M vs Q5_K_M 综合分（原始 80 题 benchmark）"
+  x-axis ["Q4_K_M","Q5_K_M"]
+  y-axis "Score" 0 --> 100
+  bar [84.50,90.82]
+```
+
+```mermaid
+xychart-beta
+  title "Q4_K_M vs Q5_K_M 关键指标（原始集，展开单序列）"
+  x-axis ["Q4-hallu","Q4-prec","Q4-neg","Q4-focus","Q5-hallu","Q5-prec","Q5-neg","Q5-focus"]
+  y-axis "Rate" 0 --> 1
+  bar [0.2500,0.8000,0.2500,0.5000,0.1250,0.8824,0.2500,0.8750]
+```
+
+注：
+
+- `hallu` = `partial_hallucination_rate`
+- `prec` = `partial_hit_precision`
+- `neg` = `partial_missing_negation_rate`
+- `focus` = `must_answer_focus_rate`
+
 ## 4. 关键对比
 
 ### 4.1 Base vs LoRA（同基座）
