@@ -1,6 +1,6 @@
 # Qwen3-1.7B 微调实践记录 Part 31
 
-## Part 31：Qwen3-0.6B 全量微调首轮可行性实验
+## Part 31-A：1.7B full SFT 支线落地与 gpu1 执行入口补齐
 
 ### 时间
 
@@ -8,298 +8,274 @@
 
 ### 本 part 目标
 
-基于当前已经跑通的 `Qwen3-0.6B LoRA` 链路，补一条最小改动的 `full SFT` 支线，并在 `gpu1` 上完成：
+- 在现有 `ai_engine/finetune_qwen3` 骨架上补齐 `Qwen3-1.7B full SFT` 支线
+- 保持与现有 `LoRA / merged / strict benchmark` 同口径
+- 保证可以直接在 `conda run -n qwen3_ft` + `gpu1` 上训练与评测
 
-- `train_full_sft.py` 落地
-- `0.6B full` smoke train
-- `0.6B full` 正式 1 epoch 训练
-- smoke eval
-- 原始 80 题 benchmark
-- strict v3 / 64 题 benchmark
+### 本次改动
 
-这一轮不回答“是否直接替换主线部署”，只回答：
+新增脚本：
 
-1. `0.6B full` 是否真实可训、可评测、可复现
-2. 它相对 `0.6B LoRA` 的收益究竟落在“任务正确性”还是“输出风格”
+- `ai_engine/finetune_qwen3/scripts/run_train_qwen3_1p7b_full_gpu1.sh`
+- `ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_1p7b_full_gpu1.sh`
+- `ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_1p7b_full_gpu1.sh`
+- `ai_engine/finetune_qwen3/scripts/run_benchmark_strict_qwen3_1p7b_full_gpu1.sh`
 
----
+兼容性修正：
 
-## 一、本轮新增支线
+- `ai_engine/finetune_qwen3/scripts/run_smoke_eval.py`
+  - 把 `AutoModelForCausalLM.from_pretrained()` 的参数从 `dtype=` 修正为 `torch_dtype=`
+  - 这样 full HF 模型目录可以与当前 transformers 版本正常对齐
 
-### 1. 新增 full SFT 训练脚本
+### 本 part 执行约束
 
-新增文件：
+本轮执行统一使用：
 
-- [train_full_sft.py](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/train_full_sft.py)
-
-实现原则：
-
-- 复用现有 LoRA 版本的数据格式与 assistant-only loss mask
-- 保留 `Qwen3` chat template 处理逻辑
-- 去掉 `PEFT/LoRA` 注入，改为全参数训练
-- 训练配置改成更保守的 `full SFT` 参数
-
-本轮正式训练参数：
-
-- 模型：`Qwen/Qwen3-0.6B`
-- `cutoff_len = 1536`
-- `num_train_epochs = 1`
-- `learning_rate = 1e-5`
-- `per_device_train_batch_size = 2`
-- `per_device_eval_batch_size = 2`
-- `gradient_accumulation_steps = 8`
+- 环境：`qwen3_ft`
+- GPU：`CUDA_VISIBLE_DEVICES=1`
+- 模型：`Qwen/Qwen3-1.7B`
+- 训练长度：`cutoff_len=1536`
 - 精度：`auto_bf16`
+- 梯度累积：`gradient_accumulation_steps=8`
 
-另外新增了 `--max_steps`，便于先做 smoke train。
+### 本 part 一句话结论
 
-### 2. 新增 gpu1 包装脚本
+`1.7B full SFT` 的训练、smoke eval、benchmark、strict benchmark 四个入口已全部补齐，可以作为独立实验支线稳定复现。
 
-新增文件：
+## Part 31-B：mini smoke 训练验证 full 支线可行性
 
-- [run_train_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_full_gpu1.sh)
-- [run_smoke_eval_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_full_gpu1.sh)
-- [run_benchmark_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_full_gpu1.sh)
-- [run_benchmark_strict_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_benchmark_strict_qwen3_0p6b_full_gpu1.sh)
+### 本 part 目标
 
-这些脚本统一固定：
+- 先验证 `1.7B full` 在 `gpu1` 上是否会 OOM
+- 验证完整 HF 模型目录是否能保存成功
+- 验证保存后的模型能否直接接入 smoke eval 与 benchmark
 
-- `conda run -n qwen3_ft`
-- `CUDA_VISIBLE_DEVICES=1`
-- `HF_ENDPOINT=https://hf-mirror.com`
+### 本次做法
 
-### 3. 顺手修了 workflow 脚本的顶层导入问题
+为避免一上来直接跑完整 900/100：
 
-修改文件：
+- 从主训练集抽取 `200` 条 train
+- 从验证集抽取 `50` 条 val
+- 运行 `max_steps=20` 的 smoke full train
 
-- [train_lora_sft.py](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/train_lora_sft.py)
-- [train_full_sft.py](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/train_full_sft.py)
-- [merge_lora_adapter.py](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/merge_lora_adapter.py)
-- [test_qwen3_workflow_scripts.py](/ltx-data/BrainDance/tests/test_qwen3_workflow_scripts.py)
+实际输出目录：
 
-原因：
+- `ai_engine/finetune_qwen3/outputs/qwen3_1p7b_full_sft_smoke_gpu1`
 
-- 默认 Python 环境下，`bitsandbytes/triton` 组合会在模块导入阶段干扰 `peft/Trainer`
-- 这会导致“只测 helper 函数”的 workflow test 也被环境噪声拖死
+实际评测日志：
 
-本轮把重依赖挪进 `main()` 路径后，`CUDA_VISIBLE_DEVICES='' pytest -q tests/test_qwen3_workflow_scripts.py` 已恢复通过。
+- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_full_smoke_gpu1.json`
+- `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_full_smoke_gpu1.json`
 
----
+### 关键观察
 
-## 二、训练执行情况
+- `gpu1` 显存稳定在约 `18G`
+- `20 step` 可正常 forward / backward / eval / save
+- full 模型目录可以直接被 `run_smoke_eval.py` 和 `evaluate_benchmark.py` 加载
 
-### 1. smoke train
+smoke 训练结果：
 
-输出目录：
+- `train_loss`: `2.8611`
+- `eval_loss`: `2.1784`
+- `steps_per_epoch_estimate`: `25`
 
-- [qwen3_0p6b_full_sft_smoke_gpu1](/ltx-data/BrainDance/ai_engine/finetune_qwen3/outputs/qwen3_0p6b_full_sft_smoke_gpu1)
+smoke benchmark（主集）：
 
-执行方式：
+- `partial_false_negative_rate`: `0.0625`
+- `partial_missing_negation_rate`: `0.8125`
+- `must_answer_focus_rate`: `0.9375`
 
-- `gpu1`
-- `max_steps = 5`
-- `save_strategy = no`
-- `eval_strategy = no`
+smoke benchmark（strict）：
 
-关键观察：
+- `partial_false_negative_rate`: `0.0556`
+- `partial_missing_negation_rate`: `0.6667`
+- `must_answer_focus_rate`: `1.0`
 
-- `trainable_ratio = 100%`
-- 5 步内 loss 从 `2.7907` 降到 `1.8739`
-- 训练过程无 OOM、无保存异常、无 tokenizer/chat template 异常
+### 本次判断
 
-结论：
+这一步的结论不是“smoke 质量很好”，而是：
 
-- `0.6B full SFT` 支线在当前环境里可正常 forward / backward
+- `1.7B full` 在当前硬件上可训
+- full 产物可直接进入现有评测流水线
+- 可以放心进入完整 round1
 
-### 2. 正式 1 epoch 训练
+### 本 part 一句话结论
 
-训练脚本：
+`1.7B full` 在 `gpu1` 上单卡可训且链路可闭环，实验可进入正式轮次。
 
-- [run_train_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_full_gpu1.sh)
+## Part 31-C：round1 正式全量微调（lr=8e-6）与主结果评测
 
-训练日志：
+### 本 part 目标
 
-- `ai_engine/finetune_qwen3/logs/train_qwen3_0p6b_full_round1_gpu1.log`
+- 用完整 `900 / 100` 数据跑完第一轮 full SFT
+- 和当前 `1.7B LoRA current best / 1.7B merged` 做同口径 benchmark 对照
+- 判断 full 是否具备继续推进价值
 
-训练产物：
+### 训练配置
 
-- [qwen3_0p6b_full_sft_round1](/ltx-data/BrainDance/ai_engine/finetune_qwen3/outputs/qwen3_0p6b_full_sft_round1)
+- 输出目录：`ai_engine/finetune_qwen3/outputs/qwen3_1p7b_full_sft_round1_gpu1`
+- `num_train_epochs=1`
+- `learning_rate=8e-6`
+- `per_device_train_batch_size=1`
+- `per_device_eval_batch_size=1`
+- `gradient_accumulation_steps=8`
 
-关键结果：
+### 训练结果
 
-- `trainable_params = 596,049,920`
-- `total_params = 596,049,920`
-- `steps_per_epoch_estimate = 57`
-- 训练耗时 `78.039s`
-- 最终 `eval_loss = 0.49685850739479065`
+训练规格写入：
 
-显存观察：
+- `ai_engine/finetune_qwen3/outputs/qwen3_1p7b_full_sft_round1_gpu1/training_spec.json`
 
-- `gpu1` 正式训练期间显存约 `22GB`
-- 明显高于 `0.6B LoRA`，但仍在当前 `L20 48GB` 范围内稳定运行
+最终评估写入：
 
-### 3. 本阶段总结
+- `ai_engine/finetune_qwen3/outputs/qwen3_1p7b_full_sft_round1_gpu1/final_metrics.json`
 
-这一阶段已经回答了第一个问题：
+关键数据：
 
-> `Qwen3-0.6B full SFT` 在 BrainDance 当前数据、脚本和 `gpu1 + qwen3_ft` 环境里是可以真实跑通的。
+- `trainable_params`: `1,720,574,976`
+- `trainable_ratio`: `100.0%`
+- `steps_per_epoch_estimate`: `113`
+- `train_runtime`: `156.40s`
+- `train_loss`: `1.1663`
+- `eval_loss`: `0.6181`
 
----
+产物体量：
 
-## 三、评测结果
+- `model.safetensors`: 约 `3.3G`
+- 输出目录总占用：约 `13G`
 
-### 1. smoke eval
+### smoke eval 抽查
 
-输出文件：
+正式 round1 的 smoke 输出已恢复正常自然句式：
 
-- `ai_engine/finetune_qwen3/logs/smoke_eval_qwen3_0p6b_full_round1_gpu1.json`
+- `recent_hit`: 能概括最近拍到的内容
+- `no_hit`: 能稳定返回“暂无相关记录”
+- `partial_hit`: 能回答“有触控笔相关记录”
 
-代表性输出：
+说明这轮 full 至少没有出现“训练后不会说话”或 HF 目录不可用的问题。
 
-- `recent_hit`：`最近拍到的是触控笔桌面采集 01，3月19日。`
-- `no_hit`：`目前没有找到与自行车相关的记录。`
-- `partial_hit`：`最近拍到过触控笔，没有拍到冰箱。`
+### benchmark 对照
 
-结论：
+主集对照：
 
-- hit / no-hit / partial 三类基础行为正常
+| 模型 | false_no_answer | partial_hallucination | natural_style | evidence_utilization | partial_hit_precision | partial_false_negative | partial_missing_negation | must_answer_focus |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `1.7B LoRA round4_1_patch_mixed` | `0.0` | `0.0` | `0.85` | `1.0` | `1.0` | `0.0` | `0.0` | `0.8125` |
+| `1.7B merged round4_1_patch_mixed` | `0.0` | `0.0625` | `0.825` | `1.0` | `0.9375` | `0.0625` | `0.0625` | `0.6875` |
+| `1.7B full round1 lr=8e-6` | `0.0` | `0.0625` | `0.9125` | `1.0` | `0.9375` | `0.0625` | `0.125` | `0.75` |
 
-### 2. 原始 80 题 benchmark
+strict 集对照：
 
-脚本：
+| 模型 | false_no_answer | partial_hallucination | natural_style | evidence_utilization | partial_hit_precision | partial_false_negative | partial_missing_negation | must_answer_focus |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `1.7B LoRA round4_1_patch_mixed` | `0.0` | `0.0` | `0.8281` | `1.0` | `1.0` | `0.0` | `0.0` | `0.8889` |
+| `1.7B merged round4_1_patch_mixed` | `0.0` | `0.0` | `0.7812` | `1.0` | `1.0` | `0.0` | `0.0` | `0.6667` |
+| `1.7B full round1 lr=8e-6` | `0.0` | `0.1111` | `0.8438` | `1.0` | `0.8889` | `0.1111` | `0.1111` | `0.8889` |
 
-- [run_benchmark_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_full_gpu1.sh)
+### 本次判断
 
-输出文件：
+这轮 `full round1` 的信号是：
 
-- `ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round1_gpu1.json`
+- 优点
+  - `natural_style_rate` 比当前 LoRA 更高
+  - `evidence_utilization_rate` 维持 `1.0`
+  - `must_answer_focus_rate` 在 strict 集与 LoRA 持平
+- 缺点
+  - `partial_false_negative_rate` 比 LoRA 明显退化
+  - `partial_missing_negation_rate` 比 LoRA 明显退化
+  - strict 集 `partial_hallucination_rate` 也出现退化
 
-与 `0.6B LoRA` 对比如下：
+所以这轮不能证明 `1.7B full` 优于当前 `LoRA current best`，最多只能说明：
 
-| 指标 | 0.6B LoRA | 0.6B full |
-|---|---:|---:|
-| false_no_answer_rate | 0.0000 | 0.0000 |
-| partial_hallucination_rate | 0.0625 | 0.1250 |
-| natural_style_rate | 0.8000 | 0.9250 |
-| evidence_utilization_rate | 0.9844 | 1.0000 |
-| partial_hit_precision | 0.9375 | 0.8824 |
-| partial_false_negative_rate | 0.0625 | 0.0625 |
-| partial_missing_negation_rate | 0.1875 | 0.0625 |
-| must_answer_focus_rate | 0.6875 | 0.8125 |
+- full 可训练
+- full 风格自然度有潜在优势
+- 但在当前高约束任务中，纪律性指标没有赢
 
-原始 benchmark 的直接结论：
+### 本 part 一句话结论
 
-1. `full` 在风格与聚焦度上明显更稳
-2. `full` 把 `partial_missing_negation_rate` 从 `0.1875` 压到了 `0.0625`
-3. 但 `partial_hallucination_rate` 反而从 `0.0625` 升到了 `0.1250`
-4. 因此不能把这轮 `full` 简单判断为“全方位优于 LoRA”
+`lr=8e-6` 的 `1.7B full round1` 可行但不优，尚不足以替代当前 LoRA 主线。
 
-### 3. strict v3 / 64 题 benchmark
+## Part 31-D：保守学习率复验（lr=5e-6）与停止条件确认
 
-脚本：
+### 本 part 目标
 
-- [run_benchmark_strict_qwen3_0p6b_full_gpu1.sh](/ltx-data/BrainDance/ai_engine/finetune_qwen3/scripts/run_benchmark_strict_qwen3_0p6b_full_gpu1.sh)
+- 排除“第一轮只是学习率偏大”的可能
+- 用更保守的 `lr=5e-6` 再做一轮 full 验证
+- 如果仍无明确收益，则终止 full 深挖
 
-输出文件：
+### 训练配置
 
-- `ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_full_gpu1.json`
+- 输出目录：`ai_engine/finetune_qwen3/outputs/qwen3_1p7b_full_sft_round1_lr5e6_gpu1`
+- 其余配置保持与 round1 一致，仅修改：
+  - `learning_rate=5e-6`
 
-与 `0.6B LoRA` 对比如下：
+### 训练结果
 
-| 指标 | 0.6B LoRA | 0.6B full |
-|---|---:|---:|
-| false_no_answer_rate | 0.0000 | 0.0000 |
-| partial_hallucination_rate | 0.0556 | 0.0556 |
-| natural_style_rate | 0.8281 | 0.9375 |
-| evidence_utilization_rate | 1.0000 | 1.0000 |
-| partial_hit_precision | 0.9474 | 0.9474 |
-| partial_false_negative_rate | 0.0000 | 0.0000 |
-| partial_missing_negation_rate | 0.0556 | 0.0556 |
-| must_answer_focus_rate | 1.0000 | 1.0000 |
+关键数据：
 
-strict 集的直接结论：
+- `train_runtime`: `165.92s`
+- `train_loss`: `1.6661`
+- `eval_loss`: `1.0381`
 
-1. 在核心任务正确性口径上，`full` 和 `LoRA` 基本打平
-2. 这轮 `full` 最清晰的收益仍然是 `natural_style_rate`
-3. strict 集没有出现比 LoRA 更差的任务纪律退化
+从 `eval_loss` 看，这一轮已经明显弱于 `lr=8e-6`。
 
----
+### benchmark 结果
 
-## 四、case 级观察
+主集：
 
-### 1. 原始 benchmark 的主要退化点
+- `false_no_answer_rate`: `0.0156`
+- `partial_hallucination_rate`: `0.1875`
+- `natural_style_rate`: `0.95`
+- `evidence_utilization_rate`: `0.9688`
+- `partial_hit_precision`: `0.8333`
+- `partial_false_negative_rate`: `0.0625`
+- `partial_missing_negation_rate`: `0.3125`
+- `must_answer_focus_rate`: `0.75`
 
-本轮 `0.6B full` 在原始集上主要新增了两个问题 case：
+strict 集：
 
-- `partial_coverage_006`
-  - 回答：`目前只找到了写字台，没有看到椅子。`
-  - 真实应答：支持对象是 `椅子`，不支持对象是 `写字台`
-  - 这是典型的 supported / unsupported 对调
-- `partial_coverage_008`
-  - 回答：`最近拍到海边的风景画，暂无相关记录。`
-  - 真实应答：支持对象是 `风景画`，不支持对象是 `海边`
-  - 这里把 unsupported 词 `海边` 正向说出来了
+- `false_no_answer_rate`: `0.0`
+- `partial_hallucination_rate`: `0.1667`
+- `natural_style_rate`: `0.9219`
+- `evidence_utilization_rate`: `0.9818`
+- `partial_hit_precision`: `0.8333`
+- `partial_false_negative_rate`: `0.1667`
+- `partial_missing_negation_rate`: `0.3889`
+- `must_answer_focus_rate`: `0.6667`
 
-这两个 case 说明：
+### 本次判断
 
-- `full` 虽然更自然、更像一句完整短答
-- 但在一小部分 `partial_coverage` 样本上，仍会出现 unsupported term 被正向带出的现象
+`lr=5e-6` 的结论非常明确：
 
-### 2. strict 集的单点退化
-
-strict v3 中的主要问题 case 是：
-
-- `partial_coverage_006_rw`
-  - `LoRA`：`目前只找到椅子相关内容，未见写字台。`
-  - `full`：`有椅子和写字台。`
+- 风格自然度继续提高
+- 但纪律性、命中精度、partial 覆盖质量进一步恶化
+- 已经不是“略差于 LoRA”，而是整体不适合作为当前主线候选
 
 这说明：
 
-- strict 集下 `full` 的总体指标没有变差
-- 但它并没有完全解决 partial coverage 的 unsupported leakage 风险
+- 当前问题不只是 `8e-6` 偏大
+- 至少在这套 `900/100` 数据与当前任务约束下，`1.7B full` 暂时没有体现出高成本对应的质量收益
 
-### 3. 风格提升的真实来源
+### 最终结论
 
-原始集上有 `10` 个 case 出现了 `natural_style: false -> true` 的改善，主要集中在：
+本轮 `1.7B full SFT` 可行性实验已经完整回答了两个问题：
 
-- `recent_hit`
-- `stability`
-- 部分 `must_answer / partial_coverage`
+1. `1.7B full` 能不能在 `gpu1` 上稳定全量微调？
+   - 能，链路已跑通
+2. `1.7B full` 值不值得替代当前 `1.7B LoRA current best`？
+   - 目前不值得
 
-典型变化不是“任务规则突然更强”，而是：
+当前建议保持：
 
-- 从偏列表、偏堆砌的答法
-- 变成更短、更自然、更像最终产品输出的句子
+- 训练主线：`1.7B LoRA round4_1_patch_mixed`
+- 质量基线：`1.7B merged`
+- 部署主线：`1.7B Q5_K_M + imatrix GGUF`
 
-因此这轮 `full` 的最大收益，更接近：
+`1.7B full` 当前更适合作为：
 
-> 保持正确性的同时，把回答形式往产品化短句方向再推了一步。
+- 已验证可训练的备用研究方向
+- 后续若要继续，只建议在新的数据配方或更强 patch 目标下再重开实验
 
----
+### 本 part 一句话结论
 
-## 五、本轮结论
-
-Part 31 的结论可以明确写成三条：
-
-1. `Qwen3-0.6B full SFT` 已经在 BrainDance 当前链路上真实跑通，训练、smoke eval、原始 benchmark、strict benchmark 全部可复现。
-2. 相比 `0.6B LoRA`，这轮 `full` 的主要收益是 `natural_style`、`must_answer_focus` 和 `partial_missing_negation`，不是核心任务正确性的全面跃迁。
-3. 由于原始 benchmark 上 `partial_hallucination_rate` 出现回升，这一轮还不适合直接判定 `full` 应该替代当前 `0.6B LoRA` 主线。
-
-更直接一点说：
-
-- 如果目标是“更自然、更像产品句子”，这轮 `full` 有价值
-- 如果目标是“严格替代 LoRA，成为新的默认 0.6B 主线”，证据还不够
-
----
-
-## 六、下一步建议
-
-下一轮如果继续做 `0.6B full`，建议顺序如下：
-
-1. 先把学习率从 `1e-5` 下调到 `8e-6` 或 `5e-6`
-2. 继续盯 `partial_coverage` 的 unsupported leakage，而不是只看总体分数
-3. 保持同一份 train/val，不要立刻混入 patch-only 数据
-4. 如果 raw benchmark 的 hallucination 仍压不住，就把 `full` 定位为“风格探索支线”，不要替换 `0.6B LoRA`
-
-一句话总结：
-
-> `0.6B full` 这轮不是失败，但它当前更像“风格更强、纪律未必更强”的对照实验版本，而不是已经可以无争议接管主线的版本。
+`1.7B full` 已完成可行性验证，但两轮结果都未显示出足够 ROI，结论是“链路通过、方向暂缓，不进入主线”。

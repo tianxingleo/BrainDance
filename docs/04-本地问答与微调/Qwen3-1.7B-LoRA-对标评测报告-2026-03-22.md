@@ -105,8 +105,9 @@ B. 体验指标（决定“像不像产品”）
 1. `Qwen3-1.7B + LoRA` 当前最佳 adapter
 2. `Qwen3-0.6B + LoRA`
 3. `Qwen3-0.6B full SFT`
-4. `Qwen3-1.7B merged` 独立 HF 模型
-5. `Qwen3-1.7B Q4_K_M GGUF`
+4. `Qwen3-1.7B full SFT`
+5. `Qwen3-1.7B merged` 独立 HF 模型
+6. `Qwen3-1.7B Q4_K_M GGUF`
 
 它们在**原始 80 题 benchmark**上的结果如下：
 
@@ -115,6 +116,7 @@ B. 体验指标（决定“像不像产品”）
 | 1.7B LoRA（历史主报告口径） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8125 | 0.8500 | 当前主报告基线 |
 | 0.6B LoRA | **0.0000** | 0.0625 | 0.9844 | 0.9375 | 0.0625 | 0.1875 | 0.6875 | 0.8000 | 小模型端侧候选 |
 | 0.6B full SFT | **0.0000** | 0.1250 | **1.0000** | 0.8824 | 0.0625 | 0.0625 | 0.8125 | **0.9250** | 小模型 full 对照实验版本 |
+| 1.7B full SFT（round1, lr=8e-6） | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.1250 | 0.7500 | 0.9125 | 1.7B full 可行性实验版本 |
 | 1.7B merged | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.0625 | 0.6875 | 0.8250 | 当前最稳 HF 部署版本 |
 | 1.7B Q4 GGUF | **0.0000** | 0.2500 | **1.0000** | 0.8000 | **0.0000** | 0.2500 | 0.5000 | 0.8375 | `llama.cpp` + CUDA 量化版本 |
 
@@ -122,16 +124,37 @@ B. 体验指标（决定“像不像产品”）
 
 - `0.6B LoRA` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_round1_gpu1.json`
 - `0.6B full` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round1_gpu1.json`
+- `1.7B full` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_full_round1_gpu1.json`
 - `1.7B merged` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_merged_round4_1_patch_mixed_gpu1.json`
 - `1.7B Q4 GGUF` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_round4_1_patch_mixed_gpu1.json`
+
+另有一轮更保守的 `1.7B full` 复验：
+
+- `lr=5e-6` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_full_round1_lr5e6_gpu1.json`
+
+该轮结果虽然把 `natural_style_rate` 提到 `0.9500`，但同时带来：
+
+- `false_no_answer_rate`: `0.0156`
+- `partial_hallucination_rate`: `0.1875`
+- `partial_precision`: `0.8333`
+- `partial_missing_negation_rate`: `0.3125`
+
+因此没有纳入主表，而是作为“full 学习率保守复验失败”的补充证据保留。
 
 就这 5 个本地版本看，可以得到更细的部署判断：
 
 - 如果优先看**任务正确性**，当前最强仍是 `1.7B LoRA`
+- `1.7B full` 在 `natural_style` 上优于当前 `1.7B LoRA / merged`，但 `partial_false_negative / partial_missing_negation / must_answer_focus` 没有形成明确优势，暂不适合替代 LoRA 主线
 - 如果优先看**独立 HF 部署稳定性**，`1.7B merged` 最平衡
 - `0.6B full` 相比 `0.6B LoRA`，明显提升了 `natural_style / must_answer_focus / partial_missing_negation`，但 `partial_hallucination` 反而升高，当前更适合作为“小模型风格增强对照版本”，还不适合直接替代 `0.6B LoRA`
 - 如果优先看**体积与端侧可运行性**，`0.6B LoRA / 0.6B full / 1.7B Q4 GGUF` 才是更现实候选
 - 但当前 `1.7B Q4 GGUF` 在 `partial_hallucination / partial_precision / must_answer_focus` 上回退明显，不能直接视作 `merged` 的无损替代
+
+把 `1.7B full` 加进来后，本地部署口径可以进一步明确为：
+
+- `1.7B full` 已验证“能训通、能评通、风格更自然”
+- 但当前并没有打赢 `1.7B LoRA` 的关键纪律指标
+- 因而它更适合作为**备用研究方向**，而不是新主线
 
 #### 3.1.1 本地 4 版本综合分图
 
