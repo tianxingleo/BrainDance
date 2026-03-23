@@ -19,6 +19,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from evaluate_benchmark import aggregate, evaluate_case, normalize_text
+from hf_load_utils import safe_from_pretrained
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,8 +59,13 @@ def main() -> None:
     args = parse_args()
     rows = load_jsonl(Path(args.benchmark_file))
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.model_name,
+        trust_remote_code=True,
+    )
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.model_name,
         dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,

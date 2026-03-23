@@ -13,6 +13,8 @@ from typing import Any
 
 import torch
 
+from hf_load_utils import safe_from_pretrained
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge a Qwen3 LoRA adapter into the base model")
@@ -67,8 +69,13 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     dtype = resolve_torch_dtype(args.torch_dtype)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.base_model,
+        trust_remote_code=True,
+    )
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.base_model,
         torch_dtype=dtype,
         trust_remote_code=True,

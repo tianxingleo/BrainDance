@@ -23,6 +23,8 @@ from typing import Any
 import torch
 from datasets import load_dataset
 
+from hf_load_utils import safe_from_pretrained
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Qwen3 full SFT for BrainDance local QA")
@@ -188,12 +190,17 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     torch_dtype = resolve_torch_dtype(args.torch_dtype)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.model_name,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.model_name,
         torch_dtype=torch_dtype,
         trust_remote_code=True,

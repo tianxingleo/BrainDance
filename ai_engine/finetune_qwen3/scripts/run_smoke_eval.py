@@ -13,6 +13,8 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from hf_load_utils import safe_from_pretrained
+
 
 SYSTEM_PROMPT = (
     "你是 BrainDance 的本地记忆问答助手。"
@@ -118,8 +120,13 @@ def apply_chat(tokenizer: AutoTokenizer, messages: list[dict[str, str]], add_gen
 
 def main() -> None:
     args = parse_args()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.model_name,
+        trust_remote_code=True,
+    )
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.model_name,
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,
