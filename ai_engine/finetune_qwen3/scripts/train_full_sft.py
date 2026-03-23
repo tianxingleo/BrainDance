@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Minimal LoRA SFT training script for BrainDance local QA on Qwen3 models.
+Minimal full-parameter SFT training script for BrainDance local QA on Qwen3 models.
 
-This script keeps the setup small and explicit:
+This keeps the LoRA training flow unchanged where possible:
 - single GPU
-- bf16/fp16/fp32 LoRA
+- bf16/fp16/fp32
 - assistant-only loss masking
 - chat template aligned with Qwen3
-- reusable across Qwen3-0.6B / Qwen3-1.7B and future nearby variants
+- reusable across Qwen3-0.6B / Qwen3-1.7B and nearby variants
 """
 
 from __future__ import annotations
@@ -24,41 +24,21 @@ import torch
 from datasets import load_dataset
 
 
-DEFAULT_TARGET_MODULES = [
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    "gate_proj",
-    "up_proj",
-    "down_proj",
-]
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train Qwen3 LoRA SFT for BrainDance local QA")
-    parser.add_argument("--model_name", default="Qwen/Qwen3-1.7B")
+    parser = argparse.ArgumentParser(description="Train Qwen3 full SFT for BrainDance local QA")
+    parser.add_argument("--model_name", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--train_file", required=True)
     parser.add_argument("--val_file", required=True)
     parser.add_argument("--output_dir", required=True)
-    parser.add_argument("--adapter_path", default="")
-    parser.add_argument("--cutoff_len", type=int, default=2048)
-    parser.add_argument("--num_train_epochs", type=float, default=2.0)
-    parser.add_argument("--learning_rate", type=float, default=2e-5)
+    parser.add_argument("--cutoff_len", type=int, default=1536)
+    parser.add_argument("--num_train_epochs", type=float, default=1.0)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=8)
     parser.add_argument("--warmup_ratio", type=float, default=0.05)
-    parser.add_argument("--logging_steps", type=int, default=1)
+    parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--save_total_limit", type=int, default=2)
-    parser.add_argument("--lora_rank", type=int, default=8)
-    parser.add_argument("--lora_alpha", type=int, default=16)
-    parser.add_argument("--lora_dropout", type=float, default=0.05)
-    parser.add_argument(
-        "--target_modules",
-        default=",".join(DEFAULT_TARGET_MODULES),
-        help="Comma-separated LoRA target modules. Leave empty to use the built-in default set.",
-    )
     parser.add_argument(
         "--torch_dtype",
         default="auto_bf16",
@@ -70,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval_strategy", default="epoch", choices=["no", "steps", "epoch"])
     parser.add_argument("--save_steps", type=int, default=0)
     parser.add_argument("--eval_steps", type=int, default=0)
+    parser.add_argument("--max_steps", type=int, default=-1)
     parser.add_argument("--run_name", default="")
     parser.add_argument("--resume_from_checkpoint", default="")
     parser.add_argument("--seed", type=int, default=42)
@@ -102,13 +83,6 @@ def resolve_torch_dtype(dtype_name: str) -> torch.dtype:
     return mapping[dtype_name]
 
 
-def parse_target_modules(raw: str) -> list[str]:
-    if not raw.strip():
-        return list(DEFAULT_TARGET_MODULES)
-    modules = [item.strip() for item in raw.split(",") if item.strip()]
-    return modules or list(DEFAULT_TARGET_MODULES)
-
-
 def apply_chat(tokenizer: Any, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
     try:
         return tokenizer.apply_chat_template(
@@ -118,7 +92,6 @@ def apply_chat(tokenizer: Any, messages: list[dict[str, str]], add_generation_pr
             enable_thinking=False,
         )
     except TypeError:
-        # Fallback for tokenizer versions without enable_thinking.
         return tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -169,12 +142,13 @@ def build_training_spec(args: argparse.Namespace, trainable: int, total: int, st
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model_name": args.model_name,
         "model_slug": normalize_model_slug(args.model_name),
-        "adapter_path": args.adapter_path or None,
+        "finetune_type": "full_sft",
         "train_file": args.train_file,
         "val_file": args.val_file,
         "output_dir": args.output_dir,
         "cutoff_len": args.cutoff_len,
         "num_train_epochs": args.num_train_epochs,
+        "max_steps": args.max_steps,
         "learning_rate": args.learning_rate,
         "per_device_train_batch_size": args.per_device_train_batch_size,
         "per_device_eval_batch_size": args.per_device_eval_batch_size,
@@ -185,12 +159,6 @@ def build_training_spec(args: argparse.Namespace, trainable: int, total: int, st
         "save_steps": args.save_steps if args.save_strategy == "steps" else None,
         "eval_strategy": args.eval_strategy,
         "eval_steps": args.eval_steps if args.eval_strategy == "steps" else None,
-        "lora": {
-            "rank": args.lora_rank,
-            "alpha": args.lora_alpha,
-            "dropout": args.lora_dropout,
-            "target_modules": parse_target_modules(args.target_modules),
-        },
         "torch_dtype": args.torch_dtype,
         "attn_implementation": args.attn_implementation,
         "report_to": [item for item in args.report_to.split(",") if item.strip() and item.strip() != "none"],
@@ -205,7 +173,6 @@ def build_training_spec(args: argparse.Namespace, trainable: int, total: int, st
 
 
 def main() -> None:
-    from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
@@ -220,7 +187,6 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     torch_dtype = resolve_torch_dtype(args.torch_dtype)
-    target_modules = parse_target_modules(args.target_modules)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -235,23 +201,6 @@ def main() -> None:
     )
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
-
-    if args.adapter_path:
-        model = PeftModel.from_pretrained(
-            model,
-            args.adapter_path,
-            is_trainable=True,
-        )
-    else:
-        lora_config = LoraConfig(
-            r=args.lora_rank,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            bias="none",
-            task_type="CAUSAL_LM",
-            target_modules=target_modules,
-        )
-        model = get_peft_model(model, lora_config)
 
     trainable, total = compute_trainable_ratio(model)
     print(
@@ -301,6 +250,7 @@ def main() -> None:
     training_args = TrainingArguments(
         output_dir=str(output_dir),
         num_train_epochs=args.num_train_epochs,
+        max_steps=args.max_steps,
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
@@ -340,9 +290,12 @@ def main() -> None:
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint or None)
     trainer.save_model()
     tokenizer.save_pretrained(output_dir)
-    metrics = trainer.evaluate()
-    (output_dir / "final_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(metrics, ensure_ascii=False, indent=2))
+
+    metrics = {}
+    if args.eval_strategy != "no":
+        metrics = trainer.evaluate()
+        (output_dir / "final_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(metrics, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

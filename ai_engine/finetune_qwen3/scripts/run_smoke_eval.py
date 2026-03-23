@@ -121,7 +121,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
-        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,
         attn_implementation="sdpa",
     )

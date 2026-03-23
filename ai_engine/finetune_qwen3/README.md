@@ -111,9 +111,11 @@ python ai_engine/finetune_qwen3/scripts/evaluate_experience_part18.py
 ```bash
 # 统一使用 conda 环境
 conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_gpu1.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_train_qwen3_0p6b_full_gpu1.sh
 
 # Qwen3-0.6B smoke eval
 conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_gpu1.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_smoke_eval_qwen3_0p6b_full_gpu1.sh
 
 # 合并 1.7B LoRA 到独立 HF 模型目录
 conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_merge_qwen3_gpu1.sh
@@ -123,6 +125,8 @@ conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_prepare_quantiza
 
 # Qwen3-0.6B benchmark
 conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_gpu1.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_benchmark_qwen3_0p6b_full_gpu1.sh
+conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_benchmark_strict_qwen3_0p6b_full_gpu1.sh
 
 # Part 29 部署候选小样本验证
 conda run -n qwen3_ft bash ai_engine/finetune_qwen3/scripts/run_deployment_eval_part29_gpu1.sh
@@ -141,6 +145,7 @@ python -m py_compile \
   ai_engine/finetune_qwen3/scripts/evaluate_experience_part18.py \
   ai_engine/finetune_qwen3/scripts/local_qa_cli.py \
   ai_engine/finetune_qwen3/scripts/train_lora_sft.py \
+  ai_engine/finetune_qwen3/scripts/train_full_sft.py \
   ai_engine/finetune_qwen3/scripts/merge_lora_adapter.py \
   ai_engine/finetune_qwen3/scripts/prepare_quantization_artifacts.py
 ```

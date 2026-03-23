@@ -104,8 +104,9 @@ B. 体验指标（决定“像不像产品”）
 
 1. `Qwen3-1.7B + LoRA` 当前最佳 adapter
 2. `Qwen3-0.6B + LoRA`
-3. `Qwen3-1.7B merged` 独立 HF 模型
-4. `Qwen3-1.7B Q4_K_M GGUF`
+3. `Qwen3-0.6B full SFT`
+4. `Qwen3-1.7B merged` 独立 HF 模型
+5. `Qwen3-1.7B Q4_K_M GGUF`
 
 它们在**原始 80 题 benchmark**上的结果如下：
 
@@ -113,20 +114,23 @@ B. 体验指标（决定“像不像产品”）
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | 1.7B LoRA（历史主报告口径） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8125 | 0.8500 | 当前主报告基线 |
 | 0.6B LoRA | **0.0000** | 0.0625 | 0.9844 | 0.9375 | 0.0625 | 0.1875 | 0.6875 | 0.8000 | 小模型端侧候选 |
+| 0.6B full SFT | **0.0000** | 0.1250 | **1.0000** | 0.8824 | 0.0625 | 0.0625 | 0.8125 | **0.9250** | 小模型 full 对照实验版本 |
 | 1.7B merged | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.0625 | 0.6875 | 0.8250 | 当前最稳 HF 部署版本 |
 | 1.7B Q4 GGUF | **0.0000** | 0.2500 | **1.0000** | 0.8000 | **0.0000** | 0.2500 | 0.5000 | 0.8375 | `llama.cpp` + CUDA 量化版本 |
 
 补充说明：
 
 - `0.6B LoRA` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_round1_gpu1.json`
+- `0.6B full` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round1_gpu1.json`
 - `1.7B merged` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_merged_round4_1_patch_mixed_gpu1.json`
 - `1.7B Q4 GGUF` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_round4_1_patch_mixed_gpu1.json`
 
-就这 4 个本地版本看，可以得到更细的部署判断：
+就这 5 个本地版本看，可以得到更细的部署判断：
 
 - 如果优先看**任务正确性**，当前最强仍是 `1.7B LoRA`
 - 如果优先看**独立 HF 部署稳定性**，`1.7B merged` 最平衡
-- 如果优先看**体积与端侧可运行性**，`0.6B LoRA` 与 `1.7B Q4 GGUF` 才是更现实候选
+- `0.6B full` 相比 `0.6B LoRA`，明显提升了 `natural_style / must_answer_focus / partial_missing_negation`，但 `partial_hallucination` 反而升高，当前更适合作为“小模型风格增强对照版本”，还不适合直接替代 `0.6B LoRA`
+- 如果优先看**体积与端侧可运行性**，`0.6B LoRA / 0.6B full / 1.7B Q4 GGUF` 才是更现实候选
 - 但当前 `1.7B Q4 GGUF` 在 `partial_hallucination / partial_precision / must_answer_focus` 上回退明显，不能直接视作 `merged` 的无损替代
 
 #### 3.1.1 本地 4 版本综合分图
@@ -281,17 +285,18 @@ Base -> LoRA 的核心任务指标变化：
 
 ### 4.2.1 LoRA / 0.6B / merged / Q4 的部署向对比
 
-如果只在本地 4 个版本之间做选择：
+如果只在当前本地可部署与可实验版本之间做选择：
 
 - `1.7B LoRA`：质量上界最高，但部署时仍依赖 adapter 机制
 - `0.6B LoRA`：小模型里表现已经可用，适合作为端侧第一候选
+- `0.6B full`：回答风格更自然，`must_answer_focus` 与 `partial_missing_negation` 更稳，但 partial hallucination 仍未压住
 - `1.7B merged`：部署最直接，质量也明显强于 `0.6B`
 - `1.7B Q4 GGUF`：已经能在 `llama.cpp` CUDA 上稳定跑，但当前质量仍低于 `1.7B merged`
 
 从工程角度，当前更准确的路线判断是：
 
 1. 想保质量：优先 `1.7B merged`
-2. 想上手机/端侧：优先比较 `0.6B LoRA` 与 `1.7B Q4 GGUF`
+2. 想上手机/端侧：优先比较 `0.6B LoRA / 0.6B full` 与 `1.7B Q4 GGUF`
 3. 不要把 `Q4` 直接当作 `merged` 的等价部署版本
 
 ### 4.3 no-opt 对照（仅参数放大是否足够）

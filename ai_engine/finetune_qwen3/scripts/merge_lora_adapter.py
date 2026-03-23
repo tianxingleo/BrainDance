@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +59,9 @@ def build_merge_metadata(args: argparse.Namespace, dtype: torch.dtype) -> dict[s
 
 
 def main() -> None:
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
