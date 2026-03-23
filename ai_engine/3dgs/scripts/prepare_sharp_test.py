@@ -114,12 +114,7 @@ def main():
     user_id = "test_user"
     scene_id = f"test_scene_sharp_{int(time.time())}"
 
-    source_image = Path(
-        os.getenv(
-            "SHARP_TEST_IMAGE_PATH",
-            str(Path(__file__).resolve().parents[2] / "demo" / "sharp" / "input.jpg"),
-        )
-    ).expanduser()
+    source_image = Path("/home/ltx/projects/BrainDance/ai_engine/demo/sharp/input.jpg")
 
     if not source_image.exists():
         print(f"❌ 测试图片不存在: {source_image}")

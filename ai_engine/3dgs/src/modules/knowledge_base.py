@@ -3,25 +3,22 @@
 # 实现：使用文本嵌入服务生成向量，通过Supabase存储和检索3D模型资产
 # 逻辑：1. 生成文本向量 2. 构造资产记录 3. 存储到数据库 4. 支持语义搜索
 # 包含：KnowledgeBase类、向量生成方法、资产存储方法、语义搜索方法
+import os
 import json
 from openai import OpenAI
 from supabase import Client
-from typing import Optional
-
-from src.config import PipelineConfig
 
 class KnowledgeBase:
-    def __init__(self, supabase_client: Client, cfg: Optional[PipelineConfig] = None):
+    def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
-        self.cfg = cfg or PipelineConfig()
         
         # 使用兼容 OpenAI 接口的 Embedding 服务 (这里以阿里云为例，或者直接用 OpenAI)
         # 建议使用 text-embedding-v3-small (OpenAI) 或 text-embedding-v2 (Aliyun)
         self.client = OpenAI(
-            api_key=self.cfg.dashscope_api_key,
-            base_url=self.cfg.dashscope_base_url
+            api_key=os.getenv("DASHSCOPE_API_KEY"), 
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
-        self.model = self.cfg.dashscope_embedding_model
+        self.model = "text-embedding-v2" # 确保维度是 1536
 
     def _get_embedding(self, text: str):
         """调用模型生成向量"""
@@ -80,15 +77,12 @@ class KnowledgeBase:
             
             # 资产路径 (用于未来复用)
             "ply_path": ply_path,
-            "preview_img_path": metadata.get('preview_img_path', ''),
             
             # 技术参数 (存入 JSONB)
             "meta_info": {
                 "quality_score": metadata.get('ai_score', 0),
                 "quality_reason": metadata.get('ai_reason', ''),
-                "engine_version": "nerfstudio-splatfacto",
-                "initial_camera_pose": metadata.get('initial_camera_pose', None),
-                "is_ai_selected": "initial_camera_pose" in metadata
+                "engine_version": "nerfstudio-splatfacto"
             }
         }
 

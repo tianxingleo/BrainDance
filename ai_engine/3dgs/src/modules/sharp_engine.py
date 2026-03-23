@@ -46,8 +46,7 @@ class SharpEngine:
         ]
 
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = os.getenv("CUDA_VISIBLE_DEVICES", "0")
-        print(f"    GPU: CUDA_VISIBLE_DEVICES={env['CUDA_VISIBLE_DEVICES']}")
+        env["CUDA_VISIBLE_DEVICES"] = "0"
 
         try:
             subprocess.run(

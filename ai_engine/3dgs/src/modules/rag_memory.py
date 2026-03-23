@@ -3,6 +3,7 @@
 # 实现：使用阿里云DashScope的文本嵌入服务生成向量，存储到Supabase向量表
 # 逻辑：1. 将文本转换为向量 2. 将向量和元数据存入数据库 3. 支持场景检索
 # 包含：RagMemory类、文本嵌入方法、知识库存储方法
+import os
 from typing import Optional
 try:
     # lazy import OpenAI - may not be installed in all dev environments
@@ -14,26 +15,22 @@ try:
 except Exception:  # pragma: no cover - defensive
     Client = object
 
-from src.config import PipelineConfig
-
-
 class RagMemory:
-    def __init__(self, supabase_client: Client, cfg: Optional[PipelineConfig] = None):
+    def __init__(self, supabase_client: Client):
         self.supabase = supabase_client
-        self.cfg = cfg or PipelineConfig()
         # 使用兼容 OpenAI 协议的 Embedding 服务（按需初始化）
         # 如果 openai SDK 不可用，self.client 会是 None，embed_text 需要被替换/mock
         if OpenAI is not None:
             try:
                 self.client = OpenAI(
-                    api_key=self.cfg.dashscope_api_key,
-                    base_url=self.cfg.dashscope_base_url
+                    api_key=os.getenv("DASHSCOPE_API_KEY"),
+                    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
                 )
             except Exception:
                 self.client = None
         else:
             self.client = None
-        self.model = self.cfg.dashscope_embedding_model
+        self.model = "text-embedding-v2"  # 阿里云的 embedding 模型
 
     def embed_text(self, text: str):
         """将文本转换为向量"""
