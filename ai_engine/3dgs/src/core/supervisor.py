@@ -4,12 +4,13 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from supabase import Client, create_client
+from supabase import Client, ClientOptions, create_client
 
 load_dotenv()
 
@@ -31,9 +32,26 @@ class WorkerSupervisor:
         self.worker_id = os.getenv("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.poll_interval = max(2, int(os.getenv("WORKER_SUPERVISOR_POLL_INTERVAL", "3")))
         self.interrupt_grace_seconds = max(5, int(os.getenv("WORKER_INTERRUPT_GRACE_SECONDS", "20")))
+        self.postgrest_timeout = max(3, int(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "5")))
+        self.storage_timeout = max(5, int(os.getenv("SUPABASE_STORAGE_TIMEOUT_SECONDS", "30")))
         self.child: subprocess.Popen | None = None
         self.root_dir = Path(__file__).resolve().parents[2]
-        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
+
+        if self.supabase_url:
+            parsed = urllib.parse.urlparse(self.supabase_url)
+            if parsed.hostname:
+                no_proxy = os.environ.get("no_proxy", "")
+                if parsed.hostname not in no_proxy:
+                    os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
+
+        self.supabase: Client = create_client(
+            self.supabase_url,
+            self.supabase_key,
+            options=ClientOptions(
+                postgrest_client_timeout=self.postgrest_timeout,
+                storage_client_timeout=self.storage_timeout,
+            ),
+        )
         self._shutdown_requested = False
 
     def _now_iso(self):
@@ -109,7 +127,17 @@ class WorkerSupervisor:
         print(f"☁️ [Supervisor] 启动成功，worker_id={self.worker_id}")
         try:
             while not self._shutdown_requested:
-                row = self._fetch_worker_row()
+                try:
+                    row = self._fetch_worker_row()
+                except Exception as e:
+                    print(f"⚠️ [Supervisor] 拉取 worker 状态失败，将在 {self.poll_interval}s 后重试: {e}")
+                    if self.child and self.child.poll() is not None:
+                        exit_code = self.child.returncode
+                        print(f"ℹ️ [Supervisor] 子 Worker 已结束，exit_code={exit_code}")
+                        self.child = None
+                    time.sleep(self.poll_interval)
+                    continue
+
                 desired_state = (row or {}).get("desired_state", "run").lower()
 
                 if desired_state == "run":
