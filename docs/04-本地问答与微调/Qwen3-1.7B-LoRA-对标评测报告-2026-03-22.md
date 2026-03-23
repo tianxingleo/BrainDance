@@ -100,14 +100,15 @@ B. 体验指标（决定“像不像产品”）
 ### 3.1 本地部署变体补充总表（新增）
 
 上表主要服务于“本地 LoRA vs 云端模型”的主叙事。  
-如果从部署角度看，本地现在实际上已经有 4 个重要版本：
+如果从部署角度看，本地现在实际上已经有 7 个重要版本：
 
 1. `Qwen3-1.7B + LoRA` 当前最佳 adapter
 2. `Qwen3-0.6B + LoRA`
-3. `Qwen3-0.6B full SFT`
-4. `Qwen3-1.7B full SFT`
-5. `Qwen3-1.7B merged` 独立 HF 模型
-6. `Qwen3-1.7B Q4_K_M GGUF`
+3. `Qwen3-0.6B full SFT` round1
+4. `Qwen3-0.6B full SFT` round4 `partial_patch_v1`
+5. `Qwen3-1.7B full SFT`
+6. `Qwen3-1.7B merged` 独立 HF 模型
+7. `Qwen3-1.7B Q4_K_M GGUF`
 
 它们在**原始 80 题 benchmark**上的结果如下：
 
@@ -115,7 +116,8 @@ B. 体验指标（决定“像不像产品”）
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | 1.7B LoRA（历史主报告口径） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8125 | 0.8500 | 当前主报告基线 |
 | 0.6B LoRA | **0.0000** | 0.0625 | 0.9844 | 0.9375 | 0.0625 | 0.1875 | 0.6875 | 0.8000 | 小模型端侧候选 |
-| 0.6B full SFT | **0.0000** | 0.1250 | **1.0000** | 0.8824 | 0.0625 | 0.0625 | 0.8125 | **0.9250** | 小模型 full 对照实验版本 |
+| 0.6B full SFT（round1） | **0.0000** | 0.1250 | **1.0000** | 0.8824 | 0.0625 | 0.0625 | 0.8125 | **0.9250** | 小模型 full 可行性实验最佳点 |
+| 0.6B full SFT（round4, partial_patch_v1） | **0.0000** | 0.1250 | 0.9844 | 0.8824 | 0.0625 | 0.1875 | 0.6875 | **0.9250** | 定向补样后未优于 round1 |
 | 1.7B full SFT（round1, lr=8e-6） | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.1250 | 0.7500 | 0.9125 | 1.7B full 可行性实验版本 |
 | 1.7B merged | **0.0000** | 0.0625 | **1.0000** | 0.9375 | 0.0625 | 0.0625 | 0.6875 | 0.8250 | 当前最稳 HF 部署版本 |
 | 1.7B Q4 GGUF | **0.0000** | 0.2500 | **1.0000** | 0.8000 | **0.0000** | 0.2500 | 0.5000 | 0.8375 | `llama.cpp` + CUDA 量化版本 |
@@ -123,7 +125,8 @@ B. 体验指标（决定“像不像产品”）
 补充说明：
 
 - `0.6B LoRA` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_round1_gpu1.json`
-- `0.6B full` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round1_gpu1.json`
+- `0.6B full round1` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round1_gpu1.json`
+- `0.6B full round4 patch` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_0p6b_full_round4_partial_patch_v1_gpu1.json`
 - `1.7B full` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_full_round1_gpu1.json`
 - `1.7B merged` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_merged_round4_1_patch_mixed_gpu1.json`
 - `1.7B Q4 GGUF` 日志：`ai_engine/finetune_qwen3/logs/benchmark_qwen3_1p7b_q4_gguf_round4_1_patch_mixed_gpu1.json`
@@ -141,24 +144,25 @@ B. 体验指标（决定“像不像产品”）
 
 因此没有纳入主表，而是作为“full 学习率保守复验失败”的补充证据保留。
 
-就这 5 个本地版本看，可以得到更细的部署判断：
+就这 7 个本地版本看，可以得到更细的部署判断：
 
 - 如果优先看**任务正确性**，当前最强仍是 `1.7B LoRA`
 - `1.7B full` 在 `natural_style` 上优于当前 `1.7B LoRA / merged`，但 `partial_false_negative / partial_missing_negation / must_answer_focus` 没有形成明确优势，暂不适合替代 LoRA 主线
 - 如果优先看**独立 HF 部署稳定性**，`1.7B merged` 最平衡
-- `0.6B full` 相比 `0.6B LoRA`，明显提升了 `natural_style / must_answer_focus / partial_missing_negation`，但 `partial_hallucination` 反而升高，当前更适合作为“小模型风格增强对照版本”，还不适合直接替代 `0.6B LoRA`
+- `0.6B full round1` 相比 `0.6B LoRA`，明显提升了 `natural_style / must_answer_focus / partial_missing_negation`，但 `partial_hallucination` 反而升高，当前更适合作为“小模型风格增强对照版本”，还不适合直接替代 `0.6B LoRA`
+- `0.6B full round4 partial_patch_v1` 证明“小规模定向补样”能修个别 raw case，但没有整体打赢 `round1`，也没有成为新的小模型最佳点
 - 如果优先看**体积与端侧可运行性**，`0.6B LoRA / 0.6B full / 1.7B Q4 GGUF` 才是更现实候选
 - 但当前 `1.7B Q4 GGUF` 在 `partial_hallucination / partial_precision / must_answer_focus` 上回退明显，不能直接视作 `merged` 的无损替代
 
-把 `1.7B full` 加进来后，本地部署口径可以进一步明确为：
+把 `0.6B full round4 patch` 与 `1.7B full` 一并纳入后，本地部署口径可以进一步明确为：
 
 - `1.7B full` 已验证“能训通、能评通、风格更自然”
 - 但当前并没有打赢 `1.7B LoRA` 的关键纪律指标
 - 因而它更适合作为**备用研究方向**，而不是新主线
 
-#### 3.1.1 本地 4 版本综合分图
+#### 3.1.1 代表 4 版本综合分图
 
-这里沿用正文已有综合分公式，单独把本地 4 个版本放在一张图里：
+这里沿用正文已有综合分公式，单独保留 4 个最具代表性的部署版本放在一张图里：
 
 ```mermaid
 xychart-beta
@@ -168,7 +172,7 @@ xychart-beta
   bar [98.12,91.95,93.44,84.50]
 ```
 
-#### 3.1.2 本地 4 版本关键指标图
+#### 3.1.2 代表 4 版本关键指标图
 
 ```mermaid
 xychart-beta
