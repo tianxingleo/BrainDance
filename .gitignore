@@ -20,6 +20,11 @@ $RECYCLE.BIN/
 !.vscode/extensions.json
 *.code-workspace
 
+# Claude Code
+.claude/
+.cache/
+tmp_papers/
+
 # PyCharm / IntelliJ
 .idea/
 *.iml
@@ -31,6 +36,8 @@ $RECYCLE.BIN/
 # =========================
 .env
 .env.*
+!.env.example
+!**/.env.example
 *.pem
 *.key
 config.yaml
@@ -67,6 +74,12 @@ service_account.json
 /app/.pub-cache/
 /app/.pub/
 
+# Dart doc 生成的 API 文档
+doc/api/
+
+# Flutter web 构建产物
+/app/web/build/
+
 # Android 相关
 /app/android/.gradle
 /app/android/local.properties
@@ -86,6 +99,9 @@ service_account.json
 # 5. AI Engine: Python (算法端)
 # =========================
 # 字节码与缓存
+__pycache__/
+*.pyc
+.pytest_cache/
 ai_engine/**/__pycache__/
 ai_engine/**/*.pyc
 
@@ -96,6 +112,34 @@ ai_engine/env/
 
 # Jupyter Notebook 缓存
 ai_engine/.ipynb_checkpoints
+
+# Qwen3 fine-tuning artifacts
+# Generated logs and training outputs. If you want to publish an adapter,
+# export a clean release bundle under ai_engine/finetune_qwen3/releases/;
+# *.safetensors is already covered by Git LFS in the repo root .gitattributes.
+ai_engine/finetune_qwen3/logs/
+ai_engine/finetune_qwen3/outputs/
+# Local deployment artifacts; keep scripts/docs versioned, keep large runtime artifacts out of Git.
+ai_engine/finetune_qwen3/tools/llama.cpp/
+ai_engine/finetune_qwen3/releases/*_merged*/
+ai_engine/finetune_qwen3/releases/*_quantized*/
+# Generated datasets; rebuild via scripts/build_*dataset.py.
+# Keep benchmark/seed/template inputs versioned in normal Git for regression tracking.
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_val.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_sft_manifest.json
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_train.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_val.jsonl
+ai_engine/finetune_qwen3/data/braindance_qwen3_round4_manifest.json
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_patch_val.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_val.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_manifest.json
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_train.jsonl
+ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_val.jsonl
 
 # =========================
 # 6. BrainDance Specific: Media & 3DGS Data (项目特有)
@@ -109,6 +153,16 @@ ai_engine/**/*.jpg
 ai_engine/**/*.jpeg
 ai_engine/**/*.png
 ai_engine/**/*.gif
+ai_engine/**/*.webp
+ai_engine/**/*.bmp
+ai_engine/**/*.tif
+ai_engine/**/*.tiff
+ai_engine/**/*.heic
+ai_engine/**/*.heif
+ai_engine/**/*.mp3
+ai_engine/**/*.wav
+ai_engine/**/*.m4a
+ai_engine/**/*.flac
 
 # 忽略 3DGS 训练过程中的大型模型文件
 ai_engine/**/*.ply
@@ -116,6 +170,40 @@ ai_engine/**/*.splat
 ai_engine/**/*.obj
 ai_engine/**/*.glb
 ai_engine/**/*.gltf
+
+# 忽略 app/assets/webgl/models 下的模型文件
+app/assets/webgl/models/*.ply
+app/assets/webgl/models/*.splat
+app/assets/webgl/models/*.obj
+app/assets/webgl/models/*.glb
+app/assets/webgl/models/*.gltf
+# 忽略 app/assets/webgl/models 下的图片文件
+app/assets/webgl/models/images/
+
+# 忽略 3dgs_viewer/ (WebGL Demo) 下的媒体文件
+3dgs_viewer/**/*.mp4
+3dgs_viewer/**/*.mov
+3dgs_viewer/**/*.avi
+3dgs_viewer/**/*.ply
+3dgs_viewer/**/*.splat
+3dgs_viewer/my-3dgs-viewer/public/models/images/
+app/assets/webgl/models/images/
+app/assets/webgl/models/*.jpg
+app/assets/webgl/models/*.jpeg
+app/assets/webgl/models/*.png
+app/assets/webgl/models/*.gif
+app/assets/webgl/models/*.webp
+
+# 忽略 WebGL 构建产物
+app/assets/webgl/assets/
+app/assets/webgl/dist/
+app/assets/webgl/.vite/
+
+# Spark 备选查看器本地开发产物
+3dgs_viewer/spark-3dgs-viewer/node_modules/
+3dgs_viewer/spark-3dgs-viewer/dist/
+3dgs_viewer/spark-3dgs-viewer/.vite/
+3dgs_viewer/spark-3dgs-viewer/.tmp/
 
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
@@ -183,9 +271,22 @@ PR_BODY.md
 create_pr.sh
 CLAUDE.md
 docs/old/idea.pdf
+repomix-output.xml
 
 # =========================
-# 10. Local Tooling / Build Artifacts (本地工具与构建产物)
+# 10. Document Files (文档文件)
+# =========================
+*.doc
+*.docx
+*.docs
+# 备份文件超过100MB不应提交
+*.ply.bak
+*.mp4.bak
+3dgs_viewer/test.mp4.bak
+3dgs_viewer/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
+
+# =========================
+# 11. Local Tooling / Build Artifacts (本地工具与构建产物)
 # =========================
 .claude/
 
@@ -204,6 +305,3 @@ ai_engine/3dgs/src/libs/Sparse2DGS/
 ai_engine/3dgs/src/libs/SuGaR/
 ai_engine/3dgs/src/libs/nerfstudio/
 ai_engine/demo/Depth-Anything-3/
-
-# Local office documents
-*.docx

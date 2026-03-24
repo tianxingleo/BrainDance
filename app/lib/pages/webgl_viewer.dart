@@ -1,0 +1,828 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:braindance/configs/app_config.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+import '../services/download_event_bus.dart';
+
+// ============================================================
+// Dev/prod mode notes
+// - Debug mode: connect to local Vite dev server
+// - Production mode: serve bundled files from assets/webgl/
+// ============================================================
+class WebGLViewerPage extends StatefulWidget {
+  final String initialModelUrl;
+  final String? posesUrl;
+  final String sceneId;
+  final List<double>? initialPose;
+  final String? initialPoseId;
+  final bool useSparkViewer;
+
+  const WebGLViewerPage({
+    super.key,
+    this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.posesUrl,
+    this.sceneId = '3DGS Viewer',
+    this.initialPose,
+    this.initialPoseId,
+    this.useSparkViewer = false,
+  });
+
+  @override
+  State<WebGLViewerPage> createState() => _WebGLViewerPageState();
+}
+
+class _WebGLViewerPageState extends State<WebGLViewerPage> {
+  WebViewController? _controller;
+  bool _isWebReady = false;
+  bool _isUnsupportedPlatform = false;
+  bool _useExternalBrowserMode = false;
+  bool _isOpeningExternalViewer = false;
+  bool _didAttemptExternalOpen = false;
+  String? _externalViewerUrl;
+  HttpServer? _localServer;
+  int _localPort = 0;
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  int _downloadedBytes = 0;
+  int _totalBytes = -1;
+  String? _localModelPath;
+  bool _downloadCancelled = false;
+  late bool _useSparkViewer;
+
+  void _attachViewerHeaders(HttpResponse response) {
+    response.headers.add('Access-Control-Allow-Origin', '*');
+    response.headers.add('Cross-Origin-Opener-Policy', 'same-origin');
+    response.headers.add('Cross-Origin-Embedder-Policy', 'require-corp');
+    response.headers.add('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+
+  String get _viewerAssetRoot =>
+      _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
+
+  String get _viewerLabel =>
+      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+
+  @override
+  void initState() {
+    super.initState();
+    _useSparkViewer = widget.useSparkViewer;
+
+    // Flutter Web is not supported here. Desktop uses the external browser mode.
+    if (kIsWeb) {
+      _isUnsupportedPlatform = true;
+    } else if (defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      _useExternalBrowserMode = true;
+      _startLocalServer().then((_) {
+        if (mounted) _prepareModelAndLoad();
+      });
+    } else {
+      try {
+        _startLocalServer().then((_) {
+          if (mounted) _prepareModelAndLoad();
+        });
+      } catch (e) {
+        debugPrint('WebView initialization failed: $e');
+        _isUnsupportedPlatform = true;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _downloadCancelled = true;
+    _localServer?.close();
+    super.dispose();
+  }
+
+  void _stopDownload() {
+    _downloadCancelled = true;
+    if (mounted) {
+      setState(() {
+        _isDownloading = false;
+      });
+    }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+  }
+
+  Future<void> _startLocalServer() async {
+    _localServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _localPort = _localServer!.port;
+    _localServer!.listen((HttpRequest request) async {
+      var path = request.uri.path;
+
+      // /proxy/: proxy HTTPS requests through Dart to avoid WebView SSL issues.
+      if (path.startsWith('/proxy/')) {
+        final encodedTarget = path.substring('/proxy/'.length);
+        final targetUrl = Uri.decodeComponent(encodedTarget);
+        try {
+          final proxyClient = HttpClient()
+            ..badCertificateCallback = (cert, host, port) => true;
+          final proxyUri = Uri.parse(targetUrl);
+          final proxyReq = await proxyClient.getUrl(proxyUri);
+          proxyReq.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          final proxyResp = await proxyReq.close();
+          request.response.statusCode = proxyResp.statusCode;
+          _attachViewerHeaders(request.response);
+          final ct = proxyResp.headers.contentType;
+          if (ct != null) request.response.headers.contentType = ct;
+          await request.response.addStream(proxyResp);
+        } catch (e) {
+          request.response.statusCode = HttpStatus.badGateway;
+          request.response.write('Proxy error: $e');
+        }
+        await request.response.close();
+        return;
+      }
+
+      // /local_models/: serve already-downloaded local model files.
+      if (path.startsWith('/local_models/')) {
+        final filePath = Uri.decodeComponent(
+          path.substring('/local_models/'.length),
+        );
+        final file = File(filePath);
+        if (await file.exists()) {
+          _attachViewerHeaders(request.response);
+          if (filePath.endsWith('.ply') ||
+              filePath.endsWith('.splat') ||
+              filePath.endsWith('.ksplat')) {
+            request.response.headers.contentType = ContentType(
+              'application',
+              'octet-stream',
+            );
+          }
+          await request.response.addStream(file.openRead());
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        return;
+      }
+
+      if (path == '/' || path.isEmpty) {
+        path = '/index.html';
+      }
+
+      final assetPath = '$_viewerAssetRoot$path';
+
+      try {
+        final data = await rootBundle.load(assetPath);
+        final bytes = data.buffer.asUint8List();
+
+        var contentType = 'text/plain';
+        if (path.endsWith('.html')) {
+          contentType = 'text/html; charset=utf-8';
+        } else if (path.endsWith('.js')) {
+          contentType = 'application/javascript; charset=utf-8';
+        } else if (path.endsWith('.css')) {
+          contentType = 'text/css; charset=utf-8';
+        } else if (path.endsWith('.png')) {
+          contentType = 'image/png';
+        } else if (path.endsWith('.ico')) {
+          contentType = 'image/x-icon';
+        } else if (path.endsWith('.ply') ||
+            path.endsWith('.splat') ||
+            path.endsWith('.ksplat')) {
+          contentType = 'application/octet-stream';
+        }
+
+        request.response.headers.contentType = ContentType.parse(contentType);
+        _attachViewerHeaders(request.response);
+        request.response.add(bytes);
+        await request.response.close();
+      } catch (_) {
+        request.response.statusCode = HttpStatus.notFound;
+        request.response.write('Not Found');
+        await request.response.close();
+      }
+    });
+  }
+
+  Future<void> _prepareModelAndLoad() async {
+    final originalUrl = widget.initialModelUrl;
+
+    if (originalUrl.startsWith('http://') ||
+        originalUrl.startsWith('https://')) {
+      try {
+        final encodedUrl = Uri.encodeFull(Uri.decodeFull(originalUrl));
+        final uri = Uri.parse(encodedUrl);
+        final requestPath = uri.path;
+        final sanitizedFileName = requestPath
+            .replaceAll('/', '_')
+            .replaceAll('\\', '_');
+
+        final dir = await getApplicationDocumentsDirectory();
+        final localFile = File('${dir.path}/$sanitizedFileName');
+
+        if (await localFile.exists()) {
+          debugPrint('Using cached offline model: ${localFile.path}');
+          _localModelPath = localFile.path;
+          if (mounted) _launchViewer();
+        } else {
+          final tmpFile = File('${localFile.path}.tmp');
+
+          int existingBytes = 0;
+          if (await tmpFile.exists()) {
+            existingBytes = await tmpFile.length();
+            debugPrint('Resuming download from byte $existingBytes');
+          }
+
+          debugPrint('Starting download from: $originalUrl');
+          setState(() {
+            _isDownloading = true;
+            _downloadProgress = 0.0;
+            _downloadedBytes = 0;
+            _totalBytes = -1;
+          });
+
+          final client = HttpClient()
+            ..badCertificateCallback = (cert, host, port) => true;
+          final request = await client.getUrl(uri);
+          request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+          if (existingBytes > 0) {
+            request.headers.set('Range', 'bytes=$existingBytes-');
+          }
+          final response = await request.close();
+
+          if (response.statusCode == 200 && existingBytes > 0) {
+            debugPrint('Server does not support Range, restarting download');
+            if (await tmpFile.exists()) await tmpFile.delete();
+            existingBytes = 0;
+          } else if (response.statusCode != 200 &&
+              response.statusCode != 206) {
+            var errorBody = '';
+            try {
+              errorBody = await response.transform(utf8.decoder).join();
+            } catch (_) {}
+            throw Exception('HTTP Error ${response.statusCode}: $errorBody');
+          }
+
+          final contentLength = response.contentLength;
+          final totalBytes = contentLength > 0
+              ? contentLength + existingBytes
+              : -1;
+          var receivedBytes = existingBytes;
+
+          final metaFile = File('${localFile.path}.meta');
+          if (totalBytes > 0) {
+            await metaFile.writeAsString('$totalBytes');
+          }
+
+          final sink = tmpFile.openWrite(
+            mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+          );
+
+          if (mounted) {
+            setState(() {
+              _downloadedBytes = receivedBytes;
+              _totalBytes = totalBytes;
+              _downloadProgress = totalBytes > 0
+                  ? receivedBytes / totalBytes
+                  : 0.0;
+            });
+          }
+
+          try {
+            await for (final chunk in response) {
+              if (_downloadCancelled) {
+                await sink.close();
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: _downloadProgress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                    isCancelled: true,
+                  ),
+                );
+                return;
+              }
+              sink.add(chunk);
+              receivedBytes += chunk.length;
+              if (totalBytes > 0 && mounted) {
+                final progress = receivedBytes / totalBytes;
+                setState(() {
+                  _downloadProgress = progress;
+                  _downloadedBytes = receivedBytes;
+                });
+                downloadEventBus.add(
+                  ModelDownloadEvent(
+                    url: originalUrl,
+                    progress: progress,
+                    downloadedBytes: receivedBytes,
+                    totalBytes: totalBytes,
+                  ),
+                );
+              }
+            }
+            await sink.close();
+
+            await tmpFile.rename(localFile.path);
+            if (await metaFile.exists()) await metaFile.delete();
+            debugPrint('Download complete: ${localFile.path}');
+            _localModelPath = localFile.path;
+            downloadEventBus.add(
+              ModelDownloadEvent(
+                url: originalUrl,
+                progress: 1.0,
+                isComplete: true,
+                downloadedBytes: receivedBytes,
+                totalBytes: totalBytes,
+              ),
+            );
+            if (mounted) {
+              setState(() {
+                _isDownloading = false;
+              });
+              _initWebView();
+            }
+          } catch (e) {
+            await sink.close();
+            debugPrint('Download interrupted, tmp file preserved for resume');
+            rethrow;
+          }
+        }
+      } catch (e) {
+        debugPrint('Download error: $e');
+        if (mounted) {
+          setState(() {
+            _isDownloading = false;
+          });
+          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          _launchViewer();
+        }
+      }
+    } else {
+      if (mounted) _launchViewer();
+    }
+  }
+
+  void _launchViewer() {
+    if (_useExternalBrowserMode) {
+      _openInExternalBrowser();
+      return;
+    }
+    _initWebView();
+  }
+
+  Map<String, dynamic> _buildViewerPayload() {
+    String targetUrl;
+    if (_localModelPath != null) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
+    } else if (widget.initialModelUrl.startsWith('http://') ||
+        widget.initialModelUrl.startsWith('https://')) {
+      targetUrl =
+          'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
+    } else {
+      targetUrl = widget.initialModelUrl;
+    }
+
+    return {
+      'ply': targetUrl,
+      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
+        'poses': widget.posesUrl,
+      if (widget.initialPose != null) 'matrix': widget.initialPose,
+      if (widget.initialPoseId != null && widget.initialPoseId!.isNotEmpty)
+        'imageId': widget.initialPoseId,
+    };
+  }
+
+  Future<void> _openInExternalBrowser() async {
+    final payload = _buildViewerPayload();
+    final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
+    final url =
+        'http://127.0.0.1:$_localPort/index.html?payload=$encodedPayload';
+    _externalViewerUrl = url;
+
+    if (_didAttemptExternalOpen) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _didAttemptExternalOpen = true;
+    if (mounted) {
+      setState(() {
+        _isOpeningExternalViewer = true;
+      });
+    }
+
+    try {
+      await _openUrlOnDesktop(url);
+    } catch (e) {
+      debugPrint('Open external viewer failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isOpeningExternalViewer = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openUrlOnDesktop(String url) async {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      await Process.start('cmd', ['/c', 'start', '', url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      await Process.start('open', [url], runInShell: true);
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      await Process.start('xdg-open', [url], runInShell: true);
+      return;
+    }
+    throw UnsupportedError('Unsupported desktop platform');
+  }
+
+  void _initWebView() {
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0x00000000))
+      ..addJavaScriptChannel(
+        'BrainDanceChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          final data = jsonDecode(message.message);
+          debugPrint('BrainDanceChannel: ${message.message}');
+          if (data['status'] == 'ready') {
+            setState(() => _isWebReady = true);
+            _sendModelToVue();
+          } else if (data['status'] == 'error') {
+            if (mounted) {
+              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+            }
+          } else if (data['status'] == 'info') {
+            debugPrint('Spark info: ${data['msg']}');
+          }
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (String url) {
+            Future.delayed(const Duration(seconds: 2), () {
+              if (!_isWebReady && mounted) {
+                debugPrint(
+                  'WebView: no ready signal received, triggering manually',
+                );
+                setState(() => _isWebReady = true);
+                _sendModelToVue();
+              }
+            });
+          },
+          onWebResourceError: (WebResourceError error) {
+            debugPrint('WebView error: ${error.description}');
+          },
+        ),
+      );
+
+    if (mounted) setState(() {});
+    _loadLocalHtml();
+  }
+
+  Future<void> _loadLocalHtml() async {
+    try {
+      await _controller?.clearCache();
+      final cacheBust = DateTime.now().millisecondsSinceEpoch;
+      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
+      await _controller?.loadRequest(Uri.parse(url));
+    } catch (e) {
+      debugPrint('Error loading HTML via local server: $e');
+    }
+  }
+
+  void _sendModelToVue() {
+    if (!_isWebReady) return;
+    final payloadData = _buildViewerPayload();
+    final targetUrl = payloadData['ply'];
+
+    debugPrint('Sending model URL to WebView: $targetUrl');
+    final payload = jsonEncode(payloadData);
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+  }
+
+  Future<void> _switchViewer(bool useSpark) async {
+    if (_useSparkViewer == useSpark) return;
+    setState(() {
+      _useSparkViewer = useSpark;
+      _isWebReady = false;
+      _didAttemptExternalOpen = false;
+      _externalViewerUrl = null;
+    });
+
+    if (_useExternalBrowserMode) {
+      await _openInExternalBrowser();
+      return;
+    }
+
+    await _loadLocalHtml();
+  }
+
+  Widget _buildFloatingCircleButton({
+    required IconData icon,
+    required VoidCallback? onPressed,
+    required bool isDark,
+    required String tooltip,
+  }) {
+    final foregroundColor = isDark
+        ? const Color(0xFFF7F7FB)
+        : const Color(0xFF202226);
+    final backgroundColor = isDark
+        ? const Color(0xCC1A1D24)
+        : const Color(0xEFFFFFFF);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: backgroundColor,
+        shape: const CircleBorder(),
+        elevation: 10,
+        shadowColor: Colors.black.withValues(alpha: 0.22),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 46,
+            height: 46,
+            child: Icon(icon, color: foregroundColor, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloatingViewerToggle(bool isDark) {
+    return Material(
+      color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
+      borderRadius: BorderRadius.circular(18),
+      elevation: 10,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: ToggleButtons(
+          isSelected: [!_useSparkViewer, _useSparkViewer],
+          onPressed: (index) {
+            _switchViewer(index == 1);
+          },
+          borderRadius: BorderRadius.circular(14),
+          constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
+          fillColor: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : AppConfig.primaryColor.withValues(alpha: 0.10),
+          selectedColor: isDark
+              ? const Color(0xFFF7F7FB)
+              : const Color(0xFF202226),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.74)
+              : const Color(0xFF5B6470),
+          children: const [
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text('\u539f\u7248'),
+            ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Text('Spark'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = TDTheme.of(context);
+    final isDark = AppConfig.isNightMode;
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    final pageBg = isDark ? const Color(0xFF18181C) : Colors.white;
+
+    return Scaffold(
+      backgroundColor: pageBg,
+      extendBodyBehindAppBar: true,
+      body: _isUnsupportedPlatform
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.desktop_access_disabled,
+                      size: 80,
+                      color: iconColor,
+                    ),
+                    const SizedBox(height: 16),
+                    TDText(
+                      textLocalize('platform_webview_unsupported'),
+                      font: theme.fontTitleLarge,
+                      fontWeight: FontWeight.w600,
+                      textColor: textColor,
+                    ),
+                    const SizedBox(height: 12),
+                    TDText(
+                      '\u5f53\u524d\u5b9e\u73b0\u672a\u8986\u76d6 Flutter Web\u3002\u8bf7\u5728 Android / iOS \u4f7f\u7528\u5185\u5d4c\u67e5\u770b\u5668\uff0c\u6216\u5728\u684c\u9762\u7aef\u4f7f\u7528\u7cfb\u7edf\u6d4f\u89c8\u5668\u6253\u5f00 3D \u67e5\u770b\u5668\u3002',
+                      font: theme.fontBodyMedium,
+                      textColor: hintTextColor,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : _useExternalBrowserMode
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.open_in_browser_rounded,
+                      size: 72,
+                      color: iconColor,
+                    ),
+                    const SizedBox(height: 16),
+                    TDText(
+                      '\u684c\u9762\u7aef\u5df2\u5207\u6362\u4e3a\u6d4f\u89c8\u5668\u9884\u89c8\u6a21\u5f0f',
+                      font: theme.fontTitleLarge,
+                      fontWeight: FontWeight.w600,
+                      textColor: textColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    TDText(
+                      _isOpeningExternalViewer
+                          ? '\u6b63\u5728\u542f\u52a8\u672c\u5730\u67e5\u770b\u670d\u52a1\u5e76\u6253\u5f00\u7cfb\u7edf\u6d4f\u89c8\u5668...'
+                          : '\u5f53\u524d\u4f7f\u7528 $_viewerLabel \u67e5\u770b\u5668\u3002\u82e5\u6d4f\u89c8\u5668\u6ca1\u6709\u81ea\u52a8\u5f39\u51fa\uff0c\u53ef\u624b\u52a8\u91cd\u65b0\u6253\u5f00\u3002',
+                      font: theme.fontBodyMedium,
+                      textColor: hintTextColor,
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_isDownloading) ...[
+                      const SizedBox(height: 18),
+                      CircularProgressIndicator(color: iconColor),
+                      const SizedBox(height: 12),
+                      TDText(
+                        '\u6b63\u5728\u51c6\u5907\u6a21\u578b...\n${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                        textAlign: TextAlign.center,
+                        font: theme.fontBodyMedium,
+                        textColor: hintTextColor,
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    ElevatedButton(
+                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
+                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                    ),
+                    if (_externalViewerUrl != null) ...[
+                      const SizedBox(height: 12),
+                      SelectableText(
+                        _externalViewerUrl!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: hintTextColor, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            )
+          : Stack(
+              children: [
+                if (_controller != null && !_isDownloading)
+                  SizedBox.expand(
+                    child: AnimatedOpacity(
+                      opacity: _isWebReady ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 500),
+                      child: WebViewWidget(controller: _controller!),
+                    ),
+                  ),
+                if (_isDownloading)
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TDText(
+                            textLocalize('viewer_downloading_title'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodyMedium,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 4),
+                          TDText(
+                            textLocalize('viewer_downloading_subtitle'),
+                            textAlign: TextAlign.center,
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor.withAlpha(150),
+                          ),
+                          const SizedBox(height: 24),
+                          TDText(
+                            '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                            font: theme.fontTitleLarge,
+                            fontWeight: FontWeight.w600,
+                            textColor: textColor,
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: _downloadProgress,
+                              minHeight: 6,
+                              backgroundColor: isDark
+                                  ? Colors.white.withAlpha(20)
+                                  : Colors.black.withAlpha(15),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                isDark
+                                    ? const Color(0xFF7AA2FF)
+                                    : AppConfig.primaryColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TDText(
+                            _totalBytes > 0
+                                ? '${_formatBytes(_downloadedBytes)} / ${_formatBytes(_totalBytes)}'
+                                : '${_formatBytes(_downloadedBytes)} / --',
+                            font: theme.fontBodySmall,
+                            textColor: hintTextColor,
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: 140,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                _stopDownload();
+                                Navigator.of(context).pop();
+                              },
+                              icon: const Icon(Icons.stop_rounded, size: 18),
+                              label: Text(textLocalize('viewer_stop_download')),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: isDark
+                                    ? const Color(0xFFFF6B6B)
+                                    : const Color(0xFFD32F2F),
+                                side: BorderSide(
+                                  color: isDark
+                                      ? const Color(0xFFFF6B6B)
+                                      : const Color(0xFFD32F2F),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else if (!_isWebReady && _controller != null)
+                  Center(child: CircularProgressIndicator(color: iconColor)),
+                if (!_isDownloading)
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildFloatingCircleButton(
+                            icon: Icons.arrow_back_rounded,
+                            onPressed: () => Navigator.of(context).pop(),
+                            isDark: isDark,
+                            tooltip: '\u8fd4\u56de',
+                          ),
+                          const Spacer(),
+                          _buildFloatingViewerToggle(isDark),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}

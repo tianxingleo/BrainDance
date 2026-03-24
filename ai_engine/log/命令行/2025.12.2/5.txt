@@ -1,0 +1,29 @@
+Windows PowerShell
+版权所有（C） Microsoft Corporation。保留所有权利。
+
+安装最新的 PowerShell，了解新功能和改进！https://aka.ms/PSWindows
+
+加载个人及系统配置文件用了 2823 毫秒。
+(base) PS C:\Users\ltx> wsl --install
+正在下载: 适用于 Linux 的 Windows 子系统 2.6.1
+正在安装: 适用于 Linux 的 Windows 子系统 2.6.1
+已安装 适用于 Linux 的 Windows 子系统 2.6.1。
+正在安装 Windows 可选组件: VirtualMachinePlatform
+
+部署映像服务和管理工具
+版本: 10.0.26100.5074
+
+映像版本: 10.0.26100.7171
+
+启用一个或多个功能
+[==========================100.0%==========================]
+操作成功完成。
+请求的操作成功。直到重新启动系统前更改将不会生效。
+请求的操作成功。直到重新启动系统前更改将不会生效。
+(base) PS C:\Users\ltx>
+
+
+
+
+
+

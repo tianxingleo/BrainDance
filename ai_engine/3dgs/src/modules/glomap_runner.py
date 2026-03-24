@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import json
 from pathlib import Path
+from collections import deque
 
 # 引入项目配置
 from src.config import PipelineConfig
@@ -15,27 +16,123 @@ from src.config import PipelineConfig
 class GlomapRunner:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
-        
-        # 1. 查找 COLMAP (优先使用 Conda 环境自带的！)
-        self.colmap_exe = shutil.which("colmap")
-        if not self.colmap_exe:
-            if os.path.exists("/usr/local/bin/colmap"):
-                self.colmap_exe = "/usr/local/bin/colmap"
-        
-        # 2. 查找 GLOMAP
-        self.glomap_exe = shutil.which("glomap")
-        if not self.glomap_exe:
-            if os.path.exists("/usr/local/bin/glomap"):
-                self.glomap_exe = "/usr/local/bin/glomap"
-
-        if not self.colmap_exe or not self.glomap_exe:
-            raise FileNotFoundError("❌ 缺少 colmap 或 glomap 可执行文件")
-
-        print(f"    -> 🎯 锁定引擎: COLMAP={self.colmap_exe}")
-        print(f"    -> 🎯 锁定引擎: GLOMAP={self.glomap_exe}")
-        
+        self.colmap_use_gpu = cfg.colmap_use_gpu
+        self.colmap_gpu_index = self._normalize_gpu_index(cfg.colmap_gpu_index.strip() or "0")
         self.env = os.environ.copy()
         self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self.colmap_exe = self._resolve_executable("colmap", "COLMAP_BIN")
+        self.glomap_exe = self._resolve_executable("glomap", "GLOMAP_BIN")
+
+        missing = []
+        if not self.colmap_exe:
+            missing.append("colmap")
+        self.use_colmap_global_mapper = self._supports_colmap_global_mapper()
+        if not self.glomap_exe and not self.use_colmap_global_mapper:
+            missing.append("glomap")
+        if missing:
+            missing_text = ", ".join(missing)
+            raise FileNotFoundError(
+                f"❌ 缺少可执行文件: {missing_text}。"
+                f"请安装后重试，或在 .env 中设置 COLMAP_BIN/GLOMAP_BIN 为绝对路径。"
+            )
+
+        print(f"    -> 🎯 锁定引擎: COLMAP={self.colmap_exe}")
+        if self.glomap_exe:
+            print(f"    -> 🎯 锁定引擎: GLOMAP={self.glomap_exe}")
+        if self.use_colmap_global_mapper:
+            print(f"    -> 🧭 Step 3 使用 COLMAP 内置 global_mapper（与当前数据库格式兼容）")
+        print(f"    -> ⚙️ COLMAP GPU 开关: {'开启' if self.colmap_use_gpu else '关闭'}")
+        if self.colmap_use_gpu:
+            print(f"    -> 🖥️ COLMAP GPU 索引: {self.colmap_gpu_index}")
+        
+    def _normalize_gpu_index(self, configured_index: str) -> str:
+        """
+        归一化 COLMAP/GLOMAP 的 GPU 索引。
+
+        约定：
+        - `CUDA_VISIBLE_DEVICES` 负责选择物理 GPU。
+        - COLMAP / GLOMAP 的 `gpu_index` 需要使用“可见设备集合”内的局部索引。
+        """
+        visible_devices = os.getenv("CUDA_VISIBLE_DEVICES", "").strip()
+        if not visible_devices:
+            return configured_index
+
+        visible_list = [item.strip() for item in visible_devices.split(",") if item.strip()]
+        if not visible_list:
+            return configured_index
+
+        if configured_index in visible_list:
+            normalized_index = str(visible_list.index(configured_index))
+            if normalized_index != configured_index:
+                print(
+                    "    -> 🔁 检测到 CUDA_VISIBLE_DEVICES 与 COLMAP_GPU_INDEX 使用了物理卡编号，"
+                    f"自动映射为局部索引: {configured_index} -> {normalized_index}"
+                )
+            return normalized_index
+
+        if configured_index.isdigit() and int(configured_index) >= len(visible_list):
+            print(
+                "    -> ⚠️ COLMAP_GPU_INDEX 超出当前可见 GPU 数量，"
+                f"自动回退为局部索引 0: {configured_index} -> 0"
+            )
+            return "0"
+
+        return configured_index
+
+    @staticmethod
+    def _command_uses_gpu(cmd) -> bool:
+        """根据当前命令参数判断是否启用了 GPU，避免降级时依赖全局状态。"""
+        for i, arg in enumerate(cmd[:-1]):
+            if "use_gpu" in arg and cmd[i + 1] == "1":
+                return True
+        return False
+
+    @staticmethod
+    def _build_cpu_fallback_cmd(cmd):
+        """将当前命令改写为 CPU 版本，仅影响本次重试。"""
+        new_cmd = list(cmd)
+        found_gpu_flag = False
+        for i, arg in enumerate(new_cmd[:-1]):
+            if "use_gpu" in arg:
+                new_cmd[i + 1] = "0"
+                found_gpu_flag = True
+            if "gpu_index" in arg:
+                new_cmd[i + 1] = "-1"
+        return new_cmd, found_gpu_flag
+
+    def _resolve_executable(self, cmd_name: str, env_key: str):
+        env_path = self.cfg.colmap_bin if env_key == "COLMAP_BIN" else self.cfg.glomap_bin
+        env_path = env_path.strip()
+        if env_path:
+            p = Path(env_path)
+            if p.exists() and os.access(str(p), os.X_OK):
+                return str(p)
+
+        by_path = shutil.which(cmd_name)
+        if by_path:
+            return by_path
+
+        common_path = Path("/usr/local/bin") / cmd_name
+        if common_path.exists() and os.access(str(common_path), os.X_OK):
+            return str(common_path)
+
+        return None
+
+    def _supports_colmap_global_mapper(self) -> bool:
+        if not self.colmap_exe:
+            return False
+        try:
+            result = subprocess.run(
+                [self.colmap_exe, "help"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=self.env,
+                check=False,
+            )
+        except OSError:
+            return False
+        return "global_mapper" in result.stdout
 
     def run(self):
         """执行 GLOMAP 完整流程"""
@@ -62,29 +159,54 @@ class GlomapRunner:
             if self.cfg.transforms_file.exists(): self.cfg.transforms_file.unlink()
 
             # Step 1: 特征提取
+            # 注意：启用 retry_cpu=True 以便在 CUDA runtime 不匹配时自动切换到 CPU
+            use_gpu_str = "GPU" if self.colmap_use_gpu else "CPU"
             self._run_cmd([
                 self.colmap_exe, "feature_extractor",
                 "--database_path", str(database_path),
                 "--image_path", str(raw_images_dir),
                 "--ImageReader.camera_model", "OPENCV",
-                "--ImageReader.single_camera", "1"
-            ], "Step 1: 特征提取 (COLMAP)")
+                "--ImageReader.single_camera", "1",
+                "--FeatureExtraction.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--FeatureExtraction.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1"
+            ], f"Step 1: 特征提取 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
             # Step 2: 顺序匹配
+            # COLMAP 3.13.0+ 中匹配 GPU 开关为 --FeatureMatching.use_gpu
+            use_gpu_str = "GPU" if self.colmap_use_gpu else "CPU"
             self._run_cmd([
                 self.colmap_exe, "sequential_matcher",
                 "--database_path", str(database_path),
-                "--SequentialMatching.overlap", "25"
-            ], "Step 2: 顺序匹配 (COLMAP)")
+                "--SequentialMatching.overlap", "25",
+                "--FeatureMatching.use_gpu", "1" if self.colmap_use_gpu else "0",
+                "--FeatureMatching.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1"
+            ], f"Step 2: 顺序匹配 (COLMAP {use_gpu_str})", retry_cpu=self.colmap_use_gpu)
 
-            # Step 3: 全局重建
-            print(f"    -> 🚀 启动 GLOMAP 引擎...")
-            self._run_cmd([
-                self.glomap_exe, "mapper",
-                "--database_path", str(database_path),
-                "--image_path", str(raw_images_dir),
-                "--output_path", str(sparse_dir)
-            ], "Step 3: 全局映射 (GLOMAP)")
+            if self.use_colmap_global_mapper:
+                print(f"    -> 🚀 启动 COLMAP global_mapper...")
+                self._run_cmd([
+                    self.colmap_exe, "global_mapper",
+                    "--database_path", str(database_path),
+                    "--image_path", str(raw_images_dir),
+                    "--output_path", str(sparse_dir),
+                    "--GlobalMapper.gp_use_gpu", "1" if self.colmap_use_gpu else "0",
+                    "--GlobalMapper.gp_gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
+                    "--GlobalMapper.ba_ceres_use_gpu", "1" if self.colmap_use_gpu else "0",
+                    "--GlobalMapper.ba_ceres_gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
+                ], "Step 3: 全局映射 (COLMAP global_mapper)", retry_cpu=self.colmap_use_gpu)
+            else:
+                print(f"    -> 🚀 启动 GLOMAP 引擎...")
+                self._run_cmd([
+                    self.glomap_exe, "mapper",
+                    "--database_path", str(database_path),
+                    "--image_path", str(raw_images_dir),
+                    "--output_path", str(sparse_dir),
+                    "--output_format", "bin",
+                    "--GlobalPositioning.use_gpu", "1" if self.colmap_use_gpu else "0",
+                    "--BundleAdjustment.use_gpu", "1" if self.colmap_use_gpu else "0",
+                    "--GlobalPositioning.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
+                    "--BundleAdjustment.gpu_index", self.colmap_gpu_index if self.colmap_use_gpu else "-1",
+                ], "Step 3: 全局映射 (GLOMAP)", retry_cpu=self.colmap_use_gpu)
 
             # Step 4: 目录修正
             self._fix_directory_structure(sparse_dir)
@@ -109,27 +231,107 @@ class GlomapRunner:
             return False
         return False
 
-    def _run_cmd(self, cmd, desc):
+    def _run_cmd(self, cmd, desc, retry_cpu=False):
         """内部工具：执行命令 (含环境隔离逻辑)"""
         print(f"🚀 {desc}...")
         
         # 🔥 环境隔离逻辑 🔥
         cmd_env = self.env.copy()
         exe_path = cmd[0]
-        # 如果是系统程序 (/usr/local/bin/glomap)，清除 LD_LIBRARY_PATH 防止 Conda 干扰
-        if exe_path.startswith("/usr") or exe_path.startswith("/bin"):
-            if "LD_LIBRARY_PATH" in cmd_env:
-                del cmd_env["LD_LIBRARY_PATH"]
+        command_uses_gpu = self._command_uses_gpu(cmd)
+        
+        is_glomap = "glomap" in exe_path.lower()
+        is_colmap = "colmap" in exe_path.lower()
+        
+        if is_glomap:
+            # 🟢 对于 GLOMAP，采用白名单纯净环境变量防止与 Conda 冲突崩溃 (SIGABRT -6)
+            # 添加系统级 CUDA 库路径以确保 GLOMAP 的 GPU 加速能正常工作
+            cuda_lib_path = "/usr/local/cuda/lib64" if os.path.exists("/usr/local/cuda/lib64") else ""
+            ld_library_paths = [cuda_lib_path, "/usr/local/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib", "/lib"]
+            ld_library_paths = [p for p in ld_library_paths if p] # filter empty
+            
+            clean_env = {
+                "PATH": os.pathsep.join(["/usr/local/cuda/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin"]),
+                "LD_LIBRARY_PATH": os.pathsep.join(ld_library_paths),
+                "HOME": os.getenv("HOME", ""),
+                "USER": os.getenv("USER", ""),
+                "LANG": os.getenv("LANG", "en_US.UTF-8"),
+                "SHELL": os.getenv("SHELL", "/bin/bash"),
+                "TERM": os.getenv("TERM", "xterm-256color")
+            }
+            if command_uses_gpu:
+                for k, v in os.environ.items():
+                    if any(x in k.upper() for x in ["CUDA", "NVIDIA"]):
+                        clean_env[k] = v
+            cmd_env = clean_env
+            
+        elif is_colmap or exe_path.startswith("/usr") or exe_path.startswith("/bin"):
+            # 🟢 对于 COLMAP 或者系统库，仅清理 LD_LIBRARY_PATH 和 LD_PRELOAD
+            for env_var in ["LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONPATH"]:
+                if env_var in cmd_env:
+                    del cmd_env[env_var]
 
         try:
+            recent_output = deque(maxlen=50)
+            # 🟢 [关键修复] 当 GPU 模式失败导致核心转储时，确保能捕获并重试 CPU 模式
+            # SIGABRT (代码 -6) 通常是由库冲突引起的，即便切换 CPU 模式也需要纯净环境
             process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=cmd_env
             )
+            # ... 后续逻辑保持不变 ...
+
             for line in process.stdout:
-                if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs"]):
+                recent_output.append(line.rstrip())
+                if any(k in line for k in ["Error", "Warning", "Elapsed", "image pairs", "CUDA error"]):
                     print(f"    | {line.strip()}")
             process.wait()
+
             if process.returncode != 0:
+                if recent_output:
+                    print("    | --- 命令失败尾日志 ---")
+                    for line in recent_output:
+                        print(f"    | {line}")
+                # 🟢 [优化] 如果是 GPU 模式执行失败且允许重试，则自动切换 CPU 模式
+                if retry_cpu:
+                    print(f"    ⚠️ GPU 执行失败，尝试自动切换至 CPU 模式重试...")
+                    new_cmd, found_gpu_flag = self._build_cpu_fallback_cmd(cmd)
+                    if found_gpu_flag:
+                        try:
+                            return self._run_cmd(new_cmd, f"{desc} (CPU 降级模式)", retry_cpu=False)
+                        except subprocess.CalledProcessError as e:
+                            # 🟢 [关键修复] 当 GLOMAP 的 CPU 模式也崩溃时 (如 SIGABRT)，尝试回退至 COLMAP mapper
+                            if "glomap" in new_cmd[0].lower():
+                                print(f"    ⚠️ GLOMAP (CPU) 执行崩溃！尝试回退至 COLMAP global_mapper...")
+                                colmap_cmd = [
+                                    self.colmap_exe, "global_mapper",
+                                    "--database_path", str(self.cfg.data_dir / "colmap" / "database.db"),
+                                    "--image_path", str(self.cfg.project_dir / "raw_images"),
+                                    "--output_path", str(self.cfg.data_dir / "colmap" / "sparse"),
+                                    "--GlobalMapper.gp_use_gpu", "0",
+                                    "--GlobalMapper.gp_gpu_index", "-1",
+                                    "--GlobalMapper.ba_ceres_use_gpu", "0",
+                                    "--GlobalMapper.ba_ceres_gpu_index", "-1",
+                                ]
+                                return self._run_cmd(colmap_cmd, "Step 3: 全局映射 (COLMAP global_mapper 回退模式)", retry_cpu=False)
+                            raise e
+
+                # 如果没有 CPU 降级或已经是 CPU 降级但不是 glomap，则仍然抛出
+                if not retry_cpu and "glomap" in cmd[0].lower():
+                    print(f"    ⚠️ GLOMAP 执行崩溃！尝试回退至 COLMAP global_mapper...")
+                    colmap_cmd = [
+                        self.colmap_exe, "global_mapper",
+                        "--database_path", str(self.cfg.data_dir / "colmap" / "database.db"),
+                        "--image_path", str(self.cfg.project_dir / "raw_images"),
+                        "--output_path", str(self.cfg.data_dir / "colmap" / "sparse"),
+                        "--GlobalMapper.gp_use_gpu", "0",
+                        "--GlobalMapper.gp_gpu_index", "-1",
+                        "--GlobalMapper.ba_ceres_use_gpu", "0",
+                        "--GlobalMapper.ba_ceres_gpu_index", "-1",
+                    ]
+                    # Create output path if not exist
+                    Path(colmap_cmd[5]).mkdir(parents=True, exist_ok=True)
+                    return self._run_cmd(colmap_cmd, "Step 3: 全局映射 (COLMAP global_mapper 回退模式)", retry_cpu=False)
+
                 raise subprocess.CalledProcessError(process.returncode, cmd)
         except subprocess.CalledProcessError as e:
             print(f"❌ 命令执行崩溃: {cmd[0]} (代码 {e.returncode})")

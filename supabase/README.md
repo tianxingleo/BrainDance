@@ -1,551 +1,129 @@
-# 🧠 BrainDance - Supabase Backend
+# BrainDance Supabase
 
-**3DGS 生成引擎与语义搜索数据库**
+`supabase/` 提供 BrainDance 当前使用的本地后端基础设施，包括数据库迁移、Edge Functions 和本地开发配置。
 
-这是一个基于 Supabase 的本地后端环境，服务于 BrainDance 项目。它不仅提供 PostgreSQL 数据库和对象存储，还集成了 `pgvector` 用于 RAG（检索增强生成）语义搜索功能。
+## 目录内容
 
-## 🏗️ 架构说明 (Architecture)
+- `migrations/`：数据库结构与策略迁移
+- `functions/search-models/`：自然语言搜索接口
+- `functions/test-timeout/`：测试用函数
+- `config.toml`：Supabase CLI 本地配置
+- `deploy-functions.sh`：函数部署脚本
 
-本项目作为 **数据中台**，连接前端与计算节点：
+## 当前职责
 
-*   📱 **Frontend (Flutter)**: 直接读写数据库（创建任务、监听进度、下载模型）。
-*   ⚙️ **AI Engine (Python)**: 监听任务队列，下载视频，生成 3D 模型，回填 Embedding 向量。
-*   🗄️ **Supabase**: 负责身份认证 (Auth)、任务调度 (DB)、文件存储 (Storage) 和 向量检索 (Vector)。
-*   ⚡ **Edge Functions (Deno)**: Serverless 函数层，负责语义搜索接口，保护 API Key 不暴露给前端。
+这一层主要承担：
 
----
+- `processing_tasks` 等业务表的数据存储
+- `worker_nodes` 的注册、心跳与集群控制
+- `community_posts` 的社区贴文存储
+- `pgvector` 向量检索
+- Storage 文件管理
+- Realtime 状态同步
+- Edge Functions 承载搜索接口
 
-## 🌐 服务端口 (Service Ports)
+## 本地启动
 
-| 服务 | 端口 | 访问地址 | 说明 |
-|------|------|----------|------|
-| **Kong (API Gateway)** | 54321 | http://127.0.0.1:54321 | 主 API 入口（REST, GraphQL, Storage, Auth, Edge Functions） |
-| **PostgreSQL** | 54322 | postgresql://postgres:postgres@127.0.0.1:54322/postgres | 数据库连接 |
-| **Studio** | 54323 | http://127.0.0.1:54323 | Web 管理界面（推荐使用） |
-| **Inbucket (Mailpit)** | 54324 | http://127.0.0.1:54324 | 邮件测试服务器 |
-| **Analytics** | 54327 | - | 分析服务 |
-
-**常用访问地址：**
-- REST API: http://127.0.0.1:54321/rest/v1
-- GraphQL: http://127.0.0.1:54321/graphql/v1
-- Storage: http://127.0.0.1:54321/storage/v1
-- Edge Functions: http://127.0.0.1:54321/functions/v1/{function-name}
-- Studio: http://127.0.0.1:54323
-
----
-
-## 📋 前置要求 (Prerequisites)
-
-在开始之前，请确保你的机器上安装了以下工具：
-
-1.  **Docker Desktop** (必须保持运行状态)
-2.  **Supabase CLI**
-    *   **MacOS:** `brew install supabase/tap/supabase`
-    *   **Windows:** `scoop bucket add supabase https://github.com/supabase/scoop-bucket.git; scoop install supabase`
-
----
-
-## 🚀 快速开始 (Quick Start)
-
-### 1. 启动服务
-确保 Docker 已启动，在当前目录下运行：
+先确保 Docker 和 Supabase CLI 可用：
 
 ```bash
 cd supabase
 supabase start
 ```
 
-首次启动会自动拉取镜像并执行 `supabase/migrations` 下的所有 SQL 脚本（包括开启 `vector` 插件、创建表结构）。
+默认本地端口以 `config.toml` 为准，当前常用地址为：
 
-### 2. 获取连接信息
-启动成功后，控制台会输出 API URL 和 Keys。**这是连接 Python 后端的关键信息。**
+- API: `http://127.0.0.1:54321`
+- PostgreSQL: `postgresql://postgres:postgres@127.0.0.1:54322/postgres`
+- Studio: `http://127.0.0.1:54323`
 
-### 3. 配置 Python 环境
-请将终端输出的 `API URL` 和 `service_role key` 复制到 `ai_engine/3dgs/.env` 文件中：
+首次启动时会执行 `migrations/` 下的 SQL 迁移。
 
-```env
-# ../ai_engine/3dgs/.env
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_KEY=sb_secret_xxxx... (填 service_role key)
-```
+## 当前迁移内容
 
----
+从现有迁移文件看，当前仓库至少覆盖了这些核心对象：
 
-## 🗃️ 数据库结构 (Schema)
+- `processing_tasks`
+- `worker_nodes`
+- `model_assets`
+- `memory_poses`
+- `rag_docs`
+- `tasks`
+- `match_memory_poses` 相关检索能力
+- Dashboard 读取 `braindance-assets` 的存储策略
 
-本项目核心包含以下业务表（定义位于 `migrations` 文件夹）：
+现有迁移文件包括：
 
-### 1. 任务流水线 (`processing_tasks`)
-*   **作用**: 管理 3D 生成任务的生命周期。
-*   **字段**:
-  - `id` (uuid): 任务唯一标识
-  - `user_id` (text): 用户 ID
-  - `scene_id` (text): 场景 ID
-  - `status` (text): 状态 (pending/processing/completed/failed)
-  - `logs` (jsonb): 实时执行日志
-  - `quality_score` (integer): AI 质检评分
-  - `description`, `tags`, `keywords`: 元数据
-*   **流转**: 前端写入 `pending` -> Python 接单改 `processing` -> 完成改 `completed`。
+- `20260118144558_init_schema.sql`
+- `20260121000000_add_task_type_and_params.sql`
+- `20260225020151_create_memory_poses_table.sql`
+- `20260306123456_match_memory_poses.sql`
+- `20260307090000_add_display_name_to_processing_tasks.sql`
+- `20260309195500_add_storage_read_policies_for_dashboard.sql`
+- `20260317170000_create_community_posts.sql`
+- `20260320143000_add_dashboard_table_read_policies.sql`
+- `20260320143000_create_worker_nodes.sql`
 
-### 2. 3D 资产知识库 (`model_assets`)
-*   **作用**: 存储已完成的高质量模型及其 **向量嵌入 (Embeddings)**。
-*   **字段**:
-  - `id` (uuid): 资产唯一标识
-  - `scene_id` (text): 场景 ID
-  - `user_id` (text): 所有者 ID
-  - `description` (text): AI 生成的场景描述
-  - `objects` (text[]): 场景中的物体列表
-  - `tags` (text[]): 环境标签
-  - `embedding` (vector(1536)): 语义向量（用于 RAG 搜索）
-  - `ply_path` (text): 3D 模型文件路径
-  - `meta_info` (jsonb): 质量评分、引擎版本等
-*   **RAG**: 支持通过 RPC 函数 `match_model_assets` 进行自然语言语义搜索。
+当前与最近几次表结构变更直接相关的对象可以概括为：
 
-### 3. RAG 文档库 (`rag_docs`)
-*   **作用**: 存储用于 RAG 检索的文档内容。
-*   **字段**:
-  - `id` (bigint): 文档 ID
-  - `content` (text): 文档内容
-  - `metadata` (jsonb): 文档元数据
-  - `embedding` (vector(1536)): 文档向量
+- `processing_tasks`：任务主表，新增了 `display_name` 用于前端列表展示
+- `model_assets`：模型资产表，供 Recall、Community 和 Dashboard 查询
+- `memory_poses`：空间锚点与向量检索表
+- `community_posts`：社区贴文表，引用 `model_assets.id`
+- `worker_nodes`：Worker 注册、心跳、当前任务和控制状态表
+- `dashboard_read_*` 策略：为 Dashboard 直连读表补齐只读 RLS
 
-### 4. 通用任务表 (`tasks`)
-*   **作用**: 通用任务队列（备用）。
-*   **字段**:
-  - `id` (uuid): 任务 ID
-  - `user_id` (uuid): 用户 ID
-  - `source_path` (text): 源文件路径
-  - `status` (text): 任务状态
-  - `result_data` (jsonb): 结果数据
+## Storage 约定
 
-### 5. Auth Schema (系统表)
-*   `auth.users`: 用户账户信息
-*   `auth.sessions`: 会话数据
-*   `auth.refresh_tokens`: 刷新令牌
-
-### 6. Storage Schema (系统表)
-*   `storage.buckets`: 存储桶配置
-*   `storage.objects`: 文件元数据
-
----
-
-## 📦 存储规范 (Storage)
-
-系统已通过 Seed 自动创建存储桶：**`braindance-assets`** (Public)。
-
-**⚠️ 严格的文件路径规范：**
-Python Worker 和 Flutter 前端均依赖此路径结构，请勿随意修改：
+当前项目默认围绕 `braindance-assets` bucket 工作，路径约定与根 README 保持一致：
 
 ```text
-braindance-assets/
-└── {user_id}/
-    └── {scene_id}/
-        ├── raw/
-        │   └── video.mp4        (输入: 原始视频)
-        └── output/
-            ├── point_cloud.ply  (输出: 3D模型)
-            └── transforms.json  (输出: 预览配置)
+{user_id}/{scene_id}/raw/video.mp4
+{user_id}/{scene_id}/raw/image.png
+{user_id}/{scene_id}/raw/images.zip
+{user_id}/{scene_id}/raw/thumbnail.jpg
+
+{user_id}/{scene_id}/output/point_cloud.ply
+{user_id}/{scene_id}/output/point_cloud.splat
+{user_id}/{scene_id}/output/point_cloud.ksplat
+{user_id}/{scene_id}/output/transforms.json
 ```
 
----
+注意：
 
-## 🔧 环境变量配置 (Environment Variables)
+- 现有策略和代码都默认使用 `braindance-assets`
+- 当前仓库中的 `seed.sql` 为空，不应假设 bucket 一定会被自动创建
+- 如果本地环境里还没有这个 bucket，需要在 Studio 或脚本中手动创建
 
-### Python Worker 必需变量
+## Edge Functions
 
-```bash
-# 必填
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_KEY=sb_secret_xxxx...  # service_role key
+### `search-models`
 
-# 可选
-SUPABASE_BUCKET=braindance-assets  # 存储桶名称
-SUPABASE_TABLE=processing_tasks     # 任务表名称
-```
+这是当前仓库里的主要函数，用于承载自然语言搜索接口。它负责：
 
-### 获取方式
-1. 运行 `supabase start` 后，控制台会输出连接信息
-2. 或查看 `supabase/.env.1` 文件（首次启动时生成）
+1. 解析查询中的检索目标和时间范围
+2. 调用 Embedding 接口生成向量
+3. 通过 `pgvector` 查询相关场景或空间锚点
 
----
-
-## ⚡ Edge Functions (语义搜索)
-
-本项目使用 **Supabase Edge Functions (Deno)** 实现语义搜索功能。
-
-### 功能说明
-
-- **自然语言搜索**: 用户输入"红色杯子"，系统自动理解意图并搜索相关 3D 模型
-- **智能时间过滤**: 支持"上周拍的"、"上个月"等自然语言时间描述
-- **语义向量匹配**: 使用 AI 生成语义向量，在 pgvector 中进行相似度搜索
-
-### 文件位置
-
-```
-supabase/functions/search-models/
-├── index.ts      # Edge Function 主程序 (Deno/TypeScript)
-├── test.ts       # 自动化测试 (Deno Test)
-└── .env.local    # 本地环境变量配置 (不提交 git)
-```
-
-### 快速开始
-
-#### 1. 配置环境变量
-
-编辑 `supabase/functions/search-models/.env.local`：
-
-```bash
-# DashScope API Key (必填)
-DASHSCOPE_API_KEY=sk-your-api-key-here
-```
-
-获取 DashScope Key: https://dashscope.console.aliyun.com/
-
-#### 2. 启动 Edge Function
+本地运行：
 
 ```bash
 cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-启动成功后显示：
-```
-Serving functions at:
-- http://127.0.0.1:54321/functions/v1/search-models
-```
+如果要测试接口，可以参考 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
 
-#### 3. 测试搜索接口
+### `test-timeout`
 
-```bash
-# 简单搜索
-curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"红色杯子"}'
+这是一个辅助测试函数，主要用于本地联调，不承担核心业务能力。
 
-# 带时间过滤的搜索
-curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"上周拍的照片"}'
-```
+## 与其他模块的关系
 
-#### 4. 运行自动化测试
+- `app/`：使用 Anon Key 直连数据库、Storage 和 Realtime
+- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入 `desired_state`
+- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和 Storage，同时持续更新 `worker_nodes`
 
-```bash
-deno test --allow-all supabase/functions/search-models/test.ts
-```
+## 说明
 
-### API 文档
-
-| 项目 | 说明 |
-| :--- | :--- |
-| **URL** | `/functions/v1/search-models` |
-| **Method** | `POST` |
-| **Content-Type** | `application/json` |
-
-**请求参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-| :--- | :--- | :---: | :--- |
-| `query` | string | ✅ | 搜索关键词，支持自然语言 |
-
-**请求示例**:
-```bash
-curl -X POST 'http://127.0.0.1:54321/functions/v1/search-models' \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"红色杯子"}'
-```
-
-**响应示例**:
-```json
-{
-  "success": true,
-  "intent": {
-    "original_query": "红色杯子",
-    "parsed_search_text": "红色杯子",
-    "filter_start": null,
-    "filter_end": null
-  },
-  "results": []
-}
-```
-
-### 技术实现
-
-| 组件 | 技术 |
-| :--- | :--- |
-| **运行时** | Deno 1.46+ |
-| **语言** | TypeScript |
-| **LLM** | DashScope qwen-plus (意图解析) |
-| **Embedding** | DashScope text-embedding-v2 (1536 维) |
-| **向量搜索** | pgvector (`match_model_assets` RPC) |
-| **数据库** | PostgreSQL + Supabase JS |
-
-### 开发说明
-
-#### 添加新的 Edge Function
-
-```bash
-# 创建新的 Edge Function
-supabase functions new my-new-function
-
-# 编辑代码
-supabase/functions/my-new-function/index.ts
-```
-
-#### 修改现有代码
-
-1. 编辑 `supabase/functions/search-models/index.ts`
-2. 重启 Edge Function:
-   ```bash
-   # Ctrl+C 停止当前服务
-   supabase functions serve search-models --no-verify-jwt --env-file .env.local
-   ```
-
-#### 查看日志
-
-```bash
-supabase functions logs search-models
-```
-
-### 相关文档
-
-- [API 接入文档](../docs/API_DOC.md) - 前端调用接口说明
-- [本地部署指南](../docs/LOCAL_DEPLOYMENT.md) - 完整的本地开发指南
-- [API 测试报告](../docs/API_TEST_REPORT.md) - 测试结果记录
-
----
-
-## 💾 备份与恢复 (Backup & Restore)
-
-### 快速备份方案（推荐）
-
-BrainDance 提供一键同步脚本 `save.sh`，简化数据库结构、数据备份和代码提交流程。
-
-#### 一键备份
-
-```bash
-# 在项目根目录下执行（和 supabase 文件夹同级）
-
-# 使用描述性名称（推荐）
-./save.sh add_vector_support
-
-# 或使用时间戳（自动生成）
-./save.sh
-```
-
-**脚本会自动执行**：
-1. 📜 生成数据库迁移文件（`supabase/migrations/`）
-2. 🌱 更新种子数据（`supabase/seed.sql`）
-3. 💅 格式化 Deno Functions 代码
-4. 📦 提交到 Git 本地仓库
-5. ☁️ 推送到 GitHub（需手动执行 `git push`）
-
-**何时使用**：
-- ✅ 安装了新的 PostgreSQL 插件（如 vector）
-- ✅ 修改了数据库表结构
-- ✅ 更新了 Deno Functions 代码
-- ✅ 需要保存测试数据供队友使用
-
-#### 队友如何恢复
-
-你的队友（或你换了新电脑）只需两步即可获得相同的环境：
-
-**1. Clone 仓库**
-```bash
-git clone https://github.com/yourusername/BrainDance.git
-cd BrainDance
-```
-
-**2. 一键启动**
-```bash
-supabase start
-```
-
-Supabase 会自动：
-- 应用 `supabase/migrations/` 下的所有迁移脚本
-- 导入 `supabase/seed.sql` 中的测试数据
-- 启动所有服务（数据库、API、Storage 等）
-
----
-
-### 高级备份方案
-
-如果需要更细粒度的备份控制，可以使用以下手动命令：
-
-#### 备份完整数据库（包括结构 + 数据）
-
-```bash
-cd supabase
-docker exec supabase_db_BrainDance pg_dump -U postgres -d postgres \
-  --format=custom --compress=9 -f /tmp/backup.dump
-docker cp supabase_db_BrainDance:/tmp/backup.dump ./backups/
-```
-
-#### 恢复完整数据库
-
-```bash
-cd supabase
-docker cp ./backups/backup.dump supabase_db_BrainDance:/tmp/
-docker exec supabase_db_BrainDance pg_restore -U postgres -d postgres \
-  -c /tmp/backup.dump
-```
-
-#### 仅备份数据（Seed 数据）
-
-```bash
-cd supabase
-supabase db dump --data-only > seed.sql
-```
-
-#### 仅备份结构（Schema）
-
-```bash
-cd supabase
-supabase db dump --schema-only > schema.sql
-```
-
-#### 备份存储文件
-
-```bash
-# 打包存储卷
-docker run --rm \
-  -v supabase_storage_BrainDance:/source:ro \
-  -v $(pwd)/backups:/backup \
-  alpine:latest \
-  sh -c "cd /source && tar czvf /backup/storage.tar.gz ."
-```
-
----
-
-### 备份策略建议
-
-| 场景 | 推荐方案 | 说明 |
-|------|----------|------|
-| **日常开发** | `./save.sh` | 自动生成迁移 + 提交 Git |
-| **版本发布** | `./save.sh release_v1.0` | 清晰的版本命名 |
-| **灾难恢复** | 完整数据库备份 | 使用 pg_dump 生成 .dump 文件 |
-| **迁移数据** | 仅数据备份 | 使用 `--data-only` 生成 seed.sql |
-
----
-
-### 常见问题
-
-**Q: `./save.sh` 报错 "command not found"?**
-A: 确保在项目根目录下执行脚本，并且已添加执行权限：
-```bash
-chmod +x save.sh
-```
-
-**Q: 迁移文件太多，如何清理？**
-A: 不建议删除迁移文件，因为它们记录了数据库的完整演进历史。如需重置，可使用 `supabase db reset`。
-
-**Q: 如何查看已生成的迁移文件？**
-A: 迁移文件位于 `supabase/migrations/` 目录，按时间顺序排列：
-```bash
-ls -lt supabase/migrations/
-```
-
-**Q: 为什么推荐使用 `save.sh` 而不是手动备份？**
-A: `save.sh` 集成了迁移生成、数据备份和代码管理，是更适合团队协作的工作流。手动备份适用于特殊场景。
-
----
-
-## 💻 常用开发命令
-
-### 1. 修改表结构 (Migrations)
-如果你在 Studio (http://localhost:54323) 修改了表结构，必须同步到本地文件，否则队友拉取代码后会丢失结构。
-
-```bash
-# 自动生成迁移文件 (基于本地 DB 的变更)
-supabase db diff -f update_schema_v1
-
-# 这会在 supabase/migrations/ 下生成新的 sql 文件
-```
-
-### 2. 重置环境 (Reset)
-如果数据库数据脏了，或者想测试"从零部署"的流程：
-
-```bash
-# 清空数据库 -> 重新应用 Migrations -> 重新应用 Seed
-supabase db reset
-```
-
-### 3. 停止服务
-```bash
-supabase stop
-```
-
-### 4. 查看日志
-```bash
-# 查看所有容器日志
-docker compose logs -f
-
-# 查看特定服务日志
-docker logs supabase_db_BrainDance -f
-```
-
-### 5. Edge Functions 命令
-
-```bash
-# 启动 Edge Function 开发服务器
-cd supabase/functions/search-models
-supabase functions serve search-models --no-verify-jwt --env-file .env.local
-
-# 部署 Edge Function 到云端
-supabase functions deploy search-models
-
-# 查看 Edge Function 日志
-supabase functions logs search-models
-
-# 运行 Edge Function 测试
-deno test --allow-all supabase/functions/search-models/test.ts
-```
-
----
-
-## 🧪 测试与验证
-
-### 验证服务状态
-```bash
-# 检查容器运行状态
-docker ps | grep supabase
-
-# 测试数据库连接
-psql "postgresql://postgres:postgres@localhost:54322/postgres" -c "\dt"
-```
-
-### 验证 API 可访问
-```bash
-# 测试 REST API
-curl http://127.0.0.1:54321/rest/v1/processing_tasks
-
-# 测试 Studio
-# 浏览器访问 http://127.0.0.1:54323
-```
-
----
-
-## ⚠️ 常见问题
-
-**Q: Python 脚本报错 `PGRST202` 找不到函数？**
-A: 这是因为 SQL 函数缓存未刷新。请进入 Studio -> Settings -> API -> 点击 **"Reload schema cache"**。
-
-**Q: 搜索功能报错 `vector` 类型不存在？**
-A: 确保迁移脚本中包含了 `create extension if not exists vector;`，并且 Docker 容器已正确加载该插件。
-
-**Q: 启动时 Docker 报错端口占用？**
-A: 检查 `54322` (DB) 或 `54321` (API) 端口是否被占用，或尝试 `supabase stop` 后重试。
-
-**Q: 存储文件上传失败？**
-A: 检查 `braindance-assets` 存储桶是否存在，确认存储服务正常运行。
-
-**Q: 如何查看数据库中的数据？**
-A: 使用 Studio (http://localhost:54323)，使用 `postgres/postgres` 登录。
-
----
-
-## 📚 相关资源
-
-- [Supabase 官方文档](https://supabase.com/docs)
-- [pgvector 使用指南](https://github.com/pgvector/pgvector)
-- [项目架构说明](../README.md)
+这份 README 只描述当前仓库里的 Supabase 层，不覆盖线上部署策略，也不替代具体的表结构设计文档。更完整的系统链路请参考项目根目录的 [README.md](/home/ltx/projects/BrainDance/README.md)。

@@ -1,0 +1,22 @@
+[
+  {
+    "group": "recent_hit",
+    "question": "我最近拍了什么？",
+    "expected_issue_tag": "recent_hit"
+  },
+  {
+    "group": "no_hit",
+    "question": "我最近拍过钢琴吗？",
+    "expected_issue_tag": "no_hit"
+  },
+  {
+    "group": "partial_coverage",
+    "question": "我最近拍过笔记本电脑和钢琴吗？",
+    "expected_issue_tag": "partial_coverage"
+  },
+  {
+    "group": "must_answer",
+    "question": "最近拍到过什么笔记本电脑相关画面？",
+    "expected_issue_tag": "must_answer"
+  }
+]

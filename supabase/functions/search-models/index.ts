@@ -7,7 +7,7 @@
  * 功能描述: 提供自然语言搜索 3D 模型资产的能力
  *
  * 核心功能:
- * 1. 意图解析 - 使用 LLM (Qwen-Plus) 从自然语言中提取搜索词和时间范围
+ * 1. 意图解析 - 使用 LLM (Qwen3.5-Plus) 从自然语言中提取搜索词和时间范围
  * 2. 向量生成 - 调用 DashScope text-embedding-v2 生成语义向量
  * 3. 向量搜索 - 通过 pgvector 在 Supabase 中执行相似度搜索
  *
@@ -72,6 +72,33 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+};
+
+type EmbeddingResponse = {
+  data?: Array<{
+    embedding?: number[];
+  }>;
+};
+
+type AiClient = {
+  chat: {
+    completions: {
+      create: (options: Record<string, unknown>) => Promise<ChatCompletionResponse>;
+    };
+  };
+  embeddings: {
+    create: (options: Record<string, unknown>) => Promise<EmbeddingResponse>;
+  };
+};
+
+type SearchResultRow = Record<string, unknown>;
+
 // ============================================================================
 // 【配置常量】全局配置参数
 // ============================================================================
@@ -120,7 +147,10 @@ const corsHeaders = {
  *
  * 官方文档: https://help.aliyun.com/zh/dashscope/
  */
-const DASHSCOPE_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DASHSCOPE_API_URL =
+  Deno.env.get("DASHSCOPE_BASE_URL") ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const DASHSCOPE_EMBEDDING_MODEL =
+  Deno.env.get("DASHSCOPE_EMBEDDING_MODEL") ?? "text-embedding-v2";
 
 // ============================================================================
 // 【辅助函数】工具性函数，用于数据处理和格式化
@@ -282,7 +312,7 @@ function errorResponse(message: string, status = 500): Response {
  * - 这样至少可以进行基本的语义搜索
  */
 async function parseQueryIntent(
-  aiClient: typeof OpenAI.prototype,
+  aiClient: AiClient,
   userQuery: string,
 ): Promise<
   { searchText: string; startTime: string | null; endTime: string | null }
@@ -330,8 +360,8 @@ async function parseQueryIntent(
      *
      * 参数说明:
      * - model: 使用的模型
-     *   * qwen-plus: 通义千问 Plus 版，适合逻辑推理任务
-     *   * 相比 qwen-turbo，推理能力更强
+     *   * qwen-plus: Qwen3.5 Plus，最新顶级模型，效果媲美 qwen3-max，支持 1M 上下文
+     *   * 相比旧版 qwen-plus，推理能力和多模态能力大幅提升
      * - messages: 对话历史
      *   * system: 系统提示词 (定义 LLM 角色)
      *   * user: 用户查询
@@ -339,7 +369,7 @@ async function parseQueryIntent(
      *   * 避免 LLM 返回自然语言解释
      */
     const resp = await aiClient.chat.completions.create({
-      model: "qwen-plus",
+      model: "qwen-turbo",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userQuery },
@@ -353,7 +383,7 @@ async function parseQueryIntent(
      * resp.choices[0].message.content 是 LLM 返回的 JSON 字符串
      * 例如: '{"search_text": "红色杯子", "start_time": "2026-01-13..."}'
      */
-    const intentStr = resp.choices[0]?.message?.content;
+    const intentStr = resp.choices?.[0]?.message?.content ?? null;
     const intent = safeJsonParse(intentStr);
 
     /**
@@ -412,7 +442,7 @@ async function parseQueryIntent(
  * // 返回: [0.012, -0.034, 0.056, ..., -0.023] (1536 个浮点数)
  */
 async function getEmbedding(
-  aiClient: typeof OpenAI.prototype,
+  aiClient: AiClient,
   text: string,
 ): Promise<number[] | null> {
   try {
@@ -427,11 +457,11 @@ async function getEmbedding(
      */
     const resp = await aiClient.embeddings.create({
       input: [text], // 包装成数组
-      model: "text-embedding-v2",
+      model: DASHSCOPE_EMBEDDING_MODEL,
     });
 
     // 提取向量
-    const embedding = resp.data[0]?.embedding;
+    const embedding = resp.data?.[0]?.embedding;
 
     // 向量验证
     if (!embedding) {
@@ -488,7 +518,7 @@ async function getEmbedding(
  * - similarity: 相似度分数 (0.0-1.0)
  */
 async function searchModels(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   queryEmbedding: number[],
   matchThreshold: number,
   matchCount: number,
@@ -508,13 +538,13 @@ async function searchModels(
    *
    * 传递参数必须与 RPC 函数定义完全匹配
    */
-  const { data, error } = await supabase.rpc("match_model_assets", {
+  const { data, error } = await supabase.rpc("match_memory_poses", {
     query_embedding: queryEmbedding,
     match_threshold: matchThreshold,
     match_count: matchCount,
     filter_start: filterStart,
     filter_end: filterEnd,
-  });
+  } as never) as { data: unknown; error: { message: string } | null };
 
   // 错误处理
   if (error) {
@@ -523,9 +553,10 @@ async function searchModels(
   }
 
   // 记录结果数量
-  console.log(`[Search] 找到 ${data?.length || 0} 条结果`);
+  const rows = Array.isArray(data) ? data as SearchResultRow[] : [];
+  console.log(`[Search] 找到 ${rows.length} 条结果`);
 
-  return data;
+  return rows;
 }
 
 // ============================================================================
@@ -656,7 +687,7 @@ serve(async (req: Request) => {
      * - chat.completions.create() - 聊天补全 (意图解析)
      * - embeddings.create() - 向量生成 (语义搜索)
      */
-    const aiClient = {
+    const aiClient: AiClient = {
       chat: {
         completions: {
           create: async (options: Record<string, unknown>) => {
@@ -701,7 +732,7 @@ serve(async (req: Request) => {
           return resp.json();
         },
       },
-    } as typeof OpenAI.prototype;
+    };
 
     /**
      * 创建 Supabase 客户端

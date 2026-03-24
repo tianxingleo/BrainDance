@@ -1,0 +1,38 @@
+:root {
+  --bd-paper: #f9f9f8;
+  --bd-ash: #ededea;
+  --bd-ink: #1e1e20;
+  --bd-muted-blue: #6b7a8f;
+  --bd-muted-blue-light: #e4e8ed;
+  --bd-red: #8b4747;
+  --bd-olive: #6d8260;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--bd-ink);
+  background: var(--bd-paper);
+  line-height: 1.6;
+  font-family:
+    'HarmonyOS Sans SC',
+    'Microsoft YaHei',
+    'PingFang SC',
+    sans-serif;
+  font-size: 15px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}

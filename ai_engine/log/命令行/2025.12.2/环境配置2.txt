@@ -1,0 +1,606 @@
+Windows PowerShell
+版权所有（C） Microsoft Corporation。保留所有权利。
+
+安装最新的 PowerShell，了解新功能和改进！https://aka.ms/PSWindows
+
+加载个人及系统配置文件用了 3025 毫秒。
+(base) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> python process_3dgs.py
+--- [1/3] 开始处理视频数据: test_scene_01 ---
+发生未知错误: [WinError 2] 系统找不到指定的文件。
+(base) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> python process_3dgs.py
+--- [1/3] 开始处理视频数据: test_scene_01 ---
+发生未知错误: [WinError 2] 系统找不到指定的文件。
+(base) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> python process_3dgs.py
+Debug: 脚本所在目录 -> C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo
+Debug: 尝试读取视频 -> C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo\test.mp4
+--- [1/3] 开始处理视频数据: test_scene_01 ---
+运行出错: [WinError 2] 系统找不到指定的文件。
+(base) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> ns-process-data --help
+ns-process-data : 无法将“ns-process-data”项识别为 cmdlet、函数、脚本文件或可运行程序的名称。请检查名称的拼写，如果包
+括路径，请确保路径正确，然后再试一次。
+所在位置 行:1 字符: 1
++ ns-process-data --help
++ ~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (ns-process-data:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+
+(base) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> conda activate brain_dance
+(brain_dance) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> ns-process-data --help
+usage: ns-process-data [-h] {images,video,polycam,metashape,realitycapture,record3d,odm,aria}
+
+╭─ options ──────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ -h, --help        show this help message and exit                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ subcommands ──────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ {images,video,polycam,metashape,realitycapture,record3d,odm,aria}                                                  │
+│     images        Process images into a nerfstudio dataset.                                                        │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Calculates the camera poses for each image using `COLMAP <https://colmap.github.io/>`_.       │
+│     video         Process videos into a nerfstudio dataset. This script does the following:                        │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Converts the video into images and downscales them.                                           │
+│                   2. Calculates the camera poses for each image using `COLMAP <https://colmap.github.io/>`_.       │
+│     polycam       Process Polycam data into a nerfstudio dataset. To capture data, use the Polycam app on an       │
+│                   iPhone or iPad with LiDAR. The capture must be in LiDAR or ROOM mode. Developer mode must be     │
+│                   enabled in the app settings, this will enable a raw data export option in the export menus. The  │
+│                   exported data folder is used as the input to this script.                                        │
+│                                                                                                                    │
+│                   This script does the following:                                                                  │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Converts Polycam poses into the nerfstudio format.                                            │
+│     metashape     Process Metashape data into a nerfstudio dataset. This script assumes that cameras have been     │
+│                   aligned using Metashape. After alignment, it is necessary to export the camera poses as a `.xml` │
+│                   file. This option can be found under `File > Export > Export Cameras`.                           │
+│                                                                                                                    │
+│                   Additionally, the points can be exported as pointcloud under `File > Export > Export Point       │
+│                   Cloud`. Make sure to export the data in non-binary format and exclude the normals.               │
+│                                                                                                                    │
+│                   This script does the following:                                                                  │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Converts Metashape poses into the nerfstudio format.                                          │
+│     realitycapture                                                                                                 │
+│                   Process RealityCapture data into a nerfstudio dataset. This script assumes that cameras have     │
+│                   been aligned using RealityCapture. After alignment, it is necessary to export the camera poses   │
+│                   as a `.csv` file using the `Internal/External camera parameters` option.                         │
+│                                                                                                                    │
+│                   This script does the following:                                                                  │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Converts RealityCapture poses into the nerfstudio format.                                     │
+│     record3d      Process Record3D data into a nerfstudio dataset. This script does the following:                 │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Converts Record3D poses into the nerfstudio format.                                           │
+│     odm           Process ODM data into a nerfstudio dataset. This script does the following:                      │
+│                                                                                                                    │
+│                                                                                                                    │
+│                   1. Scales images to a specified size.                                                            │
+│                   2. Converts ODM poses into the nerfstudio format.                                                │
+│     aria          **Not installed.** Processing Project Aria data requires `pip install projectaria_tools'[all]'`. │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+(brain_dance) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> python process_3dgs.py
+Debug: 脚本所在目录 -> C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo
+Debug: 尝试读取视频 -> C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo\test.mp4
+--- [1/3] 开始处理视频数据: test_scene_01 ---
+Number of frames in video: 1099
+Extracting 367 frames in evenly spaced intervals
+ffmpeg version 2025-11-27-git-61b034a47c-essentials_build-www.gyan.dev Copyright (c) 2000-2025 the FFmpeg developers
+  built with gcc 15.2.0 (Rev8, Built by MSYS2 project)
+  configuration: --enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-openal --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+  libavutil      60. 19.100 / 60. 19.100
+  libavcodec     62. 21.100 / 62. 21.100
+  libavformat    62.  6.103 / 62.  6.103
+  libavdevice    62.  2.100 / 62.  2.100
+  libavfilter    11. 10.100 / 11. 10.100
+  libswscale      9.  3.100 /  9.  3.100
+  libswresample   6.  2.100 /  6.  2.100
+-vsync is deprecated. Use -fps_mode
+[mov,mp4,m4a,3gp,3g2,mj2 @ 000002a54a2591c0] The index of 'data' is out of range: 1869640802 < 1 or >= 7.
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo\test.mp4':
+  Metadata:
+    major_brand     : mp42
+    minor_version   : 0
+    compatible_brands: isommp42
+    creation_time   : 2025-12-02T06:13:57.000000Z
+    com.android.version: 16
+    com.android.capture.fps: 30.000000
+    com.oplus.product.model: OPPO Find X8
+    com.oplus.lens.model: back_main
+    com.oplus.lens.focal_length: 15.0mm
+    com.oplus.lens.max_aperture_value: f/2.0
+    location        : +39.0857+121.8132/
+    location-eng    : +39.0857+121.8132/
+  Duration: 00:00:36.72, start: 0.000000, bitrate: 41460 kb/s
+  Stream #0:0[0x1](eng): Video: hevc (Main) (hvc1 / 0x31637668), yuv420p(tv, bt709), 3840x2160, 41087 kb/s, 30.01 fps, 30.01 tbr, 90k tbn, start 0.012300 (default)
+    Metadata:
+      creation_time   : 2025-12-02T06:13:57.000000Z
+      handler_name    : VideoHandle
+    Side data:
+      Display Matrix: rotation of -180.00 degrees
+  Stream #0:1[0x2](eng): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 255 kb/s (default)
+    Metadata:
+      creation_time   : 2025-12-02T06:13:57.000000Z
+      handler_name    : SoundHandle
+Stream mapping:
+  Stream #0:0 (hevc) -> thumbnail:default
+  scale:default -> Stream #0:0 (png)
+  scale:default -> Stream #1:0 (png)
+  scale:default -> Stream #2:0 (png)
+  scale:default -> Stream #3:0 (png)
+Press [q] to stop, [?] for help
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.045622) selected from a set of 3 images
+Output #0, image2, to 'data_cache\test_scene_01\images\frame_%05d.png':
+  Metadata:
+    major_brand     : mp42
+    minor_version   : 0
+    compatible_brands: isommp42
+    location-eng    : +39.0857+121.8132/
+    com.android.version: 16
+    com.android.capture.fps: 30.000000
+    com.oplus.product.model: OPPO Find X8
+    com.oplus.lens.model: back_main
+    com.oplus.lens.focal_length: 15.0mm
+    com.oplus.lens.max_aperture_value: f/2.0
+    location        : +39.0857+121.8132/
+    encoder         : Lavf62.6.103
+  Stream #0:0: Video: png, rgb24(pc, gbr/bt709/bt709, progressive), 3840x2160, q=2-31, 200 kb/s, 30.01 fps, 30.01 tbn
+    Metadata:
+      encoder         : Lavc62.21.100 png
+Output #1, image2, to 'data_cache\test_scene_01\images_2\frame_%05d.png':
+  Metadata:
+    major_brand     : mp42
+    minor_version   : 0
+    compatible_brands: isommp42
+    location-eng    : +39.0857+121.8132/
+    com.android.version: 16
+    com.android.capture.fps: 30.000000
+    com.oplus.product.model: OPPO Find X8
+    com.oplus.lens.model: back_main
+    com.oplus.lens.focal_length: 15.0mm
+    com.oplus.lens.max_aperture_value: f/2.0
+    location        : +39.0857+121.8132/
+    encoder         : Lavf62.6.103
+  Stream #1:0: Video: png, rgb24(pc, gbr/bt709/bt709, progressive), 1920x1080, q=2-31, 200 kb/s, 30.01 fps, 30.01 tbn
+    Metadata:
+      encoder         : Lavc62.21.100 png
+Output #2, image2, to 'data_cache\test_scene_01\images_4\frame_%05d.png':
+  Metadata:
+    major_brand     : mp42
+    minor_version   : 0
+    compatible_brands: isommp42
+    location-eng    : +39.0857+121.8132/
+    com.android.version: 16
+    com.android.capture.fps: 30.000000
+    com.oplus.product.model: OPPO Find X8
+    com.oplus.lens.model: back_main
+    com.oplus.lens.focal_length: 15.0mm
+    com.oplus.lens.max_aperture_value: f/2.0
+    location        : +39.0857+121.8132/
+    encoder         : Lavf62.6.103
+  Stream #2:0: Video: png, rgb24(pc, gbr/bt709/bt709, progressive), 960x540, q=2-31, 200 kb/s, 30.01 fps, 30.01 tbn
+    Metadata:
+      encoder         : Lavc62.21.100 png
+Output #3, image2, to 'data_cache\test_scene_01\images_8\frame_%05d.png':
+  Metadata:
+    major_brand     : mp42
+    minor_version   : 0
+    compatible_brands: isommp42
+    location-eng    : +39.0857+121.8132/
+    com.android.version: 16
+    com.android.capture.fps: 30.000000
+    com.oplus.product.model: OPPO Find X8
+    com.oplus.lens.model: back_main
+    com.oplus.lens.focal_length: 15.0mm
+    com.oplus.lens.max_aperture_value: f/2.0
+    location        : +39.0857+121.8132/
+    encoder         : Lavf62.6.103
+  Stream #3:0: Video: png, rgb24(pc, gbr/bt709/bt709, progressive), 480x270, q=2-31, 200 kb/s, 30.01 fps, 30.01 tbn
+    Metadata:
+      encoder         : Lavc62.21.100 png
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.145589) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.245556) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.345522) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.445489) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.545456) selected from a set of 3 images:00:00.53
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.645422) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.745389) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.845356) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=0.945322) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.045289) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.145256) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.245222) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.345189) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.445156) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.545122) selected from a set of 3 images0:00:01.17
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.645089) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.745056) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.845022) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=1.944989) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.044956) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.144922) selected from a set of 3 images0:00:01.85
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.244889) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #2 (pts_time=2.378178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.444822) selected from a set of 3 images
+frame=    1 fps=0.4 q=-0.0 q=-0.0 q=-0.0 q=-0.0 size=N/A time=00:00:00.03 bitrate=N/A speed=0.0131x elapsed=0:00:02.55  [Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.544789) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.644756) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.744722) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.844689) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=2.944656) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.044622) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.144589) selected from a set of 3 imagesed=0:00:03.10
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.244556) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.344522) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.444489) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.544456) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.644422) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.744389) selected from a set of 3 imagesed=0:00:03.67
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.844356) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=3.944322) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.044289) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.144256) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.244222) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=4.310867) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.444156) selected from a set of 3 imagesed=0:00:04.28
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.544122) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.644089) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.744056) selected from a set of 3 imagesed=0:00:04.85
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.844022) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=4.943989) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.043956) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.143922) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.243889) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.343856) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.443822) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.543789) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.643756) selected from a set of 3 imagesed=0:00:05.41
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.743722) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.843689) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=5.943656) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.043622) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.143589) selected from a set of 3 imagesed=0:00:06.15
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.243556) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.343522) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.443489) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.543456) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.643422) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.743389) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=6.810033) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=6.943322) selected from a set of 3 imagesed=0:00:06.67
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.043289) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.143256) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.243222) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.343189) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.443156) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.543122) selected from a set of 3 imagesed=0:00:07.23
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.643089) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.743056) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.843022) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=7.942989) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.042956) selected from a set of 3 imagesed=0:00:07.79
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.142822) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.242867) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.342744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.442622) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.542678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.642733) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.742611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.842467) selected from a set of 3 imagesed=0:00:08.31
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=8.942522) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.042578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.142456) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.242333) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.342389) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.442444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.542311) selected from a set of 3 imagesed=0:00:08.86
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.642278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.742244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.842211) selected from a set of 3 imagesed=0:00:09.42
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=9.942178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.042144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.142111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.242078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.342044) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.442011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.541978) selected from a set of 3 imagesd=0:00:10.02
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.641944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.741911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.841878) selected from a set of 3 imagesd=0:00:10.55
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=10.941844) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.041811) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.141778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.241744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.341711) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.441678) selected from a set of 3 imagesd=0:00:11.08
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.541644) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.641611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.741578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.841544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=11.941511) selected from a set of 3 imagesd=0:00:11.60
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.041478) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.141444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.241411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.341378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.441344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.541311) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.641278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.741244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.841211) selected from a set of 3 imagesd=0:00:12.15
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=12.941178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.041144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.141111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.241078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.341044) selected from a set of 3 imagesd=0:00:12.73
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.441011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.540978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.640944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.740911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.840878) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=13.940844) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.040811) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.140778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.240744) selected from a set of 3 imagesd=0:00:13.35
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.340711) selected from a set of 3 imagesd=0:00:13.91
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.440678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.540644) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.640611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.740578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.840544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=14.940511) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.040478) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.140444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.240411) selected from a set of 3 imagesd=0:00:14.51
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.340378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.440344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.540311) selected from a set of 3 imagesd=0:00:15.20
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.640278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.740244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.840211) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=15.940178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.040144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.140111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.240078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.340044) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.440011) selected from a set of 3 imagesd=0:00:15.75
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.539978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.639744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.739811) selected from a set of 3 imagesd=0:00:16.34
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.839778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=16.939744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.039711) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.139678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.239644) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.339611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.439578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.539544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.639511) selected from a set of 3 imagesd=0:00:16.91
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.739478) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.839444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=17.939411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.039378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.139344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.239311) selected from a set of 3 imagesd=0:00:17.55
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.339278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.439244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.539211) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.639178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.739144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.839111) selected from a set of 3 imagesd=0:00:18.23
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=18.939078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.039044) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.139011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.238978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.338944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.438911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.538878) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.638844) selected from a set of 3 imagesd=0:00:18.76
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.738811) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.838778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=19.938744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.038711) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.138678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.238644) selected from a set of 3 imagesd=0:00:19.35
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.338611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.438578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.538544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.638511) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.738478) selected from a set of 3 imagesd=0:00:20.01
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.838444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=20.938411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.038378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.138344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.238311) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.338278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.438244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.538211) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.638178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.738144) selected from a set of 3 imagesd=0:00:20.56
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.838111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=21.938078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.038044) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.138011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.237978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.337944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.437911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.537878) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.637844) selected from a set of 3 imagesd=0:00:21.24
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.737811) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.837778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=22.937744) selected from a set of 3 imagesd=0:00:22.04
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.037611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.137578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.237544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.337511) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.437478) selected from a set of 3 imagesd=0:00:22.56
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.537444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.637411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.737378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.837344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=23.937311) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.037278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.137244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.237211) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.337178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.437144) selected from a set of 3 imagesd=0:00:23.15
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.537111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.637078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.737044) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.837011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=24.936978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.036944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.136911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.236878) selected from a set of 3 imagesd=0:00:23.77
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.336844) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.436811) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.536778) selected from a set of 3 imagesd=0:00:24.41
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.636744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.736711) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.836678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=25.936644) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.036611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.136578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.236544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.336511) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.436478) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.536444) selected from a set of 3 imagesd=0:00:24.99
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.636411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.736378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.836344) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=26.936311) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.036278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=27.102922) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=27.202889) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.336178) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.436144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.536111) selected from a set of 3 imagesd=0:00:25.70
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.636078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=27.702722) selected from a set of 3 imagesd=0:00:26.46
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.836011) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=27.935978) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.035944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.135911) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.235878) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.335844) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.435811) selected from a set of 3 imagesd=0:00:26.98
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.535778) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.635744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.735711) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.835678) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=28.935644) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.035611) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.135578) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.235544) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.335511) selected from a set of 3 imagesd=0:00:27.55
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.435478) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.535444) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.635411) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.735378) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.835344) selected from a set of 3 imagesd=0:00:28.10
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=29.935311) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.035278) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.135244) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.235211) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.335178) selected from a set of 3 imagesd=0:00:28.65
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.435144) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.535111) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.635078) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.734944) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.834989) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=30.934867) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.034744) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.134800) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.234856) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.334733) selected from a set of 3 imagesd=0:00:29.22
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.434667) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.534600) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.634533) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.734467) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.834533) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=31.934500) selected from a set of 3 imagesd=0:00:29.85
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.034467) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.134433) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.234400) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.334367) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.434333) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.534300) selected from a set of 3 imagesd=0:00:30.41
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.634267) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.734233) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.834200) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=32.934167) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.034133) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.134100) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.234067) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.334033) selected from a set of 3 imagesd=0:00:30.97
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.434000) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.533967) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.633933) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.733900) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.833867) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=33.933833) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.033800) selected from a set of 3 imagesd=0:00:31.59
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.133767) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.233733) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.333700) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.433667) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.533633) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.633600) selected from a set of 3 imagesd=0:00:32.14
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.733567) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.833533) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=34.933500) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.033467) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.133433) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.233400) selected from a set of 3 imagesd=0:00:32.73
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.333367) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.433333) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.533300) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.633267) selected from a set of 3 imagesd=0:00:33.32
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.733233) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.833200) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=35.933167) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.033133) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.133100) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.233067) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.333033) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.433000) selected from a set of 3 images
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #1 (pts_time=36.532967) selected from a set of 3 imagesd=0:00:33.86
+[Parsed_thumbnail_0 @ 000002a54a2ceac0] frame id #0 (pts_time=36.599611) selected from a set of 1 images
+[out#0/image2 @ 000002a54a2a3c80] video:1447052KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+[out#1/image2 @ 000002a54a2a1340] video:606211KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+[out#2/image2 @ 000002a54a2703c0] video:175053KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+[out#3/image2 @ 000002a54a2692c0] video:51211KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
+frame=  367 fps= 10 q=-0.0 Lq=-0.0 q=-0.0 q=-0.0 size=N/A time=00:06:06.04 bitrate=N/A speed=10.4x elapsed=0:00:35.28   
+[00:18:32] 🎉 Done converting video to images.                                                 process_data_utils.py:227
+E20251203 00:18:32.942239 17888 option_manager.cc:976] Failed to parse options - unrecognised option '--SiftExtraction.use_gpu'.
+──────────────────────────────────────────────  💀 💀 💀 ERROR 💀 💀 💀  ───────────────────────────────────────────────
+Error running command: colmap feature_extractor --database_path data_cache\test_scene_01\colmap\database.db --image_path
+data_cache\test_scene_01\images --ImageReader.single_camera 1 --ImageReader.camera_model OPENCV --SiftExtraction.use_gpu
+1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Traceback (most recent call last):
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\Scripts\ns-process-data.exe\__main__.py", line 6, in <module>
+    sys.exit(entrypoint())
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\site-packages\nerfstudio\scripts\process_data.py", line 550, in entrypoint
+    tyro.cli(Commands).main()
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\site-packages\nerfstudio\process_data\video_to_nerfstudio_dataset.py", line 141, in main
+    self._run_colmap(mask_path)
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\site-packages\nerfstudio\process_data\colmap_converter_to_nerfstudio_dataset.py", line 214, in _run_colmap
+    colmap_utils.run_colmap(
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\site-packages\nerfstudio\process_data\colmap_utils.py", line 135, in run_colmap
+    run_command(feature_extractor_cmd, verbose=verbose)
+  File "C:\Users\ltx\miniconda3\envs\brain_dance\lib\site-packages\nerfstudio\utils\scripts.py", line 37, in run_command
+    CONSOLE.print(out.stderr.decode("utf-8"))
+AttributeError: 'NoneType' object has no attribute 'decode'
+运行出错: Command '['ns-process-data', 'video', '--data', 'C:\\Users\\ltx\\Documents\\coding\\BrainDance\\ai_engine\\demo\\test.mp4', '--output-dir', 'data_cache\\test_scene_01', '--verbose']' returned non-zero exit status 1.
+(brain_dance) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo> where.exe colmap
+D:\ffmpeg\colmap-x64-windows-cuda\COLMAP.bat
+(brain_dance) PS C:\Users\ltx\Documents\coding\BrainDance\ai_engine\demo>

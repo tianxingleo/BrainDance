@@ -73,13 +73,13 @@ except ImportError:
 # ================= 🧠 AI 核心逻辑函数 =================
 
 def get_central_object_prompt(images_dir: Path, sample_count=7):
-    """使用 Qwen-VL-Plus 提取 Prompt"""
+    """使用 Qwen3.5-Plus 提取 Prompt"""
     api_key = os.environ.get("DASHSCOPE_API_KEY")
     if not api_key:
         print("❌ 未设置 DASHSCOPE_API_KEY")
         return None
 
-    print(f"\n🧠 [AI 分析] 正在调用 Qwen-VL-Plus 分析场景...")
+    print(f"\n🧠 [AI 分析] 正在调用 Qwen3.5-Plus 分析场景...")
     image_files = sorted(list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png")))
     if not image_files: return None
     
@@ -102,7 +102,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=7):
     messages = [{"role": "user", "content": content}]
 
     try:
-        response = dashscope.MultiModalConversation.call(model='qwen-vl-plus', messages=messages)
+        response = dashscope.MultiModalConversation.call(model='qwen-plus', messages=messages)
         if response.status_code == 200:
             prompt_text = response.output.choices[0].message.content[0]["text"].strip()
             prompt_text = prompt_text.replace(".", "").replace('"', "").replace("'", "")
