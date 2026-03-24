@@ -6,6 +6,7 @@
 
 - `migrations/`：数据库结构与策略迁移
 - `functions/search-models/`：自然语言搜索接口
+- `functions/spatial-search-agent/`：基于 LangChain 的空间检索 Agent
 - `functions/test-timeout/`：测试用函数
 - `config.toml`：Supabase CLI 本地配置
 - `deploy-functions.sh`：函数部署脚本
@@ -128,6 +129,25 @@ Agent 能力的近期规划会优先放在 Supabase Edge Functions / TypeScript 
 ### `test-timeout`
 
 这是一个辅助测试函数，主要用于本地联调，不承担核心业务能力。
+
+### `spatial-search-agent`
+
+这是新增的空间检索 Agent，用于把用户自然语言请求编排成“意图解析 → 类型判断 → 搜索工具调用 → scene/pose 选择 → 可视化动作生成”的闭环。
+
+它当前具备：
+
+1. 解析用户意图
+2. 判断是在找物体、位置、时间还是场景
+3. 通过 LangChain tool calling 调用多个检索工具
+4. 选择最可信的 scene / pose
+5. 返回 `open_model`、`fly_to_pose`、`highlight_hotspot` 等可视化动作，以及可直接给 3D Viewer 使用的 `viewer_payload`
+
+本地运行：
+
+```bash
+cd supabase/functions/spatial-search-agent
+supabase functions serve spatial-search-agent --no-verify-jwt
+```
 
 ## 与其他模块的关系
 
