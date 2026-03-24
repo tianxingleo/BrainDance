@@ -35,6 +35,15 @@ String _modelDisplayName(
   return fallback;
 }
 
+Color _resolveTextColor(bool isDark) =>
+    isDark ? const Color(0xFFFFFFFF) : const Color(0xFF333333);
+
+Color _resolveHintTextColor(bool isDark, TDThemeData theme) =>
+    isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+
+String _formatSimilarity(double value) =>
+    '${(value * 100).toStringAsFixed(1)}%';
+
 Widget _buildSimilarityBadge({required Widget child}) {
   return Tooltip(
     message: '\u5339\u914D\u5EA6',
@@ -74,10 +83,8 @@ class RecallModelGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    final textColor = _resolveTextColor(isDark);
+    final hintTextColor = _resolveHintTextColor(isDark, theme);
 
     final isSearchWithFrames =
         models.isNotEmpty && models.first.containsKey('matched_frames');
@@ -165,7 +172,7 @@ class RecallModelGrid extends StatelessWidget {
                                           borderRadius: BorderRadius.circular(6),
                                         ),
                                         child: TDText(
-                                          '${(similarity * 100).toStringAsFixed(1)}%',
+                                          _formatSimilarity(similarity),
                                           font: theme.fontBodySmall,
                                           textColor: isDark
                                               ? const Color(0xFFFFFFFF)
@@ -571,13 +578,16 @@ class _AdaptiveFrameThumbnail extends StatefulWidget {
       _AdaptiveFrameThumbnailState();
 }
 
-class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
+/// Shared image resolution logic for widgets that load a network image by URL.
+mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
 
-  ui.Image? _resolvedImage;
-  Object? _lastError;
+  ui.Image? resolvedImage;
+  Object? lastError;
   ImageStream? _imageStream;
   ImageStreamListener? _imageStreamListener;
+
+  String get imageUrl;
 
   @override
   void initState() {
@@ -586,41 +596,39 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
   }
 
   @override
-  void didUpdateWidget(covariant _AdaptiveFrameThumbnail oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
-      _stopListening();
-      _resolvedImage = null;
-      _lastError = null;
-      _resolveImage();
-    }
-  }
-
-  @override
   void dispose() {
     _stopListening();
     super.dispose();
   }
 
+  void onImageUrlChanged(String oldUrl) {
+    if (oldUrl != imageUrl) {
+      _stopListening();
+      resolvedImage = null;
+      lastError = null;
+      _resolveImage();
+    }
+  }
+
   void _resolveImage() {
-    final cached = _imageCache[widget.imageUrl];
+    final cached = _imageCache[imageUrl];
     if (cached != null) {
-      _resolvedImage = cached;
+      resolvedImage = cached;
       return;
     }
 
-    final provider = NetworkImage(widget.imageUrl);
+    final provider = NetworkImage(imageUrl);
     final stream = provider.resolve(const ImageConfiguration());
     _imageStream = stream;
     _imageStreamListener = ImageStreamListener(
       (ImageInfo info, bool synchronousCall) {
-        _imageCache[widget.imageUrl] = info.image;
+        _imageCache[imageUrl] = info.image;
         if (!mounted) {
           return;
         }
         setState(() {
-          _resolvedImage = info.image;
-          _lastError = null;
+          resolvedImage = info.image;
+          lastError = null;
         });
       },
       onError: (Object error, StackTrace? stackTrace) {
@@ -628,7 +636,7 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
           return;
         }
         setState(() {
-          _lastError = error;
+          lastError = error;
         });
       },
     );
@@ -644,13 +652,25 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
     _imageStream = null;
     _imageStreamListener = null;
   }
+}
+
+class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail>
+    with _NetworkImageResolverMixin {
+  @override
+  String get imageUrl => widget.imageUrl;
+
+  @override
+  void didUpdateWidget(covariant _AdaptiveFrameThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    onImageUrlChanged(oldWidget.imageUrl);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final resolvedImage = _resolvedImage;
-    final aspectRatio = resolvedImage == null
+    final img = resolvedImage;
+    final aspectRatio = img == null
         ? 4 / 3
-        : resolvedImage.width / resolvedImage.height;
+        : img.width / img.height;
     final width = (widget.height * aspectRatio).clamp(76.0, 220.0);
 
     return AnimatedContainer(
@@ -669,20 +689,20 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
           children: [
             ColoredBox(
               color: widget.backgroundColor,
-              child: resolvedImage != null
+              child: img != null
                   ? FittedBox(
                       fit: BoxFit.cover,
                       clipBehavior: Clip.hardEdge,
                       child: SizedBox(
-                        width: resolvedImage.width.toDouble(),
-                        height: resolvedImage.height.toDouble(),
+                        width: img.width.toDouble(),
+                        height: img.height.toDouble(),
                         child: RawImage(
-                          image: resolvedImage,
+                          image: img,
                           filterQuality: FilterQuality.low,
                         ),
                       ),
                     )
-                  : _lastError != null
+                  : lastError != null
                   ? const Center(
                       child: Icon(Icons.broken_image, color: Colors.grey),
                     )
@@ -708,7 +728,7 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    '${(widget.frameSim! * 100).toStringAsFixed(1)}%',
+                    _formatSimilarity(widget.frameSim!),
                     style: const TextStyle(color: Colors.white, fontSize: 10),
                   ),
                 ),
@@ -735,99 +755,36 @@ class _CoverNetworkImage extends StatefulWidget {
   State<_CoverNetworkImage> createState() => _CoverNetworkImageState();
 }
 
-class _CoverNetworkImageState extends State<_CoverNetworkImage> {
-  static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
-
-  ui.Image? _resolvedImage;
-  Object? _lastError;
-  ImageStream? _imageStream;
-  ImageStreamListener? _imageStreamListener;
-
+class _CoverNetworkImageState extends State<_CoverNetworkImage>
+    with _NetworkImageResolverMixin {
   @override
-  void initState() {
-    super.initState();
-    _resolveImage();
-  }
+  String get imageUrl => widget.imageUrl;
 
   @override
   void didUpdateWidget(covariant _CoverNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
-      _stopListening();
-      _resolvedImage = null;
-      _lastError = null;
-      _resolveImage();
-    }
-  }
-
-  @override
-  void dispose() {
-    _stopListening();
-    super.dispose();
-  }
-
-  void _resolveImage() {
-    final cached = _imageCache[widget.imageUrl];
-    if (cached != null) {
-      _resolvedImage = cached;
-      return;
-    }
-
-    final provider = NetworkImage(widget.imageUrl);
-    final stream = provider.resolve(const ImageConfiguration());
-    _imageStream = stream;
-    _imageStreamListener = ImageStreamListener(
-      (ImageInfo info, bool synchronousCall) {
-        _imageCache[widget.imageUrl] = info.image;
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _resolvedImage = info.image;
-          _lastError = null;
-        });
-      },
-      onError: (Object error, StackTrace? stackTrace) {
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          _lastError = error;
-        });
-      },
-    );
-    stream.addListener(_imageStreamListener!);
-  }
-
-  void _stopListening() {
-    final stream = _imageStream;
-    final listener = _imageStreamListener;
-    if (stream != null && listener != null) {
-      stream.removeListener(listener);
-    }
-    _imageStream = null;
-    _imageStreamListener = null;
+    onImageUrlChanged(oldWidget.imageUrl);
   }
 
   @override
   Widget build(BuildContext context) {
-    final resolvedImage = _resolvedImage;
-    if (_lastError != null) {
+    final img = resolvedImage;
+    if (lastError != null) {
       return widget.errorWidget;
     }
 
     return ColoredBox(
       color: widget.backgroundColor,
-      child: resolvedImage != null
+      child: img != null
           ? ClipRect(
               child: FittedBox(
                 fit: BoxFit.cover,
                 clipBehavior: Clip.hardEdge,
                 child: SizedBox(
-                  width: resolvedImage.width.toDouble(),
-                  height: resolvedImage.height.toDouble(),
+                  width: img.width.toDouble(),
+                  height: img.height.toDouble(),
                   child: RawImage(
-                    image: resolvedImage,
+                    image: img,
                     filterQuality: FilterQuality.low,
                   ),
                 ),
@@ -935,7 +892,7 @@ class RecallModelTile extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: TDText(
-                          '${(similarity * 100).toStringAsFixed(1)}%',
+                          _formatSimilarity(similarity),
                           font: theme.fontBodyExtraSmall,
                           textColor: isDark
                               ? const Color(0xFFFFFFFF)
@@ -1056,12 +1013,8 @@ class TimePeelingList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final hintTextColor = isDark
-        ? const Color(0xFFCCCCCC)
-        : theme.fontGyColor3;
+    final textColor = _resolveTextColor(isDark);
+    final hintTextColor = _resolveHintTextColor(isDark, theme);
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.55)
         : BDDesign.colorMutedBlue;
@@ -1156,9 +1109,9 @@ class _TimePeelingSlot extends StatefulWidget {
 
 class _TimePeelingSlotState extends State<_TimePeelingSlot> {
   late PageController _pageController;
-  double _currentPage = 0.0;
+  double _currentPage = 1.0; // matches initialPage: 1 (first model card)
 
-  /// Total items: models first (newest→oldest), then create button last.
+  /// Total items: create button first, then models (newest→oldest).
   int get _totalCount => widget.models.length + 1;
 
   @override
@@ -1166,7 +1119,7 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
     super.initState();
     _pageController = PageController(
       viewportFraction: _kViewportFraction,
-      initialPage: 0, // newest model card
+      initialPage: 1, // index 0 is create card, 1 is newest model
     );
     _pageController.addListener(_onScroll);
   }
@@ -1204,10 +1157,11 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
         ? Colors.white.withValues(alpha: 0.07)
         : Colors.black.withValues(alpha: 0.06);
 
-    // Current selected model index (rounded page)
+    // Current selected page index (rounded page)
     final selectedPage = _currentPage.round().clamp(0, _totalCount - 1);
-    final isModelSelected = selectedPage < widget.models.length;
-    final timeLabel = isModelSelected ? _timeLabelFor(selectedPage) : '';
+    // index 0 = create card, index 1+ = model cards
+    final isModelSelected = selectedPage >= 1;
+    final timeLabel = isModelSelected ? _timeLabelFor(selectedPage - 1) : '';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
@@ -1264,161 +1218,105 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
               ),
             ),
             const SizedBox(height: 10),
-            // Carousel with edge fades
+            // Carousel with ShaderMask edge fade
             SizedBox(
               height: _kCarouselHeight,
-              child: Stack(
-                children: [
-                  // PageView carousel
-                  PageView.builder(
-                    controller: _pageController,
-                    itemCount: _totalCount,
-                    clipBehavior: Clip.none,
-                    itemBuilder: (context, index) {
-                      final distance = (index - _currentPage).abs().clamp(0.0, 1.0);
-                      final scale = ui.lerpDouble(1.0, 0.82, distance)!;
-                      final opacity = ui.lerpDouble(1.0, 0.5, distance)!;
+              child: ShaderMask(
+                shaderCallback: (Rect bounds) {
+                  return LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: const [
+                      Colors.transparent,
+                      Colors.white,
+                      Colors.white,
+                      Colors.transparent,
+                    ],
+                    stops: [
+                      0.0,
+                      _kEdgeFadeWidth / bounds.width,
+                      1.0 - _kEdgeFadeWidth / bounds.width,
+                      1.0,
+                    ],
+                  ).createShader(bounds);
+                },
+                blendMode: BlendMode.dstIn,
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _totalCount,
+                  clipBehavior: Clip.hardEdge,
+                  itemBuilder: (context, index) {
+                    final distance = (index - _currentPage).abs().clamp(0.0, 1.0);
+                    final scale = ui.lerpDouble(1.0, 0.82, distance)!;
+                    final opacity = ui.lerpDouble(1.0, 0.5, distance)!;
 
-                      // Last item is the create button
-                      if (index == widget.models.length) {
-                        return _buildCarouselItem(
-                          scale: scale,
-                          opacity: opacity,
-                          isSelected: selectedPage == index,
-                          child: _buildCreateCard(),
-                        );
-                      }
-
-                      final model = widget.models[index];
-                      final cardKey = widget.modelCardKeyFor(model);
-                      final isActionTarget =
-                          widget.isSameModel(widget.activeModelAction, model);
-
+                    // First item is the create button
+                    if (index == 0) {
                       return _buildCarouselItem(
                         scale: scale,
-                        opacity: isActionTarget ? 0.0 : opacity,
+                        opacity: opacity,
                         isSelected: selectedPage == index,
-                        child: IgnorePointer(
-                          ignoring: isActionTarget,
-                          child: GestureDetector(
-                            onTap: () => widget.onNavigateToViewer(model, null),
-                            onLongPressStart: (_) =>
-                                widget.onShowModelActions(model),
-                            child: Container(
-                              key: cardKey,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(28),
-                                border: Border.all(
-                                  color: widget.isDark
-                                      ? Colors.white.withValues(alpha: 0.08)
-                                      : Colors.black.withValues(alpha: 0.06),
-                                  width: 1,
-                                ),
+                        child: _buildCreateCard(),
+                      );
+                    }
+
+                    final model = widget.models[index - 1];
+                    final cardKey = widget.modelCardKeyFor(model);
+                    final isActionTarget =
+                        widget.isSameModel(widget.activeModelAction, model);
+
+                    return _buildCarouselItem(
+                      scale: scale,
+                      opacity: isActionTarget ? 0.0 : opacity,
+                      isSelected: selectedPage == index,
+                      child: IgnorePointer(
+                        ignoring: isActionTarget,
+                        child: GestureDetector(
+                          onTap: () => widget.onNavigateToViewer(model, null),
+                          onLongPressStart: (_) =>
+                              widget.onShowModelActions(model),
+                          child: Container(
+                            key: cardKey,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: widget.isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.06),
+                                width: 1,
                               ),
-                              child: RecallModelTile(
-                                model: model,
-                                theme: widget.theme,
-                                isDark: widget.isDark,
-                                darkCard: widget.darkCard,
-                                darkInput: widget.darkInput,
-                                textColor: widget.textColor,
-                                hintTextColor: widget.hintTextColor,
-                                imageOnly: true,
-                              ),
+                            ),
+                            child: RecallModelTile(
+                              model: model,
+                              theme: widget.theme,
+                              isDark: widget.isDark,
+                              darkCard: widget.darkCard,
+                              darkInput: widget.darkInput,
+                              textColor: widget.textColor,
+                              hintTextColor: widget.hintTextColor,
+                              imageOnly: true,
                             ),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                  // Left edge fade
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: _kEdgeFadeWidth,
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(20),
-                            bottomLeft: Radius.circular(20),
-                          ),
-                          gradient: LinearGradient(
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                            colors: [
-                              slotBg,
-                              slotBg.withValues(alpha: 0.0),
-                            ],
-                          ),
-                        ),
                       ),
-                    ),
-                  ),
-                  // Right edge fade
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: _kEdgeFadeWidth,
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: const BorderRadius.only(
-                            topRight: Radius.circular(20),
-                            bottomRight: Radius.circular(20),
-                          ),
-                          gradient: LinearGradient(
-                            begin: Alignment.centerRight,
-                            end: Alignment.centerLeft,
-                            colors: [
-                              slotBg,
-                              slotBg.withValues(alpha: 0.0),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                    );
+                  },
+                ),
               ),
             ),
-            // Time label for selected card
-            AnimatedSwitcher(
-              duration: BDMotion.durationNormal,
-              switchInCurve: BDMotion.curveEnter,
-              switchOutCurve: BDMotion.curveExit,
-              transitionBuilder: (child, animation) =>
-                  FadeTransition(opacity: animation, child: child),
-              child: Padding(
-                key: ValueKey<String>(timeLabel),
-                padding: const EdgeInsets.only(top: 8, bottom: 14),
-                child: Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (timeLabel.isNotEmpty) ...[
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: _kTimelineColor.withValues(alpha: 0.9),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          timeLabel,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _kTimelineColor.withValues(alpha: 0.85),
-                          ),
-                        ),
-                      ],
-                    ],
+            // Timeline with connected nodes
+            SizedBox(
+              height: 48,
+              child: ClipRect(
+                child: CustomPaint(
+                  painter: _TimelinePainter(
+                    modelCount: widget.models.length,
+                    currentPage: _currentPage,
+                    timeLabel: timeLabel,
+                    color: _kTimelineColor,
+                    viewportFraction: _kViewportFraction,
                   ),
+                  size: Size.infinite,
                 ),
               ),
             ),
@@ -1497,4 +1395,112 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
       ),
     );
   }
+}
+
+class _TimelinePainter extends CustomPainter {
+  /// Number of model cards (excludes the create card at index 0).
+  final int modelCount;
+
+  /// Current page position from PageController (index 0 = create card).
+  final double currentPage;
+  final String timeLabel;
+  final Color color;
+  final double viewportFraction;
+
+  _TimelinePainter({
+    required this.modelCount,
+    required this.currentPage,
+    required this.color,
+    required this.timeLabel,
+    required this.viewportFraction,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (modelCount == 0) return;
+
+    final lineY = 10.0;
+    final slotWidth = size.width * viewportFraction;
+    final centerX = size.width / 2;
+
+    // Model cards occupy PageView indices 1..modelCount.
+    // Node i (0-based model index) corresponds to PageView index (i + 1).
+    // Its center X = centerX + (pageIndex - currentPage) * slotWidth.
+    List<double> nodeXs = [];
+    for (int i = 0; i < modelCount; i++) {
+      final pageIndex = i + 1; // offset by create card
+      final dx = centerX + (pageIndex - currentPage) * slotWidth;
+      nodeXs.add(dx);
+    }
+
+    // Draw the connecting line between first and last node, clamped to bounds
+    final linePaint = Paint()
+      ..color = color.withValues(alpha: 0.25)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final lineLeft = nodeXs.first.clamp(0.0, size.width);
+    final lineRight = nodeXs.last.clamp(0.0, size.width);
+    if (lineRight > lineLeft) {
+      canvas.drawLine(
+        Offset(lineLeft, lineY),
+        Offset(lineRight, lineY),
+        linePaint,
+      );
+    }
+
+    // Selected model index (0-based): PageView selectedPage - 1
+    final selectedPageIndex = currentPage.round().clamp(0, modelCount);
+    // Convert to model index; -1 means create card is selected (no highlight)
+    final selectedModelIndex = selectedPageIndex - 1;
+
+    final normalRadius = 3.5;
+    final selectedRadius = 5.5;
+
+    for (int i = 0; i < modelCount; i++) {
+      final x = nodeXs[i];
+      if (x < -20 || x > size.width + 20) continue;
+
+      // Distance from the selected model node (continuous for smooth animation)
+      final distFromSelected = ((i + 1) - currentPage).abs().clamp(0.0, 1.0);
+      final radius =
+          ui.lerpDouble(selectedRadius, normalRadius, distFromSelected)!;
+      final alpha = ui.lerpDouble(0.95, 0.4, distFromSelected)!;
+
+      final dotPaint = Paint()
+        ..color = color.withValues(alpha: alpha)
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(Offset(x, lineY), radius, dotPaint);
+    }
+
+    // Draw time label below the selected model node
+    if (timeLabel.isNotEmpty &&
+        selectedModelIndex >= 0 &&
+        selectedModelIndex < modelCount) {
+      final labelX = nodeXs[selectedModelIndex];
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: timeLabel,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color.withValues(alpha: 0.85),
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      final textX = (labelX - textPainter.width / 2)
+          .clamp(4.0, size.width - textPainter.width - 4);
+      textPainter.paint(canvas, Offset(textX, lineY + selectedRadius + 6));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _TimelinePainter old) =>
+      old.currentPage != currentPage ||
+      old.modelCount != modelCount ||
+      old.timeLabel != timeLabel;
 }
