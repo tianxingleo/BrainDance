@@ -93,7 +93,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
 
     try:
         response = dashscope.MultiModalConversation.call(
-            model='qwen-plus', 
+            model='qwen-vl-plus', 
             messages=messages
         )
         

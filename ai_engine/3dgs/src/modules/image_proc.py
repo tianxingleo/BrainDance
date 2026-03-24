@@ -13,15 +13,14 @@ from typing import List
 from src.config import PipelineConfig
 
 class ImageProcessor:
-    def __init__(self, config: PipelineConfig, log_callback=None):
+    def __init__(self, config: PipelineConfig):
         self.cfg = config
-        self.log_callback = log_callback or print
 
     def smart_filter_blurry_images(self, image_folder, keep_ratio=0.85):
         """
         [图像清洗算法] 混合策略模糊检测
         """
-        self.log_callback(f"🧠 [智能清洗] 正在分析图片质量 (混合策略版)...")
+        print(f"\n🧠 [智能清洗] 正在分析图片质量 (混合策略版)...")
         image_dir = Path(image_folder)
         images = sorted([p for p in image_dir.iterdir() if p.suffix.lower() in ['.jpg', '.jpeg', '.png']])
         if not images: return
@@ -44,7 +43,7 @@ class ImageProcessor:
                     score = cv2.Laplacian(roi, cv2.CV_64F).var()
                     if score > max_grid_score: max_grid_score = score
             img_scores.append((img_path, max_grid_score))
-            if i % 50 == 0: self.log_callback(f"    -> 分析中... {i}/{len(images)}")
+            if i % 50 == 0: print(f"  -> 分析中... {i}/{len(images)}", end="\r")
         
         scores = [s[1] for s in img_scores]
         if not scores: return
@@ -65,11 +64,11 @@ class ImageProcessor:
         
         # 使用 max_imgs 替代原来的 max_images
         if len(good_images) > max_imgs:
-            self.log_callback(f"    ⚠️ 图片过多 ({len(good_images)} 张), 正在降采样至 {max_imgs} 张...")
+            print(f"    ⚠️ 图片过多 ({len(good_images)} 张), 正在降采样至 {max_imgs} 张...")
             # np.linspace 生成均匀分布的索引
             indices_to_keep = set(np.linspace(0, len(good_images) - 1, max_imgs, dtype=int))
             for idx, img_path in enumerate(good_images):
                 if idx not in indices_to_keep:
                     shutil.move(str(img_path), str(trash_dir / img_path.name))
                     
-        self.log_callback(f"✨ 清洗结束，剩余 {len(list(image_dir.glob('*')))} 张。")
+        print(f"✨ 清洗结束，剩余 {len(list(image_dir.glob('*')))} 张。")

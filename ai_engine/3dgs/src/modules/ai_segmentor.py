@@ -77,7 +77,7 @@ def get_central_object_prompt(images_dir: Path, sample_count=3):
     try:
         # 调用阿里云 Qwen-VL-Plus 模型
         response = dashscope.MultiModalConversation.call(
-            model='qwen-plus', 
+            model='qwen-vl-plus', 
             messages=messages
         )
         

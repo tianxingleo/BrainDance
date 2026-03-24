@@ -4,7 +4,6 @@ from src.core.pipeline_base import BasePipeline
 from src.config import PipelineConfig
 from src.modules.sam3d_engine.core import SAM3DEngine
 from src.modules.scene_analyzer import SceneAnalyzer
-from src.utils.ply_utils import rotate_ply_vertices_euler
 import os
 try:
     from supabase import create_client as create_supabase_client
@@ -22,29 +21,10 @@ class SingleImageSAM3DPipeline(BasePipeline):
         
         config = PipelineConfig()
         repo_path = params.get('repo_path', str(config.sam3d_repo_path))
-        # 兼容旧参数：历史上 model_dir 同时被用作 checkpoint 目录
-        checkpoint_dir = (
-            params.get('checkpoint_dir')
-            or params.get('sam3d_checkpoint_dir')
-            or params.get('model_dir')
-            or str(config.sam3d_checkpoint_dir)
-        )
-        mask_model_dir = (
-            params.get('mask_model_dir')
-            or params.get('shared_model_dir')
-            or str(config.shared_model_dir)
-        )
+        model_dir = params.get('model_dir', str(config.shared_model_dir))
         
-        self.log(
-            f"⚙️ 初始化 SAM3D 引擎 (Repo: {repo_path}, "
-            f"Checkpoint: {checkpoint_dir}, MaskModel: {mask_model_dir})"
-        )
-        engine = SAM3DEngine(
-            repo_path=repo_path,
-            checkpoint_dir=checkpoint_dir,
-            mask_model_dir=mask_model_dir,
-            model_dir=params.get('model_dir'),
-        )
+        self.log(f"⚙️ 初始化 SAM3D 引擎 (Repo: {repo_path}, Model: {model_dir})")
+        engine = SAM3DEngine(repo_path=repo_path, model_dir=model_dir)
         
         custom_mask = params.get('mask_path')
         self.log("🔥 开始生成 3DGS 模型...")
@@ -53,24 +33,6 @@ class SingleImageSAM3DPipeline(BasePipeline):
             output_dir=str(work_dir),
             mask_path=custom_mask
         )
-
-        # 生成后执行朝向修正：默认绕 X 轴旋转 -90°，让单图模型更接近输入照片视角。
-        rotate_enabled = params.get("post_rotate_enabled", True)
-        if rotate_enabled:
-            rx = float(params.get("post_rotate_deg_x", -90.0))
-            ry = float(params.get("post_rotate_deg_y", 0.0))
-            rz = float(params.get("post_rotate_deg_z", 0.0))
-            try:
-                self.log(f"🧭 [Post] 正在旋转模型: rx={rx}, ry={ry}, rz={rz}")
-                ply_path = rotate_ply_vertices_euler(
-                    ply_path=ply_path,
-                    rx_deg=rx,
-                    ry_deg=ry,
-                    rz_deg=rz,
-                )
-                self.log("    -> ✅ 模型朝向修正完成")
-            except Exception as e:
-                self.log(f"    -> ⚠️ 模型旋转失败，保留原始结果: {e}", level="WARN")
         
         self.log(f"✅ 3DGS 模型生成完毕: {ply_path}")
         # ==================== 🟢 [新增] 单图 RAG 语义注入 ====================
@@ -94,16 +56,15 @@ class SingleImageSAM3DPipeline(BasePipeline):
         except Exception as e:
             self.log(f"    -> ⚠️ RAG 分析失败，已跳过: {e}", level="WARN")
 
-        metadata = {"engine": "sam3d", "original_image": input_path, "preview_img_path": input_path}
+        metadata = {"engine": "sam3d", "original_image": input_path}
         metadata.update(rag_meta)
 
-        # 已做过单图分析则不再重复调用，避免二次大模型请求导致等待时间翻倍。
-        if not rag_meta:
-            try:
-                rag_meta = self.run_rag_analysis(input_path)
-                metadata.update(rag_meta)
-            except Exception:
-                pass
+        # 使用基类的 helper 进行 RAG 语义注入与上传（封装了 supabase 的容错）
+        try:
+            rag_meta = self.run_rag_analysis(input_path)
+            metadata.update(rag_meta)
+        except Exception:
+            pass
 
         try:
             self.upload_and_record(ply_path, metadata, params)
