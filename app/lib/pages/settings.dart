@@ -22,7 +22,6 @@ class SettingsPage extends ConsumerStatefulWidget {
 class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
-  final Set<int> _builtTabs = {0};
   int _currentTabIndex = 0;
 
   static const TextStyle tabTextStyle = TextStyle(
@@ -57,6 +56,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final bottomContentPadding = bottomInset + 132.0;
 
     final myTabBar = TDTabBar(
       tabs: [
@@ -64,6 +65,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         TDTab(text: textLocalize('set_tab3')),
       ],
       controller: tabController,
+      backgroundColor: Colors.transparent,
+      dividerHeight: 0,
       showIndicator: true,
       indicatorPadding: const EdgeInsets.all(4),
       indicatorWidth: 24,
@@ -83,8 +86,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 24),
+          bottom: false,
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(bottom: bottomContentPadding),
             child: Column(
               children: [
                 BDPageHeader(
@@ -182,7 +186,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   ),
                 ),
                 const SizedBox(height: 10),
-                Expanded(child: _buildTabContent(context, ref)),
+                _buildTabContent(context, ref),
               ],
             ),
           ),
@@ -204,26 +208,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     }
     setState(() {
       _currentTabIndex = nextIndex;
-      _builtTabs.add(nextIndex);
     });
   }
 
   Widget _buildTabContent(BuildContext context, WidgetRef ref) {
-    return IndexedStack(
-      index: _currentTabIndex,
-      children: List<Widget>.generate(tabController.length, (index) {
-        if (!_builtTabs.contains(index)) {
-          return const SizedBox.shrink();
-        }
-        return KeyedSubtree(
-          key: ValueKey<int>(index),
-          child: switch (index) {
-            0 => setTab1(ref),
-            1 => setTab3(context),
-            _ => const SizedBox.shrink(),
-          },
-        );
-      }),
+    return AnimatedSwitcher(
+      duration: BDMotion.durationNormal,
+      switchInCurve: BDMotion.curveEnter,
+      switchOutCurve: BDMotion.curveExit,
+      transitionBuilder: (child, animation) {
+        return FadeTransition(opacity: animation, child: child);
+      },
+      child: KeyedSubtree(
+        key: ValueKey<int>(_currentTabIndex),
+        child: switch (_currentTabIndex) {
+          0 => setTab1(ref),
+          1 => setTab3(context),
+          _ => const SizedBox.shrink(),
+        },
+      ),
     );
   }
 }

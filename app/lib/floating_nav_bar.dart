@@ -337,19 +337,31 @@ class _NavBarItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 340),
-        switchInCurve: BDMotion.curveFluid,
-        switchOutCurve: Curves.easeIn,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(
-            opacity: animation,
-            child: child,
-          );
-        },
-        child: isSelected
-            ? Padding(
-                key: const ValueKey('selected'),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          IgnorePointer(
+            ignoring: isSelected,
+            child: AnimatedOpacity(
+              duration: BDMotion.durationNormal,
+              curve: BDMotion.curveExit,
+              opacity: isSelected ? 0.0 : 1.0,
+              child: Center(
+                child: Icon(
+                  item.icon,
+                  size: iconSize,
+                  color: unselectedColor,
+                ),
+              ),
+            ),
+          ),
+          IgnorePointer(
+            ignoring: !isSelected,
+            child: AnimatedOpacity(
+              duration: BDMotion.durationNormal,
+              curve: BDMotion.curveFluid,
+              opacity: isSelected ? 1.0 : 0.0,
+              child: Padding(
                 padding: EdgeInsets.symmetric(
                   horizontal: horizontalPadding,
                   vertical: compact ? 7.0 : 8.0,
@@ -380,15 +392,10 @@ class _NavBarItem extends StatelessWidget {
                     ),
                   ],
                 ),
-              )
-            : Center(
-                key: const ValueKey('unselected'),
-                child: Icon(
-                  item.icon,
-                  size: iconSize,
-                  color: unselectedColor,
-                ),
               ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -7,9 +7,10 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 Widget setTab1(WidgetRef ref) {
   return Padding(
     padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-    child: ListView(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        if (SupabaseConfig.isAdminMode) ...[
+        if (SupabaseConfig.isAdminMode)
           TDButton(
             text: textLocalize('set_admin_enabled'),
             type: TDButtonType.outline,
@@ -18,7 +19,6 @@ Widget setTab1(WidgetRef ref) {
             shape: TDButtonShape.round,
             onTap: () {},
           ),
-        ],
       ],
     ),
   );
