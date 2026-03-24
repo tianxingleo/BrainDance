@@ -146,6 +146,7 @@ ai_engine/finetune_qwen3/data/braindance_qwen3_unseen_ood_benchmark_*.json
 ai_engine/finetune_qwen3/data/braindance_qwen3_unseen_ood_spatial_hardcases_*.json
 ai_engine/finetune_qwen3/data/*retrieval_snapshot_*.json
 ai_engine/finetune_qwen3/data/*_local.json
+ai_engine/finetune_qwen3/data/*_local_summary.json
 ai_engine/finetune_qwen3/audit/
 
 # =========================

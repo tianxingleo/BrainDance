@@ -46,12 +46,13 @@ def main() -> None:
     summary = load_json(AUDIT_DIR / "benchmark_audit_summary_20260324.json")
     uncovered = pd.DataFrame(load_json(AUDIT_DIR / "benchmark_uncovered_recent_scenes_20260324.json"))
     model_coverage = pd.DataFrame(load_json(AUDIT_DIR / "benchmark_model_coverage_20260324.json"))
+    spatial_generation = pd.DataFrame(load_json(AUDIT_DIR / "spatial_generation_audit_20260324.json"))
     strict_df = collect_strict_metrics()
 
     # Figure 1: recent scene coverage
     fig, ax = plt.subplots(figsize=(8, 5))
-    covered = summary["summary"]["covered_recent_scene_count"]
-    recent = summary["summary"]["recent_scene_count"]
+    covered = summary["covered_recent_scene_count"]
+    recent = summary["recent_scene_count"]
     coverage_df = pd.DataFrame(
         {"status": ["covered", "uncovered"], "count": [covered, max(recent - covered, 0)]}
     )
@@ -74,9 +75,18 @@ def main() -> None:
 
     # Figure 2: model coverage heatmap
     if not model_coverage.empty:
-        heat = model_coverage[["version_name", "strict_v3_logged", "original_benchmark_logged"]].copy()
-        heat["strict_v3_logged"] = heat["strict_v3_logged"].astype(int)
-        heat["original_benchmark_logged"] = heat["original_benchmark_logged"].astype(int)
+        heat = model_coverage[
+            [
+                "version_name",
+                "original_benchmark_logged",
+                "strict_v3_logged",
+                "unseen_ood_logged",
+                "spatial_hardcases_logged",
+                "deployment_eval_logged",
+            ]
+        ].copy()
+        for col in heat.columns[1:]:
+            heat[col] = heat[col].astype(int)
         heat = heat.set_index("version_name")
         fig, ax = plt.subplots(figsize=(10, max(6, len(heat) * 0.35)))
         sns.heatmap(heat, annot=True, cmap="YlGnBu", cbar=False, linewidths=0.5, ax=ax, fmt="d")
@@ -110,6 +120,25 @@ def main() -> None:
         ax.set_ylabel("Scene ID")
         fig.tight_layout()
         fig.savefig(AUDIT_DIR / "top_uncovered_recent_scenes_20260324.png", dpi=180)
+        plt.close(fig)
+
+    # Figure 5: spatial formatter bypass vs model generation
+    if not spatial_generation.empty:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ordered = spatial_generation.sort_values(["mode", "formatter_bypass_rate"], ascending=[True, False]).copy()
+        ordered["mode_label"] = ordered["label"] + " (" + ordered["mode"] + ")"
+        melted = ordered.melt(
+            id_vars=["mode_label"],
+            value_vars=["formatter_bypass_rate", "model_generated_rate"],
+            var_name="metric",
+            value_name="value",
+        )
+        sns.barplot(data=melted, y="mode_label", x="value", hue="metric", palette="viridis", ax=ax)
+        ax.set_title("Spatial Formatter Bypass vs Model Generation")
+        ax.set_xlabel("Rate")
+        ax.set_ylabel("")
+        fig.tight_layout()
+        fig.savefig(AUDIT_DIR / "spatial_generation_audit_20260324.png", dpi=180)
         plt.close(fig)
 
     print(json.dumps({"figure_dir": str(AUDIT_DIR)}, ensure_ascii=False, indent=2))
