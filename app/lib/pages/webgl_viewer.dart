@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -23,6 +24,7 @@ class WebGLViewerPage extends StatefulWidget {
   final List<double>? initialPose;
   final String? initialPoseId;
   final bool useSparkViewer;
+  final List<Map<String, dynamic>> timePeelingModels;
 
   const WebGLViewerPage({
     super.key,
@@ -32,6 +34,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.initialPose,
     this.initialPoseId,
     this.useSparkViewer = false,
+    this.timePeelingModels = const [],
   });
 
   @override
@@ -462,6 +465,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
             _sendModelToVue();
+          } else if (data['action'] == 'switchModel') {
+            _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
             if (mounted) {
               TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
@@ -512,6 +517,197 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     debugPrint('Sending model URL to WebView: $targetUrl');
     final payload = jsonEncode(payloadData);
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+
+    // 发送 TimePeeling 模型列表
+    if (widget.timePeelingModels.length > 1) {
+      _sendTimePeelingList();
+    }
+  }
+
+  void _sendTimePeelingList() {
+    final list = widget.timePeelingModels.map((model) {
+      final plyPath = model['ply_path'] as String? ?? '';
+      String plyUrl = '';
+      if (plyPath.isNotEmpty) {
+        // 通过本地代理访问远程模型
+        try {
+          final publicUrl = Supabase.instance.client.storage
+              .from('braindance-assets')
+              .getPublicUrl(plyPath);
+          plyUrl =
+              'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(publicUrl)}';
+        } catch (_) {}
+      }
+
+      String? posesUrl;
+      if (plyPath.isNotEmpty) {
+        final posesPath = plyPath.replaceAll(
+          RegExp(r'point_cloud\.(ply|splat|ksplat)$'),
+          'webgl_poses.json',
+        );
+        if (posesPath != plyPath) {
+          try {
+            final publicPosesUrl = Supabase.instance.client.storage
+                .from('braindance-assets')
+                .getPublicUrl(posesPath);
+            posesUrl = publicPosesUrl;
+          } catch (_) {}
+        }
+      }
+
+      final previewPath = model['preview_img_path']?.toString() ?? '';
+      String previewUrl = '';
+      if (previewPath.isNotEmpty) {
+        try {
+          // preview_img_path 可能已经是完整 URL 或 storage path
+          String fullUrl;
+          if (previewPath.startsWith('http://') ||
+              previewPath.startsWith('https://')) {
+            fullUrl = previewPath;
+          } else {
+            fullUrl = Supabase.instance.client.storage
+                .from('braindance-assets')
+                .getPublicUrl(previewPath);
+          }
+          previewUrl =
+              'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(fullUrl)}';
+        } catch (_) {}
+      }
+
+      final displayName = model['display_name']?.toString() ??
+          model['scene_id']?.toString() ??
+          '';
+
+      return {
+        'id': model['id']?.toString() ?? model['scene_id']?.toString() ?? '',
+        'name': displayName,
+        'ply': plyUrl,
+        'poses': posesUrl ?? '',
+        'previewImg': previewUrl,
+        'createdAt': model['created_at']?.toString() ?? '',
+      };
+    }).toList();
+
+    final json = jsonEncode(list);
+    // 找出当前加载的模型 ID
+    final currentModelId = _findCurrentModelId();
+    debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
+    _controller?.runJavaScript(
+        "window.setModelListForTimePeeling($json, '$currentModelId')");
+  }
+
+  String _findCurrentModelId() {
+    final currentPly = widget.initialModelUrl;
+    for (final model in widget.timePeelingModels) {
+      final plyPath = model['ply_path'] as String? ?? '';
+      if (plyPath.isNotEmpty && currentPly.contains(plyPath)) {
+        return model['id']?.toString() ?? model['scene_id']?.toString() ?? '';
+      }
+    }
+    // 默认返回第一个
+    if (widget.timePeelingModels.isNotEmpty) {
+      final first = widget.timePeelingModels.first;
+      return first['id']?.toString() ?? first['scene_id']?.toString() ?? '';
+    }
+    return '';
+  }
+
+  Future<void> _handleSwitchModel(Map<String, dynamic> data) async {
+    final modelId = data['modelId']?.toString() ?? '';
+    debugPrint('TimePeeling: switching to model $modelId');
+
+    // 在 timePeelingModels 中找到目标模型的原始 ply_path
+    Map<String, dynamic>? targetModel;
+    for (final m in widget.timePeelingModels) {
+      final id = m['id']?.toString() ?? m['scene_id']?.toString() ?? '';
+      if (id == modelId) {
+        targetModel = m;
+        break;
+      }
+    }
+
+    if (targetModel == null) {
+      debugPrint('TimePeeling: model $modelId not found');
+      return;
+    }
+
+    final plyPath = targetModel['ply_path'] as String? ?? '';
+    if (plyPath.isEmpty) return;
+
+    // 生成公开 URL
+    String publicUrl;
+    try {
+      publicUrl = Supabase.instance.client.storage
+          .from('braindance-assets')
+          .getPublicUrl(plyPath);
+    } catch (e) {
+      debugPrint('TimePeeling: getPublicUrl failed: $e');
+      return;
+    }
+
+    // 检查是否已缓存到本地
+    final encodedUrl = Uri.encodeFull(Uri.decodeFull(publicUrl));
+    final uri = Uri.parse(encodedUrl);
+    final sanitizedFileName = uri.path
+        .replaceAll('/', '_')
+        .replaceAll('\\', '_');
+    final dir = await getApplicationDocumentsDirectory();
+    final localFile = File('${dir.path}/$sanitizedFileName');
+
+    String targetUrl;
+    if (await localFile.exists()) {
+      debugPrint('TimePeeling: model cached locally');
+      targetUrl =
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(localFile.path)}';
+    } else {
+      // 未缓存，下载模型
+      debugPrint('TimePeeling: downloading model...');
+      try {
+        final client = HttpClient()
+          ..badCertificateCallback = (cert, host, port) => true;
+        final request = await client.getUrl(uri);
+        request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+        final response = await request.close();
+        if (response.statusCode != 200) {
+          throw Exception('HTTP ${response.statusCode}');
+        }
+        final tmpFile = File('${localFile.path}.tmp');
+        final sink = tmpFile.openWrite();
+        await for (final chunk in response) {
+          sink.add(chunk);
+        }
+        await sink.close();
+        await tmpFile.rename(localFile.path);
+        debugPrint('TimePeeling: download complete');
+        targetUrl =
+            'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(localFile.path)}';
+      } catch (e) {
+        debugPrint('TimePeeling: download failed: $e, using proxy');
+        targetUrl =
+            'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(publicUrl)}';
+      }
+    }
+
+    // 构建 poses URL
+    String? posesUrl;
+    final posesPath = plyPath.replaceAll(
+      RegExp(r'point_cloud\.(ply|splat|ksplat)$'),
+      'webgl_poses.json',
+    );
+    if (posesPath != plyPath) {
+      try {
+        posesUrl = Supabase.instance.client.storage
+            .from('braindance-assets')
+            .getPublicUrl(posesPath);
+      } catch (_) {}
+    }
+
+    // 通知 WebView 加载模型
+    final payload = jsonEncode({
+      'ply': targetUrl,
+      if (posesUrl != null) 'poses': posesUrl,
+    });
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
