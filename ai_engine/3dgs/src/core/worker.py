@@ -19,7 +19,7 @@ from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, unquote
 from urllib.request import urlopen, Request
 
-from supabase import create_client, Client
+from supabase import Client, ClientOptions, create_client
 
 from src.config import PipelineConfig
 from src.core.factory import PipelineFactory
@@ -67,6 +67,8 @@ class CloudWorker:
         self.BUCKET_NAME = self.cfg.supabase_bucket
         self.TABLE_NAME = self.cfg.supabase_table
         self.WORKER_TABLE = os.getenv("SUPABASE_WORKER_TABLE", "worker_nodes")
+        self.postgrest_timeout = max(5, int(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "15")))
+        self.storage_timeout = max(30, int(os.getenv("SUPABASE_STORAGE_TIMEOUT_SECONDS", "300")))
         if not self.SUPABASE_URL or not self.SUPABASE_KEY:
             raise ValueError("❌ 初始化失败：未找到 Supabase 配置！请检查 .env 文件是否存在且填写正确。")
 
@@ -81,7 +83,14 @@ class CloudWorker:
                     os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
 
         # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
-        self.supabase: Client = create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
+        self.supabase: Client = create_client(
+            self.SUPABASE_URL,
+            self.SUPABASE_KEY,
+            options=ClientOptions(
+                postgrest_client_timeout=self.postgrest_timeout,
+                storage_client_timeout=self.storage_timeout,
+            ),
+        )
         
         # 🟢 初始化记忆模块
         self.memory = RagMemory(self.supabase, self.cfg)

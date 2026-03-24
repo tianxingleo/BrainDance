@@ -1,9 +1,7 @@
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 class SharpEngine:
@@ -18,10 +16,12 @@ class SharpEngine:
         if not self.repo_path.exists():
             raise FileNotFoundError(f"[SharpEngine] 找不到仓库: {self.repo_path}")
 
-        if shutil.which("sharp") is None:
+        try:
+            __import__("sharp.cli")
+        except Exception as exc:
             raise RuntimeError(
-                f"[SharpEngine] 未找到 'sharp' 命令！\n"
-                f"请确保已在 {self.repo_path} 下运行过 'pip install -e .'"
+                "[SharpEngine] 当前 Python 环境无法导入 sharp.cli！\n"
+                f"请确保已在正确环境中安装 SHARP editable 包。原始错误: {exc}"
             )
 
     def run(self, image_path: str, output_dir: str) -> str:
@@ -40,13 +40,17 @@ class SharpEngine:
         print(f"    输出: {output_dir}")
 
         cmd = [
-            "sharp", "predict",
+            sys.executable,
+            "-c",
+            "from sharp.cli import main_cli; main_cli()",
+            "predict",
             "-i", str(image_path),
             "-o", str(output_dir)
         ]
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = os.getenv("CUDA_VISIBLE_DEVICES", "0")
+        env["PYTHONUNBUFFERED"] = "1"
         print(f"    GPU: CUDA_VISIBLE_DEVICES={env['CUDA_VISIBLE_DEVICES']}")
 
         try:

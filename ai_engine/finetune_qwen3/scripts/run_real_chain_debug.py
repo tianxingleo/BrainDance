@@ -33,6 +33,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - retrieval-only paths can run without torch.
     torch = None
 
+from hf_load_utils import safe_from_pretrained
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT_FILE = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "real_chain_debug_cases.jsonl"
@@ -1937,10 +1939,15 @@ def load_generator(model_name: str, adapter_path: str = "") -> tuple[Any, Any, s
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        model_name,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         model_name,
         dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,

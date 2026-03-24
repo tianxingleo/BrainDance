@@ -29,6 +29,16 @@ def test_train_lora_helpers_support_qwen3_sizes():
     assert module.parse_target_modules("") == module.DEFAULT_TARGET_MODULES
 
 
+def test_train_full_helpers_support_qwen3_sizes():
+    module = load_module(
+        "train_full_sft_test",
+        "ai_engine/finetune_qwen3/scripts/train_full_sft.py",
+    )
+
+    assert module.normalize_model_slug("Qwen/Qwen3-0.6B") == "qwen3_0p6b"
+    assert module.normalize_model_slug("Qwen/Qwen3-1.7B") == "qwen3_1p7b"
+
+
 def test_merge_metadata_contains_core_fields():
     module = load_module(
         "merge_lora_adapter_test",

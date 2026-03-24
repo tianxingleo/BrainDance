@@ -76,6 +76,15 @@ class MaskGenerator:
                 print("    ⚠️ [Mask] 未安装 ultralytics，降级为 simple 模式")
             return self._simple_mask_gen(img_pil)
 
+    def _load_image_bgr(self, image_path: Path) -> np.ndarray:
+        """显式解码图片，避免 Ultralytics 内部对路径走到异常的 imdecode 分支。"""
+        image_bytes = image_path.read_bytes()
+        image_buf = np.frombuffer(image_bytes, dtype=np.uint8)
+        image_bgr = cv2.imdecode(image_buf, cv2.IMREAD_COLOR)
+        if image_bgr is None:
+            raise ValueError(f"无法解码图片: {image_path}")
+        return image_bgr
+
     def _smart_mask_gen(self, image_path: Path) -> np.ndarray:
         """
         [Smart] 使用 YOLOv8-World + SAM 2.1 进行智能抠图
@@ -108,16 +117,21 @@ class MaskGenerator:
             sam_target = "sam2.1_b.pt" if sam_path.name == "sam2.1_b.pt" else "sam2.1_l.pt"
 
         print(f"    📦 [Mask] 权重加载源: YOLO={yolo_target} | SAM={sam_target}")
+        image_bgr = self._load_image_bgr(image_path)
 
         # Step 1: YOLO 检测中心物体（失败时回退中心框，不中断智能抠图）
-        best_box = self._detect_box_with_yolo(image_path=image_path, yolo_target=yolo_target)
+        best_box = self._detect_box_with_yolo(
+            image_path=image_path,
+            image_bgr=image_bgr,
+            yolo_target=yolo_target,
+        )
         if best_box is None:
             best_box = self._default_center_box(image_path)
 
         # Step 2: SAM 分割（仅当 SAM 失败时降级 simple）
         try:
             sam_model = SAM(str(sam_target))
-            sam_results = sam_model(str(image_path), bboxes=best_box, verbose=False)
+            sam_results = sam_model(image_bgr, bboxes=best_box, verbose=False)
 
             if sam_results[0].masks is not None:
                 # 合并所有 mask
@@ -133,12 +147,17 @@ class MaskGenerator:
                 print("    💡 [Mask] 提示: 当前 .pt 很可能是 Git LFS 指针文件。请安装 git-lfs 并拉取真实权重，或让 Ultralytics 联网自动下载。")
             return self._simple_mask_gen(Image.open(image_path))
 
-    def _detect_box_with_yolo(self, image_path: Path, yolo_target: Union[str, Path]) -> Optional[torch.Tensor]:
+    def _detect_box_with_yolo(
+        self,
+        image_path: Path,
+        image_bgr: np.ndarray,
+        yolo_target: Union[str, Path],
+    ) -> Optional[torch.Tensor]:
         """尝试用 YOLOWorld 找到目标框；失败时返回 None。"""
         try:
             det_model = YOLOWorld(str(yolo_target))
             det_results = det_model.predict(
-                str(image_path),
+                image_bgr,
                 conf=0.1,
                 classes=None,
                 verbose=False,

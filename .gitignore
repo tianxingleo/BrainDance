@@ -140,6 +140,14 @@ ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_val.jsonl
 ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_manifest.json
 ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_train.jsonl
 ai_engine/finetune_qwen3/data/real_chain_failures_round4_1_patch_plus_round4_val.jsonl
+# Local-only benchmark datasets / frozen retrieval snapshots.
+# Keep scripts/docs versioned, but do not upload these generated local eval assets.
+ai_engine/finetune_qwen3/data/braindance_qwen3_unseen_ood_benchmark_*.json
+ai_engine/finetune_qwen3/data/braindance_qwen3_unseen_ood_spatial_hardcases_*.json
+ai_engine/finetune_qwen3/data/*retrieval_snapshot_*.json
+ai_engine/finetune_qwen3/data/*_local.json
+ai_engine/finetune_qwen3/data/*_local_summary.json
+ai_engine/finetune_qwen3/audit/
 
 # =========================
 # 6. BrainDance Specific: Media & 3DGS Data (项目特有)
@@ -272,6 +280,10 @@ create_pr.sh
 CLAUDE.md
 docs/old/idea.pdf
 repomix-output.xml
+tmp/
+
+# 文档处理临时产物
+tmp/docs/
 
 # =========================
 # 10. Document Files (文档文件)
@@ -279,6 +291,10 @@ repomix-output.xml
 *.doc
 *.docx
 *.docs
+
+# pandoc 提取的文档媒体目录
+docs/**/*-media/
+
 # 备份文件超过100MB不应提交
 *.ply.bak
 *.mp4.bak
