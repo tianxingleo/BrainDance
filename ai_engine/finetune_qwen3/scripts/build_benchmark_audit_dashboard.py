@@ -35,18 +35,27 @@ LOG_PREFIX_TO_KIND = {
 }
 
 VERSION_MATCHES = {
-    "qwen3_0p6b_full_sft_round1": {"labels": {"0.6B full SFT round1", "0.6B full SFT"}},
+    "qwen3_0p6b_full_sft_round1": {
+        "labels": {"0.6B full SFT round1", "0.6B full SFT"},
+        "file_tokens": {"qwen3_0p6b_full_round1_gpu1", "qwen3_0p6b_full_gpu1"},
+    },
     "qwen3_0p6b_full_sft_round2_lr8e6": {"labels": {"0.6B full SFT round2 lr8e-6"}},
     "qwen3_0p6b_full_sft_round3_lr5e6": {"labels": {"0.6B full SFT round3 lr5e-6"}},
     "qwen3_0p6b_full_sft_round4_partial_patch_v1": {"labels": {"0.6B full SFT round4 partial patch"}},
-    "qwen3_0p6b_lora_sft_round1": {"labels": {"0.6B LoRA"}},
-    "qwen3_0p6b_braindance_round1": {"labels": {"0.6B LoRA"}},
-    "qwen3_1p7b_full_sft_round1_gpu1": {"labels": {"1.7B full SFT round1"}},
+    "qwen3_0p6b_lora_sft_round1": {"labels": {"0.6B LoRA"}, "file_tokens": {"qwen3_0p6b_round1_gpu0", "qwen3_0p6b_round1_gpu1"}},
+    "qwen3_0p6b_braindance_round1": {"labels": {"0.6B LoRA"}, "file_tokens": {"qwen3_0p6b_round1_gpu0", "qwen3_0p6b_round1_gpu1"}},
+    "qwen3_1p7b_full_sft_round1_gpu1": {
+        "labels": {"1.7B full SFT round1"},
+        "file_tokens": {"qwen3_1p7b_full_round1_gpu1", "qwen3_1p7b_full_gpu1"},
+    },
     "qwen3_1p7b_full_sft_round1_lr5e6_gpu1": {"labels": {"1.7B full SFT lr5e-6"}},
     "qwen3_1p7b_lora_sft_round3": {"labels": {"1.7B LoRA round3"}},
     "qwen3_1p7b_lora_sft_round4_patch": {"labels": {"1.7B LoRA round4 patch"}},
     "qwen3_1p7b_lora_sft_round4_1_patch": {"labels": {"1.7B LoRA round4.1 patch"}},
-    "qwen3_1p7b_lora_sft_round4_1_patch_mixed": {"labels": {"1.7B LoRA", "1.7B LoRA round4.1 mixed"}},
+    "qwen3_1p7b_lora_sft_round4_1_patch_mixed": {
+        "labels": {"1.7B LoRA", "1.7B LoRA round4.1 mixed"},
+        "file_tokens": {"round4_1_patch_mixed", "benchmark_strict_v3_lora_20260322.json"},
+    },
     "qwen3_1p7b_braindance_round4_1_patch_mixed_merged_gpu0": {"labels": {"1.7B merged"}},
     "qwen3_1p7b_braindance_round4_1_patch_mixed_quantized_gpu0": {
         "labels": {"1.7B Q4_K_M", "1.7B Q5_K_M", "1.7B Q4_K_M + imatrix", "1.7B Q5_K_M + imatrix"}
@@ -273,6 +282,9 @@ def version_matches_log(version_name: str, label: str, log_file: str) -> bool:
     labels = set(spec.get("labels") or [])
     if labels and label in labels:
         return True
+    for token in spec.get("file_tokens") or set():
+        if token in log_file:
+            return True
     return version_name in log_file
 
 
