@@ -522,6 +522,7 @@ textarea {
   grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
 }
 
+.panel-grid--processing,
 .panel-grid--operations {
   grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
 }
@@ -577,10 +578,85 @@ textarea {
   font-weight: 700;
 }
 
+.processing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.processing-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 24px;
+  border: 1px solid var(--stroke);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 52%),
+    color-mix(in srgb, var(--surface-soft) 88%, transparent);
+}
+
+.processing-card__top,
+.processing-card__metrics,
+.processing-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.processing-card__metrics {
+  flex-wrap: wrap;
+}
+
+.processing-chip {
+  min-width: 150px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.processing-chip span,
+.processing-card__log span,
+.task-progress-note {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.processing-chip strong,
+.processing-card__log strong {
+  display: block;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.processing-card__log {
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.processing-card__footer {
+  color: var(--ink-2);
+  font-size: 0.84rem;
+}
+
 .task-sub,
 .fail-sub {
   margin-top: 4px;
   font-size: 0.86rem;
+}
+
+.task-progress-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.task-log-snippet {
+  color: var(--ink-2);
+  line-height: 1.5;
 }
 
 .alerts-list {
@@ -801,9 +877,14 @@ textarea {
   }
 
   .panel-grid--charts,
+  .panel-grid--processing,
   .panel-grid--resources,
   .panel-grid--operations,
   .panel-grid--users {
+    grid-template-columns: 1fr;
+  }
+
+  .processing-grid {
     grid-template-columns: 1fr;
   }
 

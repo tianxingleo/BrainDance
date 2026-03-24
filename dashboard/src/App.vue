@@ -9,11 +9,11 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, PieChart, BarChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import TaskLogDrawer from './components/TaskLogDrawer.vue'
 import { supabase } from './lib/supabase'
+import { buildTaskInsight, type TaskInsight, type TaskStatus } from './lib/task-insights'
 
 use([CanvasRenderer, LineChart, PieChart, BarChart, GridComponent, TooltipComponent, LegendComponent])
-
-type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | string
 
 interface ProcessingTask {
   id: string
@@ -102,6 +102,8 @@ const workerRows = ref<WorkerNode[]>([])
 const modelAssetCount = ref(0)
 const memoryPoseCount = ref(0)
 const userSummaries = ref<UserActivitySummary[]>([])
+const logDrawerVisible = ref(false)
+const selectedTaskId = ref<string | null>(null)
 
 const selectedStatus = ref<'all' | TaskStatus>('all')
 const selectedTaskType = ref('all')
@@ -246,8 +248,54 @@ const filteredTasks = computed(() => {
   })
 })
 
+const taskInsightMap = computed<Record<string, TaskInsight>>(() =>
+  Object.fromEntries(
+    taskRows.value.map((task) => [
+      task.id,
+      buildTaskInsight({
+        logs: task.logs,
+        status: task.status,
+      }),
+    ]),
+  ),
+)
+
+const taskWorkerMap = computed<Record<string, WorkerNode>>(() =>
+  Object.fromEntries(
+    workerRows.value
+      .filter((worker): worker is WorkerNode & { current_task_id: string } => Boolean(worker.current_task_id))
+      .map((worker) => [worker.current_task_id, worker]),
+  ),
+)
+
+const selectedTask = computed(() => taskRows.value.find((item) => item.id === selectedTaskId.value) ?? null)
+const selectedTaskInsight = computed(() =>
+  selectedTask.value ? taskInsightMap.value[selectedTask.value.id] ?? null : null,
+)
+const selectedTaskWorker = computed(() =>
+  selectedTask.value ? taskWorkerMap.value[selectedTask.value.id] ?? null : null,
+)
+const selectedTaskWorkerLabel = computed(() =>
+  selectedTaskWorker.value ? formatWorkerLabel(selectedTaskWorker.value) : '',
+)
+
 const taskQueue = computed(() => filteredTasks.value.slice(0, 20))
 const failedTasks = computed(() => taskRows.value.filter((item) => item.status === 'failed').slice(0, 6))
+const processingSpotlights = computed(() =>
+  filteredTasks.value
+    .filter((item) => item.status === 'processing')
+    .map((task) => ({
+      task,
+      insight:
+        taskInsightMap.value[task.id] ??
+        buildTaskInsight({
+          logs: task.logs,
+          status: task.status,
+        }),
+      worker: taskWorkerMap.value[task.id] ?? null,
+    }))
+    .slice(0, 6),
+)
 const topUsers = computed(() => userSummaries.value.slice(0, 6))
 const newlyActiveUsers = computed(() => userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).slice(0, 8))
 
@@ -543,16 +591,22 @@ const formatHeartbeatAge = (iso: string) => {
   return `${Math.floor(diffSeconds / 3600)}h 前`
 }
 
-const getProgressByStatus = (status: TaskStatus) => {
-  if (status === 'pending') return 15
-  if (status === 'processing') return 65
-  return 100
+const getLatestLogMessage = (logs: unknown) => {
+  return buildTaskInsight({ logs, status: 'processing' }).latestMessage.slice(0, 100)
 }
 
-const getLatestLogMessage = (logs: unknown) => {
-  if (!Array.isArray(logs) || logs.length === 0) return '无日志'
-  const last = logs[logs.length - 1] as { msg?: string }
-  return (last?.msg || '无日志').slice(0, 100)
+const getTaskInsight = (task: ProcessingTask) =>
+  taskInsightMap.value[task.id] ??
+  buildTaskInsight({
+    logs: task.logs,
+    status: task.status,
+  })
+
+const getTaskProgress = (task: ProcessingTask) => getTaskInsight(task).percent
+
+const openTaskLogDrawer = (task: ProcessingTask) => {
+  selectedTaskId.value = task.id
+  logDrawerVisible.value = true
 }
 
 const formatBytes = (bytes: number) => {
@@ -1477,6 +1531,114 @@ onUnmounted(() => {
             </el-card>
           </section>
 
+          <section class="panel-grid panel-grid--processing">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">处理中模型</div>
+                    <div class="header-meta">按日志阶段估算进度，优先展示正在跑的任务。</div>
+                  </div>
+                  <div class="filter-count">{{ processingSpotlights.length }} 条</div>
+                </div>
+              </template>
+
+              <el-empty
+                v-if="!processingSpotlights.length"
+                description="当前没有 processing 状态的模型任务"
+              />
+
+              <div v-else class="processing-grid">
+                <article
+                  v-for="item in processingSpotlights"
+                  :key="item.task.id"
+                  class="processing-card"
+                >
+                  <div class="processing-card__top">
+                    <div>
+                      <div class="task-name">{{ formatDisplayName(item.task) }}</div>
+                      <div class="task-sub">
+                        {{ item.task.task_type || 'video_3dgs' }} / {{ item.task.scene_id }}
+                      </div>
+                    </div>
+                    <el-tag type="warning">{{ item.insight.stageLabel }}</el-tag>
+                  </div>
+
+                  <div class="processing-card__metrics">
+                    <div class="processing-chip">
+                      <span>当前 Worker</span>
+                      <strong>{{ item.worker ? formatWorkerLabel(item.worker) : '待分配' }}</strong>
+                    </div>
+                    <div class="processing-chip">
+                      <span>最新心跳</span>
+                      <strong>{{ item.worker ? formatHeartbeatAge(item.worker.last_heartbeat) : '暂无' }}</strong>
+                    </div>
+                  </div>
+
+                  <el-progress :percentage="item.insight.percent" :stroke-width="10" />
+
+                  <div class="processing-card__log">
+                    <span>最新动态</span>
+                    <strong>{{ item.insight.latestMessage }}</strong>
+                  </div>
+
+                  <div class="processing-card__footer">
+                    <span>更新时间 {{ formatDateTime(item.task.updated_at) }}</span>
+                    <el-button size="small" plain @click="openTaskLogDrawer(item.task)">查看日志</el-button>
+                  </div>
+                </article>
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">处理观察点</div>
+                  <div class="header-meta">聚焦处理阶段、排障入口和 Worker 绑定情况。</div>
+                </div>
+              </template>
+
+              <div class="alerts-list alerts-list--soft">
+                <article
+                  v-for="item in processingSpotlights.slice(0, 4)"
+                  :key="item.task.id"
+                  class="alert-item"
+                >
+                  <div class="alert-item-top">
+                    <div>
+                      <span class="alert-label">{{ item.insight.stageLabel }}</span>
+                      <strong class="alert-value">{{ item.insight.percent }}%</strong>
+                    </div>
+                    <el-tag type="info">
+                      {{ item.worker ? getWorkerStatusLabel(item.worker) : '等待接单' }}
+                    </el-tag>
+                  </div>
+                  <p class="alert-note">{{ item.insight.summary }}</p>
+                  <div class="fail-sub">
+                    {{ item.worker ? formatWorkerLabel(item.worker) : '尚未绑定 Worker' }}
+                  </div>
+                </article>
+              </div>
+
+              <el-divider />
+
+              <div class="db-metrics db-metrics--users">
+                <div class="metric-item">
+                  <div class="metric-title">处理中</div>
+                  <div class="metric-value">{{ processingCount }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">排队中</div>
+                  <div class="metric-value">{{ pendingCount }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">在线 Worker</div>
+                  <div class="metric-value ok">{{ onlineWorkerCount }}</div>
+                </div>
+              </div>
+            </el-card>
+          </section>
+
           <section class="panel-grid panel-grid--operations">
             <el-card shadow="never" class="table-card glass-card">
               <template #header>
@@ -1501,10 +1663,18 @@ onUnmounted(() => {
                 </el-table-column>
                 <el-table-column label="进度" min-width="140">
                   <template #default="scope">
-                    <el-progress
-                      :percentage="getProgressByStatus(scope.row.status)"
-                      :status="scope.row.status === 'failed' ? 'exception' : undefined"
-                    />
+                    <div class="task-progress-cell">
+                      <el-progress
+                        :percentage="getTaskProgress(scope.row)"
+                        :status="scope.row.status === 'failed' ? 'exception' : scope.row.status === 'completed' ? 'success' : undefined"
+                      />
+                      <span class="task-progress-note">{{ getTaskInsight(scope.row).stageLabel }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="日志摘要" min-width="240">
+                  <template #default="scope">
+                    <div class="task-log-snippet">{{ getTaskInsight(scope.row).latestMessage }}</div>
                   </template>
                 </el-table-column>
                 <el-table-column label="质量" width="85" align="center">
@@ -1515,6 +1685,11 @@ onUnmounted(() => {
                 <el-table-column label="更新时间" min-width="165">
                   <template #default="scope">
                     {{ formatDateTime(scope.row.updated_at) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="日志" width="110" align="center">
+                  <template #default="scope">
+                    <el-button size="small" plain @click="openTaskLogDrawer(scope.row)">查看</el-button>
                   </template>
                 </el-table-column>
               </el-table>
@@ -1561,6 +1736,9 @@ onUnmounted(() => {
                   <div class="fail-title">{{ formatDisplayName(item) }}</div>
                   <div class="fail-sub">{{ item.scene_id }} / {{ item.user_id }}</div>
                   <div class="fail-log">{{ getLatestLogMessage(item.logs) }}</div>
+                  <div style="margin-top: 10px;">
+                    <el-button size="small" plain @click="openTaskLogDrawer(item)">查看完整日志</el-button>
+                  </div>
                 </el-timeline-item>
               </el-timeline>
             </el-card>
@@ -1825,5 +2003,12 @@ onUnmounted(() => {
         </template>
       </main>
     </section>
+
+    <task-log-drawer
+      v-model="logDrawerVisible"
+      :task="selectedTask"
+      :insight="selectedTaskInsight"
+      :worker-label="selectedTaskWorkerLabel"
+    />
   </div>
 </template>
