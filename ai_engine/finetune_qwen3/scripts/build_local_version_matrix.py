@@ -19,6 +19,14 @@ def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def pick_existing(*names: str) -> Path:
+    for name in names:
+        path = LOG_DIR / name
+        if path.exists():
+            return path
+    raise FileNotFoundError(f"no existing log file matched: {names}")
+
+
 def infer_label(name: str) -> str:
     mapping = [
         ("benchmark_strict_v3_base_local_noopt", "1.7B Base local-noopt"),
@@ -96,26 +104,34 @@ def main() -> None:
             }
         )
 
-    unseen = load_json(LOG_DIR / "unseen_ood_benchmark_20260324_frozen_summary.json")
+    unseen_path = pick_existing(
+        "unseen_ood_benchmark_20260324_frozen_all_local_summary.json",
+        "unseen_ood_benchmark_20260324_frozen_summary.json",
+    )
+    unseen = load_json(unseen_path)
     for item in unseen["summary"]:
         rows.append(
             {
                 "benchmark": "unseen_ood_frozen",
                 "label": item["candidate_label"],
-                "source_file": "unseen_ood_benchmark_20260324_frozen_summary.json",
+                "source_file": unseen_path.name,
                 "end_to_end_pass_rate": item.get("end_to_end_pass_rate"),
                 "answer_pass_rate_when_retrieval_ok": item.get("answer_pass_rate_when_retrieval_ok"),
                 "avg_total_ms": item.get("avg_total_ms"),
             }
         )
 
-    spatial = load_json(LOG_DIR / "spatial_hardcases_candidates_20260324_frozen_summary.json")
+    spatial_path = pick_existing(
+        "spatial_hardcases_candidates_20260324_frozen_all_local_summary.json",
+        "spatial_hardcases_candidates_20260324_frozen_summary.json",
+    )
+    spatial = load_json(spatial_path)
     for item in spatial["summary"]:
         rows.append(
             {
                 "benchmark": "spatial_hardcases_frozen",
                 "label": item["candidate_label"],
-                "source_file": "spatial_hardcases_candidates_20260324_frozen_summary.json",
+                "source_file": spatial_path.name,
                 "spatial_direct_rate": item.get("spatial_direct_rate"),
                 "generic_scene_summary_rate": item.get("generic_scene_summary_rate"),
                 "refusal_rate": item.get("refusal_rate"),

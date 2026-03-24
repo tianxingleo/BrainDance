@@ -11,13 +11,13 @@ from typing import Any
 
 from evaluate_deployment_candidates import (
     DEFAULT_LLAMA_CLI,
-    CandidateConfig,
     call_retrieval,
     gpu_uuid_for_index,
     run_gguf_answer,
     run_hf_answer,
 )
 from run_real_chain_debug import extract_dashscope_key, extract_supabase_config, load_generator, now_utc, unload_model
+from benchmark_candidate_registry import DEFAULT_SPATIAL_CANDIDATE_IDS, select_candidates
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CASES_FILE = (
@@ -28,35 +28,6 @@ DEFAULT_OUTPUT_FILE = (
 )
 DEFAULT_SUMMARY_FILE = (
     PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "spatial_hardcases_candidates_20260324_summary.json"
-)
-
-DEFAULT_LORA_1P7B = (
-    PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "outputs" / "qwen3_1p7b_lora_sft_round4_1_patch_mixed"
-)
-DEFAULT_LORA_0P6B = (
-    PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "releases" / "qwen3_0p6b_braindance_round1"
-)
-DEFAULT_FULL_0P6B = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "outputs" / "qwen3_0p6b_full_sft_round1"
-DEFAULT_MERGED_1P7B = (
-    PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "releases" / "qwen3_1p7b_braindance_round4_1_patch_mixed_merged_gpu0"
-)
-DEFAULT_Q4_IMATRIX = (
-    PROJECT_ROOT
-    / "ai_engine"
-    / "finetune_qwen3"
-    / "releases"
-    / "qwen3_1p7b_braindance_round4_1_patch_mixed_quantized_gpu0"
-    / "imatrix_v1"
-    / "model-f16-q4_k_m-imatrix.gguf"
-)
-DEFAULT_Q5_IMATRIX = (
-    PROJECT_ROOT
-    / "ai_engine"
-    / "finetune_qwen3"
-    / "releases"
-    / "qwen3_1p7b_braindance_round4_1_patch_mixed_quantized_gpu0"
-    / "imatrix_v1"
-    / "model-f16-q5_k_m-imatrix.gguf"
 )
 
 NO_ANSWER_PATTERNS = ("暂无", "未见", "没有", "没找到", "不清楚", "不知道")
@@ -88,48 +59,6 @@ GENERIC_SUMMARY_MARKERS = (
     "主要有",
 )
 
-CANDIDATES = (
-    CandidateConfig(
-        candidate_id="qwen3_1p7b_lora",
-        label="1.7B LoRA",
-        backend="hf",
-        model_name="Qwen/Qwen3-1.7B",
-        adapter_path=str(DEFAULT_LORA_1P7B),
-    ),
-    CandidateConfig(
-        candidate_id="qwen3_0p6b_lora",
-        label="0.6B LoRA",
-        backend="hf",
-        model_name="Qwen/Qwen3-0.6B",
-        adapter_path=str(DEFAULT_LORA_0P6B),
-    ),
-    CandidateConfig(
-        candidate_id="qwen3_0p6b_full_round1",
-        label="0.6B full SFT",
-        backend="hf",
-        model_name=str(DEFAULT_FULL_0P6B),
-    ),
-    CandidateConfig(
-        candidate_id="qwen3_1p7b_merged",
-        label="1.7B merged",
-        backend="hf",
-        model_name=str(DEFAULT_MERGED_1P7B),
-    ),
-    CandidateConfig(
-        candidate_id="qwen3_1p7b_q4_imatrix",
-        label="1.7B Q4_K_M + imatrix",
-        backend="gguf",
-        gguf_model_path=str(DEFAULT_Q4_IMATRIX),
-    ),
-    CandidateConfig(
-        candidate_id="qwen3_1p7b_q5_imatrix",
-        label="1.7B Q5_K_M + imatrix",
-        backend="gguf",
-        gguf_model_path=str(DEFAULT_Q5_IMATRIX),
-    ),
-)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate spatial hardcases across local candidates")
     parser.add_argument("--cases_file", default=str(DEFAULT_CASES_FILE))
@@ -149,6 +78,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--ubatch_size", type=int, default=64)
     parser.add_argument("--ctx_size", type=int, default=2048)
+    parser.add_argument(
+        "--candidate_ids",
+        default=",".join(DEFAULT_SPATIAL_CANDIDATE_IDS),
+        help="Comma-separated candidate ids, or 'all' to evaluate every local QA candidate",
+    )
     return parser.parse_args()
 
 
@@ -236,6 +170,7 @@ def summarize_candidate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main() -> None:
     args = parse_args()
+    candidates = select_candidates(args.candidate_ids, default_ids=DEFAULT_SPATIAL_CANDIDATE_IDS)
     dashscope_key = extract_dashscope_key()
     supabase_url, supabase_key = extract_supabase_config()
     cases = load_cases(Path(args.cases_file))
@@ -282,7 +217,7 @@ def main() -> None:
     output_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
-    for candidate in CANDIDATES:
+    for candidate in candidates:
         tokenizer = model = device = None
         if candidate.backend == "hf":
             tokenizer, model, device = load_generator(candidate.model_name, candidate.adapter_path)
@@ -358,7 +293,7 @@ def main() -> None:
         "cases_file": str(Path(args.cases_file)),
         "retrieval_snapshot_file": str(Path(args.retrieval_snapshot_file)) if str(args.retrieval_snapshot_file).strip() else "",
         "gpu_uuid": gpu_uuid_for_index(args.gpu_index),
-        "candidates": [candidate.__dict__ for candidate in CANDIDATES],
+        "candidates": [candidate.__dict__ for candidate in candidates],
         "retrieval_cases": retrieval_rows,
         "summary": summary_rows,
     }
