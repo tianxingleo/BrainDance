@@ -114,6 +114,17 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 如果要测试接口，可以参考 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
 
+### `agent-recall`（规划中）
+
+Agent 能力的近期规划会优先放在 Supabase Edge Functions / TypeScript 一侧实现，而不是放到 Python Worker 中。规划中的 `agent-recall` 将作为在线总入口，负责：
+
+1. 识别用户查询意图
+2. 调用 `search-models` 等专用工具
+3. 组织 `answer + evidence + actions` 结构化响应
+4. 把空间证据和前端动作一起返回给 Flutter / Web
+
+它与 `search-models` 的关系是“编排入口”和“专用搜索工具”的关系，而不是替代关系。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
+
 ### `test-timeout`
 
 这是一个辅助测试函数，主要用于本地联调，不承担核心业务能力。
