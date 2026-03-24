@@ -183,3 +183,27 @@ PR_BODY.md
 create_pr.sh
 CLAUDE.md
 docs/old/idea.pdf
+
+# =========================
+# 10. Local Tooling / Build Artifacts (本地工具与构建产物)
+# =========================
+.claude/
+
+# Frontend local dependencies and builds
+dashboard/node_modules/
+dashboard/dist/
+
+# Large local model weights and checkpoints
+*.safetensors
+*.ckpt
+
+# Local research/vendor repos cloned into the monorepo
+ai_engine/3dgs/src/libs/2d-gaussian-splatting/
+ai_engine/3dgs/src/libs/Depth-Anything-3/
+ai_engine/3dgs/src/libs/Sparse2DGS/
+ai_engine/3dgs/src/libs/SuGaR/
+ai_engine/3dgs/src/libs/nerfstudio/
+ai_engine/demo/Depth-Anything-3/
+
+# Local office documents
+*.docx
