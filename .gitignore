@@ -167,6 +167,7 @@ vscode_cli.tar.gz
 # 8. OpenCode Configuration (OpenCode 配置)
 # =========================
 AGENTS.md
+.claude/
 .opencode.json
 .opencode/
 .sisyphus/
@@ -179,6 +180,9 @@ bfg-report/
 # =========================
 # 9. Sensitive / Temporary Files (临时文件)
 # =========================
+supabase/.temp/
+*.doc
+*.docx
 PR_BODY.md
 create_pr.sh
 CLAUDE.md
