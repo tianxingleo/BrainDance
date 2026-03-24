@@ -40,6 +40,7 @@ frozen retrieval 基线：
 - 本地 spatial：`ai_engine/finetune_qwen3/scripts/evaluate_spatial_hardcases_candidates.py`
 - 云端 OOD：`ai_engine/finetune_qwen3/scripts/evaluate_cloud_unseen_ood_benchmark.py`
 - 云端 spatial：`ai_engine/finetune_qwen3/scripts/evaluate_cloud_spatial_hardcases.py`
+- 静态图渲染：`ai_engine/finetune_qwen3/scripts/render_new_benchmark_comparison_figures.py`
 
 本次云端模型沿用 strict 报告使用过的同一批候选：
 
@@ -47,6 +48,17 @@ frozen retrieval 基线：
 - `qwen3-32b`
 - `qwen3-8b`
 - `qwen-turbo`
+
+图表输出目录：
+
+- `ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/`
+- 图表清单：`ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/manifest_20260324.json`
+
+绘图依赖：
+
+- `matplotlib`
+- `seaborn`
+- `adjustText`
 
 ## 3. 新增未见数据 OOD：云端与本地总表
 
@@ -125,21 +137,17 @@ frozen retrieval 基线：
 
 ### 3.5 图表：新增未见数据 OOD 第一梯队
 
-```mermaid
-xychart-beta
-  title "新增未见数据 OOD：端到端通过率（本地 vs 云端）"
-  x-axis ["Q5+imatrix","qwen3-8b","qwen2.5-32b","1.7B-merged","qwen3-32b","1.7B-LoRA","qwen-turbo"]
-  y-axis "Pass Rate" 0 --> 0.7
-  bar [0.6667,0.6667,0.6667,0.6111,0.6111,0.5556,0.4444]
-```
+下面这 3 张图分别对应：
 
-```mermaid
-xychart-beta
-  title "新增未见数据 OOD：partial_coverage 通过率（本地 vs 云端）"
-  x-axis ["Q5+imatrix","qwen3-8b","qwen2.5-32b","1.7B-merged","qwen3-32b","1.7B-LoRA","qwen-turbo"]
-  y-axis "Pass Rate" 0 --> 1
-  bar [1.0000,1.0000,1.0000,0.8333,0.8333,0.6667,0.3333]
-```
+1. 全量统一榜单
+2. 速度/准确率/partial 覆盖三维关系
+3. 第一梯队模型画像
+
+![新增未见数据 OOD 统一榜单](../../ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/new_benchmark_unseen_leaderboard_20260324.png)
+
+![新增未见数据 OOD 三维散点图](../../ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/new_benchmark_unseen_scatter_20260324.png)
+
+![新增未见数据 OOD 第一梯队雷达图](../../ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/new_benchmark_unseen_radar_20260324.png)
 
 ## 4. 空间关系 hardcases：云端与本地总表
 
@@ -190,21 +198,9 @@ xychart-beta
 
 ### 4.3 图表：空间题云端与本地一起失效
 
-```mermaid
-xychart-beta
-  title "空间 hardcases：spatial_direct_rate（本地 vs 云端）"
-  x-axis ["0.6B-full-r3","1.7B-LoRA","1.7B-merged","Q5+imatrix","qwen3-32b","qwen2.5-32b","qwen3-8b","qwen-turbo"]
-  y-axis "Rate" 0 --> 0.12
-  bar [0.1000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000,0.0000]
-```
+![空间 hardcases 直接回答率全景](../../ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/new_benchmark_spatial_bar_20260324.png)
 
-```mermaid
-xychart-beta
-  title "空间 hardcases：generic_scene_summary_rate（本地 vs 云端）"
-  x-axis ["0.6B-full-r3","1.7B-LoRA","1.7B-merged","Q5+imatrix","qwen3-32b","qwen2.5-32b","qwen3-8b","qwen-turbo"]
-  y-axis "Rate" 0 --> 1
-  bar [0.9000,0.9000,0.9000,0.9000,0.9000,0.9000,0.9000,0.9000]
-```
+![跨 benchmark 关键指标热力图](../../ai_engine/finetune_qwen3/audit/new_benchmark_figures_20260324/new_benchmark_cross_heatmap_20260324.png)
 
 ## 5. 最终结论
 
