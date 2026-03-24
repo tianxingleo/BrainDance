@@ -1908,6 +1908,10 @@ $userQuestion
       initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
     }
 
+    // 查找同名模型组（Time Peeling 兄弟模型）
+    final groupedModels = _groupModelsByName(_models);
+    final siblingModels = groupedModels[sceneId] ?? [model];
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1917,6 +1921,7 @@ $userQuestion
           sceneId: sceneId,
           initialPose: initialPose,
           initialPoseId: initialPoseId,
+          timePeelingModels: siblingModels,
         ),
       ),
     );
