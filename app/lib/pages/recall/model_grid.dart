@@ -1110,15 +1110,12 @@ class TimePeelingList extends StatelessWidget {
   }
 }
 
-const double _kCardWidth = 170.0;
-const double _kCardGap = 12.0;
-const double _kSlotWidth = _kCardWidth + _kCardGap;
-const double _kTimelineHeight = 58.0;
-const double _kNodeRadius = 7.0;
-const double _kLineHeight = 3.5;
 const Color _kTimelineColor = Color(0xFFCC9A5C); // muted orange
+const double _kCarouselHeight = 240.0;
+const double _kViewportFraction = 0.52;
+const double _kEdgeFadeWidth = 36.0;
 
-class _TimePeelingSlot extends StatelessWidget {
+class _TimePeelingSlot extends StatefulWidget {
   final String name;
   final List<Map<String, dynamic>> models;
   final TDThemeData theme;
@@ -1154,21 +1151,63 @@ class _TimePeelingSlot extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final lineColor = _kTimelineColor.withValues(alpha: 0.6);
-    final nodeColor = _kTimelineColor.withValues(alpha: 0.95);
-    final timeStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w500,
-      color: _kTimelineColor.withValues(alpha: 0.8),
-    );
+  State<_TimePeelingSlot> createState() => _TimePeelingSlotState();
+}
 
-    final slotBg = isDark
+class _TimePeelingSlotState extends State<_TimePeelingSlot> {
+  late PageController _pageController;
+  double _currentPage = 0.0;
+
+  /// Total items: models first (newest→oldest), then create button last.
+  int get _totalCount => widget.models.length + 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(
+      viewportFraction: _kViewportFraction,
+      initialPage: 0, // newest model card
+    );
+    _pageController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _pageController.removeListener(_onScroll);
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_pageController.page != null) {
+      setState(() => _currentPage = _pageController.page!);
+    }
+  }
+
+  String _timeLabelFor(int modelIndex) {
+    if (modelIndex < 0 || modelIndex >= widget.models.length) return '';
+    final dt = DateTime.tryParse(
+      widget.models[modelIndex]['created_at']?.toString() ?? '',
+    );
+    if (dt == null) return '--';
+    final local = dt.toLocal();
+    return '${local.month.toString().padLeft(2, '0')}/${local.day.toString().padLeft(2, '0')} '
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slotBg = widget.isDark
         ? Colors.white.withValues(alpha: 0.04)
         : Colors.white.withValues(alpha: 0.55);
-    final slotBorder = isDark
+    final slotBorder = widget.isDark
         ? Colors.white.withValues(alpha: 0.07)
         : Colors.black.withValues(alpha: 0.06);
+
+    // Current selected model index (rounded page)
+    final selectedPage = _currentPage.round().clamp(0, _totalCount - 1);
+    final isModelSelected = selectedPage < widget.models.length;
+    final timeLabel = isModelSelected ? _timeLabelFor(selectedPage) : '';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
@@ -1179,7 +1218,7 @@ class _TimePeelingSlot extends StatelessWidget {
           border: Border.all(color: slotBorder, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.04),
+              color: Colors.black.withValues(alpha: widget.isDark ? 0.12 : 0.04),
               blurRadius: 12,
               offset: const Offset(0, 3),
             ),
@@ -1195,13 +1234,13 @@ class _TimePeelingSlot extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      name,
+                      widget.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: textColor,
+                        color: widget.textColor,
                       ),
                     ),
                   ),
@@ -1209,15 +1248,15 @@ class _TimePeelingSlot extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: hintColor.withValues(alpha: 0.12),
+                      color: widget.hintColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      '${models.length}',
+                      '${widget.models.length}',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: hintColor,
+                        color: widget.hintColor,
                       ),
                     ),
                   ),
@@ -1225,215 +1264,237 @@ class _TimePeelingSlot extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            // Cards + timeline share one horizontal scroll area
+            // Carousel with edge fades
             SizedBox(
-              height: 220 + 10 + _kTimelineHeight,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                itemCount: models.length + 1, // +1 for add card
-              itemBuilder: (context, i) {
-                // First slot: add card
-                if (i == 0) {
-                  return SizedBox(
-                    width: _kSlotWidth,
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: _kCardGap),
-                            child: GestureDetector(
-                              onTap: () => onAddNewTask(name),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.06)
-                                      : Colors.white.withValues(alpha: 0.7),
-                                  borderRadius: BorderRadius.circular(28),
-                                  border: Border.all(
-                                    color: _kTimelineColor.withValues(alpha: 0.35),
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.add_rounded,
-                                        size: 36,
-                                        color: _kTimelineColor.withValues(alpha: 0.7),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        textLocalize("create"),
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: _kTimelineColor.withValues(alpha: 0.7),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Empty spacer aligned with the timeline
-                        const SizedBox(height: 10),
-                        SizedBox(height: _kTimelineHeight),
-                      ],
-                    ),
-                  );
-                }
-                final modelIndex = i - 1;
-                final model = models[modelIndex];
-                final cardKey = modelCardKeyFor(model);
-                final isActionTarget = isSameModel(activeModelAction, model);
-                final dt = DateTime.tryParse(
-                  model['created_at']?.toString() ?? '',
-                );
-                final timeLabel = dt != null
-                    ? '${dt.toLocal().month.toString().padLeft(2, '0')}/${dt.toLocal().day.toString().padLeft(2, '0')} ${dt.toLocal().hour.toString().padLeft(2, '0')}:${dt.toLocal().minute.toString().padLeft(2, '0')}'
-                    : '--';
+              height: _kCarouselHeight,
+              child: Stack(
+                children: [
+                  // PageView carousel
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: _totalCount,
+                    clipBehavior: Clip.none,
+                    itemBuilder: (context, index) {
+                      final distance = (index - _currentPage).abs().clamp(0.0, 1.0);
+                      final scale = ui.lerpDouble(1.0, 0.82, distance)!;
+                      final opacity = ui.lerpDouble(1.0, 0.5, distance)!;
 
-                return SizedBox(
-                  width: _kSlotWidth,
-                  child: Column(
-                    children: [
-                      // Card
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: _kCardGap),
-                          child: RepaintBoundary(
-                            child: IgnorePointer(
-                              ignoring: isActionTarget,
-                              child: Opacity(
-                                opacity: isActionTarget ? 0.0 : 1.0,
-                                child: GestureDetector(
-                                  onTap: () => onNavigateToViewer(model, null),
-                                  onLongPressStart: (_) =>
-                                      onShowModelActions(model),
-                                  child: Container(
-                                    key: cardKey,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(28),
-                                      border: Border.all(
-                                        color: isDark
-                                            ? Colors.white.withValues(alpha: 0.08)
-                                            : Colors.black.withValues(alpha: 0.06),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: RecallModelTile(
-                                      model: model,
-                                      theme: theme,
-                                      isDark: isDark,
-                                      darkCard: darkCard,
-                                      darkInput: darkInput,
-                                      textColor: textColor,
-                                      hintTextColor: hintTextColor,
-                                      imageOnly: true,
-                                    ),
-                                  ),
+                      // Last item is the create button
+                      if (index == widget.models.length) {
+                        return _buildCarouselItem(
+                          scale: scale,
+                          opacity: opacity,
+                          isSelected: selectedPage == index,
+                          child: _buildCreateCard(),
+                        );
+                      }
+
+                      final model = widget.models[index];
+                      final cardKey = widget.modelCardKeyFor(model);
+                      final isActionTarget =
+                          widget.isSameModel(widget.activeModelAction, model);
+
+                      return _buildCarouselItem(
+                        scale: scale,
+                        opacity: isActionTarget ? 0.0 : opacity,
+                        isSelected: selectedPage == index,
+                        child: IgnorePointer(
+                          ignoring: isActionTarget,
+                          child: GestureDetector(
+                            onTap: () => widget.onNavigateToViewer(model, null),
+                            onLongPressStart: (_) =>
+                                widget.onShowModelActions(model),
+                            child: Container(
+                              key: cardKey,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(28),
+                                border: Border.all(
+                                  color: widget.isDark
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : Colors.black.withValues(alpha: 0.06),
+                                  width: 1,
                                 ),
+                              ),
+                              child: RecallModelTile(
+                                model: model,
+                                theme: widget.theme,
+                                isDark: widget.isDark,
+                                darkCard: widget.darkCard,
+                                darkInput: widget.darkInput,
+                                textColor: widget.textColor,
+                                hintTextColor: widget.hintTextColor,
+                                imageOnly: true,
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      // Gap between card and timeline
-                      const SizedBox(height: 10),
-                      // Timeline
-                      SizedBox(
-                        height: _kTimelineHeight,
-                        child: _TimelineNode(
-                          isFirst: modelIndex == 0,
-                          isLast: modelIndex == models.length - 1,
-                          lineColor: lineColor,
-                          nodeColor: nodeColor,
-                          timeLabel: timeLabel,
-                          timeStyle: timeStyle,
+                      );
+                    },
+                  ),
+                  // Left edge fade
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: _kEdgeFadeWidth,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(20),
+                            bottomLeft: Radius.circular(20),
+                          ),
+                          gradient: LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                            colors: [
+                              slotBg,
+                              slotBg.withValues(alpha: 0.0),
+                            ],
+                          ),
                         ),
                       ),
+                    ),
+                  ),
+                  // Right edge fade
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: _kEdgeFadeWidth,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.only(
+                            topRight: Radius.circular(20),
+                            bottomRight: Radius.circular(20),
+                          ),
+                          gradient: LinearGradient(
+                            begin: Alignment.centerRight,
+                            end: Alignment.centerLeft,
+                            colors: [
+                              slotBg,
+                              slotBg.withValues(alpha: 0.0),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Time label for selected card
+            AnimatedSwitcher(
+              duration: BDMotion.durationNormal,
+              switchInCurve: BDMotion.curveEnter,
+              switchOutCurve: BDMotion.curveExit,
+              transitionBuilder: (child, animation) =>
+                  FadeTransition(opacity: animation, child: child),
+              child: Padding(
+                key: ValueKey<String>(timeLabel),
+                padding: const EdgeInsets.only(top: 8, bottom: 14),
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (timeLabel.isNotEmpty) ...[
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: _kTimelineColor.withValues(alpha: 0.9),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          timeLabel,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: _kTimelineColor.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    ));
-  }
-}
-
-/// Single timeline node: line + dot + time label
-class _TimelineNode extends StatelessWidget {
-  final bool isFirst;
-  final bool isLast;
-  final Color lineColor;
-  final Color nodeColor;
-  final String timeLabel;
-  final TextStyle timeStyle;
-
-  const _TimelineNode({
-    required this.isFirst,
-    required this.isLast,
-    required this.lineColor,
-    required this.nodeColor,
-    required this.timeLabel,
-    required this.timeStyle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Line + node
-        SizedBox(
-          height: _kNodeRadius * 2 + 4,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Horizontal line
-              Positioned(
-                left: isFirst ? _kSlotWidth / 2 : 0,
-                right: isLast ? _kSlotWidth / 2 : 0,
-                child: Container(
-                  height: _kLineHeight,
-                  color: lineColor,
                 ),
               ),
-              // Dot centered relative to the card, offset by half the gap
-              Positioned(
-                left: (_kCardWidth - _kNodeRadius * 2) / 2,
-                child: Container(
-                  width: _kNodeRadius * 2,
-                  height: _kNodeRadius * 2,
-                  decoration: BoxDecoration(
-                    color: nodeColor,
-                    shape: BoxShape.circle,
-                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCarouselItem({
+    required double scale,
+    required double opacity,
+    required bool isSelected,
+    required Widget child,
+  }) {
+    return Center(
+      child: Transform.scale(
+        scale: scale,
+        child: Opacity(
+          opacity: opacity.clamp(0.0, 1.0),
+          child: Container(
+            decoration: isSelected
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _kTimelineColor.withValues(alpha: 0.18),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  )
+                : null,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCreateCard() {
+    return GestureDetector(
+      onTap: () => widget.onAddNewTask(widget.name),
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: _kTimelineColor.withValues(alpha: 0.35),
+            width: 1.5,
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.add_rounded,
+                size: 36,
+                color: _kTimelineColor.withValues(alpha: 0.7),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                textLocalize("create"),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _kTimelineColor.withValues(alpha: 0.7),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 10),
-        // Time label centered under the card
-        SizedBox(
-          width: _kCardWidth,
-          child: Text(
-            timeLabel,
-            textAlign: TextAlign.center,
-            style: timeStyle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
