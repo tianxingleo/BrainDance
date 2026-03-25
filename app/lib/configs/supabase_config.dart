@@ -2,6 +2,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class SupabaseConfig {
   static const String _defaultLocalModelBucket = 'braindance-models';
+  static const List<String> _defaultLocalModelDiscoveryBuckets = <String>[
+    'braindance-assets',
+    'braindance-models',
+  ];
   static const String _defaultLocalModelObjectPath =
       'releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf';
 
@@ -54,6 +58,25 @@ class SupabaseConfig {
       return bucket;
     }
     return _defaultLocalModelBucket;
+  }
+
+  static List<String> get localModelDiscoveryBuckets {
+    final rawBuckets = dotenv.env['LOCAL_LLM_MODEL_BUCKETS']?.trim() ?? '';
+    final buckets = <String>[
+      if (rawBuckets.isNotEmpty)
+        ...rawBuckets
+            .split(',')
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty),
+      localModelBucket,
+      ..._defaultLocalModelDiscoveryBuckets,
+    ];
+
+    final deduplicated = <String>{};
+    for (final bucket in buckets) {
+      deduplicated.add(bucket);
+    }
+    return deduplicated.toList(growable: false);
   }
 
   static String get localModelObjectPath {

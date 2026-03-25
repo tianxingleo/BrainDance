@@ -11,6 +11,7 @@ class LocalModelCatalogItem {
     required this.name,
     required this.downloadUrl,
     required this.fileName,
+    required this.bucket,
     this.description,
     this.sizeBytes,
     this.tags = const <String>[],
@@ -21,6 +22,7 @@ class LocalModelCatalogItem {
   final String name;
   final String downloadUrl;
   final String fileName;
+  final String bucket;
   final String? description;
   final int? sizeBytes;
   final List<String> tags;
@@ -50,52 +52,53 @@ class LocalModelCatalogService {
       }
     }
 
-    // 自动扫描 Supabase 存储桶中的 .gguf 文件
+    // 历史上端侧模型既放过 braindance-models，也放过 braindance-assets。
+    // 这里统一做多 bucket 扫描，避免前端因为迁移历史只能看到一个默认模型。
     try {
       final supabase = Supabase.instance.client;
-      final bucket = SupabaseConfig.localModelBucket;
+      for (final bucket in SupabaseConfig.localModelDiscoveryBuckets) {
+        final pathsToScan = [''];
+        final scannedPaths = <String>{};
 
-      final pathsToScan = [''];
-      final scannedPaths = <String>{};
+        while (pathsToScan.isNotEmpty) {
+          final currentPath = pathsToScan.removeLast();
+          if (scannedPaths.contains(currentPath)) continue;
+          scannedPaths.add(currentPath);
 
-      while (pathsToScan.isNotEmpty) {
-        final currentPath = pathsToScan.removeLast();
-        if (scannedPaths.contains(currentPath)) continue;
-        scannedPaths.add(currentPath);
+          try {
+            final objects = await supabase.storage
+                .from(bucket)
+                .list(
+                  path: currentPath,
+                  searchOptions: const SearchOptions(limit: 1000),
+                );
+            for (final obj in objects) {
+              if (obj.name == '.emptyFolderPlaceholder') continue;
 
-        try {
-          final objects = await supabase.storage
-              .from(bucket)
-              .list(
-                path: currentPath,
-                searchOptions: const SearchOptions(limit: 1000),
-              );
-          for (final obj in objects) {
-            if (obj.name == '.emptyFolderPlaceholder') continue;
+              final objPath = currentPath.isEmpty
+                  ? obj.name
+                  : '$currentPath/${obj.name}';
 
-            final objPath = currentPath.isEmpty
-                ? obj.name
-                : '$currentPath/${obj.name}';
-
-            // 如果对象没有 metadata 或者是明确的文件夹
-            if (obj.id == null || obj.metadata == null) {
-              pathsToScan.add(objPath);
-            } else if (obj.name.toLowerCase().endsWith('.gguf')) {
-              final url = _buildPublicUrl(objPath);
-              items.add(
-                LocalModelCatalogItem(
-                  id: objPath,
-                  name: obj.name,
-                  downloadUrl: url,
-                  fileName: obj.name,
-                  description: 'Supabase Storage: /$objPath',
-                  sizeBytes: obj.metadata?['size'] as int?,
-                  isRecommended: url == SupabaseConfig.localModelUrl,
-                ),
-              );
+              if (obj.id == null || obj.metadata == null) {
+                pathsToScan.add(objPath);
+              } else if (obj.name.toLowerCase().endsWith('.gguf')) {
+                final url = _buildPublicUrl(objPath, bucket: bucket);
+                items.add(
+                  LocalModelCatalogItem(
+                    id: '$bucket:$objPath',
+                    name: obj.name,
+                    downloadUrl: url,
+                    fileName: obj.name,
+                    bucket: bucket,
+                    description: 'Supabase Storage: $bucket/$objPath',
+                    sizeBytes: _readInt(obj.metadata?['size']),
+                    isRecommended: url == SupabaseConfig.localModelUrl,
+                  ),
+                );
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
     } catch (_) {}
 
@@ -184,6 +187,9 @@ class LocalModelCatalogService {
                 'storage_path',
               ]) ??
               '',
+          bucket:
+              _readString(raw, const ['bucket', 'bucket_id']) ??
+              SupabaseConfig.localModelBucket,
         );
     final fileName =
         _readString(raw, const ['file_name', 'filename']) ??
@@ -203,6 +209,10 @@ class LocalModelCatalogService {
       name: name,
       downloadUrl: downloadUrl,
       fileName: fileName,
+      bucket:
+          _readString(raw, const ['bucket', 'bucket_id']) ??
+          _inferBucketFromUrl(downloadUrl) ??
+          SupabaseConfig.localModelBucket,
       description: _readString(raw, const ['description', 'desc', 'summary']),
       sizeBytes: _readInt(raw['size_bytes']) ?? _readInt(raw['size']),
       tags: _readStringList(raw['tags']),
@@ -220,21 +230,23 @@ class LocalModelCatalogService {
       name: 'Qwen3-1.7B BrainDance 默认模型',
       downloadUrl: defaultUrl,
       fileName: _extractFileName(defaultUrl),
+      bucket: SupabaseConfig.localModelBucket,
       description: 'Recall 端侧问答默认模型',
       isRecommended: true,
     );
   }
 
-  String _buildPublicUrl(String objectPath) {
+  String _buildPublicUrl(String objectPath, {String? bucket}) {
     final baseUrl = SupabaseConfig.url.trim();
     final normalizedPath = objectPath.trim().replaceFirst(RegExp(r'^/+'), '');
+    final normalizedBucket = (bucket ?? SupabaseConfig.localModelBucket).trim();
     if (baseUrl.isEmpty || normalizedPath.isEmpty) {
       return '';
     }
     final normalizedBaseUrl = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
-    return '$normalizedBaseUrl/storage/v1/object/public/${SupabaseConfig.localModelBucket}/$normalizedPath';
+    return '$normalizedBaseUrl/storage/v1/object/public/$normalizedBucket/$normalizedPath';
   }
 
   String? _readString(Map raw, List<String> keys) {
@@ -286,5 +298,18 @@ class LocalModelCatalogService {
       return '';
     }
     return segments.last;
+  }
+
+  String? _inferBucketFromUrl(String url) {
+    final uri = Uri.tryParse(url);
+    final segments = uri?.pathSegments;
+    if (segments == null || segments.length < 5) {
+      return null;
+    }
+    final publicIndex = segments.indexOf('public');
+    if (publicIndex == -1 || publicIndex + 1 >= segments.length) {
+      return null;
+    }
+    return segments[publicIndex + 1];
   }
 }
