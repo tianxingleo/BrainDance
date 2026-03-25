@@ -1,0 +1,87 @@
+[
+  {
+    "case_id": "part17_obj_001",
+    "group": "object_lookup",
+    "question": "帮我找一下洛天依模型",
+    "expected_focus": ["洛天依"],
+    "priority": "high",
+    "notes": "实体名 + 泛后缀，观察 normalization 和 lexical supplement。"
+  },
+  {
+    "case_id": "part17_obj_002",
+    "group": "object_lookup",
+    "question": "找一下洛天依",
+    "expected_focus": ["洛天依"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_003",
+    "group": "object_lookup",
+    "question": "最近有没有洛天依相关的内容？",
+    "expected_focus": ["洛天依"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_004",
+    "group": "object_lookup",
+    "question": "最近有没有显示器相关的记录？",
+    "expected_focus": ["显示器"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_005",
+    "group": "object_lookup",
+    "question": "显示器内容",
+    "expected_focus": ["显示器"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17_obj_006",
+    "group": "object_lookup",
+    "question": "最近有笔记本电脑相关的画面吗？",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_007",
+    "group": "object_lookup",
+    "question": "笔记本电脑记录",
+    "expected_focus": ["笔记本电脑"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17_obj_008",
+    "group": "object_lookup",
+    "question": "最近拍到过地球仪吗？",
+    "expected_focus": ["地球仪"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_009",
+    "group": "object_lookup",
+    "question": "帮我找找手办相关的内容",
+    "expected_focus": ["手办"],
+    "priority": "high"
+  },
+  {
+    "case_id": "part17_obj_010",
+    "group": "object_lookup",
+    "question": "有没有书架相关的画面",
+    "expected_focus": ["书架"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17_obj_011",
+    "group": "object_lookup",
+    "question": "最近有没有看到沙发？",
+    "expected_focus": ["沙发"],
+    "priority": "medium"
+  },
+  {
+    "case_id": "part17_obj_012",
+    "group": "object_lookup",
+    "question": "有没有台面相关场景？",
+    "expected_focus": ["台面"],
+    "priority": "medium"
+  }
+]

@@ -1,0 +1,110 @@
+[
+  {
+    "case_id": "deploy_recent_001",
+    "group": "recent_hit",
+    "question": "我上周拍过什么？",
+    "source": "benchmark_recent_hit"
+  },
+  {
+    "case_id": "deploy_recent_002",
+    "group": "recent_hit",
+    "question": "最近都拍了哪些内容？",
+    "source": "benchmark_recent_hit"
+  },
+  {
+    "case_id": "deploy_recent_003",
+    "group": "recent_hit",
+    "question": "请按时间倒序概括我这边近期新增的拍摄记录。",
+    "source": "strict_recent_hit"
+  },
+  {
+    "case_id": "deploy_nohit_001",
+    "group": "no_hit",
+    "question": "昨天见过猫吗？",
+    "source": "benchmark_no_hit"
+  },
+  {
+    "case_id": "deploy_nohit_002",
+    "group": "no_hit",
+    "question": "我最近拍过咖啡机吗？",
+    "source": "benchmark_no_hit"
+  },
+  {
+    "case_id": "deploy_nohit_003",
+    "group": "no_hit",
+    "question": "帮我确认下，这段时间看到过吉他吗？",
+    "source": "strict_no_hit"
+  },
+  {
+    "case_id": "deploy_partial_001",
+    "group": "partial_coverage",
+    "question": "最近记录里同时有地毯和打印机吗？",
+    "source": "benchmark_partial"
+  },
+  {
+    "case_id": "deploy_partial_002",
+    "group": "partial_coverage",
+    "question": "最近和冰箱相关的内容有，书架也有吗？",
+    "source": "benchmark_partial"
+  },
+  {
+    "case_id": "deploy_partial_003",
+    "group": "partial_coverage",
+    "question": "这段时间看到的电视柜和咖啡机分别具体是什么？一句话告诉我。",
+    "source": "strict_partial"
+  },
+  {
+    "case_id": "deploy_must_001",
+    "group": "must_answer",
+    "question": "最近和鼠标垫有关的画面有哪些？",
+    "source": "benchmark_must_answer"
+  },
+  {
+    "case_id": "deploy_must_002",
+    "group": "must_answer",
+    "question": "请直接告诉我最近有没有拍到风景画。",
+    "source": "benchmark_must_answer"
+  },
+  {
+    "case_id": "deploy_must_003",
+    "group": "must_answer",
+    "question": "这段时间看到过哪些台面相关场景？",
+    "source": "strict_must_answer"
+  },
+  {
+    "case_id": "deploy_inventory_001",
+    "group": "inventory",
+    "question": "我最近生成过哪些模型？",
+    "source": "inventory_custom"
+  },
+  {
+    "case_id": "deploy_inventory_002",
+    "group": "inventory",
+    "question": "最近有没有新的三维模型？",
+    "source": "inventory_custom"
+  },
+  {
+    "case_id": "deploy_inventory_003",
+    "group": "inventory",
+    "question": "我现在手头有哪些模型资产？",
+    "source": "inventory_custom"
+  },
+  {
+    "case_id": "deploy_semantic_001",
+    "group": "abstract_semantic",
+    "question": "最近有没有偏理工科学习氛围的场景？",
+    "source": "semantic_custom"
+  },
+  {
+    "case_id": "deploy_semantic_002",
+    "group": "abstract_semantic",
+    "question": "有没有学习相关的场景？",
+    "source": "semantic_custom"
+  },
+  {
+    "case_id": "deploy_semantic_003",
+    "group": "abstract_semantic",
+    "question": "有没有像办公桌摆件那样的学习类摆件场景？",
+    "source": "semantic_custom"
+  }
+]

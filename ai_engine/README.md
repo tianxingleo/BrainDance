@@ -83,9 +83,30 @@ BrainDance AI Engine是一个时空记忆引擎，致力于通过AI技术将物�
 ## 📋 安装与部署
 
 ### 环境要求
-- **GPU**：NVIDIA RTX 30/40/50系列 (推荐12GB+显存，测试显卡: RTX5070)
-- **操作系统**：Linux (Ubuntu 22.04) / Windows WSL2
-- **CUDA版本**：11.8 或 12.x
+
+**当前测试/推荐设备（本机，2026-03-09 实测）**
+- **主机名**: hjbl40
+- **GPU**: NVIDIA L20 46GB × 2 (双卡)
+- **CPU**: Intel Xeon Platinum 8260 × 2 (双路，96 线程)
+- **内存**: 503GiB（约 512GB）
+- **操作系统**: Linux (Ubuntu 22.04.5 LTS)
+- **CUDA版本**: 12.x（驱动 570.211.01）
+
+**最低配置**
+- **GPU**: NVIDIA RTX 5070 12GB 或更高
+- **CPU**: Intel Core i5-14600KF 或同级处理器
+- **内存**: 64GB RAM
+- **操作系统**: Linux (Ubuntu 22.04) / Windows WSL2
+- **CUDA版本**: 11.8 或 12.x
+
+> 说明：最低配置基线为 `i5-14600KF + 64GB + RTX 5070 12GB`（CPU 为 i5，不是 i7）。
+
+**推荐配置**
+- **GPU**: NVIDIA L20 46GB × 2 (双卡)
+- **CPU**: Intel Xeon Platinum 8260 × 2 (双路)
+- **内存**: 512GB RAM
+- **操作系统**: Linux (Ubuntu 22.04)
+- **CUDA版本**: 12.x
 
 ### 快速开始
 
@@ -97,40 +118,50 @@ cd BrainDance/ai_engine/3dgs
 
 > ⚠️ **重要**：所有后续命令都在 `ai_engine/3dgs` 目录下执行
 
-2. **创建conda环境**
+2. **创建并激活环境**
 ```bash
-conda create -n braindance python=3.10
-conda activate braindance
+conda create -n Braindance python=3.10
+conda activate Braindance
 ```
 
-3. **安装PyTorch (根据CUDA版本)**
+3. **安装依赖（以 Braindance 实际环境为准）**
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-```
-
-4. **安装项目依赖**
-```bash
+# 最小运行依赖
 pip install -r requirements.txt
 ```
 
-或者逐个安装：
+完整依赖（系统工具 + Python 全量依赖 + 编译/非编译分类 + nerfstudio patch）统一见：
+
+- `ai_engine/3dgs/ENVIRONMENT.md`
+
+4. **应用 nerfstudio patch（推荐）**
 ```bash
-pip install nerfstudio supabase python-dotenv openai ultralytics plyfile opencv-python dashscope
+SITE_PACKAGES=$(python -c "import site; print(site.getusersitepackages())")
+cd "$SITE_PACKAGES"
+patch -p0 < /path/to/BrainDance/patches/0002_nerfstudio_eval_utils_weights_only.patch
 ```
 
 5. **配置环境变量**
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填入Supabase和AI服务的API密钥
+# 编辑 .env 文件，填入 Supabase 和 AI 服务的 API 密钥
+# 如需调整训练参数、仓库路径、交付格式，编辑 ai_engine/3dgs/config/default.toml
 ```
 
 必要配置项：
 - `SUPABASE_URL`: Supabase项目URL
 - `SUPABASE_KEY`: Supabase服务角色密钥
 - `DASHSCOPE_API_KEY`: 阿里云DashScope API密钥（用于Qwen-VL和embedding）
-- `MAX_IMAGES`: 单次处理最大图片数量（默认500）
-- `TRAINING_ITERATIONS`: 训练迭代次数（默认15000）
-- `MIN_QUALITY_SCORE`: AI质检最低分（默认40）
+
+默认工程参数位置：
+- `ai_engine/3dgs/config/default.toml`: 仓库共享的非敏感默认配置
+- `ai_engine/3dgs/config/local.toml`: 本机覆盖配置（可自行创建）
+
+常见可调参数：
+- `training.max_images`: 单次处理最大图片数量
+- `training.training_iterations`: 训练迭代次数
+- `training.min_quality_score`: AI 质检最低分
+- `training.mapper_type`: 默认重建路线
 
 ### Supabase配置
 1. 启动本地Supabase环境

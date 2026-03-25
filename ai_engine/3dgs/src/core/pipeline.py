@@ -70,10 +70,24 @@ def run_pipeline(cfg: PipelineConfig, log_callback=None):
     temp_dir = cfg.project_dir / "temp_extract"
     temp_dir.mkdir(parents=True, exist_ok=True)
     log(f"    -> 正在进行 FFmpeg 抽帧...")
-    subprocess.run(["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
-                    "-vf", "fps=10", "-q:v", "2", 
-                    str(temp_dir / "frame_%05d.jpg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    log(f"    -> FFmpeg 抽帧完成")
+    
+    # [修改] 捕获 FFmpeg 错误输出，以便排查抽帧失败的具体原因
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(cfg.project_dir / cfg.video_path.name), 
+             "-vf", "fps=10", "-q:v", "2",
+             "-map_metadata", "-1",  # 清除 EXIF，防止 COLMAP 读取原始视频 w/h 导致与实际帧尺寸不匹配
+             str(temp_dir / "frame_%05d.jpg")],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        log(f"    -> FFmpeg 抽帧完成")
+    except subprocess.CalledProcessError as e:
+        log(f"❌ FFmpeg 抽帧失败! 错误码: {e.returncode}")
+        log(f"❌ 错误详情: {e.stderr}")
+        raise RuntimeError(f"FFmpeg extraction failed: {e.stderr}")
     
     # 清洗
     img_processor.smart_filter_blurry_images(temp_dir, keep_ratio=0.85)

@@ -116,7 +116,15 @@ The system consists of four parts, decoupled through **Supabase**:
     - **Single Image**: Support SAM3D-based single-image 3DGS generation without video.
     - **Understanding**: Call multimodal large models (Qwen-VL) for scene understanding and auto-tagging.
 
+### 🧪 On-Device QA and Edge LLM Fine-tuning
 
+To achieve faster and privacy-preserving spatial retrieval interactions on mobile and edge devices, we have built a local QA pipeline based on Qwen3, bypassing the need for cloud LLMs:
+
+- **Edge-Cloud Hybrid RAG**: Combines local quantized models (GGUF) with retrieval augmentation, supporting fast intent understanding and spatial anchor localization.
+- **Scenario-Specific Fine-tuning**: Parameter-Efficient Fine-Tuning (LoRA) for spatial queries, environment descriptions, and multi-turn dialogues, improving inference accuracy in proprietary scenarios while keeping computational costs lightweight.
+- **Local Deployment & Validation**: Implemented Q4/Q5 Importance Matrix (imatrix) quantization and strict zero-leakage evaluation, ensuring stable on-device inference.
+
+> For comprehensive documentation on model exploration, fine-tuning workflows, benchmarks, and technical evolution records extending from Part 1 to Part 30, please refer to the documentation in `docs/` and the `ai_engine/finetune_qwen3/` directory.
 
 ------
 
@@ -145,6 +153,7 @@ BrainDance/
 │   │   ├── requirements.txt  #   - Python Dependencies
 │   │   └── main.py           #   - Program Entry Point
 │   ├── demo/              #   - Demo Scripts and Test Data
+│   ├── finetune_qwen3/    #   - Qwen3 local QA fine-tuning track, evaluation & deployment pipeline
 │   ├── models/            #   - AI Model Cache Directory
 │   ├── rag/               #   - RAG Data Processing
 │   └── log/               #   - Log Files
@@ -155,7 +164,13 @@ BrainDance/
 │   ├── config.toml        #   - Supabase Local Development Config
 │   └── README.md          #   - ☁️ Backend Deployment Guide
 │
+├── dashboard/             # [Web] System Monitoring Dashboard (Vue 3 + Vite)
+│   ├── src/               #   - Frontend source (Supabase realtime subscriptions)
+│   ├── .env.example       #   - Supabase connection template
+│   └── README.md          #   - Local run and deployment guide
+│
 ├── docs/                  # [Doc] Project Documentation
+│   ├── 04-本地问答与微调/     #   - Local QA Fine-tuning Logs (Part 1-30)
 │   ├── API_DOC.md         #   - API Interface Documentation
 │   ├── BrainDance Project Collaboration Specification and Development Agreement (v1.0).md  #   - Development Specifications
 │   ├── 待办/               #   - TODO Items
@@ -167,6 +182,7 @@ BrainDance/
 > **Note**:
 > - `app/` (Flutter Mobile Client) is under development and not yet included in this repository
 > - `supabase/functions/` (Search Edge Functions) is under development
+> - `dashboard/` is a standalone web dashboard and can be statically deployed
 
 ## 🚀 Quick Start
 
@@ -181,19 +197,44 @@ BrainDance/
 #### Mobile Test Devices
 
 - **OPPO Find X8**
-- **HUAWEI Mate 30 Pro**
+- **OPPO Reno 14**
 
 #### Server Configuration
 
-- **CPU**: Intel Core i7-12600KF
+- **Current AI Engine Test/Recommended Server (this machine, verified on 2026-03-09)**
+- **Hostname**: hjbl40
+- **CPU**: Intel Xeon Platinum 8260 × 2 (dual socket, 96 threads)
+- **RAM**: 503GiB (about 512GB)
+- **GPU**: NVIDIA L20 46GB × 2
+- **OS**: Ubuntu 22.04.5 LTS (Kernel 6.8.0-100-generic)
+
+**AI Engine Minimum Configuration (compatibility baseline)**
+- **CPU**: Intel Core i5-14600KF (not i7)
 - **RAM**: 64GB
-- **GPU**: NVIDIA RTX 5070 12GB (Blackwell)
-- **OS**: Ubuntu on WSL2 (Windows 11)
+- **GPU**: NVIDIA RTX 5070 12GB
 
 
 ### Deployment Steps
 
 This project supports **fully local deployment** and can run completely without cloud accounts.
+
+#### 0. Get Full Source (Submodules + LFS)
+
+```bash
+# Install and initialize Git LFS (first time only)
+git lfs install
+
+# Clone main repo with all submodules
+git clone --recurse-submodules https://github.com/tianxingleo/BrainDance.git
+cd BrainDance
+
+# Pull LFS objects in main repo and every submodule
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+
+# Verify submodule status
+git submodule status --recursive
+```
 
 #### 1. Start Infrastructure (Supabase Local)
 
@@ -221,8 +262,17 @@ Worker is responsible for monitoring local Supabase task queues and calling GPU 
 ```bash
 cd ai_engine
 
-# 1. Install dependencies
+# 1. Install dependencies (including 3DGS submodules)
+cd ..
+git submodule sync --recursive
+git submodule update --init --recursive
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
+cd ai_engine/3dgs
 pip install -r requirements.txt
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
+cd ../../ai_engine
 
 # 2. Configure environment variables (copy example and fill in URL/Key from previous step)
 cp .env.example .env
@@ -339,6 +389,7 @@ This project is an exploration standing on the shoulders of giants. Core algorit
 
 #### Rendering & Viewer
 
+- **Special Thanks**: Special thanks to **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** for its continued contribution to the web 3DGS ecosystem.
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: Three.js-based web viewer, inspiration for our mobile WebView rendering.
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: Another excellent WebGL implementation, providing early conceptual references.
 

@@ -121,9 +121,11 @@ cd ai_engine/3dgs
 cat >> .env <<EOF
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-service-key
-SUPABASE_BUCKET=braindance-assets
 EOF
 ```
+
+`SUPABASE_BUCKET`、`SUPABASE_TABLE` 等非敏感默认值现在来自 `config/default.toml`。
+如果你需要覆盖默认值，优先修改 `config/local.toml`，不要继续把工程参数追加到 `.env`。
 
 **步骤 2:** 在 Supabase 创建任务
 ```sql
@@ -159,4 +161,3 @@ A: 检查 Supabase 连接和任务状态是否为 `pending`
 A:
 - 本地模式：直接输出到控制台
 - Worker 模式：日志同步到 `processing_tasks.logs` 字段
-

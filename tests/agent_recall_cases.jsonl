@@ -1,0 +1,4 @@
+{"query":"黑色耳机在哪","intent":"object_lookup","expected_action_types":["open_scene","fly_to_pose"],"notes":"基础找物体，要求返回场景和视角动作。"}
+{"query":"窗边那个台灯还在吗","intent":"location_lookup","expected_action_types":["open_scene","fly_to_pose"],"notes":"位置提示词检索，要求返回证据视角。"}
+{"query":"上周拍到的红色杯子","intent":"time_filtered_search","expected_action_types":["open_scene","fly_to_pose"],"notes":"带相对时间过滤的检索。"}
+{"query":"最像厨房角落堆纸箱的三个空间","intent":"scene_similarity_search","expected_action_types":["open_scene"],"notes":"模糊场景描述检索，可无精确 pose。"}

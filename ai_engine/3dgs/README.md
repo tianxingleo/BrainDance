@@ -15,6 +15,7 @@
 - [快速开始](#-快速开始) - 5 分钟上手
 - [环境准备](#-环境准备) - 硬件和软件要求
 - [运行模式](#-运行模式) - 本地/云端/单图模式
+- [论文 Pipeline 使用指南](#-论文-pipeline-使用指南新增) - DA3+SuGaR / DA3+2DGS / Sparse2DGS
 - [工作流原理](#-工作流原理) - 系统架构和数据流
 
 **适合读者**：运维人员、新用户、快速部署者
@@ -42,6 +43,8 @@
 BrainDance/
 ├── main.py                    # [入口] 程序启动入口 (模式选择器)
 ├── .env                       # [配置] 环境变量 (Supabase Key 等敏感信息)
+├── config/
+│   └── default.toml           # [配置] 非敏感默认工程参数
 ├── src/
 │   ├── config.py              # [配置] PipelineConfig 配置类定义
 │   ├── core/                  # [核心逻辑]
@@ -64,41 +67,99 @@ BrainDance/
 
 ### 1. 硬件要求
 
-* **GPU**: NVIDIA RTX 30/40/50 系列 (显存 >= 8GB)
+**最低配置**
+* **GPU**: NVIDIA RTX 5070 12GB 或更高
+* **CPU**: Intel Core i5-14600KF 或同级处理器
+* **RAM**: 64GB
 * **OS**: Linux (推荐 Ubuntu 22.04) 或 Windows WSL2
 * **CUDA**: 11.8 或 12.x
 
+**推荐配置（生产环境）**
+* **GPU**: NVIDIA L20 45GB × 2 (双卡配置)
+* **CPU**: Intel Xeon Platinum 8260 × 2 (双路配置)
+* **RAM**: 512GB
+* **OS**: Linux (Ubuntu 22.04)
+* **CUDA**: 12.x
+
 ### 2. 软件依赖
 
-确保已安装 `nerfstudio` 和 `ffmpeg`。
+依赖以 `Braindance` 实际环境为准，统一文档见：
+
+- `ENVIRONMENT.md`（系统版本、COLMAP/GLOMAP/FFmpeg、全量 Python 依赖、编译/非编译分类、`nerfstudio` 子模块安装）
+
+基础安装流程：
 
 ```bash
 # 1. 创建并激活 Conda 环境
-conda create -n braindance python=3.10
-conda activate braindance
+conda create -n Braindance python=3.10
+conda activate Braindance
 
-# 2. 安装 PyTorch (根据你的 CUDA 版本调整)
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# 2. 拉取子模块（包含项目 fork 的 nerfstudio）
+cd /path/to/BrainDance
+git submodule sync --recursive
+git submodule update --init --recursive
+git lfs pull
+git submodule foreach --recursive 'git lfs pull || true'
 
-# 3. 安装依赖库
-pip install nerfstudio supabase python-dotenv
+# 3. 安装最小依赖
+cd ai_engine/3dgs
+pip install -r requirements.txt
 
+# 4. 强制使用仓库内 nerfstudio（已包含 weights_only=False 修复）
+pip uninstall -y nerfstudio
+pip install -e src/libs/nerfstudio
+
+# 5. 验证导入路径
+python -c "import nerfstudio, pathlib; print(pathlib.Path(nerfstudio.__file__).resolve())"
+# 预期路径包含: ai_engine/3dgs/src/libs/nerfstudio
 ```
 
-### 3. 环境变量配置 (.env)
+### 3. 配置文件说明
 
-在项目根目录下新建 `.env` 文件，填入你的 Supabase 配置：
+当前配置分为两层：
+
+1. `.env`
+   存放密钥和少量部署差异，例如 `SUPABASE_KEY`、`DASHSCOPE_API_KEY`
+2. `config/default.toml`
+   存放可版本化的默认工程参数，例如训练步数、最大图片数、仓库路径、交付格式
+
+推荐初始化方式：
+
+```bash
+cp .env.example .env
+# 如需修改默认工程参数，编辑 config/default.toml
+# 如需保留个人机器差异，新增 config/local.toml（不会被仓库默认覆盖）
+```
+
+`.env` 最小示例：
 
 ```ini
-# Supabase 连接信息
+# 密钥与部署变量
 SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_KEY=your_service_role_key_here
-
-# 存储桶与表名配置
-SUPABASE_BUCKET=braindance-assets
-SUPABASE_TABLE=processing_tasks
-
+DASHSCOPE_API_KEY=your_dashscope_key_here
 ```
+
+`config/default.toml` 示例片段：
+
+```toml
+[training]
+training_iterations = 15000
+max_images = 300
+mapper_type = "glomap"
+
+[supabase]
+bucket = "braindance-assets"
+table = "processing_tasks"
+```
+
+配置优先级：
+
+1. `config/default.toml`
+2. `config/local.toml`
+3. `.env` / 系统环境变量
+
+也就是说，环境变量会覆盖 `TOML` 中的默认值。
 
 ## 💾 数据库设计 (Supabase)
 
@@ -152,6 +213,86 @@ python main.py /path/to/your/video.mp4
 
 > 💿 启动本地模式: video.mp4
 > ... (开始直接运行 Pipeline)
+
+## 🧪 论文 Pipeline 使用指南（新增）
+
+下面三条是近期新增的“论文复现/组合型”流水线，统一通过 `processing_tasks.task_type` 触发。
+
+### 1) `da3_sugar` / `da3+sugar`（DA3 + SuGaR）
+
+- 用途：先用 DA3 做位姿与深度，再由 SuGaR 使用 mesh/SDF 约束 3DGS；通常质量更高，但速度更慢。
+- 输入：`{user_id}/{scene_id}/raw/video.mp4`
+- 典型场景：室内空间、需要后续 mesh/refinement 的资产化流程。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `regularization` | `dn_consistency` | SuGaR 正则类型：`dn_consistency` / `density` / `sdf` |
+| `refinement_time` | `short` | 精炼时长：`short` / `medium` / `long` |
+| `fast_mode` | `true` | 快速模式，通常更快产出可交付 PLY |
+| `high_poly` | `false` | 是否启用更高面数相关流程 |
+| `gpu_index` | 环境默认 | 映射到 `CUDA_VISIBLE_DEVICES` |
+| `da3_repo_path` | 自动探测 | DA3 仓库路径（需含 `da3_to_sugar_pipeline.sh`） |
+| `sugar_repo_path` | 自动探测 | SuGaR 仓库路径（需含 `train_fast.py`） |
+
+### 2) `da3_2dgs` / `da3+2dgs`（DA3 + 2DGS）
+
+- 用途：少量图片输入，先 DA3 解算，再用 2DGS 训练；可视为 Nerfstudio 3DGS 的替代方案，在一定程度上质量更高，输出 2DGS。
+- 输入优先级：`raw/images.zip`（推荐） -> 下载失败时回退 `raw/image.png`
+- 典型场景：移动端多张照片上传、希望用较少图像得到可用点云。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `iterations` | `7000` | 2DGS 训练步数（质量优先可提到 30k） |
+| `max_images` | `60` | 最大参与训练图片数 |
+| `keep_ratio` | `1.0` | 输入保留比例（0~1） |
+| `gpu_index` | `1` | 训练显卡索引 |
+| `enable_scene_analysis` | `false` | 是否先做 AI 质检 |
+| `render_after_train` | `false` | 是否训练后调用 `render.py` |
+| `dgs_repo_path` | 自动探测 | 2DGS 仓库路径（需含 `train.py`） |
+
+### 3) `sparse2dgs`（Sparse2DGS）
+
+- 用途：少量图片输入 + COLMAP 稀疏重建 + Sparse2DGS 训练，输出 2DGS。
+- 输入：优先 `{user_id}/{scene_id}/raw/images.zip`，若不存在则回退 `{user_id}/{scene_id}/raw/video.mp4`
+- 最低要求：至少 3 张有效图片（少于 3 张会直接失败）。
+- 典型场景：照片数量有限，但希望比常规少图流程有更强几何约束。
+- 视频输入行为：从视频中随机抽取若干帧，再复用同一套 COLMAP + Sparse2DGS 流程。
+
+常用参数（写入 `task_params`）：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `iterations` | `7000` | Sparse2DGS 训练步数 |
+| `resolution` | `2` | 对应 `train.py -r`，值越小分辨率越高、耗时更大 |
+| `depth_ratio` | `1.0` | 深度损失权重比例 |
+| `lambda_dist` | `1000` | 几何约束强度 |
+| `conda_env` | `Braindance` | 用于 `conda run -n` 的环境名 |
+| `sparse2dgs_repo_path` | `/ltx-data/Sparse2DGS` | Sparse2DGS 仓库路径 |
+| `colmap_matcher` | `exhaustive_matcher` | COLMAP 匹配器（少图推荐 exhaustive） |
+| `colmap_mapper` | `mapper` | COLMAP mapper（失败时会回退 `mapper`） |
+| `video_sample_count` | `12` | 视频输入时随机抽取的帧数 |
+| `video_random_seed` | `42` | 视频随机抽帧种子，便于复现 |
+| `min_video_frame_gap` | `3` | 随机抽帧时的最小帧间隔 |
+| `video_max_edge` | `0` | 视频抽帧后缩放长边上限，`0` 表示不缩放 |
+
+### 选型建议（实战）
+
+| 目标 | 推荐 task_type | 原因 |
+| --- | --- | --- |
+| 视频输入，追求更高质量且可接受更慢速度 | `da3_sugar` | SuGaR 的 mesh/SDF 约束能提升质量，但耗时更高 |
+| 少图（2~60 张），希望替代 Nerfstudio 3DGS 并输出 2DGS | `da3_2dgs` | 2DGS 作为替代方案，在一定程度上质量更高 |
+| 少量图片直接生成 2DGS | `sparse2dgs` | 针对少图输入的 Sparse2DGS 路线 |
+
+### 前端接入最小步骤
+
+1. 上传素材到标准路径（`video.mp4` / `images.zip` / `image.png`）。
+2. 向 `processing_tasks` 插入任务：`status='pending'` + 正确 `task_type`。
+3. 可选传入 `task_params` 调参（建议先默认参数跑通，再微调）。
+4. 监听 `status` 和 `logs`，完成后从 `output/point_cloud.*` 获取交付文件。
 
 ## 🔄 工作流原理
 
@@ -309,4 +450,3 @@ python main.py /path/to/your/video.mp4
 ---
 
 **BrainDance Team © 2026**
-
