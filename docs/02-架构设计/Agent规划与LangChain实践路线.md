@@ -162,6 +162,12 @@ type AgentRecallResponse = {
 
 在缺少稳定 `place_id / memory_thread_id / alignment` 抽象前，当前能力更接近“按时间过滤搜索”，还不足以稳定支持“同一空间跨时间比较”。
 
+当前仓库显示状态：
+
+- 已有 `agent-recall`，用于稳定返回 `answer + evidence + actions`。
+- 已有 `spatial-search-agent`，用于 LangChain TS 风格的空间检索编排。
+- 新增 `time-compare-agent` 的最小可用版时，应明确其能力边界是“同主题查询 + 双时间窗口检索 + 元数据差分”，而不是点位级配准后的强时序对比。
+
 ### P3：第二大脑 / 长期记忆图谱
 
 属于长期方向，需要建立跨空间、跨时间的长期状态层，不作为近期交付目标。
@@ -193,12 +199,24 @@ type AgentRecallResponse = {
    - 带时间过滤
    - 模糊空间描述
 
+当前显示状态补充：
+
+- `agent-recall/` 已落地，并复用了 `search-models/shared.ts`。
+- `searchSpace(query, threshold?)` 已实现。
+- `buildViewAction(...)` 已以结果驱动的形式实现。
+- `getSceneAsset(sceneId)` 目前未按“独立按 sceneId 读取”接口落地，而是以从搜索结果提取 evidence 的方式承接。
+
 ### 5.3 本阶段的完成标志
 
 - 前端可以调用 `agent-recall`。
 - `agent-recall` 可以复用 `search-models`。
 - 接口返回结构化证据与动作。
 - 至少有一套回归题集可重复验证。
+
+当前显示状态：
+
+- 上述目标已基本达成。
+- 但文档原始目录设计与当前实现已有漂移，仓库中同时存在 `agent-recall` 与 `spatial-search-agent` 两条在线链路。
 
 ### 5.4 本阶段不要做什么
 
@@ -228,6 +246,13 @@ type AgentRecallResponse = {
 - `location_lookup`
 - `time_filtered_search`
 - `scene_similarity_search`
+
+当前显示状态：
+
+- `spatial-search-agent` 当前以 `object / location / time / scene` 四类目标类型实现。
+- 当前已注册的工具为 `pose_semantic_search`、`scene_metadata_search`、`recent_scene_search`。
+- 其中 `time_filtered_search` 被时间参数和 `recent_scene_search` 部分覆盖。
+- `scene_similarity_search` 尚未以独立 tool 名称落地。
 
 示例：
 
@@ -276,6 +301,12 @@ LangChain TS 只负责三件事：
 - 前端可以消费 `open_scene` / `fly_to_pose`。
 - 至少能演示 5 个真实查询样例。
 
+当前显示状态：
+
+- `agent-recall` 已可稳定返回 `open_scene` / `fly_to_pose`。
+- `spatial-search-agent` 返回的是 `open_model` / `fly_to_pose` / `highlight_hotspot` 这一组更贴近 Viewer 的动作。
+- 文档中的动作名与当前真实实现并不完全一致，后续应收敛到同一协议。
+
 ### 第三步：扩展到时间对比与记忆整理
 
 ### 5.11 目标
@@ -293,6 +324,11 @@ LangChain TS 只负责三件事：
 
 在这层没补齐前，不建议直接承诺强时序比较体验。
 
+当前显示状态：
+
+- 上述字段在当前仓库的 Supabase schema 中仍未出现。
+- 因此当前时间对比能力只能做“候选场景级别的近似对比”，不能对外宣称为严格的同一空间配准比较。
+
 ### 5.13 第三步建议分成两条线
 
 A. 时间对比 Agent
@@ -300,6 +336,11 @@ A. 时间对比 Agent
 - `listPlaceVersions(placeId)`
 - `compareTwoScans(scanA, scanB)`
 - `summarizeSpatialDiff(diffResult)`
+
+当前显示状态：
+
+- 这 3 个工具在当前仓库里仍未按该接口完成。
+- 当前更现实的最小实现是新增 `time-compare-agent/`，通过双时间窗口搜索、候选选择和标签/描述差分生成回答与动作。
 
 返回内容应包括：
 
@@ -335,25 +376,38 @@ B. 记忆整理 Agent
 supabase/functions/
 ├── search-models/
 │   └── index.ts
-└── agent-recall/
+├── agent-recall/
+│   ├── index.ts
+│   ├── tools/
+│   │   ├── searchSpace.ts
+│   │   ├── getSceneAsset.ts
+│   │   └── buildViewAction.ts
+│   ├── prompts/
+│   │   └── recallSystemPrompt.ts
+│   ├── schemas/
+│   │   ├── request.ts
+│   │   └── response.ts
+│   └── agent/
+│       └── recallAgent.ts
+├── spatial-search-agent/
+│   ├── index.ts
+│   ├── agent.ts
+│   └── test.ts
+└── time-compare-agent/
     ├── index.ts
-    ├── tools/
-    │   ├── searchSpace.ts
-    │   ├── getSceneAsset.ts
-    │   └── buildViewAction.ts
-    ├── prompts/
-    │   └── recallSystemPrompt.ts
+    ├── agent.ts
     ├── schemas/
     │   ├── request.ts
     │   └── response.ts
-    └── agent/
-        └── recallAgent.ts
+    └── test.ts
 ```
 
 对应职责边界如下：
 
 - `search-models`：时间解析、Embedding、向量检索
 - `agent-recall`：意图路由、工具调用、结果组织、动作输出
+- `spatial-search-agent`：面向 LangChain TS 的空间检索编排与 Viewer 动作建议
+- `time-compare-agent`：面向双时间窗口的最小可用时间对比
 - Python Worker：重建、打标、Embedding 写入、离线任务
 - Flutter/Web：渲染场景、执行动作、展示证据
 
