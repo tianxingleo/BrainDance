@@ -75,7 +75,12 @@ supabase start
 
 ## Storage 约定
 
-当前项目默认围绕 `braindance-assets` bucket 工作，路径约定与根 README 保持一致：
+当前项目当前使用两个 Storage bucket：
+
+- `braindance-assets`：3DGS 任务素材与输出
+- `braindance-models`：端侧模型发布与分发
+
+其中 `braindance-assets` 路径约定与根 README 保持一致：
 
 ```text
 {user_id}/{scene_id}/raw/video.mp4
@@ -89,11 +94,30 @@ supabase start
 {user_id}/{scene_id}/output/transforms.json
 ```
 
+`braindance-models` 当前发布目录约定如下：
+
+```text
+catalog/model_catalog.json
+
+releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
+releases/qwen3-1.7b-braindance-q5-k-m.gguf
+releases/qwen3-1.7b-braindance-q4-k-m.gguf
+releases/qwen3-1.7b-braindance-merged/*
+releases/qwen3-0.6b-braindance-round1/*
+```
+
+其中：
+
+- `catalog/model_catalog.json` 用于记录默认推荐模型与候选用途
+- Flutter Recall 本地 AI 默认下载对象为 `releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf`
+- `qwen3-1.7b-braindance-merged/` 与 `qwen3-0.6b-braindance-round1/` 保留为完整发布目录，便于后续做 HF / LoRA 侧部署实验
+
 注意：
 
-- 现有策略和代码都默认使用 `braindance-assets`
+- Worker 与 Dashboard 的现有资产路径默认仍围绕 `braindance-assets`
+- Flutter Recall 本地 AI 默认模型下载入口已切到 `braindance-models`
 - 当前仓库中的 `seed.sql` 为空，不应假设 bucket 一定会被自动创建
-- 如果本地环境里还没有这个 bucket，需要在 Studio 或脚本中手动创建
+- 如果本地环境里还没有这些 bucket，需要在 Studio 或脚本中手动创建
 
 ## Edge Functions
 

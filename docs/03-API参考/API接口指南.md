@@ -399,7 +399,11 @@ await supabase
 ## 4. 文件存储 (Storage)
 
 ### 4.1 存储桶配置
-- **Bucket**: `braindance-assets`
+- **Bucket 1**: `braindance-assets`
+- **用途**: 3D 生成任务素材与输出
+- **权限**: Public (公开读取)
+- **Bucket 2**: `braindance-models`
+- **用途**: Flutter Recall 本地 AI 模型发布与下载
 - **权限**: Public (公开读取)
 
 ### 4.2 目录结构规范
@@ -431,8 +435,23 @@ graph TD
 
 > 注：`webgl_poses.json` 与 `output/images/*` 主要由视频流水线（含空间锚点提取）生成，单图任务可能只产出 `point_cloud.ply`。
 
+`braindance-models` 当前目录约定：
+
+```text
+catalog/model_catalog.json
+
+releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
+releases/qwen3-1.7b-braindance-q5-k-m.gguf
+releases/qwen3-1.7b-braindance-q4-k-m.gguf
+releases/qwen3-1.7b-braindance-merged/*
+releases/qwen3-0.6b-braindance-round1/*
+```
+
 ### 4.3 下载链接拼接
 `{Supabase_URL}/storage/v1/object/public/braindance-assets/{user_id}/{scene_id}/output/point_cloud.ply`
+
+Flutter Recall 本地 AI 默认模型下载链接：
+`{Supabase_URL}/storage/v1/object/public/braindance-models/releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf`
 
 ---
 
