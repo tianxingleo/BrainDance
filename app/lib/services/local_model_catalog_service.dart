@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../configs/supabase_config.dart';
 
@@ -33,6 +34,8 @@ class LocalModelCatalogService {
 
   Future<List<LocalModelCatalogItem>> fetchCatalog() async {
     final items = <LocalModelCatalogItem>[];
+    
+    // 从 catalog/model_catalog.json 获取
     final catalogUrl = _buildPublicUrl(_catalogObjectPath);
     if (catalogUrl.isNotEmpty) {
       try {
@@ -43,9 +46,49 @@ class LocalModelCatalogService {
         final decoded = jsonDecode(response.data.toString());
         items.addAll(_parseCatalog(decoded));
       } catch (_) {
-        // 读取 catalog 失败时回退到默认模型，避免阻断 Recall 页使用。
+        // 读取 catalog 失败时继续尝试其他方式
       }
     }
+
+    // 自动扫描 Supabase 存储桶中的 .gguf 文件
+    try {
+      final supabase = Supabase.instance.client;
+      final bucket = SupabaseConfig.localModelBucket;
+      
+      final pathsToScan = [''];
+      final scannedPaths = <String>{};
+      
+      while (pathsToScan.isNotEmpty) {
+        final currentPath = pathsToScan.removeLast();
+        if (scannedPaths.contains(currentPath)) continue;
+        scannedPaths.add(currentPath);
+        
+        try {
+          final objects = await supabase.storage.from(bucket).list(path: currentPath);
+          for (final obj in objects) {
+            if (obj.name == '.emptyFolderPlaceholder') continue;
+            
+            final objPath = currentPath.isEmpty ? obj.name : '$currentPath/${obj.name}';
+            
+            // 没有metadata且没有扩展名的通常是文件夹，不过可靠一点可以这样判断
+            if (obj.id == null || obj.metadata == null) {
+              pathsToScan.add(objPath);
+            } else if (obj.name.toLowerCase().endsWith('.gguf')) {
+              final url = _buildPublicUrl(objPath);
+              items.add(LocalModelCatalogItem(
+                id: objPath,
+                name: obj.name,
+                downloadUrl: url,
+                fileName: obj.name,
+                description: 'Supabase Storage: $objPath',
+                sizeBytes: obj.metadata?['size'] as int?,
+                isRecommended: url == SupabaseConfig.localModelUrl,
+              ));
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
 
     if (items.isEmpty) {
       items.add(_buildDefaultItem());

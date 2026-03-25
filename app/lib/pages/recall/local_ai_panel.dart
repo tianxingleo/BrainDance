@@ -196,39 +196,106 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           ),
           if (localModelCatalog.isNotEmpty) ...[
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue:
-                  localModelCatalog.any(
-                    (item) => item.downloadUrl == selectedLocalModelUrl,
-                  )
-                  ? selectedLocalModelUrl
-                  : null,
-              dropdownColor: isDark ? const Color(0xFF17202B) : Colors.white,
-              decoration: InputDecoration(
-                labelText: 'Supabase 模型仓',
-                filled: true,
-                fillColor: Colors.transparent,
-                border: OutlineInputBorder(
+            InkWell(
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: isDark ? const Color(0xFF1C2331) : Colors.white,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  builder: (BuildContext ctx) {
+                    return SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '选择模型',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: textColor,
+                                  ),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  icon: Icon(Icons.close, color: hintColor),
+                                  onPressed: () => Navigator.pop(ctx),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          Flexible(
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: localModelCatalog.length,
+                              itemBuilder: (context, index) {
+                                final item = localModelCatalog[index];
+                                final isSelected = item.downloadUrl == selectedLocalModelUrl;
+                                final labels = <String>[
+                                  if (item.isRecommended) '推荐',
+                                  if (downloadedLocalModelUrls.contains(item.downloadUrl)) '已下载',
+                                  if (activeLocalModelUrl == item.downloadUrl) '当前使用',
+                                ];
+                                final suffix = labels.isEmpty ? '' : ' · ${labels.join(' · ')}';
+                                return ListTile(
+                                  title: Text(
+                                    '${item.name}$suffix',
+                                    style: TextStyle(
+                                      color: isSelected ? TDTheme.of(context).brandNormalColor : textColor,
+                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  trailing: isSelected ? Icon(Icons.check, color: TDTheme.of(context).brandNormalColor) : null,
+                                  onTap: () {
+                                    Navigator.pop(ctx);
+                                    onSelectCatalogModel(item.downloadUrl);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  border: Border.all(color: hintColor.withValues(alpha: 0.3)),
                   borderRadius: BorderRadius.circular(16),
                 ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selectedCatalogModel?.name ?? 'Supabase 模型仓 - 选择模型',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 15,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_drop_down,
+                      color: hintColor,
+                    ),
+                  ],
+                ),
               ),
-              items: localModelCatalog.map((item) {
-                final labels = <String>[
-                  if (item.isRecommended) '推荐',
-                  if (downloadedLocalModelUrls.contains(item.downloadUrl))
-                    '已下载',
-                  if (activeLocalModelUrl == item.downloadUrl) '当前使用',
-                ];
-                final suffix = labels.isEmpty ? '' : ' · ${labels.join(' · ')}';
-                return DropdownMenuItem<String>(
-                  value: item.downloadUrl,
-                  child: Text(
-                    '${item.name}$suffix',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
-              onChanged: onSelectCatalogModel,
             ),
           ],
           if (selectedCatalogModel != null) ...[
