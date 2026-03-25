@@ -20,6 +20,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
+part 'record/record_ui_widgets.dart';
+part 'record/record_motion_guidance_card.dart';
 
 const double _kIdealAccelMin = 0.08;
 const double _kIdealAccelMax = 0.65;
@@ -66,7 +68,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _linearAccel = 0;
   double _smoothedLinearAccel = 0;
   double _peakLinearAccel = 0;
-  double _accelDelta = 0;
   double _motionMeter = 0;
   String _motionHint = textLocalize('reco_motion_steady');
   String _motionDetail = textLocalize('reco_motion_detail');
@@ -74,9 +75,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
   _MotionState _motionState = _MotionState.steady;
-
-  double _yaw = 0;
-  double _pitch = 0;
 
   final List<double> _accelHistory = [];
 
@@ -283,12 +281,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       yaw += 360;
     }
 
-    if (mounted) {
-      setState(() {
-        _yaw = yaw;
-        _pitch = (pitch * (180 / pi)).clamp(-90.0, 90.0);
-      });
-    }
   }
 
   void _updateMotionFeedback(
@@ -304,8 +296,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       smoothedAccel,
       linearAccel * 0.78 + accelDelta * 0.42,
     );
-    final displayMotionMeter =
-        (_motionMeter * 0.82) + (motionMeter * 0.18);
+    final displayMotionMeter = (_motionMeter * 0.82) + (motionMeter * 0.18);
 
     final nextState = switch (motionMeter) {
       <= _kIdealAccelMin => _MotionState.steady,
@@ -368,7 +359,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _linearAccel = linearAccel;
         _smoothedLinearAccel = smoothedAccel;
         _peakLinearAccel = nextPeak;
-        _accelDelta = accelDelta;
         _motionMeter = displayMotionMeter;
         _motionHint = nextHint;
         _motionDetail = nextDetail;
@@ -378,7 +368,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _linearAccel = linearAccel;
       _smoothedLinearAccel = smoothedAccel;
       _peakLinearAccel = nextPeak;
-      _accelDelta = accelDelta;
       _motionMeter = displayMotionMeter;
       _motionHint = nextHint;
       _motionDetail = nextDetail;
@@ -438,7 +427,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _linearAccel = 0;
     _smoothedLinearAccel = 0;
     _peakLinearAccel = 0;
-    _accelDelta = 0;
     _motionMeter = 0;
     _motionHint = textLocalize('reco_motion_steady');
     _motionDetail = textLocalize('reco_motion_detail');
@@ -506,147 +494,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
   Future<void> _onRecordTap() async {
     await _toggleVideoRecording();
-  }
-
-  List<Widget> _buildCameraSwitchButtons(
-    BuildContext context,
-    bool isAnyRecording,
-  ) {
-    final theme = TDTheme.of(context);
-    final isDark = AppConfig.isNightMode;
-    final cameras = RecoConfig.cameras;
-    final cameraSwitchButtons = <Widget>[];
-
-    int getLensPriority(CameraLensDirection dir) {
-      if (dir == CameraLensDirection.back) {
-        return 1;
-      }
-      if (dir == CameraLensDirection.front) {
-        return 2;
-      }
-      return 3;
-    }
-
-    final sortedIndices = List<int>.generate(cameras.length, (i) => i)
-      ..sort(
-        (a, b) => getLensPriority(
-          cameras[a].lensDirection,
-        ).compareTo(getLensPriority(cameras[b].lensDirection)),
-      );
-
-    var backCount = 1;
-    var frontCount = 1;
-    var externalCount = 1;
-
-    for (final i in sortedIndices) {
-      final cam = cameras[i];
-      late final String label;
-      switch (cam.lensDirection) {
-        case CameraLensDirection.back:
-          label = 'Rear$backCount';
-          backCount++;
-          break;
-        case CameraLensDirection.front:
-          label = 'Front$frontCount';
-          frontCount++;
-          break;
-        case CameraLensDirection.external:
-          label = 'External$externalCount';
-          externalCount++;
-          break;
-      }
-
-      final isSelected = RecoConfig.camNum == i;
-
-      cameraSwitchButtons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: () async {
-                if (!RecoConfig.cameraEnabled) {
-                  return;
-                }
-
-                if (isAnyRecording) {
-                  try {
-                    await RecoConfig.trySwitchCameraDescription(i);
-                  } catch (_) {
-                    if (context.mounted) {
-                      TDToast.showText(
-                        textLocalize('reco_no_switch'),
-                        context: context,
-                      );
-                    }
-                  }
-                  return;
-                }
-
-                RecoConfig.camNum = i;
-                await RecoConfig.cameraInitialize();
-                if (mounted) {
-                  setState(() {});
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? (isDark
-                            ? const Color(0xFF4582FF).withAlpha(200)
-                            : theme.brandColor7.withAlpha(220))
-                      : (isDark
-                            ? const Color(0xFF23232A).withAlpha(150)
-                            : Colors.white.withAlpha(150)),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: isSelected
-                        ? (isDark ? const Color(0xFF4582FF) : theme.brandColor7)
-                        : (isDark
-                              ? Colors.white.withAlpha(30)
-                              : Colors.black.withAlpha(20)),
-                    width: isSelected ? 1.5 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      RecoConfig.getCameraLensIcon(cam.lensDirection),
-                      size: 20,
-                      color: isSelected
-                          ? Colors.white
-                          : (isDark ? Colors.white70 : const Color(0xFF555555)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: isSelected
-                            ? Colors.white
-                            : (isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF555555)),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return cameraSwitchButtons;
   }
 
   int? _findPrimaryCameraIndex(CameraLensDirection direction) {
@@ -1084,361 +931,3 @@ class _RecordPageState extends ConsumerState<RecordPage>
     );
   }
 }
-
-class _TipBlock extends StatelessWidget {
-  final String title;
-  final String body;
-
-  const _TipBlock({required this.title, required this.body});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(12),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withAlpha(18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: BDDesign.colorPaperWhite,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            body,
-            style: TextStyle(color: Colors.white.withAlpha(176), height: 1.45),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  final String label;
-  final Color color;
-  final Color backgroundColor;
-  final bool isSquareDot;
-  final bool compact;
-
-  const _StatusPill({
-    super.key,
-    required this.label,
-    required this.color,
-    required this.backgroundColor,
-    this.isSquareDot = false,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 10 : 12,
-        vertical: compact ? 5 : 7,
-      ),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withAlpha(120)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: compact ? 7 : 8,
-            height: compact ? 7 : 8,
-            decoration: BoxDecoration(
-              color: color,
-              shape: isSquareDot ? BoxShape.rectangle : BoxShape.circle,
-            ),
-          ),
-          SizedBox(width: compact ? 6 : 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: compact ? 10 : 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: compact ? 0.3 : 0.6,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecordOverlayPanel extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-
-  const _RecordOverlayPanel({required this.child, required this.padding});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: BDDesign.colorInkBlack.withAlpha(216),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withAlpha(28)),
-        boxShadow: [BDDesign.shadowElevated],
-      ),
-      child: child,
-    );
-  }
-}
-
-class _SimpleMotionGuidanceCard extends StatelessWidget {
-  final double motionMeter;
-  final _MotionState motionState;
-  final String motionHint;
-  final String motionDetail;
-
-  const _SimpleMotionGuidanceCard({
-    required this.motionMeter,
-    required this.motionState,
-    required this.motionHint,
-    required this.motionDetail,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final cardWidth = (size.width * 0.42).clamp(170.0, 220.0);
-    final progressValue = switch (motionState) {
-      _MotionState.steady => 0.18,
-      _MotionState.ideal => 0.42 + (motionMeter / _kIdealAccelMax) * 0.18,
-      _MotionState.caution =>
-        0.68 +
-            ((motionMeter - _kIdealAccelMax) /
-                    (_kCautionAccelMax - _kIdealAccelMax)) *
-                0.18,
-      _MotionState.danger =>
-        0.9 +
-            ((motionMeter - _kCautionAccelMax) /
-                    (_kInstantSpikeAccel - _kCautionAccelMax)) *
-                0.1,
-    };
-    final normalizedAccel = progressValue.clamp(0.0, 1.0);
-    final guideColor = switch (motionState) {
-      _MotionState.steady => BDDesign.colorMutedBlue,
-      _MotionState.ideal => BDDesign.colorFadedOlive,
-      _MotionState.caution => const Color(0xFFB88746),
-      _MotionState.danger => BDDesign.colorDarkRed,
-    };
-    final stateLabel = switch (motionState) {
-      _MotionState.steady => textLocalize('reco_state_steady'),
-      _MotionState.ideal => textLocalize('reco_state_ideal'),
-      _MotionState.caution => textLocalize('reco_state_caution'),
-      _MotionState.danger => textLocalize('reco_state_danger'),
-    };
-
-    return Container(
-      width: cardWidth,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: BoxDecoration(
-        color: BDDesign.colorInkBlack.withAlpha(216),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: guideColor.withAlpha(160)),
-        boxShadow: [BDDesign.shadowElevated],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: guideColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  textLocalize('sensor_on'),
-                  style: const TextStyle(
-                    color: BDDesign.colorPaperWhite,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: guideColor.withAlpha(36),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  stateLabel,
-                  style: TextStyle(
-                    color: guideColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(end: normalizedAccel),
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, _) {
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  minHeight: 9,
-                  value: value,
-                  backgroundColor: Colors.white.withAlpha(28),
-                  valueColor: AlwaysStoppedAnimation<Color>(guideColor),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          Text(
-            motionHint,
-            style: TextStyle(
-              color: Colors.white.withAlpha(210),
-              fontSize: 11,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            motionDetail,
-            style: TextStyle(
-              color: BDDesign.colorAshGray.withAlpha(220),
-              fontSize: 10,
-              height: 1.3,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AccelHistoryPainter extends CustomPainter {
-  final List<double> samples;
-  final Color color;
-
-  const _AccelHistoryPainter({required this.samples, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bounds = Offset.zero & size;
-    final background = Paint()..color = Colors.white.withAlpha(10);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(bounds, const Radius.circular(10)),
-      background,
-    );
-
-    double yFor(double value) {
-      final normalized = (value / _kInstantSpikeAccel).clamp(0.0, 1.0);
-      return size.height - (size.height * normalized);
-    }
-
-    final safeBand = Paint()..color = BDDesign.colorFadedOlive.withAlpha(26);
-    final cautionBand = Paint()..color = const Color(0xFFB88746).withAlpha(22);
-    final dangerBand = Paint()..color = BDDesign.colorDarkRed.withAlpha(20);
-
-    canvas.drawRect(
-      Rect.fromLTRB(
-        0,
-        yFor(_kIdealAccelMax),
-        size.width,
-        yFor(_kIdealAccelMin),
-      ),
-      safeBand,
-    );
-    canvas.drawRect(
-      Rect.fromLTRB(
-        0,
-        yFor(_kCautionAccelMax),
-        size.width,
-        yFor(_kIdealAccelMax),
-      ),
-      cautionBand,
-    );
-    canvas.drawRect(
-      Rect.fromLTRB(
-        0,
-        yFor(_kInstantSpikeAccel),
-        size.width,
-        yFor(_kCautionAccelMax),
-      ),
-      dangerBand,
-    );
-
-    final gridPaint = Paint()
-      ..color = Colors.white.withAlpha(20)
-      ..strokeWidth = 1;
-    for (final marker in <double>[
-      _kIdealAccelMax,
-      _kCautionAccelMax,
-      _kDangerAccelMax,
-    ]) {
-      final y = yFor(marker);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    if (samples.isEmpty) {
-      return;
-    }
-
-    final path = Path();
-    for (var i = 0; i < samples.length; i++) {
-      final x = samples.length == 1
-          ? size.width
-          : (size.width * i) / (samples.length - 1);
-      final y = yFor(samples[i]);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-
-    final linePaint = Paint()
-      ..shader = LinearGradient(
-        colors: [color.withAlpha(120), color],
-      ).createShader(bounds)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    canvas.drawPath(path, linePaint);
-    canvas.drawCircle(
-      Offset(size.width, yFor(samples.last)),
-      3.5,
-      Paint()..color = color,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _AccelHistoryPainter oldDelegate) {
-    return oldDelegate.samples != samples || oldDelegate.color != color;
-  }
-}
-

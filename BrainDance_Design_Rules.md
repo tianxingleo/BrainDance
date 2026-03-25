@@ -39,3 +39,9 @@
 *   卡片状态、导航岛：`AnimatedContainer`、`AnimatedSlide`、`AnimatedOpacity`。
 *   特定组件替换（如任务卡片、顶部层级）：`AnimatedSwitcher`。
 *   场景切换：利用 `Hero` 或者 `animations` 包的 `SharedAxisTransition` 提供一致的过渡。
+
+## 7. 组件库与 TDesign 迁移说明
+目前项目正处于从标准的微信/腾讯系旧版 UI (TDesign) 往本项目独有的『真实/克制/物理感』(BrainDance Design) 体系演进的阶段。
+* **禁止新购入深绑定**：虽然全局仍混杂大量 TDToast、TDButton、TDLoading，但在新增特性和重构时，应当逐步剥离对 	design_flutter 的视觉依赖，能用 Flutter 原生组件（如 CircularProgressIndicator、自绘按钮）配合 BDDesign 颜色集的尽量替换。
+* **风格冲突预警**：TDesign 默认含有过多的
+圆润、经典蓝饱和色、互联网厂化组件痕迹，这与咱们「极度克制、档案室沉浸式」的气质相悖，请后续所有 Agent 在设计 UI 时，优先查阅并使用 pp_theme.dart 或 d_surfaces.dart 中以 BD 开头的专有组件组合。
