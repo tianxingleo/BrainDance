@@ -1928,10 +1928,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 const SizedBox(
                   width: 14,
                   height: 14,
-                  child: TDLoading(
-                    size: TDLoadingSize.small,
-                    icon: TDLoadingIcon.circle,
-                  ),
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ],
             ],
@@ -2011,18 +2008,19 @@ class _RecallPageState extends ConsumerState<RecallPage> {
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: TDButton(
-                text: '打开场景',
-                iconWidget: const Icon(
-                  Icons.open_in_new_rounded,
-                  color: Colors.white,
-                  size: 16,
+              height: 40,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: BDDesign.colorMutedBlue,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
                 ),
-                type: TDButtonType.fill,
-                theme: TDButtonTheme.primary,
-                shape: TDButtonShape.round,
-                size: TDButtonSize.medium,
-                onTap: () => _openAgentRecallResult(_agentResult!),
+                icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                label: const Text('打开场景', style: TextStyle(fontSize: 14)),
+                onPressed: () => _openAgentRecallResult(_agentResult!),
               ),
             ),
           ],
