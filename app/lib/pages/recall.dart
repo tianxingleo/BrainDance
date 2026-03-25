@@ -1722,44 +1722,60 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
           try {
             final data = jsonDecode(chunk);
-            if (data['event'] == 'thought') {
+            final event = data['event']?.toString() ?? '';
+            final payload = data['data'];
+
+            if (event == 'plan' && payload is Map) {
+              final title = payload['title']?.toString() ?? '';
+              final stepsStr = (payload['steps'] as List?)?.join('\n') ?? '';
               _agentChatMessage!.addStep(
-                AgentStep(type: 'thought', content: data['data']),
+                AgentStep(type: 'thought', content: 'Plan: $title\n$stepsStr'),
               );
-            } else if (data['event'] == 'tool_call') {
-              final argsStr = data['args'] is Map
-                  ? jsonEncode(data['args'])
-                  : data['args'].toString();
+            } else if (event == 'thinking' || event == 'thought') {
+              final content = payload is Map ? payload['content']?.toString() ?? '' : payload?.toString() ?? '';
+              _agentChatMessage!.addStep(
+                AgentStep(type: 'thought', content: content),
+              );
+            } else if (event == 'tool_call' && payload is Map) {
+              final argsStr = payload['args'] is Map
+                  ? jsonEncode(payload['args'])
+                  : payload['args']?.toString() ?? '';
               _agentChatMessage!.addStep(
                 AgentStep(
                   type: 'tool_call',
-                  toolName: data['name'],
+                  toolName: payload['name']?.toString() ?? '',
                   content: argsStr,
                 ),
               );
-            } else if (data['event'] == 'tool_result') {
+            } else if (event == 'tool_result' && payload is Map) {
+              final name = payload['name']?.toString() ?? '';
               var lastTool = _agentChatMessage!.steps.lastWhere(
-                (s) => s.type == 'tool_call' && s.toolName == data['name'],
+                (s) => s.type == 'tool_call' && s.toolName == name,
                 orElse: () => AgentStep(
                   type: 'tool_call',
-                  toolName: data['name'],
+                  toolName: name,
                   content: '',
                 ),
               );
               lastTool.isCompleted = true;
-            } else if (data['event'] == 'message') {
-              _agentChatMessage!.finalAnswer += data['data'] ?? '';
-            } else if (data['event'] == 'error') {
+            } else if (event == 'message' && payload is Map) {
+              _agentChatMessage!.finalAnswer += payload['delta']?.toString() ?? '';
+            } else if (event == 'error' && payload is Map) {
               _agentChatMessage!.addStep(
                 AgentStep(
                   type: 'error',
-                  content: data['data'] ?? 'Unknown error',
+                  content: payload['message']?.toString() ?? 'Unknown error',
                 ),
               );
-            } else if (data['event'] == 'done') {
-              if (data['result'] != null) {
+            } else if (event == 'done') {
+              if (payload != null && payload is Map) {
                 setState(() {
-                  _agentResult = AgentRecallResponse.fromJson(data['result']);
+                  _agentResult = AgentRecallResponse.fromJson(Map<String, dynamic>.from(payload));
+                });
+              } else if (data['result'] != null && data['result'] is Map) {
+                // 回退兼容旧格式
+                setState(() {
+                  _agentResult = AgentRecallResponse.fromJson(Map<String, dynamic>.from(data['result']));
                 });
               }
               setState(() {
