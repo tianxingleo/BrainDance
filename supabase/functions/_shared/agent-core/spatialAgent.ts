@@ -77,6 +77,7 @@ const spatialIntentSchema = z.object({
 });
 
 const agentModeSchema = z.enum([
+  "chat",
   "spatial_search",
   "asset_metadata",
   "time_compare",
@@ -224,7 +225,13 @@ type AgentRuntimeCallbacks = {
 
 export type SpatialSearchResponse = {
   success: true;
-  mode: "spatial_search" | "asset_metadata" | "time_compare" | "creative" | "memory_graph";
+  mode:
+    | "chat"
+    | "spatial_search"
+    | "asset_metadata"
+    | "time_compare"
+    | "creative"
+    | "memory_graph";
   intent: SpatialIntent | null;
   selection: {
     scene_id: string | null;
@@ -396,6 +403,21 @@ export function normalizeExplicitTimeRange(input: {
     start.setUTCDate(start.getUTCDate() - 7);
     return { startTime: asUtcIso(start), endTime: asUtcIso(now) };
   }
+  if (hint.includes("上周")) {
+    const day = now.getUTCDay() || 7;
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - day - 6);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    return { startTime: startOfDayUtc(start), endTime: endOfDayUtc(end) };
+  }
+  if (hint.includes("去年")) {
+    const year = now.getUTCFullYear() - 1;
+    return {
+      startTime: asUtcIso(new Date(Date.UTC(year, 0, 1, 0, 0, 0))),
+      endTime: asUtcIso(new Date(Date.UTC(year, 11, 31, 23, 59, 59))),
+    };
+  }
 
   return { startTime: null, endTime: null };
 }
@@ -516,8 +538,46 @@ async function emitProgress(
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
-  options: SpatialSearchAgentOptions = {}
+  options: SpatialSearchAgentOptions = {},
 ): Promise<AgentMode> {
+  const normalized = query.trim().toLowerCase();
+  const currentMode = options.currentMode ?? null;
+
+  if (isDirectReplyQuery(query)) {
+    return "chat";
+  }
+
+  if (
+    currentMode === "compare" ||
+    /比较|对比|变化|前后|两个月前|现在/.test(query)
+  ) {
+    return "time_compare";
+  }
+  if (/导览|旁白|脚本|大纲|故事|创作|生成一个.*记忆集/.test(query)) {
+    return "creative";
+  }
+  if (/越来越|趋势|缺失|时间线|最近三次|长期记忆|关系摘要/.test(query)) {
+    return "memory_graph";
+  }
+  if (
+    currentMode === "batch_edit" ||
+    currentMode === "collection" ||
+    /改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|对比.*模型|模型.*对比/.test(query) ||
+    ((options.selectedModelIds?.length ?? 0) > 0 &&
+      /这些模型|这几个模型|选中的模型|这三个模型/.test(query))
+  ) {
+    return "asset_metadata";
+  }
+  if (
+    normalized.includes("找") ||
+    normalized.includes("在哪") ||
+    normalized.includes("有没有") ||
+    normalized.includes("空间") ||
+    normalized.includes("场景")
+  ) {
+    return "spatial_search";
+  }
+
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getRoutePrompt } = await import("./prompts/route.ts");
   const contextBlock = buildAgentContextBlock(options);
@@ -530,11 +590,90 @@ async function classifyAgentMode(
   return result.mode;
 }
 
+export function isDirectReplyQuery(query: string): boolean {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.,，?？~～\s]+/g, "");
+
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    "你好",
+    "您好",
+    "嗨",
+    "哈喽",
+    "hello",
+    "hi",
+    "在吗",
+    "在不在",
+    "有人吗",
+    "谢谢",
+    "多谢",
+    "谢了",
+    "辛苦了",
+  ].includes(normalized);
+}
+
+function buildDirectReplyAnswer(query: string): string {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.,，?？~～\s]+/g, "");
+
+  if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
+    return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
+  }
+
+  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
+}
+
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {}
 ): Promise<SpatialIntent> {
+  const trimmed = query.trim();
+  const heuristicTimeHint = (
+    trimmed.match(/今天|昨天|最近|最新|刚才|上周|去年/g) ?? []
+  ).join(" ");
+  const heuristicTargetType: SearchTargetType =
+    /最近|最新|今天|昨天|上周|去年/.test(trimmed)
+      ? "time"
+      : /角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/.test(trimmed)
+      ? "location"
+      : /场景|空间|房间/.test(trimmed)
+      ? "scene"
+      : "object";
+
+  const heuristic: SpatialIntent = {
+    rewrittenQuery: trimmed
+      .replace(/^(帮我|给我|请你|麻烦你|找一下|帮我找|请帮我找)/, "")
+      .replace(/(在哪|在哪里|还在吗|有没有|给我看看|帮我找出来)$/g, "")
+      .trim() || trimmed,
+    targetType: heuristicTargetType,
+    objectHint: heuristicTargetType === "object" ? trimmed : null,
+    locationHint: trimmed.match(/角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/)?.[0] ?? null,
+    sceneHint: null,
+    timeHint: heuristicTimeHint || null,
+    startTime: null,
+    endTime: null,
+    reasoning: "优先使用规则解析，减少同步路径上的 LLM 延迟。",
+  };
+  const heuristicRange = normalizeExplicitTimeRange(heuristic);
+  if (
+    heuristic.rewrittenQuery &&
+    (heuristic.targetType !== "scene" || heuristic.locationHint !== null || heuristic.timeHint !== null)
+  ) {
+    return {
+      ...heuristic,
+      startTime: heuristicRange.startTime,
+      endTime: heuristicRange.endTime,
+    };
+  }
+
   const structuredModel = model.withStructuredOutput(spatialIntentSchema);
   const today = new Date().toISOString().slice(0, 10);
   
@@ -1160,7 +1299,6 @@ async function executeAgentToolLoop(input: {
       );
       toolCalls = [forcedToolCall];
     }
-
     for (const toolCall of toolCalls) {
       await emitProgress(callbacks, {
         event: "tool_call",
@@ -1202,12 +1340,13 @@ async function executeAgentToolLoop(input: {
           round: round + 1,
         },
       });
-      messages.push(
-        new ToolMessage({
-          tool_call_id: toolCall.id ?? toolCall.name,
-          content: resultText,
-        }),
-      );
+        messages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id ?? toolCall.name,
+            content: resultText,
+          }),
+        );
+      }
     }
   }
 
@@ -1604,6 +1743,34 @@ export async function runSpatialSearchAgent(
       summary: `已完成模式判断：${mode}`,
     },
   });
+
+  if (mode === "chat") {
+    return {
+      success: true,
+      mode: "chat",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 1,
+        reason: "该请求属于纯问候或致谢，不需要进入工具调用链路。",
+      },
+      answer: buildDirectReplyAnswer(query),
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: null,
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    };
+  }
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options, callbacks);

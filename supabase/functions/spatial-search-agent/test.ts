@@ -4,11 +4,18 @@ import {
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
   buildVisualizationActions,
+  isDirectReplyQuery,
   normalizeExplicitTimeRange,
   scoreSceneCandidate,
   shouldForceAnotherToolRound,
   summarizeCandidateEvidence,
 } from "../_shared/agent-core/spatialAgent.ts";
+
+Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
+  assertEquals(isDirectReplyQuery("你好"), true);
+  assertEquals(isDirectReplyQuery("谢谢！"), true);
+  assertEquals(isDirectReplyQuery("你好，帮我找一下红色杯子"), false);
+});
 
 Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
   const result = normalizeExplicitTimeRange({

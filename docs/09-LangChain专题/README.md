@@ -16,6 +16,7 @@
 - 共享 Core 已收敛到 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)。
 - `agent-recall` 与 `spatial-search-agent` 现在都只是入口壳层，强能力集中在共享 Core 与相关工具文件中。
 - 正式稳定动作协议以 `open_scene`、`fly_to_pose` 为准，不再把 `highlight_hotspot` 视为正式前端能力。
+- 2026-03-26 已补充纯问候/致谢直答模式：`你好`、`谢谢` 这类闲聊不再误进 `spatial_search` 工具链，Flutter 端也会在 `done` 事件兜底显示最终 `answer`，避免只剩选择理由和工具调试信息。
 
 ## 维护规则
 
