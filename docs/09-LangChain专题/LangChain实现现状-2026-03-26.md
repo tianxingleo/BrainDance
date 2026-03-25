@@ -22,3 +22,9 @@
 1. **新增解释型工具 `get_pose_summary`**：需要通过 `memory_poses` 提取摘要，以强化模型对比解释能力。
 2. **新增资产工具 `find_related_models`**：实现同空间场景的模糊搜索匹配工具 (基于 tags、时间和 scene_id)，加强版本整理与相关性比对能力。
 
+
+### 4. 解决上下文管理不足与 Prompt 模块化
+- **已完成**：将请求 Schema 进一步升级，添加 UI Context (`currentSceneId`, `currentModelId`, `candidateSceneIds`) 以及会话记忆 (`conversationSummary`, `sessionId`)。
+- **已完成**：抽取原内联于 `spatialAgent.ts` 的各类系统提示词至独立的 `prompts/` 目录下（如 `route.ts`、`spatial_intent.ts`、`asset_tool_loop.ts`、`spatial_tool_loop.ts`、`selection.ts`，新增 `context.ts`）。
+- **已完成**：在提示词中补全了大量 Few-Shot 示例并实现了标准化的统一上下文注入块 (`buildAgentContextBlock`)，强化了多轮执行连贯性、以及基于预览执行写操作的逻辑稳健性。
+- **已补强**：在空间结果组织的 Prompt 中补上了“面向 UI”的三段式回答模板要求（一句结论、一句证据、一句下一步建议）。

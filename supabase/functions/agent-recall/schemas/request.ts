@@ -7,6 +7,11 @@ export const agentRecallRequestSchema = z.object({
   ),
   selectedModelIds: z.array(z.string()).optional(),
   executionMode: z.enum(["preview", "execute"]).default("execute"),
+  currentSceneId: z.string().nullable().optional(),
+  currentModelId: z.string().nullable().optional(),
+  candidateSceneIds: z.array(z.string()).optional(),
+  sessionId: z.string().optional(),
+  conversationSummary: z.string().nullable().optional(),
 });
 
 export type AgentRecallRequest = z.infer<typeof agentRecallRequestSchema>;

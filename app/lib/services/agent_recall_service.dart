@@ -120,10 +120,28 @@ class AgentAction {
 class AgentRecallService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  Future<AgentRecallResponse> query(String query) async {
+  Future<AgentRecallResponse> query(
+    String query, {
+    List<String>? selectedModelIds,
+    String executionMode = 'preview',
+    String? currentSceneId,
+    String? currentModelId,
+    List<String>? candidateSceneIds,
+    String? sessionId,
+    String? conversationSummary,
+  }) async {
     final response = await _client.functions.invoke(
       'agent-recall',
-      body: {'query': query},
+      body: {
+        'query': query,
+        if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
+        'executionMode': executionMode,
+        if (currentSceneId != null) 'currentSceneId': currentSceneId,
+        if (currentModelId != null) 'currentModelId': currentModelId,
+        if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
+        if (sessionId != null) 'sessionId': sessionId,
+        if (conversationSummary != null) 'conversationSummary': conversationSummary,
+      },
     );
 
     final data = response.data;

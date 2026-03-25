@@ -38,6 +38,11 @@ serve(async (req: Request) => {
     const result = await runSpatialSearchAgent(parsed.data.query, {
       selectedModelIds: parsed.data.selectedModelIds,
       executionMode: parsed.data.executionMode,
+      currentSceneId: parsed.data.currentSceneId,
+      currentModelId: parsed.data.currentModelId,
+      candidateSceneIds: parsed.data.candidateSceneIds,
+      sessionId: parsed.data.sessionId,
+      conversationSummary: parsed.data.conversationSummary,
     });
     
     return new Response(JSON.stringify(result), {

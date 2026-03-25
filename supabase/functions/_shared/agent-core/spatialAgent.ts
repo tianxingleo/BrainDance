@@ -91,6 +91,11 @@ type SelectionResult = z.infer<typeof selectionSchema>;
 export type SpatialSearchAgentOptions = {
   selectedModelIds?: string[];
   executionMode?: "preview" | "execute";
+  currentSceneId?: string | null;
+  currentModelId?: string | null;
+  candidateSceneIds?: string[];
+  sessionId?: string;
+  conversationSummary?: string | null;
 };
 
 type RuntimeEnv = {
@@ -415,15 +420,15 @@ function serializeAssetOperation(state: AssetToolState) {
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
+  options: SpatialSearchAgentOptions = {}
 ): Promise<AgentMode> {
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getRoutePrompt } = await import("./prompts/route.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
   const structuredModel = model.withStructuredOutput(agentRouteSchema);
   const result = await structuredModel.invoke([
-    new SystemMessage(
-      `你是 BrainDance Agent 路由器。
-如果用户是在找空间记忆、物体、位置、镜头、最近场景，选择 spatial_search。
-如果用户是在做模型资产元数据操作或分析，比如改名、批量打标签、批量改描述、拉取多个模型摘要、对比多个模型，选择 asset_metadata。
-只输出结构化结果。`,
-    ),
+    new SystemMessage(getRoutePrompt(contextBlock)),
     new HumanMessage(query),
   ]);
   return result.mode;
@@ -432,19 +437,17 @@ async function classifyAgentMode(
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
+  options: SpatialSearchAgentOptions = {}
 ): Promise<SpatialIntent> {
   const structuredModel = model.withStructuredOutput(spatialIntentSchema);
   const today = new Date().toISOString().slice(0, 10);
+  
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getSpatialIntentPrompt } = await import("./prompts/spatial_intent.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
   const parsed = await structuredModel.invoke([
-    new SystemMessage(
-      `你是 BrainDance 的空间检索意图解析器。当前日期是 ${today}。
-你的任务：
-1. 重写用户查询，去掉语气词和无关赘述。
-2. 判断检索目标属于 object / location / time / scene 四类之一。
-3. 提取可能的物体、位置、场景和时间线索。
-4. 如果用户表达的是“最近、最新、今天、昨天”等相对时间，请尽量换算出绝对 UTC 时间范围。
-5. 输出必须严格满足给定结构，不要附加解释。`,
-    ),
+    new SystemMessage(getSpatialIntentPrompt(today, contextBlock)),
     new HumanMessage(query),
   ]);
 
@@ -943,14 +946,17 @@ async function selectBestResult(
   intent: SpatialIntent,
   rankedCandidates: Array<SceneCandidate & { score: number }>,
   actions: VisualizationAction[],
+  options: SpatialSearchAgentOptions = {}
 ): Promise<SelectionResult> {
   const structuredModel = model.withStructuredOutput(selectionSchema);
   const best = rankedCandidates[0] ?? null;
 
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getSelectionPrompt } = await import("./prompts/selection.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
   return await structuredModel.invoke([
-    new SystemMessage(
-      "你是空间检索结果裁决器。请基于候选证据，选择最可信的 scene / pose，并产出简洁回答。不能编造不存在的结果。",
-    ),
+    new SystemMessage(getSelectionPrompt(contextBlock)),
     new HumanMessage(JSON.stringify({
       intent,
       candidates: rankedCandidates.slice(0, 5).map((candidate) => ({
@@ -979,24 +985,22 @@ async function executeAgentToolLoop(input: {
   model: ChatOpenAI;
   intent: SpatialIntent;
   tools: DynamicStructuredTool[];
+  options?: SpatialSearchAgentOptions;
 }): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
-  const { model, intent, tools } = input;
+  const { model, intent, tools, options = {} } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
   const trace: ToolTraceEntry[] = [];
   const agentModel = model.bindTools(tools);
 
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getSpatialToolLoopPrompt } = await import("./prompts/spatial_tool_loop.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
   const messages = [
-    new SystemMessage(
-      `你是 BrainDance 的空间检索 Agent。
-你必须根据意图决定调用哪些工具：
-- object/location 优先调用 pose_semantic_search。
-- scene 优先调用 scene_metadata_search。
-- time 或“最近/最新”优先调用 recent_scene_search，必要时可再补 scene_metadata_search。
-最多调用 3 轮工具；拿到足够证据后停止。`,
-    ),
+    new SystemMessage(getSpatialToolLoopPrompt(contextBlock)),
     new HumanMessage(JSON.stringify(intent)),
   ];
 
@@ -1070,24 +1074,21 @@ async function executeAssetToolLoop(input: {
   model: ChatOpenAI;
   query: string;
   tools: DynamicStructuredTool[];
+  options?: SpatialSearchAgentOptions;
 }): Promise<{ trace: ToolTraceEntry[]; state: AssetToolState }> {
-  const { model, query, tools } = input;
+  const { model, query, tools, options = {} } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
   const agentModel = model.bindTools(tools);
   const today = new Date().toISOString().slice(0, 10);
+  
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getAssetToolLoopPrompt } = await import("./prompts/asset_tool_loop.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
   const messages = [
-    new SystemMessage(
-      `你是 BrainDance 的模型资产元数据 Agent。当前日期是 ${today}。
-你的职责：
-- 处理模型资产元数据的改名、批量打标签、批量改描述、读取摘要、结构化对比。
-- 写入前优先先做候选筛选，再做 dry run 预览。
-- 如果用户已经指定了模型 ID，就直接围绕这些模型工作，不要额外扩散范围。
-- 绝对不要改动 ply_path、scene_id、embedding、user_id 之类的系统字段。
-- 如果需要批量改名，优先使用 batch_patch_model_metadata，并通过 displayNameTemplate / Prefix / Suffix 生成新名称。
-- 工具调用最多 3 轮，拿到足够结果后停止。`,
-    ),
+    new SystemMessage(getAssetToolLoopPrompt(today, contextBlock)),
     new HumanMessage(query),
   ];
 
@@ -1143,7 +1144,7 @@ export async function runSpatialSearchAgent(
   const env = ensureRuntimeEnv();
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
-  const mode = await classifyAgentMode(model, query);
+  const mode = await classifyAgentMode(model, query, options);
 
   if (mode === "asset_metadata") {
     const assetTools = [
@@ -1169,6 +1170,7 @@ export async function runSpatialSearchAgent(
       model,
       query,
       tools: assetTools,
+      options,
     });
 
     return {
@@ -1204,7 +1206,7 @@ export async function runSpatialSearchAgent(
 
   const embeddings = createEmbeddingsModel(env);
 
-  const intent = await parseSpatialIntent(model, query);
+  const intent = await parseSpatialIntent(model, query, options);
   const tools = [
     await buildPoseTool(supabase, embeddings),
     await buildSceneTool(supabase),
@@ -1214,6 +1216,7 @@ export async function runSpatialSearchAgent(
     model,
     intent,
     tools,
+    options,
   });
 
   const rankedCandidates = [...candidateMap.values()]
@@ -1233,7 +1236,7 @@ export async function runSpatialSearchAgent(
   });
 
   const selection = rankedCandidates.length > 0
-    ? await selectBestResult(model, intent, rankedCandidates, suggestedActions)
+    ? await selectBestResult(model, intent, rankedCandidates, suggestedActions, options)
     : {
       selectedSceneId: null,
       selectedModelId: null,
