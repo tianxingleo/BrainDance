@@ -387,3 +387,6 @@ verify_jwt = false
 
 [functions.agent-recall]
 verify_jwt = false
+
+[functions.time-compare-agent]
+verify_jwt = false
