@@ -77,6 +77,7 @@ const spatialIntentSchema = z.object({
 });
 
 const agentModeSchema = z.enum([
+  "chat",
   "spatial_search",
   "asset_metadata",
   "time_compare",
@@ -192,7 +193,13 @@ type ToolCallLike = {
 
 export type SpatialSearchResponse = {
   success: true;
-  mode: "spatial_search" | "asset_metadata" | "time_compare" | "creative" | "memory_graph";
+  mode:
+    | "chat"
+    | "spatial_search"
+    | "asset_metadata"
+    | "time_compare"
+    | "creative"
+    | "memory_graph";
   intent: SpatialIntent | null;
   selection: {
     scene_id: string | null;
@@ -492,10 +499,14 @@ function serializeAssetContext(state: AssetToolState) {
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
-  options: SpatialSearchAgentOptions = {}
+  options: SpatialSearchAgentOptions = {},
 ): Promise<AgentMode> {
   const normalized = query.trim().toLowerCase();
   const currentMode = options.currentMode ?? null;
+
+  if (isDirectReplyQuery(query)) {
+    return "chat";
+  }
 
   if (
     currentMode === "compare" ||
@@ -538,6 +549,46 @@ async function classifyAgentMode(
     new HumanMessage(query),
   ]);
   return result.mode;
+}
+
+export function isDirectReplyQuery(query: string): boolean {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.,，?？~～\s]+/g, "");
+
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    "你好",
+    "您好",
+    "嗨",
+    "哈喽",
+    "hello",
+    "hi",
+    "在吗",
+    "在不在",
+    "有人吗",
+    "谢谢",
+    "多谢",
+    "谢了",
+    "辛苦了",
+  ].includes(normalized);
+}
+
+function buildDirectReplyAnswer(query: string): string {
+  const normalized = query
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.,，?？~～\s]+/g, "");
+
+  if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
+    return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
+  }
+
+  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
 }
 
 async function parseSpatialIntent(
@@ -1491,6 +1542,34 @@ export async function runSpatialSearchAgent(
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
   const mode = await classifyAgentMode(model, query, options);
+
+  if (mode === "chat") {
+    return {
+      success: true,
+      mode: "chat",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 1,
+        reason: "该请求属于纯问候或致谢，不需要进入工具调用链路。",
+      },
+      answer: buildDirectReplyAnswer(query),
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: null,
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    };
+  }
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options);

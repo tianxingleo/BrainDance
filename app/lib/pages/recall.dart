@@ -1773,6 +1773,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                   _agentResult = AgentRecallResponse.fromJson(
                     Map<String, dynamic>.from(payload),
                   );
+                  if ((_agentChatMessage?.finalAnswer.trim().isEmpty ?? true) &&
+                      _agentResult!.answer.trim().isNotEmpty) {
+                    _agentChatMessage!.finalAnswer = _agentResult!.answer;
+                  }
                 });
               } else if (data['result'] != null && data['result'] is Map) {
                 // 回退兼容旧格式
@@ -1780,6 +1784,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                   _agentResult = AgentRecallResponse.fromJson(
                     Map<String, dynamic>.from(data['result']),
                   );
+                  if ((_agentChatMessage?.finalAnswer.trim().isEmpty ?? true) &&
+                      _agentResult!.answer.trim().isNotEmpty) {
+                    _agentChatMessage!.finalAnswer = _agentResult!.answer;
+                  }
                 });
               }
               setState(() {
