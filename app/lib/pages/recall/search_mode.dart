@@ -1,1 +1,1 @@
-enum RecallSearchMode { cloud, local, localAi }
+enum RecallSearchMode { cloud, local, localAi, agent }

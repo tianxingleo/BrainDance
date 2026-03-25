@@ -5,7 +5,7 @@ import 'package:braindance/pages/community/composer_sheet.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
-import 'package:braindance/pages/webgl_viewer.dart';
+import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -89,15 +89,11 @@ class _CommunityPageState extends State<CommunityPage>
   }
 
   void _openViewer(CommunityPost post) {
-    Navigator.push(
+    openViewer(
       context,
-      MaterialPageRoute(
-        builder: (_) => WebGLViewerPage(
-          initialModelUrl: post.modelUrl,
-          posesUrl: post.posesUrl,
-          sceneId: post.modelName,
-        ),
-      ),
+      initialModelUrl: post.modelUrl,
+      posesUrl: post.posesUrl,
+      sceneId: post.modelName,
     );
   }
 

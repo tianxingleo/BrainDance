@@ -8,10 +8,10 @@ import '../configs/app_config.dart';
 import '../configs/motion_tokens.dart';
 import '../configs/supabase_config.dart';
 import '../services/task_notification_service.dart';
+import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
 import 'task_list/category_section.dart';
 import 'task_list/status_category.dart';
-import 'webgl_viewer.dart';
 
 /// 任务列表页面 - 使用Supabase Realtime轮询
 class TaskListPage extends StatefulWidget {
@@ -337,25 +337,47 @@ class _TaskListPageState extends State<TaskListPage> {
     }).toList();
   }
 
-  void _onTaskTap(Map<String, dynamic> task) {
+  Future<void> _onTaskTap(Map<String, dynamic> task) async {
     final status = task['status']?.toString();
     final sceneId = task['scene_id']?.toString();
 
     // 只有completed状态的任务才能查看
-    if (status == 'completed' && sceneId != null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => WebGLViewerPage(sceneId: sceneId),
-        ),
-      );
-    } else {
-      // 显示任务详情或状态提示
+    if (status != 'completed' || sceneId == null) {
       TDToast.showText(
         textLocalize('task_status_${status ?? 'unknown'}'),
         context: context,
       );
+      return;
     }
+
+    // 查询 model_assets 获取 ply_path，确保 Viewer 能触发下载
+    String modelUrl = './models/scene_auto_sync_raw.ply';
+    String? posesUrl;
+    try {
+      final asset = await Supabase.instance.client
+          .from('model_assets')
+          .select('ply_path')
+          .eq('scene_id', sceneId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      final plyPath = asset?['ply_path']?.toString() ?? '';
+      if (plyPath.isNotEmpty) {
+        modelUrl = toPublicUrl(plyPath);
+        posesUrl = toPosesUrl(plyPath);
+      }
+    } catch (_) {
+      // 查询失败时使用默认值，Viewer 仍可打开
+    }
+
+    if (!mounted) return;
+    final displayName = task['display_name']?.toString() ?? sceneId;
+    await openViewer(
+      context,
+      initialModelUrl: modelUrl,
+      posesUrl: posesUrl,
+      sceneId: displayName,
+    );
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark, Color textColor) {

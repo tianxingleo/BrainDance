@@ -41,6 +41,57 @@ export type SearchModelsResponse = {
   results: SearchResultRow[];
 };
 
+async function attachDisplayNames(
+  supabase: any,
+  rows: SearchResultRow[],
+): Promise<SearchResultRow[]> {
+  const sceneIds = rows
+    .map((row) => typeof row.scene_id === "string" ? row.scene_id : "")
+    .filter((sceneId) => sceneId.length > 0);
+
+  if (sceneIds.length == 0) {
+    return rows;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("processing_tasks")
+      .select("scene_id, display_name")
+      .in("scene_id", sceneIds);
+
+    if (error) {
+      console.warn("[Search] display_name 补全失败:", error.message);
+      return rows;
+    }
+
+    const displayNameMap = new Map<string, string>();
+    for (const item of data ?? []) {
+      const sceneId = typeof item.scene_id === "string" ? item.scene_id : "";
+      const displayName = typeof item.display_name === "string"
+        ? item.display_name.trim()
+        : "";
+      if (sceneId && displayName) {
+        displayNameMap.set(sceneId, displayName);
+      }
+    }
+
+    return rows.map((row) => {
+      const sceneId = typeof row.scene_id === "string" ? row.scene_id : "";
+      const displayName = displayNameMap.get(sceneId);
+      if (!displayName) {
+        return row;
+      }
+      return {
+        ...row,
+        display_name: displayName,
+      };
+    });
+  } catch (error) {
+    console.warn("[Search] display_name 补全异常:", error);
+    return rows;
+  }
+}
+
 function getDashscopeApiUrl(): string {
   return Deno.env.get("DASHSCOPE_BASE_URL") ??
     "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -156,7 +207,7 @@ export async function parseQueryIntent(
   try {
     console.log(`[Search] 正在分析用户意图: "${userQuery}"`);
     const resp = await aiClient.chat.completions.create({
-      model: Deno.env.get("DASHSCOPE_CHAT_MODEL") ?? "qwen3.5-plus",
+      model: Deno.env.get("DASHSCOPE_CHAT_MODEL") ?? "qwen-turbo",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userQuery },
@@ -265,6 +316,7 @@ export async function runSearchModelsQuery(
     startTime,
     endTime,
   );
+  const enrichedResults = await attachDisplayNames(supabase, results);
 
   return {
     success: true,
@@ -275,6 +327,6 @@ export async function runSearchModelsQuery(
       filter_end: endTime,
     },
     threshold: matchThreshold,
-    results,
+    results: enrichedResults,
   };
 }

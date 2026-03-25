@@ -20,9 +20,11 @@ import '../main.dart'
         overviewLocalIndexingProvider,
         pageIndexProvider;
 import '../configs/motion_tokens.dart';
+import '../services/agent_recall_service.dart';
 import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
+import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community/composer_sheet.dart';
 import 'community/models.dart';
@@ -34,7 +36,6 @@ import 'recall/processing_section.dart';
 import 'recall/rename_model_dialog.dart';
 import 'recall/search_header_section.dart';
 import 'recall/search_mode.dart';
-import 'webgl_viewer.dart';
 
 class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
@@ -97,6 +98,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   int _searchRequestId = 0;
   String? _lastSearchKey;
   String _lastOwnModelSignature = '';
+  bool _isAgentSearching = false;
+  AgentRecallResponse? _agentResult;
 
   String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
@@ -1409,6 +1412,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                             onLoadModel: _loadLocalQnaModel,
                           ),
                         ),
+                        if (_searchMode == RecallSearchMode.agent)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                            child: _buildAgentResultCard(isDark, textColor),
+                          ),
                         if (_processingTasks.isNotEmpty)
                           RepaintBoundary(
                             child: RecallProcessingSection(
@@ -1550,8 +1558,16 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _localReasoning = '';
           _localContextPreview = '';
         }
+        if (_searchMode == RecallSearchMode.agent) {
+          _agentResult = null;
+        }
         _isLoading = false;
       });
+      return;
+    }
+
+    // Agent 模式不做即时列表检索，仅在 submit 时调用 _askAgentRecall
+    if (_searchMode == RecallSearchMode.agent) {
       return;
     }
 
@@ -1636,12 +1652,80 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     throw Exception(errMsg);
   }
 
+  Future<void> _askAgentRecall(String query) async {
+    if (query.isEmpty) return;
+    setState(() {
+      _isAgentSearching = true;
+      _agentResult = null;
+    });
+    try {
+      final result = await AgentRecallService().query(query);
+      if (!mounted) return;
+      setState(() {
+        _agentResult = result;
+        _isAgentSearching = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAgentSearching = false;
+      });
+      TDToast.showText('Agent 检索失败：$e', context: context);
+    }
+  }
+
+  void _openAgentRecallResult(AgentRecallResponse result) {
+    final openScene = result.actions
+        .where((a) => a.type == 'open_scene')
+        .cast<AgentAction?>()
+        .firstOrNull;
+    final flyToPose = result.actions
+        .where((a) => a.type == 'fly_to_pose')
+        .cast<AgentAction?>()
+        .firstOrNull;
+
+    if (openScene == null || openScene.ply == null || openScene.ply!.isEmpty) {
+      TDToast.showText('缺少 open_scene.ply，无法打开 Viewer', context: context);
+      return;
+    }
+
+    // ply 可能是 Storage 相对路径，需转为公开 URL 才能下载
+    final rawPly = openScene.ply!;
+    final modelUrl =
+        rawPly.startsWith('http://') || rawPly.startsWith('https://')
+        ? rawPly
+        : toPublicUrl(rawPly);
+    final posesUrlResolved =
+        openScene.poses != null &&
+            openScene.poses!.isNotEmpty &&
+            !openScene.poses!.startsWith('http')
+        ? toPublicUrl(openScene.poses!)
+        : openScene.poses ?? toPosesUrl(rawPly);
+
+    unawaited(
+      openViewer(
+        context,
+        initialModelUrl: modelUrl,
+        posesUrl: posesUrlResolved,
+        sceneId: openScene.sceneId,
+        initialPose: flyToPose?.matrix,
+        initialPoseId: flyToPose?.imageName,
+      ),
+    );
+  }
+
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
     if (_searchMode == RecallSearchMode.localAi) {
       await _searchModels(query);
       if (query.isNotEmpty) {
         await _askLocalQuestion(question: query);
+      }
+      return;
+    }
+    if (_searchMode == RecallSearchMode.agent) {
+      if (query.isNotEmpty) {
+        await _askAgentRecall(query);
       }
       return;
     }
@@ -1660,6 +1744,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         return textLocalize('recall_local_rag');
       case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_rag');
+      case RecallSearchMode.agent:
+        return 'Agent 检索';
     }
   }
 
@@ -1679,12 +1765,17 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         return '$base · ${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}';
       case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_scope');
+      case RecallSearchMode.agent:
+        return '空间检索 Agent · 直接带你去看';
     }
   }
 
   String _searchFieldHint() {
     if (_searchMode == RecallSearchMode.localAi) {
       return textLocalize('recall_local_ai_hint');
+    }
+    if (_searchMode == RecallSearchMode.agent) {
+      return '输入空间问题，例如"厨房在哪里"';
     }
     return textLocalize('recall_search_hint');
   }
@@ -1699,6 +1790,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _localAnswer = '';
         _localReasoning = '';
         _localContextPreview = '';
+      }
+      if (mode != RecallSearchMode.agent) {
+        _agentResult = null;
       }
     });
     final keyword = _searchController.text.trim();
@@ -1728,6 +1822,106 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
+  Widget _buildAgentResultCard(bool isDark, Color textColor) {
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+
+    if (_isAgentSearching) {
+      return BDPanelCard(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: TDLoading(
+                size: TDLoadingSize.small,
+                icon: TDLoadingIcon.circle,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Agent 正在检索空间...',
+              style: TextStyle(color: hintColor, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final result = _agentResult;
+    if (result == null) {
+      return BDPanelCard(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          '输入问题后按回车，Agent 将为你检索空间并定位视角。',
+          style: TextStyle(color: hintColor, fontSize: 13),
+        ),
+      );
+    }
+
+    final hasActions = result.actions.any((a) => a.type == 'open_scene');
+
+    return BDPanelCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.travel_explore_rounded,
+                size: 18,
+                color: BDDesign.colorMutedBlue,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Agent 回答',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            result.answer,
+            style: TextStyle(color: textColor, fontSize: 14, height: 1.5),
+          ),
+          if (result.evidence != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              '场景：${result.evidence!.sceneId}  ·  相似度：${(result.evidence!.similarity * 100).toStringAsFixed(1)}%',
+              style: TextStyle(color: hintColor, fontSize: 12),
+            ),
+          ],
+          if (hasActions) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: TDButton(
+                text: '打开场景',
+                iconWidget: const Icon(
+                  Icons.open_in_new_rounded,
+                  color: Colors.white,
+                  size: 16,
+                ),
+                type: TDButtonType.fill,
+                theme: TDButtonTheme.primary,
+                shape: TDButtonShape.round,
+                size: TDButtonSize.medium,
+                onTap: () => _openAgentRecallResult(result),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   String _modelKey(Map<String, dynamic> model) {
     return model['id']?.toString() ??
         model['scene_id']?.toString() ??
@@ -1749,7 +1943,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty
-        ? _toPublicUrl(plyPath)
+        ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = _modelDisplayName(model);
@@ -1774,21 +1968,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
     }
 
-    // 查找同名模型组（Time Peeling 兄弟模型）
-    final groupedModels = _groupModelsByName(_models);
-    final siblingModels = groupedModels[sceneId] ?? [model];
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => WebGLViewerPage(
-          initialModelUrl: modelUrl,
-          posesUrl: posesUrl,
-          sceneId: sceneId,
-          initialPose: initialPose,
-          initialPoseId: initialPoseId,
-          timePeelingModels: siblingModels,
-        ),
+    unawaited(
+      openViewer(
+        context,
+        initialModelUrl: modelUrl,
+        posesUrl: posesUrl,
+        sceneId: sceneId,
+        initialPose: initialPose,
+        initialPoseId: initialPoseId,
       ),
     );
   }

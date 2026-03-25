@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
-import '../webgl_viewer.dart';
+import '../../services/viewer_navigation.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
 class SearchResultCard extends StatelessWidget {
@@ -196,7 +196,7 @@ class SearchResultCard extends StatelessWidget {
     final modelUrl = plyPath.isNotEmpty
         ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
-    final posesUrl = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
+    final posesUrlResolved = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
     final sceneId =
         model['display_name']?.toString() ??
         model['scene_id'] ??
@@ -208,7 +208,6 @@ class SearchResultCard extends StatelessWidget {
       transformMatrix = transformMatrix['transform_matrix'];
     }
 
-    // 如果传入的 matrix 为空，尝试从模型元数据中获取智能初始视角
     if (transformMatrix == null && model['meta_info'] != null) {
       if (model['meta_info'] is Map &&
           model['meta_info']['initial_camera_pose'] != null) {
@@ -216,23 +215,18 @@ class SearchResultCard extends StatelessWidget {
       }
     }
 
-    // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
       initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
     }
 
-    Navigator.push(
+    openViewer(
       context,
-      MaterialPageRoute(
-        builder: (context) => WebGLViewerPage(
-          initialModelUrl: modelUrl,
-          posesUrl: posesUrl,
-          sceneId: sceneId,
-          initialPose: initialPose,
-          initialPoseId: initialPoseId,
-        ),
-      ),
+      initialModelUrl: modelUrl,
+      posesUrl: posesUrlResolved,
+      sceneId: sceneId,
+      initialPose: initialPose,
+      initialPoseId: initialPoseId,
     );
   }
 }

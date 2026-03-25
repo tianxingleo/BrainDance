@@ -171,6 +171,8 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
                           RecallSearchMode.local => Icons.privacy_tip_rounded,
                           RecallSearchMode.localAi =>
                             Icons.auto_awesome_rounded,
+                          RecallSearchMode.agent =>
+                            Icons.travel_explore_rounded,
                         },
                         onTap: widget.onTapSearchMode,
                       ),
@@ -255,6 +257,20 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
             onSelectCatalogModel: widget.onSelectCatalogModel,
             onDownloadModel: widget.onDownloadModel,
             onLoadModel: widget.onLoadModel,
+          ),
+        ] else if (widget.searchMode == RecallSearchMode.agent) ...[
+          const SizedBox(height: 10),
+          BDPanelCard(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              '输入空间问题后按回车，Agent 将为你检索空间并定位视角。',
+              style: TextStyle(
+                color: widget.isDark
+                    ? Colors.white.withValues(alpha: 0.62)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.88),
+                fontSize: 13,
+              ),
+            ),
           ),
         ],
       ],
@@ -446,6 +462,11 @@ class RecallSearchModeSheet extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                modeTile(
+                  mode: RecallSearchMode.agent,
+                  icon: Icons.travel_explore_rounded,
+                ),
+                const SizedBox(height: 10),
                 modeTile(
                   mode: RecallSearchMode.cloud,
                   icon: Icons.cloud_rounded,

@@ -17,7 +17,12 @@ function buildAnswerFromSearchResult(
   const description = typeof topResult.description === "string"
     ? topResult.description
     : result.intent.parsed_search_text;
-  const sceneId = typeof topResult.scene_id === "string"
+  const displayName = typeof topResult.display_name === "string"
+    ? topResult.display_name.trim()
+    : "";
+  const sceneId = displayName.length > 0
+    ? displayName
+    : typeof topResult.scene_id === "string"
     ? topResult.scene_id
     : "未知场景";
   const similarity = Math.round(Number(topResult.similarity ?? 0) * 100);

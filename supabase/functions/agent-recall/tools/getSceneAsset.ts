@@ -1,5 +1,15 @@
 import type { SearchModelsResponse } from "../../search-models/shared.ts";
 
+function extractSceneLabel(topResult: Record<string, unknown>): string | null {
+  const displayName = typeof topResult.display_name === "string"
+    ? topResult.display_name.trim()
+    : "";
+  if (displayName.length > 0) {
+    return displayName;
+  }
+  return typeof topResult.scene_id === "string" ? topResult.scene_id : null;
+}
+
 export function buildEvidenceFromSpatialResult(
   result: SearchModelsResponse,
 ): {
@@ -16,9 +26,7 @@ export function buildEvidenceFromSpatialResult(
     return null;
   }
 
-  const sceneId = typeof topResult.scene_id === "string"
-    ? topResult.scene_id
-    : null;
+  const sceneId = extractSceneLabel(topResult);
   if (!sceneId) {
     return null;
   }
