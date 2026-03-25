@@ -258,3 +258,125 @@ class _LanguageToggleChip extends StatelessWidget {
     );
   }
 }
+
+class _SettingsTabSwitch extends StatelessWidget {
+  final TabController controller;
+
+  const _SettingsTabSwitch({
+    super.key,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final navBackground = isDark
+        ? AppTheme.darkSurface.withValues(alpha: 0.55)
+        : BDDesign.colorPaperWhite.withValues(alpha: 0.52);
+    final navBorder = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.10);
+    // Use slightly less shadow for this inner pill than the main floating bar
+    final navShadow = Colors.black.withValues(alpha: isDark ? 0.22 : 0.05);
+
+    final selectedBackground = isDark
+        ? const Color(0xFFAEBAC7).withValues(alpha: 0.14)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.09);
+    final selectedColor = isDark
+        ? const Color(0xFFF4F7FA)
+        : BDDesign.colorInkBlack;
+    final unselectedColor = isDark
+        ? const Color(0xFFB4BEC9)
+        : const Color(0xFF9AA3AD);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      height: 56,
+      child: ClipRRect(
+        borderRadius: BDDesign.radiusLarge,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
+          child: Container(
+            padding: const EdgeInsets.all(4.0),
+            decoration: BoxDecoration(
+              color: navBackground,
+              borderRadius: BDDesign.radiusLarge,
+              border: Border.all(color: navBorder, width: 1.0),
+              boxShadow: [
+                BoxShadow(
+                  color: navShadow,
+                  blurRadius: 28,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final tabWidth = constraints.maxWidth / 2;
+                return Stack(
+                  children: [
+                    AnimatedBuilder(
+                      animation: controller.animation!,
+                      builder: (context, child) {
+                        final double offset =
+                            controller.animation!.value * tabWidth;
+                        return Positioned(
+                          left: offset,
+                          width: tabWidth,
+                          top: 0,
+                          bottom: 0,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: selectedBackground,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    Row(
+                      children: [
+                        _buildTabItem(0, textLocalize('set_tab1'),
+                            selectedColor, unselectedColor),
+                        _buildTabItem(1, textLocalize('set_tab3'),
+                            selectedColor, unselectedColor),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabItem(int index, String label,
+      Color selectedColor, Color unselectedColor) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => controller.animateTo(index),
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: AnimatedBuilder(
+            animation: controller.animation!,
+            builder: (ctx, child) {
+              final selected =
+                  (controller.animation!.value - index).abs() < 0.5;
+              return Text(
+                label,
+                style: TextStyle(
+                  color: selected ? selectedColor : unselectedColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
