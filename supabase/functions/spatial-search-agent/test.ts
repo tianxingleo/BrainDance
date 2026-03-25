@@ -8,7 +8,7 @@ import {
   scoreSceneCandidate,
   shouldForceAnotherToolRound,
   summarizeCandidateEvidence,
-} from "./agent.ts";
+} from "../_shared/agent-core/spatialAgent.ts";
 
 Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
   const result = normalizeExplicitTimeRange({
