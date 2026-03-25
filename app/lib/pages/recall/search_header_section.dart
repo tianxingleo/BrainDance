@@ -243,11 +243,8 @@ class RecallSearchModeButton extends StatelessWidget {
                     : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 16, color: foreground),
-              ],
+            child: Center(
+              child: Icon(icon, size: 16, color: foreground),
             ),
           ),
         ),
