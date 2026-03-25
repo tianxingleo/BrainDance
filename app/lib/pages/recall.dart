@@ -23,13 +23,17 @@ import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
 import '../widgets/bd_surfaces.dart';
-import 'community.dart';
-import 'recall/local_ai_panel.dart';
+import 'community/composer_sheet.dart';
+import 'community/models.dart';
+import 'community/repository.dart';
+import 'recall/empty_states.dart';
 import 'recall/model_grid.dart';
+import 'recall/model_detail_sheet.dart';
 import 'recall/processing_section.dart';
+import 'recall/rename_model_dialog.dart';
+import 'recall/search_header_section.dart';
+import 'recall/search_mode.dart';
 import 'webgl_viewer.dart';
-
-enum _RecallSearchMode { cloud, local, localAi }
 
 class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
@@ -65,7 +69,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   RealtimeChannel? _realtimeChannel;
   Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
-  _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
+  RecallSearchMode _searchMode = RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   String _localAnswer = '';
@@ -120,6 +124,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // ignore: deprecated_member_use
     final isTabActive = TickerMode.of(context);
     if (_isTabActive == isTabActive) {
       return;
@@ -1314,136 +1319,45 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                         ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
-                          child: Column(
-                            children: [
-                              BDPanelCard(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                child: TextField(
-                                  controller: _searchController,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 15,
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: _searchFieldHint(),
-                                    hintStyle: TextStyle(
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.45)
-                                          : BDDesign.colorMutedBlue.withValues(
-                                              alpha: 0.78,
-                                            ),
-                                      fontSize: 15,
-                                    ),
-                                    prefixIcon: Icon(
-                                      Icons.search_rounded,
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.5)
-                                          : BDDesign.colorMutedBlue,
-                                    ),
-                                    suffixIcon:
-                                        ValueListenableBuilder<
-                                          TextEditingValue
-                                        >(
-                                          valueListenable: _searchController,
-                                          builder: (context, value, _) {
-                                            final hasText = value.text
-                                                .trim()
-                                                .isNotEmpty;
-                                            return Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                _buildSearchModeMenuButton(
-                                                  isDark,
-                                                ),
-                                                if (hasText)
-                                                  IconButton(
-                                                    onPressed: () {
-                                                      _searchController.clear();
-                                                      _searchModels('');
-                                                    },
-                                                    icon: Icon(
-                                                      Icons.close_rounded,
-                                                      color: isDark
-                                                          ? Colors.white
-                                                                .withValues(
-                                                                  alpha: 0.5,
-                                                                )
-                                                          : BDDesign
-                                                                .colorMutedBlue,
-                                                    ),
-                                                  ),
-                                              ],
-                                            );
-                                          },
-                                        ),
-                                    filled: true,
-                                    fillColor: Colors.transparent,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                      horizontal: 16,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                        color: BDDesign.colorMutedBlue,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                  onSubmitted: (value) {
-                                    unawaited(_handleSearchSubmitted(value));
-                                  },
-                                  onChanged: _searchModels,
-                                ),
-                              ),
-                              if (_searchMode == _RecallSearchMode.localAi) ...[
-                                const SizedBox(height: 10),
-                                RecallLocalAiPanel(
-                                  theme: theme,
-                                  isDark: isDark,
-                                  textColor: textColor,
-                                  darkInput: darkInput,
-                                  isLocalModelReady: _isLocalModelReady,
-                                  isModelDownloading: _isModelDownloading,
-                                  isLocalModelLoading: _isLocalModelLoading,
-                                  modelDownloadProgress: _modelDownloadProgress,
-                                  modelDownloadedBytes: _modelDownloadedBytes,
-                                  modelDownloadTotalBytes:
-                                      _modelDownloadTotalBytes,
-                                  localAnswer: _localAnswer,
-                                  localAnswerStatus: _localAnswerStatus,
-                                  localContextPreview: _localContextPreview,
-                                  defaultModelDownloadUrl:
-                                      _defaultModelDownloadUrl,
-                                  localModelCatalog: _localModelCatalog,
-                                  selectedLocalModelUrl: _selectedLocalModelUrl,
-                                  activeLocalModelUrl: _activeLocalModelUrl,
-                                  downloadedLocalModelUrls:
-                                      _downloadedLocalModelPathsByUrl.keys
-                                          .toSet(),
-                                  localModelUrlController:
-                                      _localModelUrlController,
-                                  localModelPathController:
-                                      _localModelPathController,
-                                  onSelectCatalogModel: (value) {
-                                    unawaited(_selectCatalogModel(value));
-                                  },
-                                  onDownloadModel: _downloadModelToPrivateDir,
-                                  onLoadModel: _loadLocalQnaModel,
-                                ),
-                              ],
-                            ],
+                          child: RecallSearchHeaderSection(
+                            theme: theme,
+                            isDark: isDark,
+                            textColor: textColor,
+                            darkInput: darkInput,
+                            searchController: _searchController,
+                            searchMode: _searchMode,
+                            searchModeTitleBuilder: _searchModeTitle,
+                            searchModeSubtitleBuilder: _searchModeSubtitle,
+                            searchFieldHint: _searchFieldHint(),
+                            onSubmit: _handleSearchSubmitted,
+                            onChanged: _searchModels,
+                            onClear: () {
+                              _searchController.clear();
+                              unawaited(_searchModels(''));
+                            },
+                            onTapSearchMode: _showSearchModeSheet,
+                            isLocalModelReady: _isLocalModelReady,
+                            isModelDownloading: _isModelDownloading,
+                            isLocalModelLoading: _isLocalModelLoading,
+                            modelDownloadProgress: _modelDownloadProgress,
+                            modelDownloadedBytes: _modelDownloadedBytes,
+                            modelDownloadTotalBytes: _modelDownloadTotalBytes,
+                            localAnswer: _localAnswer,
+                            localAnswerStatus: _localAnswerStatus,
+                            localContextPreview: _localContextPreview,
+                            defaultModelDownloadUrl: _defaultModelDownloadUrl,
+                            localModelCatalog: _localModelCatalog,
+                            selectedLocalModelUrl: _selectedLocalModelUrl,
+                            activeLocalModelUrl: _activeLocalModelUrl,
+                            downloadedLocalModelUrls:
+                                _downloadedLocalModelPathsByUrl.keys.toSet(),
+                            localModelUrlController: _localModelUrlController,
+                            localModelPathController: _localModelPathController,
+                            onSelectCatalogModel: (value) {
+                              unawaited(_selectCatalogModel(value));
+                            },
+                            onDownloadModel: _downloadModelToPrivateDir,
+                            onLoadModel: _loadLocalQnaModel,
                           ),
                         ),
                         if (_processingTasks.isNotEmpty)
@@ -1496,8 +1410,20 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       child: Padding(
                         padding: const EdgeInsets.only(top: 16.0),
                         child: _searchController.text.trim().isEmpty
-                            ? _buildEmptyState(theme, isDark)
-                            : _buildSearchEmptyState(theme, isDark),
+                            ? RecallEmptyState(
+                                theme: theme,
+                                isDark: isDark,
+                                darkCard: darkCard,
+                                darkBorder: darkBorder,
+                              )
+                            : RecallSearchEmptyState(
+                                theme: theme,
+                                isDark: isDark,
+                                darkCard: darkCard,
+                                darkBorder: darkBorder,
+                                searchMode: _searchMode,
+                                searchModeTitleBuilder: _searchModeTitle,
+                              ),
                       ),
                     )
                   else if (_models.isNotEmpty &&
@@ -1568,7 +1494,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
-        if (_searchMode == _RecallSearchMode.localAi) {
+        if (_searchMode == RecallSearchMode.localAi) {
           _localAnswer = '';
           _localContextPreview = '';
         }
@@ -1660,7 +1586,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
-    if (_searchMode == _RecallSearchMode.localAi) {
+    if (_searchMode == RecallSearchMode.localAi) {
       await _searchModels(query);
       if (query.isNotEmpty) {
         await _askLocalQuestion(question: query);
@@ -1670,26 +1596,26 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     await _searchModels(query);
   }
 
-  bool _usesLocalIndex(_RecallSearchMode mode) {
-    return mode == _RecallSearchMode.local || mode == _RecallSearchMode.localAi;
+  bool _usesLocalIndex(RecallSearchMode mode) {
+    return mode == RecallSearchMode.local || mode == RecallSearchMode.localAi;
   }
 
-  String _searchModeTitle(_RecallSearchMode mode) {
+  String _searchModeTitle(RecallSearchMode mode) {
     switch (mode) {
-      case _RecallSearchMode.cloud:
+      case RecallSearchMode.cloud:
         return textLocalize('recall_cloud_rag');
-      case _RecallSearchMode.local:
+      case RecallSearchMode.local:
         return textLocalize('recall_local_rag');
-      case _RecallSearchMode.localAi:
+      case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_rag');
     }
   }
 
-  String _searchModeSubtitle(_RecallSearchMode mode) {
+  String _searchModeSubtitle(RecallSearchMode mode) {
     switch (mode) {
-      case _RecallSearchMode.cloud:
+      case RecallSearchMode.cloud:
         return textLocalize('recall_cloud_scope');
-      case _RecallSearchMode.local:
+      case RecallSearchMode.local:
         if (_isLocalIndexing) {
           return textLocalize('recall_local_indexing');
         }
@@ -1699,25 +1625,25 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           return base;
         }
         return '$base · ${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}';
-      case _RecallSearchMode.localAi:
+      case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_scope');
     }
   }
 
   String _searchFieldHint() {
-    if (_searchMode == _RecallSearchMode.localAi) {
+    if (_searchMode == RecallSearchMode.localAi) {
       return textLocalize('recall_local_ai_hint');
     }
     return textLocalize('recall_search_hint');
   }
 
-  void _setSearchMode(_RecallSearchMode mode) {
+  void _setSearchMode(RecallSearchMode mode) {
     if (_searchMode == mode) {
       return;
     }
     setState(() {
       _searchMode = mode;
-      if (mode != _RecallSearchMode.localAi) {
+      if (mode != RecallSearchMode.localAi) {
         _localAnswer = '';
         _localContextPreview = '';
       }
@@ -1728,210 +1654,17 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
-  Widget _buildSearchModeMenuButton(bool isDark) {
-    final icon = switch (_searchMode) {
-      _RecallSearchMode.cloud => Icons.cloud_rounded,
-      _RecallSearchMode.local => Icons.privacy_tip_rounded,
-      _RecallSearchMode.localAi => Icons.auto_awesome_rounded,
-    };
-    final foreground = isDark
-        ? Colors.white.withValues(alpha: 0.82)
-        : BDDesign.colorInkBlack;
-
-    return Tooltip(
-      message: textLocalize('recall_search_mode'),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _showSearchModeSheet,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 68),
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 16, color: foreground),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    _searchModeTitle(_searchMode),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Icon(Icons.expand_more_rounded, size: 16, color: foreground),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _showSearchModeSheet() async {
-    final selected = await showModalBottomSheet<_RecallSearchMode>(
+    final selected = await showModalBottomSheet<RecallSearchMode>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        final isDark = AppConfig.isNightMode;
-        final textColor = isDark
-            ? BDDesign.colorPaperWhite
-            : BDDesign.colorInkBlack;
-        final hintColor = isDark
-            ? Colors.white.withValues(alpha: 0.62)
-            : BDDesign.colorMutedBlue;
-
-        Widget modeTile({
-          required _RecallSearchMode mode,
-          required IconData icon,
-          required String title,
-          required String subtitle,
-        }) {
-          final selected = _searchMode == mode;
-          return InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () => Navigator.pop(context, mode),
-            child: AnimatedContainer(
-              duration: BDMotion.durationFast,
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: selected
-                    ? BDDesign.colorMutedBlue.withValues(
-                        alpha: isDark ? 0.22 : 0.10,
-                      )
-                    : (isDark ? darkInput : const Color(0xFFF6F8FC)),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: selected
-                      ? BDDesign.colorMutedBlue
-                      : (isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? BDDesign.colorMutedBlue.withValues(alpha: 0.18)
-                          : (isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.white),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(icon, color: textColor, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: hintColor,
-                            fontSize: 12.5,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (selected)
-                    const Icon(
-                      Icons.check_circle_rounded,
-                      color: BDDesign.colorMutedBlue,
-                    ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    textLocalize('recall_search_mode'),
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '选择当前搜索栏要优先使用的检索方式。',
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 12.5,
-                      height: 1.35,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  modeTile(
-                    mode: _RecallSearchMode.cloud,
-                    icon: Icons.cloud_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.cloud),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.cloud),
-                  ),
-                  const SizedBox(height: 10),
-                  modeTile(
-                    mode: _RecallSearchMode.local,
-                    icon: Icons.privacy_tip_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.local),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.local),
-                  ),
-                  const SizedBox(height: 10),
-                  modeTile(
-                    mode: _RecallSearchMode.localAi,
-                    icon: Icons.auto_awesome_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.localAi),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.localAi),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        return RecallSearchModeSheet(
+          selectedMode: _searchMode,
+          titleBuilder: _searchModeTitle,
+          subtitleBuilder: _searchModeSubtitle,
+          darkInput: darkInput,
+          onSelect: (mode) => Navigator.pop(context, mode),
         );
       },
     );
@@ -1939,141 +1672,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (selected != null) {
       _setSearchMode(selected);
     }
-  }
-
-  Widget _buildEmptyState(TDThemeData theme, bool isDark) {
-    final textColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final iconColor = isDark
-        ? const Color(0xFFEEEEEE)
-        : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
-    return Center(
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
-        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
-        decoration: BoxDecoration(
-          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
-          borderRadius: BorderRadius.circular(32.0),
-          border: Border.all(
-            color: isDark ? darkBorder : theme.whiteColor1,
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(20),
-              blurRadius: 20,
-              spreadRadius: 5,
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TDImage(
-              assetUrl: 'assets/sprites/empty_state.png',
-              width: 120,
-              height: 120,
-              errorWidget: Icon(
-                TDIcons.time_filled,
-                size: 80,
-                color: iconColor,
-              ),
-            ),
-            const SizedBox(height: 24),
-            TDText(
-              textLocalize("home_page"),
-              font: theme.fontTitleLarge,
-              textColor: textColor,
-              fontWeight: FontWeight.w600,
-            ),
-            const SizedBox(height: 8),
-            TDText(
-              textLocalize("recall_empty_title"),
-              font: theme.fontBodyMedium,
-              textColor: hintTextColor,
-            ),
-            const SizedBox(height: 40),
-            TDButton(
-              text: textLocalize("recall_open_demo"),
-              iconWidget: Icon(
-                TDIcons.view_module,
-                color: Colors.white,
-                size: 20,
-              ),
-              type: TDButtonType.fill,
-              theme: TDButtonTheme.primary,
-              shape: TDButtonShape.round,
-              size: TDButtonSize.large,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => WebGLViewerPage(
-                      sceneId: textLocalize("recall_demo_title"),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSearchEmptyState(TDThemeData theme, bool isDark) {
-    final textColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF333333);
-    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
-    return Center(
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
-        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
-        decoration: BoxDecoration(
-          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
-          borderRadius: BorderRadius.circular(32.0),
-          border: Border.all(
-            color: isDark ? darkBorder : theme.whiteColor1,
-            width: 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.travel_explore_rounded,
-              size: 56,
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.8)
-                  : BDDesign.colorMutedBlue,
-            ),
-            const SizedBox(height: 18),
-            TDText(
-              _searchModeTitle(_searchMode),
-              font: theme.fontTitleLarge,
-              textColor: textColor,
-              fontWeight: FontWeight.w600,
-            ),
-            const SizedBox(height: 8),
-            TDText(
-              switch (_searchMode) {
-                _RecallSearchMode.local => textLocalize('recall_local_empty'),
-                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
-                _RecallSearchMode.localAi => textLocalize(
-                  'recall_local_ai_empty',
-                ),
-              },
-              font: theme.fontBodyMedium,
-              textColor: hintTextColor,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   String _modelKey(Map<String, dynamic> model) {
@@ -2238,13 +1836,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     if (!mounted) return;
 
-    final isDark = AppConfig.isNightMode;
-    final textColor = isDark
-        ? BDDesign.colorPaperWhite
-        : BDDesign.colorInkBlack;
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
     final displayName = _modelDisplayName(
       model,
       fallback: textLocalize('recall_unnamed_model'),
@@ -2252,8 +1843,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     // 格式化日期
     String formatDate(String? raw) {
-      if (raw == null || raw.isEmpty)
+      if (raw == null || raw.isEmpty) {
         return textLocalize('recall_detail_unknown');
+      }
       final dt = DateTime.tryParse(raw);
       if (dt == null) return raw;
       final local = dt.toLocal();
@@ -2269,98 +1861,20 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         textLocalize('recall_detail_unknown');
     final qualityScore = taskInfo?['quality_score'];
 
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        size: 22,
-                        color: textColor,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          displayName,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  _DetailRow(
-                    icon: Icons.calendar_today_rounded,
-                    label: textLocalize('recall_detail_created_at'),
-                    value: createdAt,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.update_rounded,
-                    label: textLocalize('recall_detail_updated_at'),
-                    value: updatedAt,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.category_rounded,
-                    label: textLocalize('recall_detail_task_type'),
-                    value: taskType,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.star_rounded,
-                    label: textLocalize('recall_detail_quality_score'),
-                    value: qualityScore != null
-                        ? '$qualityScore / 100'
-                        : textLocalize('recall_detail_unknown'),
-                    textColor: textColor,
-                    hintColor: hintColor,
-                    valueTrailing: qualityScore != null
-                        ? _buildScoreBar(
-                            (qualityScore as num).toDouble(),
-                            isDark,
-                          )
-                        : null,
-                  ),
-                  if (sizeLabel.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _DetailRow(
-                      icon: Icons.storage_rounded,
-                      label: textLocalize('recall_detail_local_size'),
-                      value: sizeLabel.replaceAll(RegExp(r'[()]'), ''),
-                      textColor: textColor,
-                      hintColor: hintColor,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    await showRecallModelDetailSheet(
+      context,
+      displayName: displayName,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      taskType: taskType,
+      qualityScore: qualityScore,
+      sizeLabel: sizeLabel,
+      qualityScoreTrailing: qualityScore != null
+          ? _buildScoreBar(
+              (qualityScore as num).toDouble(),
+              AppConfig.isNightMode,
+            )
+          : null,
     );
   }
 
@@ -2394,7 +1908,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final currentName = _modelDisplayName(model, fallback: sceneId);
     final newName = await showDialog<String>(
       context: context,
-      builder: (_) => _RenameModelDialog(initialName: currentName),
+      builder: (_) => RecallRenameModelDialog(initialName: currentName),
     );
 
     if (newName == null || newName.isEmpty || !mounted) return;
@@ -2556,173 +2070,4 @@ class _RecallSearchCacheEntry {
 
   final DateTime createdAt;
   final List<Map<String, dynamic>> results;
-}
-
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color textColor;
-  final Color hintColor;
-  final Widget? trailing;
-  final Widget? valueTrailing;
-
-  const _DetailRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.textColor,
-    required this.hintColor,
-    this.trailing,
-    this.valueTrailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: hintColor),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      value,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (valueTrailing != null) ...[
-                    const SizedBox(width: 10),
-                    valueTrailing!,
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-      ],
-    );
-  }
-}
-
-class _RecallMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? accent;
-
-  const _RecallMetric({required this.label, required this.value, this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.58)
-                : BDDesign.colorMutedBlue,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color:
-                accent ??
-                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RenameModelDialog extends StatefulWidget {
-  final String initialName;
-  const _RenameModelDialog({required this.initialName});
-
-  @override
-  State<_RenameModelDialog> createState() => _RenameModelDialogState();
-}
-
-class _RenameModelDialogState extends State<_RenameModelDialog> {
-  static final _invalidChars = RegExp(r'[/\\:*?"<>|]');
-  late final TextEditingController _controller;
-  String? _errorText;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialName);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(textLocalize('recall_rename_model')),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: InputDecoration(
-          hintText: textLocalize('recall_rename_hint'),
-          errorText: _errorText,
-        ),
-        onChanged: (value) {
-          setState(() {
-            _errorText = _invalidChars.hasMatch(value)
-                ? textLocalize('recall_rename_invalid')
-                : null;
-          });
-        },
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(textLocalize('gen_cancel')),
-        ),
-        TextButton(
-          onPressed: () {
-            final text = _controller.text.trim();
-            if (text.isEmpty || _invalidChars.hasMatch(text)) return;
-            Navigator.pop(context, text);
-          },
-          child: Text(textLocalize('gen_button')),
-        ),
-      ],
-    );
-  }
 }
