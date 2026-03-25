@@ -317,7 +317,12 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 ## 数据流与存储约定
 
-Storage 目前以 `braindance-assets` bucket 为中心，常见路径约定如下：
+Storage 目前分成两个主要 bucket：
+
+- `braindance-assets`：3D 生成任务的原始素材、中间结果和输出模型
+- `braindance-models`：Flutter Recall 本地 AI 下载用的端侧模型发布仓
+
+`braindance-assets` 常见路径约定如下：
 
 ```text
 {user_id}/{scene_id}/raw/video.mp4
@@ -329,6 +334,24 @@ Storage 目前以 `braindance-assets` bucket 为中心，常见路径约定如�
 {user_id}/{scene_id}/output/point_cloud.splat
 {user_id}/{scene_id}/output/point_cloud.ksplat
 {user_id}/{scene_id}/output/transforms.json
+```
+
+`braindance-models` 当前约定如下：
+
+```text
+catalog/model_catalog.json
+
+releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
+releases/qwen3-1.7b-braindance-q5-k-m.gguf
+releases/qwen3-1.7b-braindance-q4-k-m.gguf
+releases/qwen3-1.7b-braindance-merged/*
+releases/qwen3-0.6b-braindance-round1/*
+```
+
+其中 Flutter Recall 本地 AI 默认下载地址当前指向：
+
+```text
+{Supabase_URL}/storage/v1/object/public/braindance-models/releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
 ```
 
 数据库中的关键表包括：

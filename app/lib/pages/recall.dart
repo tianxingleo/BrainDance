@@ -40,8 +40,6 @@ class RecallPage extends ConsumerStatefulWidget {
 
 class _RecallPageState extends ConsumerState<RecallPage> {
   static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
-  static const String _defaultModelDownloadUrl =
-      'https://hf-mirror.com/jc-builds/Qwen3-1.7B-Q4_K_M-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true';
   static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
   static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
 
@@ -56,9 +54,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _localModelPathController =
       TextEditingController();
-  final TextEditingController _localModelUrlController = TextEditingController(
-    text: _defaultModelDownloadUrl,
-  );
+  late final TextEditingController _localModelUrlController;
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
   RealtimeChannel? _realtimeChannel;
   Timer? _modelPollingTimer;
@@ -89,9 +85,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _lastSearchKey;
   String _lastOwnModelSignature = '';
 
+  String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
+
   @override
   void initState() {
     super.initState();
+    _localModelUrlController = TextEditingController(
+      text: _defaultModelDownloadUrl,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bootstrapPage();
     });
