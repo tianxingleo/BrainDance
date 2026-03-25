@@ -32,12 +32,13 @@ void main() {
                         label: 'Recall',
                       ),
                       NavIslandItem(
-                        icon: Icons.camera_alt_rounded,
-                        label: 'Record',
+                        icon: Icons.add_rounded,
+                        label: 'Create',
+                        isLarge: true,
                       ),
                       NavIslandItem(
-                        icon: Icons.auto_awesome_rounded,
-                        label: 'Generate',
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Record',
                       ),
                     ],
                   );
@@ -49,13 +50,70 @@ void main() {
       ),
     );
 
-    expect(find.text('Recall'), findsOneWidget);
-    expect(find.text('Record'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('floating-nav-selected-content-Recall')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('floating-nav-selected-content-Record')),
+      findsNothing,
+    );
 
-    await tester.tap(find.byType(GestureDetector).at(1));
+    await tester.tap(find.byIcon(Icons.camera_alt_rounded).hitTestable());
     await tester.pumpAndSettle();
 
-    expect(find.text('Record'), findsOneWidget);
-    expect(selectedIndex, 1);
+    expect(
+      find.byKey(const ValueKey('floating-nav-selected-content-Record')),
+      findsOneWidget,
+    );
+    expect(selectedIndex, 2);
+  });
+
+  testWidgets('floating nav pill is centered with selected content', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              const Positioned.fill(
+                child: BDPageBackdrop(child: SizedBox.expand()),
+              ),
+              FloatingNavBar(
+                currentIndex: 0,
+                onTap: (_) {},
+                items: [
+                  NavIslandItem(
+                    icon: Icons.history_edu_rounded,
+                    label: 'Recall',
+                  ),
+                  NavIslandItem(
+                    icon: Icons.add_rounded,
+                    label: 'Create',
+                    isLarge: true,
+                  ),
+                  NavIslandItem(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Record',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final pillCenter = tester.getCenter(
+      find.byKey(const ValueKey('floating-nav-pill')),
+    );
+    final contentCenter = tester.getCenter(
+      find.byKey(const ValueKey('floating-nav-selected-content-Recall')),
+    );
+
+    expect((pillCenter.dx - contentCenter.dx).abs(), lessThanOrEqualTo(1.0));
   });
 }
