@@ -163,6 +163,167 @@ const compareModelAssetsSchema = z.object({
   ]),
 });
 
+const listedModelAssetSchema = z.object({
+  id: z.string(),
+  scene_id: z.string(),
+  display_name: z.string().nullable(),
+  description: z.string().nullable(),
+  tags: z.array(z.string()),
+  created_at: z.string(),
+});
+
+const modelAssetBundleSchema = z.object({
+  id: z.string(),
+  scene_id: z.string(),
+  display_name: z.string().nullable(),
+  description: z.string().nullable(),
+  objects: z.array(z.string()),
+  tags: z.array(z.string()),
+  created_at: z.string(),
+  preview_img_path: z.string().nullable(),
+  ply_path: z.string().nullable(),
+  meta_info: z.record(z.string(), z.unknown()),
+  pose_count: z.number().int().min(0),
+});
+
+const compareModelAssetsResultSchema = z.object({
+  rows: z.array(modelAssetBundleSchema),
+  diff: z.object({
+    common_tags: z.array(z.string()),
+    common_objects: z.array(z.string()),
+    tag_only_by_model: z.record(z.string(), z.array(z.string())),
+    object_only_by_model: z.record(z.string(), z.array(z.string())),
+    time_order: z.array(z.string()),
+    pose_count_by_model: z.record(z.string(), z.number()),
+  }),
+});
+
+const assetOperationSchema = z.object({
+  tool_name: z.string(),
+  dry_run: z.boolean(),
+  requires_confirmation: z.boolean(),
+  affected_count: z.number().int().min(0),
+  preview: z.array(z.object({
+    model_id: z.string(),
+    scene_id: z.string(),
+    old_display_name: z.string().nullable(),
+    new_display_name: z.string().nullable(),
+    old_description: z.string().nullable(),
+    new_description: z.string().nullable(),
+    old_tags: z.array(z.string()),
+    new_tags: z.array(z.string()),
+  })),
+});
+
+const poseSummaryResultSchema = z.object({
+  model_id: z.string(),
+  pose_count: z.number().int().min(0),
+  top_tags: z.array(z.string()),
+  sample_frames: z.array(z.object({
+    image_name: z.string(),
+    tag: z.string().nullable(),
+    transform_matrix: z.custom<unknown>(() => true),
+    created_at: z.string(),
+  })),
+});
+
+const relatedModelSummarySchema = z.object({
+  model_id: z.string(),
+  scene_id: z.string(),
+  display_name: z.string().nullable(),
+  relation_type: z.string(),
+  relation_score: z.number(),
+  created_at: z.string(),
+  place_id: z.string().nullable(),
+  memory_thread_id: z.string().nullable(),
+  version_label: z.string().nullable(),
+});
+
+const placeVersionsResultSchema = z.object({
+  place_id: z.string().nullable(),
+  memory_thread_id: z.string().nullable(),
+  versions: z.array(z.object({
+    model_id: z.string(),
+    scene_id: z.string(),
+    display_name: z.string().nullable(),
+    version_label: z.string().nullable(),
+    created_at: z.string(),
+  })),
+});
+
+const memoryCollectionSummarySchema = z.object({
+  collection: z.object({
+    id: z.string(),
+    user_id: z.string(),
+    title: z.string(),
+    description: z.string().nullable(),
+    cover_model_id: z.string().nullable(),
+    collection_type: z.string().nullable(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  }),
+  model_count: z.number().int().min(0),
+  items: z.array(z.object({
+    model_id: z.string(),
+    scene_id: z.string(),
+    display_name: z.string().nullable(),
+    created_at: z.string(),
+    tags: z.array(z.string()),
+    sort_order: z.number().int(),
+    note: z.string().nullable(),
+  })),
+  title_suggestion: z.string(),
+  summary: z.string(),
+  tag_suggestions: z.array(z.string()),
+});
+
+const assetToolResultSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("list_model_assets"),
+    rows: z.array(listedModelAssetSchema),
+  }),
+  z.object({
+    kind: z.literal("model_asset_bundle"),
+    rows: z.array(modelAssetBundleSchema),
+  }),
+  z.object({
+    kind: z.literal("compare_model_assets"),
+    rows: compareModelAssetsResultSchema.shape.rows,
+    diff: compareModelAssetsResultSchema.shape.diff,
+  }),
+  z.object({
+    kind: z.literal("asset_operation"),
+    operation: assetOperationSchema,
+  }),
+  z.object({
+    kind: z.literal("pose_summary"),
+    summary: poseSummaryResultSchema,
+  }),
+  z.object({
+    kind: z.literal("related_models"),
+    rows: z.array(relatedModelSummarySchema),
+  }),
+  z.object({
+    kind: z.literal("place_versions"),
+    result: placeVersionsResultSchema,
+  }),
+  z.object({
+    kind: z.literal("memory_collection_summary"),
+    summary: memoryCollectionSummarySchema,
+  }),
+  z.object({
+    kind: z.literal("group_models_into_thread"),
+    result: z.object({
+      model_ids: z.array(z.string()),
+      place_id: z.string(),
+      memory_thread_id: z.string(),
+    }),
+  }),
+  z.object({
+    kind: z.literal("memory_collection"),
+  }),
+]);
+
 function safeArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string =>
@@ -715,46 +876,46 @@ export function collectAssetToolResult(
   payload: string,
   state: AssetToolState,
 ): number {
-  const parsed = JSON.parse(payload) as Record<string, unknown>;
+  const parsed = assetToolResultSchema.parse(JSON.parse(payload));
   state.lastToolName = toolName;
 
-  if (parsed.kind === "list_model_assets" && Array.isArray(parsed.rows)) {
-    state.list = parsed.rows as ListedModelAsset[];
+  if (parsed.kind === "list_model_assets") {
+    state.list = parsed.rows;
     return state.list.length;
   }
-  if (parsed.kind === "model_asset_bundle" && Array.isArray(parsed.rows)) {
-    state.bundle = parsed.rows as ModelAssetBundle[];
+  if (parsed.kind === "model_asset_bundle") {
+    state.bundle = parsed.rows;
     return state.bundle.length;
   }
   if (parsed.kind === "compare_model_assets") {
     state.comparison = {
-      rows: Array.isArray(parsed.rows) ? parsed.rows as ModelAssetBundle[] : [],
-      diff: parsed.diff as CompareModelAssetsResult["diff"],
+      rows: parsed.rows,
+      diff: parsed.diff,
     };
     return state.comparison.rows.length;
   }
   if (parsed.kind === "asset_operation" && parsed.operation) {
-    state.operation = parsed.operation as AssetOperationResult;
+    state.operation = parsed.operation;
     return state.operation.affected_count;
   }
   if (parsed.kind === "pose_summary" && parsed.summary) {
     state.poseSummary = parsed.summary as PoseSummary;
-    return state.poseSummary.pose_count;
+    return parsed.summary.pose_count;
   }
-  if (parsed.kind === "related_models" && Array.isArray(parsed.rows)) {
-    state.relatedModels = parsed.rows as RelatedModelSummary[];
+  if (parsed.kind === "related_models") {
+    state.relatedModels = parsed.rows;
     return state.relatedModels.length;
   }
   if (parsed.kind === "place_versions" && parsed.result) {
-    state.placeVersions = parsed.result as PlaceVersionsResult;
+    state.placeVersions = parsed.result;
     return state.placeVersions.versions.length;
   }
   if (parsed.kind === "memory_collection_summary" && parsed.summary) {
-    state.collectionSummary = parsed.summary as MemoryCollectionSummary;
+    state.collectionSummary = parsed.summary;
     return state.collectionSummary.model_count;
   }
   if (parsed.kind === "group_models_into_thread" && parsed.result) {
-    state.threadGrouping = parsed.result as AssetToolState["threadGrouping"];
+    state.threadGrouping = parsed.result;
     return state.threadGrouping?.model_ids.length ?? 0;
   }
   if (parsed.kind === "memory_collection") {

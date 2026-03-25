@@ -103,6 +103,8 @@ class AgentRecallResponse {
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
   final Map<String, dynamic>? collectionContext;
+  final Map<String, dynamic>? creativeContext;
+  final Map<String, dynamic>? memoryGraphContext;
 
   AgentRecallResponse({
     required this.mode,
@@ -114,6 +116,8 @@ class AgentRecallResponse {
     this.assetContext,
     this.compareContext,
     this.collectionContext,
+    this.creativeContext,
+    this.memoryGraphContext,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -156,7 +160,79 @@ class AgentRecallResponse {
       collectionContext: json['collection_context'] is Map
           ? Map<String, dynamic>.from(json['collection_context'] as Map)
           : null,
+      creativeContext: json['creative_context'] is Map
+          ? Map<String, dynamic>.from(json['creative_context'] as Map)
+          : null,
+      memoryGraphContext: json['memory_graph_context'] is Map
+          ? Map<String, dynamic>.from(json['memory_graph_context'] as Map)
+          : null,
     );
+  }
+}
+
+class AgentSessionState {
+  final String? lastMode;
+  final List<String>? lastSelectedModelIds;
+  final List<AgentCandidateRef>? lastCandidateRefs;
+  final AgentOperationPreview? lastOperationPreview;
+
+  AgentSessionState({
+    this.lastMode,
+    this.lastSelectedModelIds,
+    this.lastCandidateRefs,
+    this.lastOperationPreview,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (lastMode != null) 'lastMode': lastMode,
+      if (lastSelectedModelIds != null)
+        'lastSelectedModelIds': lastSelectedModelIds,
+      if (lastCandidateRefs != null)
+        'lastCandidateRefs': lastCandidateRefs!.map((item) => item.toJson()).toList(),
+      if (lastOperationPreview != null)
+        'lastOperationPreview': lastOperationPreview!.toJson(),
+    };
+  }
+}
+
+class AgentCandidateRef {
+  final int index;
+  final String sceneId;
+  final String modelId;
+  final String description;
+
+  AgentCandidateRef({
+    required this.index,
+    required this.sceneId,
+    required this.modelId,
+    required this.description,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'index': index,
+      'sceneId': sceneId,
+      'modelId': modelId,
+      'description': description,
+    };
+  }
+}
+
+class AgentOperationPreview {
+  final String toolName;
+  final int affectedCount;
+
+  AgentOperationPreview({
+    required this.toolName,
+    required this.affectedCount,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'toolName': toolName,
+      'affectedCount': affectedCount,
+    };
   }
 }
 
@@ -311,6 +387,7 @@ class AgentRecallService {
     List<String>? candidateSceneIds,
     String? sessionId,
     String? conversationSummary,
+    AgentSessionState? sessionState,
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -360,6 +437,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
@@ -394,6 +472,7 @@ class AgentRecallService {
           candidateSceneIds: candidateSceneIds,
           sessionId: sessionId,
           conversationSummary: conversationSummary,
+          sessionState: sessionState,
         );
         yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
       } catch (fallbackError) {
@@ -417,6 +496,7 @@ class AgentRecallService {
     List<String>? candidateSceneIds,
     String? sessionId,
     String? conversationSummary,
+    AgentSessionState? sessionState,
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -437,6 +517,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
@@ -504,6 +585,8 @@ class AgentRecallService {
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,
       'collection_context': response.collectionContext,
+      'creative_context': response.creativeContext,
+      'memory_graph_context': response.memoryGraphContext,
     };
   }
 
