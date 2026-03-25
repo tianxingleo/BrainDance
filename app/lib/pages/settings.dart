@@ -92,45 +92,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: BDPanelCard(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      children: [
-                        Text(
-                          textLocalize('set_label_lang'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: hintColor,
-                          ),
-                        ),
-                        const Spacer(),
-                        _LanguageToggleChip(
-                          label: textLocalize('set_lang_zh'),
-                          selected: AppConfig.langMap['locale'] == 'zh_CN',
-                          onTap: () {
-                            SetConfig.setLanguage('zh_CN', ref);
-                            SetConfig.saveMsgToFile();
-                            onUpdate();
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        _LanguageToggleChip(
-                          label: textLocalize('set_lang_en'),
-                          selected: AppConfig.langMap['locale'] == 'en_US',
-                          onTap: () {
-                            SetConfig.setLanguage('en_US', ref);
-                            SetConfig.saveMsgToFile();
-                            onUpdate();
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
+
                 Consumer(
                   builder: (context, ref, _) {
                     final stats = ref.watch(overviewStatsProvider);
@@ -193,7 +155,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       child: KeyedSubtree(
         key: ValueKey<int>(_currentTabIndex),
         child: switch (_currentTabIndex) {
-          0 => setTab1(ref),
+          0 => setTab1(context, ref),
           1 => setTab3(context),
           _ => const SizedBox.shrink(),
         },
@@ -202,62 +164,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 }
 
-class _LanguageToggleChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
 
-  const _LanguageToggleChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final selectedColor = isDark
-        ? BDDesign.colorMutedBlueLight
-        : BDDesign.colorMutedBlue;
-    final borderColor = selected
-        ? selectedColor.withValues(alpha: 0.22)
-        : (isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : BDDesign.colorMutedBlue.withValues(alpha: 0.10));
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: AnimatedContainer(
-          duration: BDMotion.durationNormal,
-          curve: BDMotion.curveFluid,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? selectedColor.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: borderColor),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: selected
-                  ? selectedColor
-                  : (isDark
-                        ? BDDesign.colorPaperWhite
-                        : BDDesign.colorInkBlack),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _SettingsTabSwitch extends StatelessWidget {
   final TabController controller;
@@ -329,7 +236,7 @@ class _SettingsTabSwitch extends StatelessWidget {
                           child: Container(
                             decoration: BoxDecoration(
                               color: selectedBackground,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(24),
                             ),
                           ),
                         );
