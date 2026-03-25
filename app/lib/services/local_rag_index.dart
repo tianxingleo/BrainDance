@@ -134,6 +134,19 @@ class LocalRagIndexService {
     });
     return List<Map<String, dynamic>>.from(results as List<dynamic>);
   }
+
+  Future<void> deleteByModelId(String modelId) async {
+    final normalizedId = modelId.trim();
+    if (normalizedId.isEmpty) {
+      return;
+    }
+    final db = await _database();
+    await db.delete(
+      tableName,
+      where: 'model_id = ?',
+      whereArgs: [normalizedId],
+    );
+  }
 }
 
 Map<String, dynamic> _prepareSyncPayload(Map<String, dynamic> payload) {

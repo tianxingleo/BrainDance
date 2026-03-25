@@ -1484,7 +1484,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               onDownloadModel: _downloadRecallModel,
               onShareModelToCommunity: _shareModelToCommunity,
               onRenameModel: _renameModel,
-              onDeleteLocalModel: _deleteLocalModel,
+              onDeleteCloudModel: _deleteCloudModel,
             ),
         ],
       ),
@@ -2092,78 +2092,142 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         .trim();
   }
 
-  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
-    final plyPath = model['ply_path'] as String? ?? '';
-    if (plyPath.isEmpty) {
+  Future<List<String>> _listStorageFilesRecursively(
+    String bucket,
+    String folderPath,
+  ) async {
+    final normalizedFolder = folderPath.trim().replaceAll('\\', '/');
+    if (normalizedFolder.isEmpty) {
+      return const <String>[];
+    }
+
+    final files = <String>[];
+    final pendingFolders = <String>[normalizedFolder];
+    final storage = Supabase.instance.client.storage.from(bucket);
+
+    while (pendingFolders.isNotEmpty) {
+      final currentFolder = pendingFolders.removeLast();
+      final entries = await storage.list(path: currentFolder);
+      for (final entry in entries) {
+        final entryName = entry.name.trim();
+        if (entryName.isEmpty) {
+          continue;
+        }
+        final childPath = '$currentFolder/$entryName';
+        final entryId = entry.id?.trim() ?? '';
+        if (entryId.isNotEmpty) {
+          files.add(childPath);
+        } else {
+          pendingFolders.add(childPath);
+        }
+      }
+    }
+
+    return files;
+  }
+
+  String? _sceneFolderPathForModel(Map<String, dynamic> model) {
+    final plyPath = model['ply_path']?.toString().trim() ?? '';
+    if (plyPath.isNotEmpty) {
+      final normalizedPath = plyPath.replaceAll('\\', '/');
+      final marker = '/output/';
+      final markerIndex = normalizedPath.indexOf(marker);
+      if (markerIndex > 0) {
+        return normalizedPath.substring(0, markerIndex);
+      }
+      final lastSlash = normalizedPath.lastIndexOf('/');
+      if (lastSlash > 0) {
+        return normalizedPath.substring(0, lastSlash);
+      }
+    }
+
+    final userId = model['user_id']?.toString().trim() ?? '';
+    final sceneId = model['scene_id']?.toString().trim() ?? '';
+    if (userId.isEmpty || sceneId.isEmpty) {
+      return null;
+    }
+    return '$userId/$sceneId';
+  }
+
+  Future<void> _deleteCloudModel(Map<String, dynamic> model) async {
+    final modelId = model['id']?.toString().trim() ?? '';
+    final currentUserId =
+        Supabase.instance.client.auth.currentUser?.id.trim() ?? '';
+    final modelUserId = model['user_id']?.toString().trim() ?? '';
+    if (modelId.isEmpty) {
       if (mounted) {
-        TDToast.showText(
-          textLocalize('recall_delete_local_none'),
-          context: context,
-        );
+        TDToast.showText('云端模型缺少 id，无法删除', context: context);
+      }
+      return;
+    }
+    if (currentUserId.isEmpty || modelUserId != currentUserId) {
+      if (mounted) {
+        TDToast.showText('只能删除当前账号自己的云端模型', context: context);
       }
       return;
     }
 
+    final targetKey = _modelKey(model);
+    final targetSceneFolder = _sceneFolderPathForModel(model);
+    final plyPath = model['ply_path']?.toString().trim() ?? '';
+
     try {
-      final modelUrl = _toPublicUrl(plyPath);
-      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
-        if (mounted) {
-          TDToast.showText(
-            textLocalize('recall_delete_local_none'),
-            context: context,
-          );
+      if (targetSceneFolder != null && targetSceneFolder.isNotEmpty) {
+        final storageFiles = await _listStorageFilesRecursively(
+          'braindance-assets',
+          targetSceneFolder,
+        );
+        if (storageFiles.isNotEmpty) {
+          await Supabase.instance.client.storage
+              .from('braindance-assets')
+              .remove(storageFiles);
         }
+      }
+
+      await Supabase.instance.client
+          .from('model_assets')
+          .delete()
+          .eq('id', modelId)
+          .eq('user_id', currentUserId);
+
+      await _localRagIndex.deleteByModelId(modelId);
+
+      if (plyPath.isNotEmpty) {
+        final modelUrl = _toPublicUrl(plyPath);
+        downloadEventBus.add(
+          ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
+        );
+      }
+
+      if (!mounted) {
         return;
       }
 
-      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
-      final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName = uri.path
-          .replaceAll('/', '_')
-          .replaceAll('\\', '_');
-      final dir = await getApplicationDocumentsDirectory();
-
-      final localFile = File('${dir.path}/$sanitizedFileName');
-      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
-      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
-
-      bool deleted = false;
-      if (await localFile.exists()) {
-        await localFile.delete();
-        deleted = true;
-      }
-      if (await tmpFile.exists()) {
-        await tmpFile.delete();
-        deleted = true;
-      }
-      if (await metaFile.exists()) {
-        await metaFile.delete();
-        deleted = true;
-      }
-
-      if (mounted) {
-        if (deleted) {
-          // 通知下载状态徽章重置为"未下载"
-          downloadEventBus.add(
-            ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
-          );
-          TDToast.showText(
-            textLocalize('recall_delete_local_success'),
-            context: context,
-          );
-        } else {
-          TDToast.showText(
-            textLocalize('recall_delete_local_none'),
-            context: context,
-          );
+      setState(() {
+        _allModels.removeWhere((item) => _modelKey(item) == targetKey);
+        _models.removeWhere((item) => _modelKey(item) == targetKey);
+        if (_activeModelAction != null &&
+            _modelKey(_activeModelAction!) == targetKey) {
+          _activeModelAction = null;
+          _activeModelActionRect = null;
         }
-      }
+        if (_allModels.isEmpty) {
+          final demo = _buildDemoModel();
+          _allModels = [demo];
+          _models = [demo];
+        } else if (_models.isEmpty) {
+          _models = List<Map<String, dynamic>>.from(_allModels);
+        }
+        _lastOwnModelSignature = _buildModelSignature(
+          _extractOwnModels(_allModels),
+        );
+      });
+      _updateOverviewProvider();
+
+      TDToast.showText('云端模型删除成功', context: context);
     } catch (e) {
       if (mounted) {
-        TDToast.showText(
-          '${textLocalize('recall_delete_local_fail')}: $e',
-          context: context,
-        );
+        TDToast.showText('云端模型删除失败：$e', context: context);
       }
     }
   }

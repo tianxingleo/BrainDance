@@ -307,7 +307,7 @@ class RecallModelActionOverlay extends StatefulWidget {
   final Future<void> Function(Map<String, dynamic>) onDownloadModel;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
   final Future<void> Function(Map<String, dynamic>) onRenameModel;
-  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteCloudModel;
   final String Function(String) toPublicUrl;
 
   const RecallModelActionOverlay({
@@ -324,7 +324,7 @@ class RecallModelActionOverlay extends StatefulWidget {
     required this.onDownloadModel,
     required this.onShareModelToCommunity,
     required this.onRenameModel,
-    required this.onDeleteLocalModel,
+    required this.onDeleteCloudModel,
     required this.toPublicUrl,
   });
 
@@ -398,12 +398,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final blurProgress = _blurOpacityAnimation.value;
-    final localSizeLabel =
-        widget.model['_local_size_label']?.toString().trim() ?? '';
-    final deleteLabel = localSizeLabel.isEmpty
-        ? '删除模型'
-        : '删除模型($localSizeLabel)';
+    const deleteLabel = '删除云端模型';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
@@ -592,7 +587,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                             destructive: true,
                             onTap: () async {
                               widget.onDismiss();
-                              await widget.onDeleteLocalModel(widget.model);
+                              await widget.onDeleteCloudModel(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
