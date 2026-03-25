@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -201,7 +202,7 @@ class AgentRecallService {
       if (e is FunctionException) {
         yield jsonEncode({
           'event': 'error',
-          'data': e.details ?? e.reason ?? e.message,
+          'data': e.details ?? e.status.toString(),
         });
       } else {
         yield jsonEncode({'event': 'error', 'data': 'Function Error: $e'});
