@@ -63,7 +63,7 @@ class RecallModelGrid extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
@@ -130,7 +130,7 @@ class RecallModelGrid extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () => onNavigateToViewer(model, null),
-                            onLongPressStart: (_) => onShowModelActions(model),
+                            onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Row(
@@ -261,7 +261,7 @@ class RecallModelGrid extends StatelessWidget {
                   opacity: isActionTarget ? 0.0 : 1.0,
                   child: GestureDetector(
                     onTap: () => onNavigateToViewer(model, null),
-                    onLongPressStart: (_) => onShowModelActions(model),
+                    onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
                     child: Container(
                       key: cardKey,
                       child: RecallModelTile(
@@ -1074,7 +1074,7 @@ class TimePeelingList extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
@@ -1165,7 +1165,7 @@ class _TimePeelingSlot extends StatefulWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const _TimePeelingSlot({
@@ -1367,7 +1367,7 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
                         child: GestureDetector(
                           onTap: () => widget.onNavigateToViewer(model, null),
                           onLongPressStart: (_) =>
-                              widget.onShowModelActions(model),
+                              widget.onShowModelActions(model, imageOnly: true),
                           child: Container(
                             key: cardKey,
                             decoration: BoxDecoration(

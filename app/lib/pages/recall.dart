@@ -1441,8 +1441,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
                       toPublicUrl: _toPublicUrl,
-                      onShowModelActions: (model) {
-                        _showModelActions(model);
+                      onShowModelActions: (model, {bool imageOnly = false}) {
+                        _showModelActions(model, imageOnly: imageOnly);
                       },
                     )
                   else
@@ -1456,8 +1456,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       modelCardKeyFor: _modelCardKeyFor,
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
-                      onShowModelActions: (model) {
-                        _showModelActions(model);
+                      onShowModelActions: (model, {bool imageOnly = false}) {
+                        _showModelActions(model, imageOnly: imageOnly);
                       },
                       onAddNewTask: (name) {
                         ref.read(pageIndexProvider.notifier).state = 1;
