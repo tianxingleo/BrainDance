@@ -1,12 +1,20 @@
 import type { SearchModelsResponse } from "../../search-models/shared.ts";
 import type { AgentRecallResponse } from "../schemas/response.ts";
 
+function extractSceneLabel(topResult: Record<string, unknown>): string | null {
+  const displayName = typeof topResult.display_name === "string"
+    ? topResult.display_name.trim()
+    : "";
+  if (displayName.length > 0) {
+    return displayName;
+  }
+  return typeof topResult.scene_id === "string" ? topResult.scene_id : null;
+}
+
 function buildOpenSceneAction(
   topResult: Record<string, unknown>,
 ): AgentRecallResponse["actions"][number] | null {
-  const sceneId = typeof topResult.scene_id === "string"
-    ? topResult.scene_id
-    : null;
+  const sceneId = extractSceneLabel(topResult);
   if (!sceneId) {
     return null;
   }
@@ -35,9 +43,7 @@ export function buildRecallActionsFromSearchResult(
     mapped.push(openAction);
   }
 
-  const sceneId = typeof topResult.scene_id === "string"
-    ? topResult.scene_id
-    : null;
+  const sceneId = extractSceneLabel(topResult);
   const rawFrames = Array.isArray(topResult.matched_frames)
     ? topResult.matched_frames as Array<Record<string, unknown>>
     : [];
