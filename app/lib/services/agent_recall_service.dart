@@ -303,37 +303,6 @@ class AgentRecallService {
         if (conversationSummary != null) 'conversationSummary': conversationSummary,
       },
     );
-        if (sessionId != null) 'sessionId': sessionId,
-        if (conversationSummary != null) 'conversationSummary': conversationSummary,
-      },
-    );
-
-    final data = response.data;
-    if (data is! Map) {
-      throw Exception('agent-recall 返回格式错误');
-    }
-
-    if (data['error'] != null) {
-      throw Exception(data['error'].toString());
-    }
-
-    return AgentRecallResponse.fromJson(Map<String, dynamic>.from(data));
-  }
-}
-    final response = await _client.functions.invoke(
-      'agent-recall',
-      body: {
-        'query': query,
-        if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
-        'executionMode': executionMode,
-        if (currentSceneId != null) 'currentSceneId': currentSceneId,
-        if (currentModelId != null) 'currentModelId': currentModelId,
-        if (currentMode != null) 'currentMode': currentMode,
-        if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
-        if (sessionId != null) 'sessionId': sessionId,
-        if (conversationSummary != null) 'conversationSummary': conversationSummary,
-      },
-    );
 
     final data = response.data;
     if (data is! Map) {
