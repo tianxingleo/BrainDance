@@ -41,6 +41,8 @@
 | 系统架构 | 详细架构说明、组件设计 | [2.架构说明/系统架构.md](2.架构说明/系统架构.md) |
 | 技术栈清单 | 完整技术栈说明、数据流转 | [协同规范/详细技术栈清单、技术协同规范.md](协同规范/详细技术栈清单、技术协同规范.md) |
 | Agent 规划与 LangChain 实践路线 | Agent 三步实施路线、LangChain TS 落点、工具与动作协议 | [02-架构设计/Agent规划与LangChain实践路线.md](02-架构设计/Agent规划与LangChain实践路线.md) |
+| LangChain 专题目录 | LangChain 相关实现现状、阶段总结与联调记录入口 | [09-LangChain专题/README.md](09-LangChain专题/README.md) |
+| LangChain 实现现状（2026-03-25） | 以当前代码为准整理已落地能力 | [09-LangChain专题/LangChain实现现状-2026-03-25.md](09-LangChain专题/LangChain实现现状-2026-03-25.md) |
 
 ### 3️⃣ API 与接口
 
