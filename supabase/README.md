@@ -7,6 +7,7 @@
 - `migrations/`：数据库结构与策略迁移
 - `functions/search-models/`：自然语言搜索接口
 - `functions/spatial-search-agent/`：基于 LangChain 的空间检索 Agent
+- `functions/agent-recall/`：稳定响应协议的 Recall Agent 总入口
 - `functions/test-timeout/`：测试用函数
 - `config.toml`：Supabase CLI 本地配置
 - `deploy-functions.sh`：函数部署脚本
@@ -115,16 +116,29 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 如果要测试接口，可以参考 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
 
-### `agent-recall`（规划中）
+### `agent-recall`
 
-Agent 能力的近期规划会优先放在 Supabase Edge Functions / TypeScript 一侧实现，而不是放到 Python Worker 中。规划中的 `agent-recall` 将作为在线总入口，负责：
+`agent-recall` 是当前按架构路线新增的稳定总入口，负责：
 
 1. 识别用户查询意图
-2. 调用 `search-models` 等专用工具
+2. 复用现有空间检索 Agent 能力组织召回结果
 3. 组织 `answer + evidence + actions` 结构化响应
 4. 把空间证据和前端动作一起返回给 Flutter / Web
 
-它与 `search-models` 的关系是“编排入口”和“专用搜索工具”的关系，而不是替代关系。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
+当前动作协议已经稳定为：
+
+- `open_scene`
+- `fly_to_pose`
+- `highlight_region`
+
+本地运行：
+
+```bash
+cd supabase/functions/agent-recall
+supabase functions serve agent-recall --no-verify-jwt
+```
+
+最小回归题集位于 [tests/agent_recall_cases.jsonl](/home/ltx/projects/BrainDance/tests/agent_recall_cases.jsonl)。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
 
 ### `test-timeout`
 

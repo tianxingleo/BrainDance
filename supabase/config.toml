@@ -384,3 +384,6 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 
 [functions.search-models]
 verify_jwt = false
+
+[functions.agent-recall]
+verify_jwt = false

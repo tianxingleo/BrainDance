@@ -1,5 +1,12 @@
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { HumanMessage, SystemMessage, ToolMessage } from "npm:@langchain/core@0.3/messages";
+import {
+  createClient,
+  type SupabaseClient,
+} from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+} from "npm:@langchain/core@0.3/messages";
 import { DynamicStructuredTool } from "npm:@langchain/core@0.3/tools";
 import { ChatOpenAI, OpenAIEmbeddings } from "npm:@langchain/openai@0.6";
 import { z } from "npm:zod@3.25";
@@ -119,7 +126,7 @@ type ToolTraceEntry = {
   resultSummary: string;
 };
 
-type SpatialSearchResponse = {
+export type SpatialSearchResponse = {
   success: true;
   intent: SpatialIntent;
   selection: {
@@ -150,7 +157,8 @@ type SpatialSearchResponse = {
 function ensureRuntimeEnv(): RuntimeEnv {
   const dashscopeApiKey = Deno.env.get("DASHSCOPE_API_KEY") ?? "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+    "";
 
   if (!dashscopeApiKey) {
     throw new Error("未配置 DASHSCOPE_API_KEY");
@@ -206,13 +214,31 @@ function asUtcIso(date: Date): string {
 
 function startOfDayUtc(date: Date): string {
   return asUtcIso(
-    new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0)),
+    new Date(
+      Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+        0,
+        0,
+        0,
+      ),
+    ),
   );
 }
 
 function endOfDayUtc(date: Date): string {
   return asUtcIso(
-    new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59)),
+    new Date(
+      Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+        23,
+        59,
+        59,
+      ),
+    ),
   );
 }
 
@@ -254,7 +280,9 @@ export function normalizeExplicitTimeRange(input: {
 
 function safeArray(value: unknown): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    ? value.filter((item): item is string =>
+      typeof item === "string" && item.trim().length > 0
+    )
     : [];
 }
 
@@ -290,7 +318,10 @@ function computeKeywordScore(query: string, chunks: string[]): number {
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
   if (!Array.isArray(input)) return null;
 
-  if (input.length === 16 && input.every((value) => Number.isFinite(Number(value)))) {
+  if (
+    input.length === 16 &&
+    input.every((value) => Number.isFinite(Number(value)))
+  ) {
     return input.map((value) => Number(value));
   }
 
@@ -382,7 +413,9 @@ async function buildPoseTool(
         throw new Error(`pose_semantic_search 执行失败: ${error.message}`);
       }
 
-      const rows = Array.isArray(data) ? data as Array<Record<string, unknown>> : [];
+      const rows = Array.isArray(data)
+        ? data as Array<Record<string, unknown>>
+        : [];
       const enriched: PoseSearchRow[] = [];
 
       for (const row of rows) {
@@ -391,7 +424,9 @@ async function buildPoseTool(
           ? row.matched_frames as Array<Record<string, unknown>>
           : [];
         const imageNames = rawFrames
-          .map((frame) => typeof frame.image_name === "string" ? frame.image_name : "")
+          .map((frame) =>
+            typeof frame.image_name === "string" ? frame.image_name : ""
+          )
           .filter((value) => value.length > 0);
 
         const tagMap = new Map<string, string | null>();
@@ -404,7 +439,10 @@ async function buildPoseTool(
 
           for (const poseRow of poseRows ?? []) {
             if (typeof poseRow.image_name === "string") {
-              tagMap.set(poseRow.image_name, typeof poseRow.tag === "string" ? poseRow.tag : null);
+              tagMap.set(
+                poseRow.image_name,
+                typeof poseRow.tag === "string" ? poseRow.tag : null,
+              );
             }
           }
         }
@@ -412,7 +450,9 @@ async function buildPoseTool(
         enriched.push({
           id: modelId,
           scene_id: String(row.scene_id ?? ""),
-          description: typeof row.description === "string" ? row.description : null,
+          description: typeof row.description === "string"
+            ? row.description
+            : null,
           ply_path: typeof row.ply_path === "string" ? row.ply_path : null,
           created_at: String(row.created_at ?? ""),
           user_id: typeof row.user_id === "string" ? row.user_id : null,
@@ -431,7 +471,9 @@ async function buildPoseTool(
   });
 }
 
-async function buildSceneTool(supabase: SupabaseClient): Promise<DynamicStructuredTool> {
+async function buildSceneTool(
+  supabase: SupabaseClient,
+): Promise<DynamicStructuredTool> {
   return new DynamicStructuredTool({
     name: "scene_metadata_search",
     description:
@@ -484,7 +526,9 @@ async function buildSceneTool(supabase: SupabaseClient): Promise<DynamicStructur
             ...safeArray(row.objects),
             ...safeArray(row.tags),
           ];
-          const keywordScore = query.trim() ? computeKeywordScore(query, chunks) : 0.45;
+          const keywordScore = query.trim()
+            ? computeKeywordScore(query, chunks)
+            : 0.45;
           return {
             ...row,
             keyword_score: keywordScore,
@@ -546,12 +590,16 @@ function mergeSceneCandidate(
   }
 
   existing.sourceScores = { ...existing.sourceScores, ...partial.sourceScores };
-  if (!existing.description && partial.description) existing.description = partial.description;
+  if (!existing.description && partial.description) {
+    existing.description = partial.description;
+  }
   if (!existing.plyPath && partial.plyPath) existing.plyPath = partial.plyPath;
   if (!existing.previewImgPath && partial.previewImgPath) {
     existing.previewImgPath = partial.previewImgPath;
   }
-  if (!existing.bestPose && partial.bestPose) existing.bestPose = partial.bestPose;
+  if (!existing.bestPose && partial.bestPose) {
+    existing.bestPose = partial.bestPose;
+  }
   existing.objects = [...new Set([...existing.objects, ...partial.objects])];
   existing.tags = [...new Set([...existing.tags, ...partial.tags])];
 }
@@ -583,7 +631,9 @@ function collectSceneCandidates(
         userId: typeof row.user_id === "string" ? row.user_id : null,
         description: typeof row.description === "string" ? row.description : "",
         objects: [],
-        tags: sortedFrames.map((frame) => frame.tag ?? "").filter((value) => value.length > 0),
+        tags: sortedFrames.map((frame) => frame.tag ?? "").filter((value) =>
+          value.length > 0
+        ),
         plyPath: typeof row.ply_path === "string" ? row.ply_path : null,
         previewImgPath: null,
         createdAt: String(row.created_at ?? ""),
@@ -604,7 +654,9 @@ function collectSceneCandidates(
       objects: safeArray(row.objects),
       tags: safeArray(row.tags),
       plyPath: typeof row.ply_path === "string" ? row.ply_path : null,
-      previewImgPath: typeof row.preview_img_path === "string" ? row.preview_img_path : null,
+      previewImgPath: typeof row.preview_img_path === "string"
+        ? row.preview_img_path
+        : null,
       createdAt: String(row.created_at ?? ""),
       metaInfo: row.meta_info && typeof row.meta_info === "object"
         ? row.meta_info as Record<string, unknown>
@@ -751,7 +803,9 @@ async function executeAgentToolLoop(input: {
   model: ChatOpenAI;
   intent: SpatialIntent;
   tools: DynamicStructuredTool[];
-}): Promise<{ candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }> {
+}): Promise<
+  { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
+> {
   const { model, intent, tools } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
@@ -774,7 +828,9 @@ async function executeAgentToolLoop(input: {
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
-    const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
+    const toolCalls = Array.isArray(response.tool_calls)
+      ? response.tool_calls
+      : [];
     if (toolCalls.length === 0) {
       break;
     }
@@ -782,10 +838,12 @@ async function executeAgentToolLoop(input: {
     for (const toolCall of toolCalls) {
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
-        messages.push(new ToolMessage({
-          tool_call_id: toolCall.id ?? toolCall.name,
-          content: JSON.stringify({ error: `未知工具 ${toolCall.name}` }),
-        }));
+        messages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id ?? toolCall.name,
+            content: JSON.stringify({ error: `未知工具 ${toolCall.name}` }),
+          }),
+        );
         continue;
       }
 
@@ -799,10 +857,12 @@ async function executeAgentToolLoop(input: {
         args: toolCall.args ?? {},
         resultSummary: summarizeToolResult(tool.name, count),
       });
-      messages.push(new ToolMessage({
-        tool_call_id: toolCall.id ?? toolCall.name,
-        content: resultText,
-      }));
+      messages.push(
+        new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: resultText,
+        }),
+      );
     }
   }
 
@@ -857,12 +917,14 @@ export async function runSpatialSearchAgent(
       actions: [],
     };
 
-  const finalScene = rankedCandidates.find((candidate) =>
-    candidate.sceneId === selection.selectedSceneId
-  ) ?? bestCandidate;
-  const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId
-    ? finalScene.bestPose
-    : finalScene?.bestPose ?? null;
+  const finalScene =
+    rankedCandidates.find((candidate) =>
+      candidate.sceneId === selection.selectedSceneId
+    ) ?? bestCandidate;
+  const finalPose =
+    finalScene?.bestPose?.image_name === selection.selectedPoseImageId
+      ? finalScene.bestPose
+      : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({
     scene: finalScene ?? null,
     selectedPose: finalPose,
@@ -883,9 +945,15 @@ export async function runSpatialSearchAgent(
     answer: selection.answer,
     actions: finalActions,
     viewer_payload: {
-      ply: finalScene ? publicUrlForPath(supabase, env.storageBucket, finalScene.plyPath) : null,
+      ply: finalScene
+        ? publicUrlForPath(supabase, env.storageBucket, finalScene.plyPath)
+        : null,
       poses: finalScene
-        ? publicUrlForPath(supabase, env.storageBucket, derivePosesPath(finalScene))
+        ? publicUrlForPath(
+          supabase,
+          env.storageBucket,
+          derivePosesPath(finalScene),
+        )
         : null,
       matrix: finalPose?.transform_matrix ?? null,
       imageId: finalPose?.image_name ?? null,
