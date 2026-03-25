@@ -1,4 +1,7 @@
+import 'dart:ui';
+
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/set_config.dart';
 import 'package:braindance/pages/recall/overview_card.dart';
@@ -58,29 +61,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         : BDDesign.colorMutedBlue;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final bottomContentPadding = bottomInset + 132.0;
-
-    final myTabBar = TDTabBar(
-      tabs: [
-        TDTab(text: textLocalize('set_tab1')),
-        TDTab(text: textLocalize('set_tab3')),
-      ],
-      controller: tabController,
-      backgroundColor: Colors.transparent,
-      dividerHeight: 0,
-      showIndicator: true,
-      indicatorPadding: const EdgeInsets.all(4),
-      indicatorWidth: 24,
-      indicatorHeight: 3,
-      indicatorColor: BDDesign.colorMutedBlue,
-      labelStyle: tabTextStyle.copyWith(
-        fontWeight: FontWeight.w600,
-        color: BDDesign.colorMutedBlue,
-      ),
-      unselectedLabelStyle: tabTextStyle.copyWith(
-        fontWeight: FontWeight.w400,
-        color: hintColor.withValues(alpha: 0.78),
-      ),
-    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -175,16 +155,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   },
                 ),
                 const SizedBox(height: 14),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: BDPanelCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    child: myTabBar,
-                  ),
-                ),
+                _SettingsTabSwitch(controller: tabController),
                 const SizedBox(height: 10),
                 _buildTabContent(context, ref),
               ],

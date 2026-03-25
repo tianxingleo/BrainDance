@@ -13,6 +13,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../extra_func/dir_and_file.dart';
 import '../main.dart'
     show
         overviewStatsProvider,
@@ -1480,6 +1481,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
               onShowModelDetails: _showModelDetails,
+              onDownloadModel: _downloadRecallModel,
               onShareModelToCommunity: _shareModelToCommunity,
               onRenameModel: _renameModel,
               onDeleteLocalModel: _deleteLocalModel,
@@ -1795,7 +1797,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
-  Future<void> _showModelActions(Map<String, dynamic> model) async {
+  Future<void> _showModelActions(
+    Map<String, dynamic> model, {
+    bool imageOnly = false,
+  }) async {
     final cardKey = _modelCardKeyFor(model);
     final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
     final overlayRenderBox =
@@ -1814,6 +1819,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _activeModelAction = {
         ...model,
         if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+        '_imageOnly': imageOnly,
       };
       _activeModelActionRect = rect;
     });
@@ -1960,6 +1966,132 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
+  Future<void> _downloadRecallModel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path']?.toString() ?? '';
+    if (plyPath.isEmpty) {
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_download_model_unavailable'),
+          context: context,
+        );
+      }
+      return;
+    }
+
+    final modelUrl = _toPublicUrl(plyPath);
+    if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_download_model_unavailable'),
+          context: context,
+        );
+      }
+      return;
+    }
+
+    try {
+      final targetPath = await _buildRecallDownloadTargetPath(modelUrl, model);
+      if (targetPath.isEmpty) {
+        if (mounted) {
+          TDToast.showText(
+            textLocalize('recall_download_model_fail'),
+            context: context,
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_download_model_start'),
+          context: context,
+        );
+      }
+
+      await Dio().download(
+        modelUrl,
+        targetPath,
+        deleteOnError: true,
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: true,
+          receiveTimeout: const Duration(minutes: 30),
+          sendTimeout: const Duration(minutes: 2),
+        ),
+      );
+
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}',
+          context: context,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText(
+          '${textLocalize('recall_download_model_fail')}: $e',
+          context: context,
+        );
+      }
+    }
+  }
+
+  Future<String> _buildRecallDownloadTargetPath(
+    String modelUrl,
+    Map<String, dynamic> model,
+  ) async {
+    var baseDir = await DirFinder.downloadsDir();
+    if (baseDir.isEmpty) {
+      baseDir = await DirFinder.documentsDir();
+    }
+    if (baseDir.isEmpty) {
+      baseDir = (await getApplicationDocumentsDirectory()).path;
+    }
+    final ensured = await DirSystem.ensureDir(baseDir);
+    if (!ensured) {
+      return '';
+    }
+
+    final uri = Uri.tryParse(Uri.encodeFull(Uri.decodeFull(modelUrl)));
+    final urlFileName = uri == null ? '' : path.basename(uri.path);
+    final ext = path.extension(urlFileName).isNotEmpty
+        ? path.extension(urlFileName)
+        : '.ply';
+    final displayName = _sanitizeExportFileName(
+      _modelDisplayName(model, fallback: 'recall_model'),
+    );
+    final candidateName = displayName.isEmpty
+        ? (urlFileName.isNotEmpty ? urlFileName : 'recall_model$ext')
+        : '$displayName$ext';
+
+    return _dedupeExportPath(path.join(baseDir, candidateName));
+  }
+
+  Future<String> _dedupeExportPath(String targetPath) async {
+    if (!await File(targetPath).exists()) {
+      return targetPath;
+    }
+
+    final dir = path.dirname(targetPath);
+    final ext = path.extension(targetPath);
+    final name = path.basenameWithoutExtension(targetPath);
+    for (var index = 2; index <= 999; index++) {
+      final nextPath = path.join(dir, '$name($index)$ext');
+      if (!await File(nextPath).exists()) {
+        return nextPath;
+      }
+    }
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return path.join(dir, '${name}_$timestamp$ext');
+  }
+
+  String _sanitizeExportFileName(String raw) {
+    return raw
+        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
     final plyPath = model['ply_path'] as String? ?? '';
     if (plyPath.isEmpty) {
@@ -2040,12 +2172,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (_activeModelAction == null && _activeModelActionRect == null) {
       return;
     }
-    
+
     final overlayState = _overlayKey.currentState;
     if (overlayState != null) {
       await overlayState.hide();
     }
-    
+
     if (mounted) {
       setState(() {
         _activeModelAction = null;
