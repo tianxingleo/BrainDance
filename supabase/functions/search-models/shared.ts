@@ -156,7 +156,7 @@ export async function parseQueryIntent(
   try {
     console.log(`[Search] 正在分析用户意图: "${userQuery}"`);
     const resp = await aiClient.chat.completions.create({
-      model: Deno.env.get("DASHSCOPE_CHAT_MODEL") ?? "qwen3.5-plus",
+      model: Deno.env.get("DASHSCOPE_CHAT_MODEL") ?? "qwen-turbo",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userQuery },
