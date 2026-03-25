@@ -11,6 +11,7 @@ import 'package:braindance/configs/motion_tokens.dart';
 
 const double _kCreateSize = 68.0;
 const double _kNavBarInnerHeight = 60.0;
+const double _kSelectedContentOpticalOffset = -1.5;
 
 class FloatingNavBar extends StatefulWidget {
   final int currentIndex;
@@ -400,40 +401,45 @@ class _NavBarItem extends StatelessWidget {
               curve: BDMotion.curveFluid,
               opacity: isSelected ? 1.0 : 0.0,
               child: Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: horizontalPadding,
-                    vertical: compact ? 7.0 : 8.0,
-                  ),
-                  child: Row(
-                    key: isSelected
-                        ? ValueKey(
-                            'floating-nav-selected-content-${item.label}',
-                          )
-                        : null,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _AnimatedFillIcon(
-                        icon: item.icon,
-                        progress: 1.0,
-                        selectedColor: selectedColor,
-                        unselectedColor: selectedColor.withValues(alpha: 0.68),
-                        size: iconSize,
-                      ),
-                      SizedBox(width: labelGap),
-                      Text(
-                        item.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.fade,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: selectedColor,
-                          fontWeight: FontWeight.w600,
-                          fontSize: compact ? 13.0 : 14.0,
-                          height: 1.0,
+                child: Transform.translate(
+                  offset: const Offset(_kSelectedContentOpticalOffset, 0),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: horizontalPadding,
+                      vertical: compact ? 7.0 : 8.0,
+                    ),
+                    child: Row(
+                      key: isSelected
+                          ? ValueKey(
+                              'floating-nav-selected-content-${item.label}',
+                            )
+                          : null,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _AnimatedFillIcon(
+                          icon: item.icon,
+                          progress: 1.0,
+                          selectedColor: selectedColor,
+                          unselectedColor: selectedColor.withValues(
+                            alpha: 0.68,
+                          ),
+                          size: iconSize,
                         ),
-                      ),
-                    ],
+                        SizedBox(width: labelGap),
+                        Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
+                          style: TextStyle(
+                            color: selectedColor,
+                            fontWeight: FontWeight.w600,
+                            fontSize: compact ? 13.0 : 14.0,
+                            height: 1.0,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

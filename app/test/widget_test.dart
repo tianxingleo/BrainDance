@@ -114,6 +114,6 @@ void main() {
       find.byKey(const ValueKey('floating-nav-selected-content-Recall')),
     );
 
-    expect((pillCenter.dx - contentCenter.dx).abs(), lessThanOrEqualTo(1.0));
+    expect((pillCenter.dx - contentCenter.dx).abs(), lessThanOrEqualTo(2.0));
   });
 }
