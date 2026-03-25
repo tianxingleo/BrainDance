@@ -1980,9 +1980,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       );
     }
 
-    final hasActions =
-        _agentResult != null &&
+    final hasActions = _agentResult != null &&
         _agentResult!.actions.any((a) => a.type == 'open_scene');
+    final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -2099,12 +2099,50 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 ),
               ],
 
+              if (_agentResult?.mode != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '模式：${_agentResult!.mode}',
+                  style: TextStyle(color: hintColor, fontSize: 12),
+                ),
+              ],
+
+              if (_agentResult?.selectedCandidateReason != null &&
+                  _agentResult!.selectedCandidateReason!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '选择理由：${_agentResult!.selectedCandidateReason!}',
+                  style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                ),
+              ],
+
               if (_agentResult?.evidence != null) ...[
                 const SizedBox(height: 10),
                 Text(
                   '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
                   style: TextStyle(color: hintColor, fontSize: 12),
                 ),
+              ],
+
+              if (topCandidates.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '候选结果',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final candidate in topCandidates)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
+                      style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                    ),
+                  ),
               ],
 
               if (hasActions) ...[
@@ -2130,6 +2168,151 @@ class _RecallPageState extends ConsumerState<RecallPage> {
             ],
           );
         },
+      ),
+    );
+                type: TDButtonType.fill,
+                theme: TDButtonTheme.primary,
+                shape: TDButtonShape.round,
+                size: TDButtonSize.medium,
+                onTap: () => _openAgentRecallResult(result),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(20),
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TDImage(
+              assetUrl: 'assets/sprites/empty_state.png',
+              width: 120,
+              height: 120,
+              errorWidget: Icon(
+                TDIcons.time_filled,
+                size: 80,
+                color: iconColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            TDText(
+              textLocalize("home_page"),
+              font: theme.fontTitleLarge,
+              textColor: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            TDText(
+              textLocalize("recall_empty_title"),
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
+            ),
+            const SizedBox(height: 40),
+            TDButton(
+              text: textLocalize("recall_open_demo"),
+              iconWidget: Icon(
+                TDIcons.view_module,
+                color: Colors.white,
+                size: 20,
+              ),
+              type: TDButtonType.fill,
+              theme: TDButtonTheme.primary,
+              shape: TDButtonShape.round,
+              size: TDButtonSize.large,
+              onTap: () {
+                unawaited(openViewer(
+                  context,
+                  initialModelUrl: './models/scene_auto_sync_raw.ply',
+                  sceneId: textLocalize("recall_demo_title"),
+                ));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.travel_explore_rounded,
+              size: 56,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.8)
+                  : BDDesign.colorMutedBlue,
+            ),
+            const SizedBox(height: 18),
+            TDText(
+              _searchModeTitle(_searchMode),
+              font: theme.fontTitleLarge,
+              textColor: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            TDText(
+              switch (_searchMode) {
+                _RecallSearchMode.local => textLocalize('recall_local_empty'),
+                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                _RecallSearchMode.localAi => textLocalize(
+                  'recall_local_ai_empty',
+                ),
+                _RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
+              },
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
+            ),
+          ],
+        ),
+>>>>>>> origin/dev
       ),
     );
   }

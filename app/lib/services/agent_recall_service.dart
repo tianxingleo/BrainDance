@@ -61,30 +61,86 @@ class ChatMessage extends ChangeNotifier {
 }
 
 class AgentRecallResponse {
+  final String mode;
   final String answer;
   final AgentEvidence? evidence;
   final List<AgentAction> actions;
+  final List<AgentCandidate> candidates;
+  final String? selectedCandidateReason;
+  final Map<String, dynamic>? assetContext;
+  final Map<String, dynamic>? compareContext;
+  final Map<String, dynamic>? collectionContext;
 
   AgentRecallResponse({
+    required this.mode,
     required this.answer,
     required this.evidence,
     required this.actions,
+    this.candidates = const [],
+    this.selectedCandidateReason,
+    this.assetContext,
+    this.compareContext,
+    this.collectionContext,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
+    final rawCandidates = (json['top_candidates'] as List?) ?? (json['candidates'] as List?) ?? const [];
+    final rawEvidence = json['evidence'];
+    final evidenceMap = rawEvidence is Map ? Map<String, dynamic>.from(rawEvidence as Map) : null;
     return AgentRecallResponse(
+      mode: json['mode']?.toString() ?? 'spatial_search',
       answer: json['answer']?.toString() ?? '',
-      evidence: json['evidence'] == null
+      evidence: evidenceMap == null || (!evidenceMap.containsKey('sceneId') && !evidenceMap.containsKey('similarity'))
           ? null
-          : AgentEvidence.fromJson(
-              Map<String, dynamic>.from(json['evidence'] as Map),
-            ),
+          : AgentEvidence.fromJson(evidenceMap),
       actions: ((json['actions'] as List?) ?? [])
           .map(
             (item) =>
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      candidates: rawCandidates
+          .map(
+            (item) =>
+                AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
+          )
+          .toList(),
+      selectedCandidateReason: json['selected_candidate_reason']?.toString(),
+      assetContext: json['asset_context'] is Map
+          ? Map<String, dynamic>.from(json['asset_context'] as Map)
+          : null,
+      compareContext: json['compare_context'] is Map
+          ? Map<String, dynamic>.from(json['compare_context'] as Map)
+          : null,
+      collectionContext: json['collection_context'] is Map
+          ? Map<String, dynamic>.from(json['collection_context'] as Map)
+          : null,
+    );
+  }
+}
+
+class AgentCandidate {
+  final String sceneId;
+  final String modelId;
+  final double score;
+  final String description;
+  final String? poseImageId;
+
+  AgentCandidate({
+    required this.sceneId,
+    required this.modelId,
+    required this.score,
+    required this.description,
+    this.poseImageId,
+  });
+
+  factory AgentCandidate.fromJson(Map<String, dynamic> json) {
+    return AgentCandidate(
+      sceneId: json['scene_id']?.toString() ?? '',
+      modelId: json['model_id']?.toString() ?? '',
+      score: (json['score'] as num?)?.toDouble() ?? 0.0,
+      description: json['description']?.toString() ?? '',
+      poseImageId: json['pose_image_id']?.toString(),
     );
   }
 }
@@ -178,42 +234,57 @@ class AgentAction {
 class AgentRecallService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  Stream<String> queryStream(String query) async* {
-    // 调用 Supabase 边缘函数
-    try {
-      final response = await _client.functions.invoke(
-        'agent-recall',
-        body: {'query': query},
-      );
-
-      if (response.status != 200) {
-        yield jsonEncode({
-          'event': 'error',
-          'data': 'API Invoke Error: ${response.status}',
-        });
-        return;
-      }
-
-      // 注意：如果函数返回的是流式响应，需确认 invoke 的处理方式
-      // 这里的原始代码似乎是想手动处理流式响应，但 supabase_flutter 的 invoke 默认返回全部数据
-      // 如果业务确实需要流式，通常需要更复杂的 http 处理或函数支持
-      yield response.data.toString();
-    } catch (e) {
-      if (e is FunctionException) {
-        yield jsonEncode({
-          'event': 'error',
-          'data': e.details ?? e.status.toString(),
-        });
-      } else {
-        yield jsonEncode({'event': 'error', 'data': 'Function Error: $e'});
-      }
-    }
-  }
-
-  Future<AgentRecallResponse> query(String query) async {
+  Future<AgentRecallResponse> query(
+    String query, {
+    List<String>? selectedModelIds,
+    String executionMode = 'preview',
+    String? currentSceneId,
+    String? currentModelId,
+    String? currentMode,
+    List<String>? candidateSceneIds,
+    String? sessionId,
+    String? conversationSummary,
+  }) async {
     final response = await _client.functions.invoke(
       'agent-recall',
-      body: {'query': query},
+      body: {
+        'query': query,
+        if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
+        'executionMode': executionMode,
+        if (currentSceneId != null) 'currentSceneId': currentSceneId,
+        if (currentModelId != null) 'currentModelId': currentModelId,
+        if (currentMode != null) 'currentMode': currentMode,
+        if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
+        if (sessionId != null) 'sessionId': sessionId,
+        if (conversationSummary != null) 'conversationSummary': conversationSummary,
+      },
+    );
+
+    final data = response.data;
+    if (data is! Map) {
+      throw Exception('agent-recall 返回格式错误');
+    }
+
+    if (data['error'] != null) {
+      throw Exception(data['error'].toString());
+    }
+
+    return AgentRecallResponse.fromJson(Map<String, dynamic>.from(data));
+  }
+}
+    final response = await _client.functions.invoke(
+      'agent-recall',
+      body: {
+        'query': query,
+        if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
+        'executionMode': executionMode,
+        if (currentSceneId != null) 'currentSceneId': currentSceneId,
+        if (currentModelId != null) 'currentModelId': currentModelId,
+        if (currentMode != null) 'currentMode': currentMode,
+        if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
+        if (sessionId != null) 'sessionId': sessionId,
+        if (conversationSummary != null) 'conversationSummary': conversationSummary,
+      },
     );
 
     final data = response.data;

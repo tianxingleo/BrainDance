@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { DynamicStructuredTool } from "npm:@langchain/core@0.3/tools";
 import { z } from "npm:zod@3.25";
+import type {
+  MemoryCollectionSummary,
+  PlaceVersionsResult,
+  PoseSummary,
+  RelatedModelSummary,
+} from "./memoryTools.ts";
 
 type ModelAssetRow = {
   id: string;
@@ -77,6 +83,15 @@ export type AssetToolState = {
   bundle: ModelAssetBundle[] | null;
   comparison: CompareModelAssetsResult | null;
   operation: AssetOperationResult | null;
+  poseSummary: PoseSummary | null;
+  relatedModels: RelatedModelSummary[] | null;
+  placeVersions: PlaceVersionsResult | null;
+  collectionSummary: MemoryCollectionSummary | null;
+  threadGrouping: {
+    model_ids: string[];
+    place_id: string;
+    memory_thread_id: string;
+  } | null;
 };
 
 type AssetToolRuntimeOptions = {
@@ -435,6 +450,21 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
   if (state.bundle) {
     return `已读取 ${state.bundle.length} 个模型资产摘要。`;
   }
+  if (state.collectionSummary) {
+    return `已整理专题“${state.collectionSummary.collection.title}”，当前包含 ${state.collectionSummary.model_count} 个模型。`;
+  }
+  if (state.relatedModels) {
+    return `已找到 ${state.relatedModels.length} 个相关模型版本候选。`;
+  }
+  if (state.poseSummary) {
+    return `已读取模型视角摘要，共 ${state.poseSummary.pose_count} 个 pose。`;
+  }
+  if (state.placeVersions) {
+    return `已列出 ${state.placeVersions.versions.length} 个地点版本。`;
+  }
+  if (state.threadGrouping) {
+    return `已将 ${state.threadGrouping.model_ids.length} 个模型归入同一记忆线程。`;
+  }
   if (state.list) {
     return `已找到 ${state.list.length} 个候选模型资产。`;
   }
@@ -672,6 +702,11 @@ export function createEmptyAssetToolState(): AssetToolState {
     bundle: null,
     comparison: null,
     operation: null,
+    poseSummary: null,
+    relatedModels: null,
+    placeVersions: null,
+    collectionSummary: null,
+    threadGrouping: null,
   };
 }
 
@@ -701,6 +736,29 @@ export function collectAssetToolResult(
   if (parsed.kind === "asset_operation" && parsed.operation) {
     state.operation = parsed.operation as AssetOperationResult;
     return state.operation.affected_count;
+  }
+  if (parsed.kind === "pose_summary" && parsed.summary) {
+    state.poseSummary = parsed.summary as PoseSummary;
+    return state.poseSummary.pose_count;
+  }
+  if (parsed.kind === "related_models" && Array.isArray(parsed.rows)) {
+    state.relatedModels = parsed.rows as RelatedModelSummary[];
+    return state.relatedModels.length;
+  }
+  if (parsed.kind === "place_versions" && parsed.result) {
+    state.placeVersions = parsed.result as PlaceVersionsResult;
+    return state.placeVersions.versions.length;
+  }
+  if (parsed.kind === "memory_collection_summary" && parsed.summary) {
+    state.collectionSummary = parsed.summary as MemoryCollectionSummary;
+    return state.collectionSummary.model_count;
+  }
+  if (parsed.kind === "group_models_into_thread" && parsed.result) {
+    state.threadGrouping = parsed.result as AssetToolState["threadGrouping"];
+    return state.threadGrouping?.model_ids.length ?? 0;
+  }
+  if (parsed.kind === "memory_collection") {
+    return 1;
   }
 
   return 0;

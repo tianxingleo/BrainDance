@@ -139,6 +139,12 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
+如果使用 `supabase start` 启动本地自部署容器，请把 `DASHSCOPE_API_KEY`
+写在仓库下的 `supabase/.env.local`，并确保
+[`supabase/config.toml`](/home/ltx/projects/BrainDance/supabase/config.toml)
+通过 `[edge_runtime.secrets]` 从宿主机环境读取该变量；修改后需要重启本地
+Supabase，Edge Runtime 才会重新加载它。
+
 如果要测试接口，可以参考
 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
 

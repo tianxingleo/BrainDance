@@ -85,26 +85,6 @@ async function attachDisplayNames(
       }
     }
 
-    if (sceneIds.length > 0) {
-      const { data: tasks, error: taskError } = await supabase
-        .from("processing_tasks")
-        .select("scene_id, display_name")
-        .in("scene_id", sceneIds);
-
-      if (taskError) {
-        console.warn("[Search] processing_tasks.display_name 补全失败:", taskError.message);
-      } else {
-        for (const item of tasks ?? []) {
-          const sceneId = typeof item.scene_id === "string" ? item.scene_id : "";
-          const displayName = typeof item.display_name === "string"
-            ? item.display_name.trim()
-            : "";
-          if (sceneId && displayName && !displayNameBySceneId.has(sceneId)) {
-            displayNameBySceneId.set(sceneId, displayName);
-          }
-        }
-      }
-    }
 
     return rows.map((row) => {
       const modelId = typeof row.id === "string" ? row.id : "";

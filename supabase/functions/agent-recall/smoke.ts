@@ -13,7 +13,7 @@ const AGENT_RECALL_CASES = [
 ];
 
 Deno.test({
-  name: "agent-recall smoke - 固定查询至少返回 answer，且动作协议有效",
+  name: "agent-recall smoke - 固定查询至少返回 answer、mode，并保持稳定动作协议",
   async fn() {
     if (!SUPABASE_KEY) {
       return;
@@ -32,6 +32,7 @@ Deno.test({
       assertEquals(resp.status < 500, true, `${query} 不应返回 5xx`);
       const data = await resp.json();
       assertEquals(typeof data.answer, "string", `${query} 应返回 answer`);
+      assertEquals(typeof data.mode, "string", `${query} 应返回 mode`);
       assertExists(data.actions, `${query} 应返回 actions`);
       assertEquals(
         Array.isArray(data.actions),
@@ -51,6 +52,12 @@ Deno.test({
           `${query} 的动作类型必须属于稳定协议`,
         );
       }
+
+      assertEquals(
+        Array.isArray(data.top_candidates ?? data.candidates ?? []),
+        true,
+        `${query} 应返回候选数组`,
+      );
     }
   },
   sanitizeResources: false,

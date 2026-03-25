@@ -7,6 +7,15 @@
 - [LangChain实现现状-2026-03-25.md](./LangChain实现现状-2026-03-25.md)
   - 说明当前仓库中已经落地的 LangChain 相关代码。
   - 区分稳定入口、实验链路、最小可用扩展和正在演进中的能力。
+- [LangChain实现现状-2026-03-26.md](./LangChain实现现状-2026-03-26.md)
+  - 记录 2026-03-26 这轮收口后的真实代码状态。
+  - 覆盖统一入口、多模式共享 Core、数据库迁移、动作协议与剩余待办。
+
+## 当前实现总览
+
+- 共享 Core 已收敛到 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)。
+- `agent-recall` 与 `spatial-search-agent` 现在都只是入口壳层，强能力集中在共享 Core 与相关工具文件中。
+- 正式稳定动作协议以 `open_scene`、`fly_to_pose` 为准，不再把 `highlight_hotspot` 视为正式前端能力。
 
 ## 维护规则
 

@@ -73,7 +73,7 @@ Deno.test("scoreSceneCandidate 在物体检索下优先 pose 分数", () => {
   assertEquals(poseHeavy > sceneHeavy, true);
 });
 
-Deno.test("buildVisualizationActions 会生成打开模型与飞行动作", () => {
+Deno.test("buildVisualizationActions 会生成打开场景与飞行动作", () => {
   const actions = buildVisualizationActions({
     scene: {
       modelId: "m1",
@@ -109,10 +109,9 @@ Deno.test("buildVisualizationActions 会生成打开模型与飞行动作", () =
     bucket: "braindance-assets",
   });
 
-  assertEquals(actions.length, 3);
-  assertEquals(actions[0]?.type, "open_model");
+  assertEquals(actions.length, 2);
+  assertEquals(actions[0]?.type, "open_scene");
   assertEquals(actions[1]?.type, "fly_to_pose");
-  assertEquals(actions[2]?.type, "highlight_hotspot");
 });
 
 Deno.test("summarizeCandidateEvidence 会识别多来源证据与最高分", () => {
