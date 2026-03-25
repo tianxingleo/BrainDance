@@ -109,6 +109,9 @@
 - `asset_context`
 - `compare_context`
 - `collection_context`
+- 兼容正式动作协议 `actions[].payload`
+- 兼容 `matrix` 的二维数组/扁平数组解析
+- 将 Supabase `FunctionException` 的 5xx / upstream 错误归一化为更可读的前端提示，避免 Flutter 侧直接暴露 `An invalid response was received from the upstream server`
 
 [recall.dart](/home/ltx/projects/BrainDance/app/lib/pages/recall.dart) 当前已做最小展示增强：
 
@@ -142,8 +145,15 @@
 
 - `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts supabase/functions/time-compare-agent/test.ts`
 - `deno check supabase/functions/agent-recall/index.ts supabase/functions/spatial-search-agent/index.ts supabase/functions/_shared/agent-core/spatialAgent.ts supabase/functions/_shared/agent-core/memoryTools.ts`
+- `dart format app/lib/services/agent_recall_service.dart`
+- `flutter analyze app/lib/services/agent_recall_service.dart app/lib/pages/recall.dart`
 
 未完成的验证：
 
-- 本地未执行 Flutter `dart format`，原因是当前环境缺少 `dart` 命令。
 - 未执行需要真实 Supabase 环境的 `agent-recall` smoke 集成调用，因为当前会话未注入可用的线上/本地服务配置。
+
+补充：
+
+- 2026-03-26 针对 Flutter Recall Agent 消费层又做了一次兼容修复，静态检查已确认 `agent_recall_service.dart` 可通过分析。
+- 这次修复主要解决前端仍按旧协议读取 `sceneId / ply / poses / matrix` 顶层字段的问题；当前正式协议应从 `actions[].payload` 读取。
+- 若后续仍出现 upstream 类 502/504，需要继续从 Supabase Edge Function 日志与 DashScope / OpenAI 网关侧排查，而不是再把问题归因到 Flutter JSON 解析层。
