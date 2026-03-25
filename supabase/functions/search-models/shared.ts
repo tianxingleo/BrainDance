@@ -41,10 +41,14 @@ export type SearchModelsResponse = {
   results: SearchResultRow[];
 };
 
-const DASHSCOPE_API_URL = Deno.env.get("DASHSCOPE_BASE_URL") ??
-  "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DASHSCOPE_EMBEDDING_MODEL = Deno.env.get("DASHSCOPE_EMBEDDING_MODEL") ??
-  "text-embedding-v2";
+function getDashscopeApiUrl(): string {
+  return Deno.env.get("DASHSCOPE_BASE_URL") ??
+    "https://dashscope.aliyuncs.com/compatible-mode/v1";
+}
+
+function getDashscopeEmbeddingModel(): string {
+  return Deno.env.get("DASHSCOPE_EMBEDDING_MODEL") ?? "text-embedding-v2";
+}
 
 export function safeJsonParse(str: string | null): Record<string, unknown> {
   if (!str) {
@@ -69,11 +73,12 @@ export function normalizeDate(dateStr: string | null): string | null {
 }
 
 export function createAiClient(apiKey: string): AiClient {
+  const baseUrl = getDashscopeApiUrl();
   return {
     chat: {
       completions: {
         create: async (options: Record<string, unknown>) => {
-          const resp = await fetch(`${DASHSCOPE_API_URL}/chat/completions`, {
+          const resp = await fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${apiKey}`,
@@ -93,7 +98,7 @@ export function createAiClient(apiKey: string): AiClient {
     },
     embeddings: {
       create: async (options: Record<string, unknown>) => {
-        const resp = await fetch(`${DASHSCOPE_API_URL}/embeddings`, {
+        const resp = await fetch(`${baseUrl}/embeddings`, {
           method: "POST",
           headers: {
             "Authorization": `Bearer ${apiKey}`,
@@ -182,7 +187,7 @@ export async function getEmbedding(
   try {
     const resp = await aiClient.embeddings.create({
       input: [text],
-      model: DASHSCOPE_EMBEDDING_MODEL,
+      model: getDashscopeEmbeddingModel(),
     });
     const embedding = resp.data?.[0]?.embedding;
     if (!embedding) {
