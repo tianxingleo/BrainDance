@@ -4,30 +4,60 @@ import 'package:http/http.dart' as http;
 
 // ── Data models ──────────────────────────────────────────────
 
-class AgentStep {
-  final String type; // 'thought', 'tool_call', 'tool_result'
+class AgentStep extends ChangeNotifier {
+  final String type; // 'thought', 'tool_call', 'tool_result', 'error'
   final String? toolName;
-  final String content;
-  bool isCompleted;
+  String content;
+  bool _isCompleted;
 
   AgentStep({
     required this.type,
     this.toolName,
     required this.content,
-    this.isCompleted = false,
-  });
+    bool isCompleted = false,
+  }) : _isCompleted = isCompleted;
+
+  bool get isCompleted => _isCompleted;
+  set isCompleted(bool value) {
+    if (_isCompleted != value) {
+      _isCompleted = value;
+      notifyListeners();
+    }
+  }
+
+  void updateContent(String newContent) {
+    content = newContent;
+    notifyListeners();
+  }
 }
 
-class ChatMessage {
+class ChatMessage extends ChangeNotifier {
   final bool isUser;
-  String finalAnswer; 
-  List<AgentStep> steps;
+  String _finalAnswer; 
+  final List<AgentStep> steps;
 
   ChatMessage({
     required this.isUser,
-    this.finalAnswer = '',
+    String finalAnswer = '',
     List<AgentStep>? steps,
-  }) : steps = steps ?? [];
+  }) : _finalAnswer = finalAnswer,
+       steps = steps ?? [];
+
+  String get finalAnswer => _finalAnswer;
+  set finalAnswer(String value) {
+    _finalAnswer = value;
+    notifyListeners();
+  }
+
+  void addStep(AgentStep step) {
+    steps.add(step);
+    notifyListeners();
+  }
+
+  void clearSteps() {
+    steps.clear();
+    notifyListeners();
+  }
 }
 
 class AgentRecallResponse {

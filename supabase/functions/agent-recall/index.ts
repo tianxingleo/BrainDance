@@ -34,7 +34,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const result = await runRecallAgent(parsed.data.query);
+    const result = await runRecallAgent(parsed.data.query, req.signal);
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

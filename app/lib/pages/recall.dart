@@ -11,6 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/atom-one-light.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -102,6 +105,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   bool _isAgentSearching = false;
   AgentRecallResponse? _agentResult;
   ChatMessage? _agentChatMessage;
+  final ScrollController _recallScrollController = ScrollController();
 
   String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
@@ -1340,6 +1344,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           BDPageBackdrop(
             child: SafeArea(
               child: CustomScrollView(
+                controller: _recallScrollController,
                 cacheExtent: 1200,
                 slivers: [
                   SliverToBoxAdapter(
@@ -1663,76 +1668,29 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _agentChatMessage = ChatMessage(isUser: false);
     });
     try {
-      final stream = AgentRecallService().queryStream(query);
-      await for (final chunk in stream) {
-        if (!mounted) break;
-        if (chunk.isEmpty) continue;
-        
-        try {
-          final data = jsonDecode(chunk);
-          setState(() {
-            if (data['event'] == 'thought') {
-              _agentChatMessage!.steps.add(AgentStep(type: 'thought', content: data['data']));
-            } else if (data['event'] == 'tool_call') {
-              // Convert args map to string if it's a map
-              final argsStr = data['args'] is Map ? jsonEncode(data['args']) : data['args'].toString();
-              _agentChatMessage!.steps.add(
-                AgentStep(type: 'tool_call', toolName: data['name'], content: argsStr)
-              );
-            } else if (data['event'] == 'tool_result') {
-              var lastTool = _agentChatMessage!.steps.lastWhere(
-                (s) => s.type == 'tool_call' && s.toolName == data['name'],
-                orElse: () => AgentStep(type: 'tool_call', toolName: data['name'], content: ''),
-              );
-              lastTool.isCompleted = true;
-            } else if (data['event'] == 'message') {
-              _agentChatMessage!.finalAnswer += data['data'] ?? '';
-            } else if (data['event'] == 'done') {
-              // Finish using old format for backward compatibility or action parsing
-              if (data['result'] != null) {
-                _agentResult = AgentRecallResponse.fromJson(data['result']);
-              }
-              _isAgentSearching = false;
-            }
-          });
-        } catch (e) {
-          debugPrint('Error parsing chunk: $e');
-        }
-      }
+      final result = await AgentRecallService().query(query);
+      if (!mounted) return;
       
-      if (mounted) {
-        setState(() {
-          _isAgentSearching = false;
-        });
+      setState(() {
+        _agentResult = result;
+        _agentChatMessage!.finalAnswer = result.answer;
+        _isAgentSearching = false;
+      });
+
+      // Auto scroll
+      if (_recallScrollController.hasClients) {
+        _recallScrollController.animateTo(
+          _recallScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isAgentSearching = false;
       });
-      TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
-      
-      // Fallback
-      if (mounted) {
-        setState(() {
-          _isAgentSearching = true;
-        });
-      }
-      try {
-        final result = await AgentRecallService().query(query);
-        if (!mounted) return;
-        setState(() {
-          _agentResult = result;
-          _agentChatMessage!.finalAnswer = result.answer; 
-          _isAgentSearching = false;
-        });
-      } catch (ex) {
-         if (!mounted) return;
-        setState(() {
-          _isAgentSearching = false;
-        });
-        TDToast.showText('Agent 检索失败：$ex', context: context);
-      }
+      TDToast.showText('Agent 检索失败：$e', context: context);
     }
   }
 
@@ -1904,132 +1862,217 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: ListenableBuilder(
+        listenable: _agentChatMessage!,
+        builder: (context, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.travel_explore_rounded,
-                size: 18,
-                color: BDDesign.colorMutedBlue,
+              Row(
+                children: [
+                  Icon(
+                    Icons.travel_explore_rounded,
+                    size: 18,
+                    color: BDDesign.colorMutedBlue,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Agent',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (_isAgentSearching) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                'Agent',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+              const SizedBox(height: 10),
+              
+              ..._agentChatMessage!.steps.map((step) {
+                return ListenableBuilder(
+                  listenable: step,
+                  builder: (context, _) {
+                    if (step.type == 'tool_call') {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Theme(
+                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                          child: _AgentStepTile(step: step, isDark: isDark, textColor: textColor),
+                        ),
+                      );
+                    } else if (step.type == 'thought') {
+                       return Padding(
+                         padding: const EdgeInsets.symmetric(vertical: 4.0),
+                         child: Text('🤔 思考中: ${step.content}', style: TextStyle(color: hintColor, fontSize: 13)),
+                       );
+                    } else if (step.type == 'error') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                step.content,
+                                style: const TextStyle(color: Colors.red, fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  }
+                );
+              }),
+              
+              if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                MarkdownBody(
+                  data: _agentChatMessage!.finalAnswer,
+                  styleSheet: MarkdownStyleSheet(
+                    p: TextStyle(color: textColor, fontSize: 14, height: 1.5),
+                  ),
                 ),
-              ),
-              if (_isAgentSearching) ...[
-                const SizedBox(width: 12),
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+              ],
+
+              if (_agentResult?.evidence != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(color: hintColor, fontSize: 12),
+                ),
+              ],
+              
+              if (hasActions) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: BDDesign.colorMutedBlue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('打开场景', style: TextStyle(fontSize: 14)),
+                    onPressed: () => _openAgentRecallResult(_agentResult!),
+                  ),
                 ),
               ],
             ],
-          ),
-          const SizedBox(height: 10),
-          
-          if (_agentChatMessage != null) ...[
-            ..._agentChatMessage!.steps.map((step) {
-              if (step.type == 'tool_call') {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      tilePadding: EdgeInsets.zero,
-                      minTileHeight: 0,
-                      leading: step.isCompleted 
-                          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
-                          : const SizedBox(
-                              width: 16, height: 16, 
-                              child: CircularProgressIndicator(strokeWidth: 2)
-                            ),
-                      title: Text(
-                        'Using ${step.toolName}...',
-                        style: TextStyle(fontSize: 13, color: textColor),
-                      ),
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.grey[900] : Colors.grey[100],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            step.content, 
-                            style: TextStyle(
-                              fontFamily: 'monospace', 
-                              color: isDark ? Colors.greenAccent : Colors.green[800],
-                              fontSize: 12,
-                            ),
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
-                );
-              } else if (step.type == 'thought') {
-                 return Padding(
-                   padding: const EdgeInsets.symmetric(vertical: 4.0),
-                   child: Text('🤔 思考中: ${step.content}', style: TextStyle(color: hintColor, fontSize: 13)),
-                 );
-              }
-              return const SizedBox.shrink();
-            }),
-            
-            if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              MarkdownBody(
-                data: _agentChatMessage!.finalAnswer,
-                styleSheet: MarkdownStyleSheet(
-                  p: TextStyle(color: textColor, fontSize: 14, height: 1.5),
-                ),
-              ),
-            ],
-          ],
-
-          if (_agentResult?.evidence != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
-              style: TextStyle(color: hintColor, fontSize: 12),
-            ),
-          ],
-          
-          if (hasActions) ...[
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              height: 40,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: BDDesign.colorMutedBlue,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  elevation: 0,
-                ),
-                icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                label: const Text('打开场景', style: TextStyle(fontSize: 14)),
-                onPressed: () => _openAgentRecallResult(_agentResult!),
-              ),
-            ),
-          ],
-        ],
+          );
+        }
       ),
     );
   }
 
-  String _modelKey(Map<String, dynamic> model) {
+}
+
+class _AgentStepTile extends StatefulWidget {
+  final AgentStep step;
+  final bool isDark;
+  final Color textColor;
+
+  const _AgentStepTile({
+    required this.step,
+    required this.isDark,
+    required this.textColor,
+  });
+
+  @override
+  State<_AgentStepTile> createState() => _AgentStepTileState();
+}
+
+class _AgentStepTileState extends State<_AgentStepTile> {
+  final ExpansionTileController _controller = ExpansionTileController();
+  bool _wasCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasCompleted = widget.step.isCompleted;
+    // initial state: expand if not completed
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!widget.step.isCompleted) {
+        _controller.expand();
+      }
+    });
+
+    widget.step.addListener(_handleStepChange);
+  }
+
+  @override
+  void dispose() {
+    widget.step.removeListener(_handleStepChange);
+    super.dispose();
+  }
+
+  void _handleStepChange() {
+    if (widget.step.isCompleted && !_wasCompleted) {
+      _wasCompleted = true;
+      // Auto-collapse when completed
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _controller.collapse();
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      controller: _controller,
+      tilePadding: EdgeInsets.zero,
+      minTileHeight: 0,
+      leading: widget.step.isCompleted 
+          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
+          : const SizedBox(
+              width: 16, height: 16, 
+              child: CircularProgressIndicator(strokeWidth: 2)
+            ),
+      title: Text(
+        'Using ${widget.step.toolName}...',
+        style: TextStyle(fontSize: 13, color: widget.textColor),
+      ),
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          margin: const EdgeInsets.only(top: 4),
+          decoration: BoxDecoration(
+            color: widget.isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+          ),
+          child: HighlightView(
+            widget.step.content,
+            language: 'json',
+            theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
+            padding: const EdgeInsets.all(4),
+            textStyle: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
+          ),
+        )
+      ],
+    );
+  }
     return model['id']?.toString() ??
         model['scene_id']?.toString() ??
         model.hashCode.toString();
