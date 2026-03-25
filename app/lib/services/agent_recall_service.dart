@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../configs/supabase_config.dart';
 
 // ── Data models ──────────────────────────────────────────────
 
@@ -34,14 +36,23 @@ class AgentStep extends ChangeNotifier {
 class ChatMessage extends ChangeNotifier {
   final bool isUser;
   String _finalAnswer;
+  String _liveStatus;
+  final List<String> summaries;
   final List<AgentStep> steps;
+  bool _isProcessCollapsed;
 
   ChatMessage({
     required this.isUser,
     String finalAnswer = '',
+    String liveStatus = '',
+    List<String>? summaries,
     List<AgentStep>? steps,
+    bool isProcessCollapsed = false,
   }) : _finalAnswer = finalAnswer,
-       steps = steps ?? [];
+       _liveStatus = liveStatus,
+       summaries = summaries ?? [],
+       steps = steps ?? [],
+       _isProcessCollapsed = isProcessCollapsed;
 
   String get finalAnswer => _finalAnswer;
   set finalAnswer(String value) {
@@ -49,8 +60,30 @@ class ChatMessage extends ChangeNotifier {
     notifyListeners();
   }
 
+  String get liveStatus => _liveStatus;
+  set liveStatus(String value) {
+    _liveStatus = value;
+    notifyListeners();
+  }
+
+  bool get isProcessCollapsed => _isProcessCollapsed;
+  set isProcessCollapsed(bool value) {
+    if (_isProcessCollapsed != value) {
+      _isProcessCollapsed = value;
+      notifyListeners();
+    }
+  }
+
   void addStep(AgentStep step) {
     steps.add(step);
+    notifyListeners();
+  }
+
+  void addSummary(String summary) {
+    final trimmed = summary.trim();
+    if (trimmed.isEmpty) return;
+    if (summaries.isNotEmpty && summaries.last == trimmed) return;
+    summaries.add(trimmed);
     notifyListeners();
   }
 
@@ -268,12 +301,109 @@ List<double>? _flattenNumericList(Object? value) {
 class AgentRecallService {
   final SupabaseClient _client = Supabase.instance.client;
 
-  Stream<String> queryStream(String query) async* {
+  Stream<String> queryStream(
+    String query, {
+    List<String>? selectedModelIds,
+    String executionMode = 'preview',
+    String? currentSceneId,
+    String? currentModelId,
+    String? currentMode,
+    List<String>? candidateSceneIds,
+    String? sessionId,
+    String? conversationSummary,
+  }) async* {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) {
+      throw Exception('查询语句不能为空');
+    }
+
+    final baseUrl = SupabaseConfig.url.trim();
+    if (baseUrl.isEmpty) {
+      throw Exception('未配置 SUPABASE_URL，无法建立 Agent 流式连接');
+    }
+
+    // 构造 Edge Function URL
+    final endpoint = baseUrl.endsWith('/')
+        ? '${baseUrl}functions/v1/agent-recall'
+        : '$baseUrl/functions/v1/agent-recall';
+
+    final dio = Dio();
+    // 配置超时 (根据需要调整)
+    dio.options.connectTimeout = const Duration(seconds: 10);
+    dio.options.receiveTimeout = const Duration(seconds: 300); // 长连接需较长超时
+
     try {
-      final result = await this.query(query);
-      yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
+      final session = _client.auth.currentSession;
+      final token = session?.accessToken;
+      final apiKey = SupabaseConfig.apiKey;
+
+      final response = await dio.post<ResponseBody>(
+        endpoint,
+        queryParameters: {'stream': '1'},
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            'Authorization': token != null ? 'Bearer $token' : null,
+            'apikey': apiKey,
+            'Accept': 'application/x-ndjson',
+            'Content-Type': 'application/json',
+          },
+        ),
+        data: {
+          'query': trimmedQuery,
+          if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
+          'executionMode': executionMode,
+          if (currentSceneId != null) 'currentSceneId': currentSceneId,
+          if (currentModelId != null) 'currentModelId': currentModelId,
+          if (currentMode != null) 'currentMode': currentMode,
+          if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
+          if (sessionId != null) 'sessionId': sessionId,
+          if (conversationSummary != null)
+            'conversationSummary': conversationSummary,
+        },
+      );
+
+      final stream = response.data?.stream;
+      if (stream == null) {
+        throw Exception('Response stream is null');
+      }
+
+      await for (final line
+          in stream
+              .cast<List<int>>()
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        final trimmed = line.trim();
+        if (trimmed.isNotEmpty) {
+          yield trimmed;
+        }
+      }
     } catch (e) {
-      yield jsonEncode({'event': 'error', 'data': _normalizeInvokeError(e)});
+      if (kDebugMode) {
+        print('Agent streaming error: $e');
+      }
+
+      try {
+        final result = await this.query(
+          trimmedQuery,
+          selectedModelIds: selectedModelIds,
+          executionMode: executionMode,
+          currentSceneId: currentSceneId,
+          currentModelId: currentModelId,
+          currentMode: currentMode,
+          candidateSceneIds: candidateSceneIds,
+          sessionId: sessionId,
+          conversationSummary: conversationSummary,
+        );
+        yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
+      } catch (fallbackError) {
+        yield jsonEncode({
+          'event': 'error',
+          'data': _normalizeInvokeError(fallbackError),
+        });
+      }
+    } finally {
+      dio.close();
     }
   }
 

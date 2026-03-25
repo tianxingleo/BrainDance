@@ -113,10 +113,173 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _agentStreamSubscription?.cancel();
       setState(() {
         _isAgentSearching = false;
+        _agentChatMessage?.isProcessCollapsed = false;
+        _agentChatMessage?.liveStatus = '已停止 Agent 执行';
+        _agentChatMessage?.addSummary('用户手动停止了本次 Agent 执行');
         _agentChatMessage?.addStep(
           AgentStep(type: 'error', content: '🚫 用户已强行中断 Agent'),
         );
       });
+    }
+  }
+
+  void _updateAgentLiveStatus(
+    String summary, {
+    String? detail,
+    bool persistSummary = true,
+  }) {
+    final message = [
+      summary.trim(),
+      if (detail != null && detail.trim().isNotEmpty) detail.trim(),
+    ].join(' · ');
+    if (_agentChatMessage == null || message.isEmpty) {
+      return;
+    }
+    _agentChatMessage!.liveStatus = message;
+    if (persistSummary) {
+      _agentChatMessage!.addSummary(message);
+    }
+  }
+
+  AgentStep? _findLastToolStep(String name) {
+    for (var index = _agentChatMessage!.steps.length - 1; index >= 0; index--) {
+      final step = _agentChatMessage!.steps[index];
+      if (step.type == 'tool_call' && step.toolName == name) {
+        return step;
+      }
+    }
+    return null;
+  }
+
+  void _completeAgentRun({bool collapseProcess = true}) {
+    if (_agentChatMessage == null) {
+      return;
+    }
+    _agentChatMessage!.isProcessCollapsed = collapseProcess;
+    if (_agentChatMessage!.finalAnswer.isNotEmpty) {
+      _agentChatMessage!.liveStatus = '最终回答已生成';
+    }
+  }
+
+  void _consumeAgentEvent(Map<String, dynamic> data) {
+    final event = data['event']?.toString() ?? '';
+    final payload = data['data'];
+    if (_agentChatMessage == null) {
+      return;
+    }
+
+    if (event == 'status' && payload is Map) {
+      final summary = payload['summary']?.toString() ?? '';
+      final detail = payload['detail']?.toString();
+      _updateAgentLiveStatus(summary, detail: detail);
+      return;
+    }
+
+    if (event == 'plan' && payload is Map) {
+      final title = payload['title']?.toString() ?? '';
+      final stepsStr = (payload['steps'] as List?)?.join('\n') ?? '';
+      final content = 'Plan: $title\n$stepsStr'.trim();
+      _updateAgentLiveStatus(title.isEmpty ? '已生成执行计划' : title);
+      _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
+      return;
+    }
+
+    if (event == 'thinking' || event == 'thought') {
+      final content = payload is Map
+          ? payload['content']?.toString() ?? ''
+          : payload?.toString() ?? '';
+      if (content.isEmpty) {
+        return;
+      }
+      _updateAgentLiveStatus(content);
+      _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
+      return;
+    }
+
+    if (event == 'tool_call' && payload is Map) {
+      final toolName = payload['name']?.toString() ?? '';
+      final argsStr = payload['args'] is Map
+          ? const JsonEncoder.withIndent('  ').convert(payload['args'])
+          : payload['args']?.toString() ?? '';
+      final summary =
+          payload['summary']?.toString() ??
+          '开始执行 ${toolName.isEmpty ? '工具' : toolName}';
+      _updateAgentLiveStatus(summary, detail: '等待工具返回结果');
+      _agentChatMessage!.addStep(
+        AgentStep(type: 'tool_call', toolName: toolName, content: argsStr),
+      );
+      return;
+    }
+
+    if (event == 'tool_result' && payload is Map) {
+      final name = payload['name']?.toString() ?? '';
+      final summary = payload['summary']?.toString() ?? '工具已返回结果';
+      final lastTool = _findLastToolStep(name);
+      if (lastTool != null) {
+        final existing = lastTool.content.trim();
+        lastTool.updateContent(
+          existing.isEmpty ? summary : '$existing\n\n结果摘要:\n$summary',
+        );
+        lastTool.isCompleted = true;
+      } else {
+        _agentChatMessage!.addStep(
+          AgentStep(
+            type: 'tool_call',
+            toolName: name,
+            content: summary,
+            isCompleted: true,
+          ),
+        );
+      }
+      _updateAgentLiveStatus(summary);
+      return;
+    }
+
+    if (event == 'message' && payload is Map) {
+      final delta = payload['delta']?.toString() ?? '';
+      if (delta.isEmpty) {
+        return;
+      }
+      _agentChatMessage!.finalAnswer += delta;
+      _agentChatMessage!.liveStatus = '正在生成最终回答';
+      return;
+    }
+
+    if (event == 'error') {
+      String errorMsg = 'Unknown error';
+      if (payload is Map) {
+        errorMsg =
+            payload['message']?.toString() ??
+            payload['error']?.toString() ??
+            'Unknown error';
+      } else if (payload != null) {
+        errorMsg = payload.toString();
+      }
+      _updateAgentLiveStatus('Agent 执行失败', detail: errorMsg);
+      _agentChatMessage!.addStep(AgentStep(type: 'error', content: errorMsg));
+      return;
+    }
+
+    if (event == 'done') {
+      if (payload != null && payload is Map) {
+        setState(() {
+          _agentResult = AgentRecallResponse.fromJson(
+            Map<String, dynamic>.from(payload),
+          );
+        });
+        final answer = _agentResult?.answer ?? '';
+        if (answer.isNotEmpty &&
+            _agentChatMessage!.finalAnswer.trim().isEmpty) {
+          _agentChatMessage!.finalAnswer = answer;
+        }
+      } else if (data['result'] != null && data['result'] is Map) {
+        setState(() {
+          _agentResult = AgentRecallResponse.fromJson(
+            Map<String, dynamic>.from(data['result']),
+          );
+        });
+      }
+      _completeAgentRun();
     }
   }
 
@@ -1676,11 +1839,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Future<void> _askAgentRecall(String query) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) return;
-    
+
     setState(() {
       _isAgentSearching = true;
       _agentResult = null;
-      _agentChatMessage = ChatMessage(isUser: false);
+      _agentChatMessage = ChatMessage(
+        isUser: false,
+        liveStatus: '正在连接 Agent...',
+      );
     });
 
     _agentStreamSubscription?.cancel();
@@ -1698,6 +1864,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _agentChatMessage!.finalAnswer = result.answer;
           _isAgentSearching = false;
         });
+        _agentChatMessage!.addSummary('当前环境不支持流式事件，已回退到一次性回答');
+        _completeAgentRun();
       } catch (ex) {
         if (!mounted) return;
         setState(() {
@@ -1708,6 +1876,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
 
     try {
+      _updateAgentLiveStatus('正在发起 Agent 流式请求');
       final stream = AgentRecallService().queryStream(trimmedQuery);
       _agentStreamSubscription = stream.listen(
         (chunk) {
@@ -1716,75 +1885,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
           try {
             final data = jsonDecode(chunk);
-            final event = data['event']?.toString() ?? '';
-            final payload = data['data'];
-
-            if (event == 'plan' && payload is Map) {
-              final title = payload['title']?.toString() ?? '';
-              final stepsStr = (payload['steps'] as List?)?.join('\n') ?? '';
-              _agentChatMessage!.addStep(
-                AgentStep(type: 'thought', content: 'Plan: $title\n$stepsStr'),
-              );
-            } else if (event == 'thinking' || event == 'thought') {
-              final content = payload is Map
-                  ? payload['content']?.toString() ?? ''
-                  : payload?.toString() ?? '';
-              _agentChatMessage!.addStep(
-                AgentStep(type: 'thought', content: content),
-              );
-            } else if (event == 'tool_call' && payload is Map) {
-              final argsStr = payload['args'] is Map
-                  ? jsonEncode(payload['args'])
-                  : payload['args']?.toString() ?? '';
-              _agentChatMessage!.addStep(
-                AgentStep(
-                  type: 'tool_call',
-                  toolName: payload['name']?.toString() ?? '',
-                  content: argsStr,
-                ),
-              );
-            } else if (event == 'tool_result' && payload is Map) {
-              final name = payload['name']?.toString() ?? '';
-              var lastTool = _agentChatMessage!.steps.lastWhere(
-                (s) => s.type == 'tool_call' && s.toolName == name,
-                orElse: () =>
-                    AgentStep(type: 'tool_call', toolName: name, content: ''),
-              );
-              lastTool.isCompleted = true;
-            } else if (event == 'message' && payload is Map) {
-              _agentChatMessage!.finalAnswer +=
-                  payload['delta']?.toString() ?? '';
-            } else if (event == 'error') {
-              String errorMsg = 'Unknown error';
-              if (payload is Map) {
-                errorMsg =
-                    payload['message']?.toString() ??
-                    payload['error']?.toString() ??
-                    'Unknown error';
-              } else if (payload != null) {
-                errorMsg = payload.toString();
-              }
-              _agentChatMessage!.addStep(
-                AgentStep(type: 'error', content: errorMsg),
-              );
-            } else if (event == 'done') {
-              if (payload != null && payload is Map) {
+            if (data is Map) {
+              final eventData = Map<String, dynamic>.from(data);
+              _consumeAgentEvent(eventData);
+              if (eventData['event']?.toString() == 'done') {
                 setState(() {
-                  _agentResult = AgentRecallResponse.fromJson(
-                    Map<String, dynamic>.from(payload),
-                  );
-                });
-              } else if (data['result'] != null && data['result'] is Map) {
-                // 回退兼容旧格式
-                setState(() {
-                  _agentResult = AgentRecallResponse.fromJson(
-                    Map<String, dynamic>.from(data['result']),
-                  );
+                  _isAgentSearching = false;
                 });
               }
-              setState(() {
-                _isAgentSearching = false;
-              });
             }
           } catch (e) {
             debugPrint('Error parsing chunk: $e');
@@ -1795,6 +1903,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           setState(() {
             _isAgentSearching = false;
           });
+          _updateAgentLiveStatus('流式连接失败，准备回退到普通请求', detail: '$e');
           TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
           fallback();
         },
@@ -1803,6 +1912,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
             setState(() {
               _isAgentSearching = false;
             });
+            if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
+              _completeAgentRun();
+            }
           }
         },
       );
@@ -1811,6 +1923,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isAgentSearching = false;
       });
+      _updateAgentLiveStatus('流式启动失败，准备回退到普通请求', detail: '$e');
       TDToast.showText('Agent 流启动失败 (尝试回退)：$e', context: context);
       fallback();
     }
@@ -1982,9 +2095,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       );
     }
 
-    final hasActions = _agentResult != null &&
+    final hasActions =
+        _agentResult != null &&
         _agentResult!.actions.any((a) => a.type == 'open_scene');
     final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
+    final processRecordCount =
+        _agentChatMessage!.steps.length + _agentChatMessage!.summaries.length;
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -2036,68 +2152,190 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               ),
               const SizedBox(height: 10),
 
-              ..._agentChatMessage!.steps.map((step) {
-                return ListenableBuilder(
-                  listenable: step,
-                  builder: (context, _) {
-                    if (step.type == 'tool_call') {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: Theme(
-                          data: Theme.of(
-                            context,
-                          ).copyWith(dividerColor: Colors.transparent),
-                          child: _AgentStepTile(
-                            step: step,
-                            isDark: isDark,
-                            textColor: textColor,
+              if (_agentChatMessage!.liveStatus.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF141A24)
+                        : const Color(0xFFF3F7FC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white10
+                          : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        _isAgentSearching
+                            ? Icons.auto_awesome_motion_rounded
+                            : Icons.done_all_rounded,
+                        size: 18,
+                        color: BDDesign.colorMutedBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _agentChatMessage!.liveStatus,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 13,
+                            height: 1.45,
                           ),
                         ),
-                      );
-                    } else if (step.type == 'thought') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Text(
-                          '🤔 思考中: ${step.content}',
-                          style: TextStyle(color: hintColor, fontSize: 13),
-                        ),
-                      );
-                    } else if (step.type == 'error') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+
+              if (processRecordCount > 0) ...[
+                Row(
+                  children: [
+                    Text(
+                      '执行过程',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$processRecordCount 条记录',
+                      style: TextStyle(color: hintColor, fontSize: 12),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () {
+                        _agentChatMessage!.isProcessCollapsed =
+                            !_agentChatMessage!.isProcessCollapsed;
+                      },
+                      icon: Icon(
+                        _agentChatMessage!.isProcessCollapsed
+                            ? Icons.unfold_more_rounded
+                            : Icons.unfold_less_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        _agentChatMessage!.isProcessCollapsed ? '展开' : '折叠',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_agentChatMessage!.isProcessCollapsed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '过程已自动折叠，默认只突出最终回复；展开后可查看阶段总结与工具调用。',
+                      style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                    ),
+                  )
+                else ...[
+                  if (_agentChatMessage!.summaries.isNotEmpty) ...[
+                    for (final summary in _agentChatMessage!.summaries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
-                              Icons.error_outline,
-                              color: Colors.red,
-                              size: 16,
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: BDDesign.colorMutedBlue,
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                step.content,
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 13,
+                                summary,
+                                style: TextStyle(
+                                  color: hintColor,
+                                  fontSize: 12,
+                                  height: 1.4,
                                 ),
                               ),
                             ),
                           ],
                         ),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                );
-              }),
+                      ),
+                    const SizedBox(height: 4),
+                  ],
+                  ..._agentChatMessage!.steps.map((step) {
+                    return ListenableBuilder(
+                      listenable: step,
+                      builder: (context, _) {
+                        if (step.type == 'tool_call') {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Theme(
+                              data: Theme.of(
+                                context,
+                              ).copyWith(dividerColor: Colors.transparent),
+                              child: _AgentStepTile(
+                                step: step,
+                                isDark: isDark,
+                                textColor: textColor,
+                              ),
+                            ),
+                          );
+                        } else if (step.type == 'thought') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Text(
+                              '思考摘要：${step.content}',
+                              style: TextStyle(color: hintColor, fontSize: 13),
+                            ),
+                          );
+                        } else if (step.type == 'error') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline,
+                                  color: Colors.red,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    step.content,
+                                    style: const TextStyle(
+                                      color: Colors.red,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    );
+                  }),
+                ],
+              ],
 
               if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                MarkdownBody(
-                  data: _agentChatMessage!.finalAnswer,
-                  styleSheet: MarkdownStyleSheet(
-                    p: TextStyle(color: textColor, fontSize: 14, height: 1.5),
-                  ),
+                _AgentAnswerCard(
+                  markdown: _agentChatMessage!.finalAnswer,
+                  isDark: isDark,
+                  textColor: textColor,
+                  hintColor: hintColor,
                 ),
               ],
 
@@ -2142,7 +2380,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
                       '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
-                      style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                      style: TextStyle(
+                        color: hintColor,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
                     ),
                   ),
               ],
@@ -2241,11 +2483,13 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               shape: TDButtonShape.round,
               size: TDButtonSize.large,
               onTap: () {
-                unawaited(openViewer(
-                  context,
-                  initialModelUrl: './models/scene_auto_sync_raw.ply',
-                  sceneId: textLocalize("recall_demo_title"),
-                ));
+                unawaited(
+                  openViewer(
+                    context,
+                    initialModelUrl: './models/scene_auto_sync_raw.ply',
+                    sceneId: textLocalize("recall_demo_title"),
+                  ),
+                );
               },
             ),
           ],
@@ -2927,7 +3171,7 @@ class _AgentStepTile extends StatefulWidget {
 
 class _AgentStepTileState extends State<_AgentStepTile>
     with AutomaticKeepAliveClientMixin {
-  final ExpansionTileController _controller = ExpansionTileController();
+  final ExpansibleController _controller = ExpansibleController();
   bool _wasCompleted = false;
 
   @override
@@ -2966,42 +3210,235 @@ class _AgentStepTileState extends State<_AgentStepTile>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final toolName = widget.step.toolName;
+    final accentColor = widget.step.isCompleted
+        ? const Color(0xFF3FA66C)
+        : BDDesign.colorMutedBlue;
+    final panelColor = widget.isDark
+        ? const Color(0xFF171D24)
+        : const Color(0xFFF4F8FB);
+    final borderColor = accentColor.withValues(
+      alpha: widget.isDark ? 0.42 : 0.28,
+    );
+
     return ExpansionTile(
       controller: _controller,
       tilePadding: EdgeInsets.zero,
       minTileHeight: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      collapsedShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+      ),
       leading: widget.step.isCompleted
-          ? const Icon(Icons.check_circle, color: Colors.green, size: 20)
+          ? const Icon(
+              Icons.task_alt_rounded,
+              color: Color(0xFF3FA66C),
+              size: 20,
+            )
           : const SizedBox(
               width: 16,
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-      title: Text(
-        'Using ${widget.step.toolName}...',
-        style: TextStyle(fontSize: 13, color: widget.textColor),
+      title: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: panelColor,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '工具调用',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: accentColor,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    toolName == null || toolName.isEmpty ? '执行未命名工具' : toolName,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: widget.textColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              widget.step.isCompleted ? '已完成' : '运行中',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: accentColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(8),
-          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+          margin: const EdgeInsets.only(top: 6, left: 2, right: 2, bottom: 8),
           decoration: BoxDecoration(
-            color: widget.isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: widget.isDark ? Colors.white10 : Colors.black12,
-            ),
+            color: widget.isDark ? const Color(0xFF12171D) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor.withValues(alpha: 0.85)),
           ),
-          child: HighlightView(
-            widget.step.content,
-            language: 'json',
-            theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
-            padding: const EdgeInsets.all(4),
-            textStyle: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '调用参数',
+                style: TextStyle(
+                  color: accentColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              HighlightView(
+                widget.step.content.isEmpty ? '{}' : widget.step.content,
+                language: 'json',
+                theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
+                padding: const EdgeInsets.all(6),
+                textStyle: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 1.45,
+                ),
+              ),
+            ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AgentAnswerCard extends StatelessWidget {
+  final String markdown;
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+
+  const _AgentAnswerCard({
+    required this.markdown,
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = BDDesign.colorFadedOlive.withValues(
+      alpha: isDark ? 0.42 : 0.28,
+    );
+    final backgroundColor = isDark
+        ? const Color(0xFF1A1F1A)
+        : const Color(0xFFFBFCF7);
+
+    // 最终回答与工具调用分层，避免“过程日志”和“正式回复”视觉上混在一起。
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: BDDesign.colorFadedOlive.withValues(
+              alpha: isDark ? 0.10 : 0.08,
+            ),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.auto_awesome_rounded,
+                size: 16,
+                color: BDDesign.colorFadedOlive,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Agent 回复',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '最终输出',
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          MarkdownBody(
+            data: markdown,
+            styleSheet: MarkdownStyleSheet(
+              p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
+              h1: TextStyle(
+                color: textColor,
+                fontSize: 18,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+              h2: TextStyle(
+                color: textColor,
+                fontSize: 16,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+              blockquote: TextStyle(
+                color: hintColor,
+                fontSize: 13,
+                height: 1.5,
+              ),
+              code: TextStyle(
+                color: textColor,
+                fontSize: 12.5,
+                fontFamily: 'monospace',
+              ),
+              codeblockDecoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF131813)
+                    : const Color(0xFFF1F4EA),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: BDDesign.colorFadedOlive.withValues(
+                    alpha: isDark ? 0.28 : 0.18,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

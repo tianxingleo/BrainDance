@@ -190,6 +190,38 @@ type ToolCallLike = {
   args: Record<string, unknown>;
 };
 
+export type AgentProgressEvent =
+  | {
+    event: "status";
+    data: {
+      phase: string;
+      summary: string;
+      detail?: string;
+    };
+  }
+  | {
+    event: "tool_call";
+    data: {
+      name: string;
+      args: Record<string, unknown>;
+      summary?: string;
+      round?: number;
+    };
+  }
+  | {
+    event: "tool_result";
+    data: {
+      name: string;
+      summary: string;
+      count?: number;
+      round?: number;
+    };
+  };
+
+type AgentRuntimeCallbacks = {
+  onEvent?: (event: AgentProgressEvent) => void | Promise<void>;
+};
+
 export type SpatialSearchResponse = {
   success: true;
   mode: "spatial_search" | "asset_metadata" | "time_compare" | "creative" | "memory_graph";
@@ -472,6 +504,13 @@ function serializeAssetContext(state: AssetToolState) {
     collection_summary: state.collectionSummary,
     thread_grouping: state.threadGrouping,
   };
+}
+
+async function emitProgress(
+  callbacks: AgentRuntimeCallbacks | undefined,
+  event: AgentProgressEvent,
+): Promise<void> {
+  await callbacks?.onEvent?.(event);
 }
 
 async function classifyAgentMode(
@@ -1003,8 +1042,19 @@ async function selectBestResult(
   intent: SpatialIntent,
   rankedCandidates: Array<SceneCandidate & { score: number }>,
   actions: VisualizationAction[],
-  options: SpatialSearchAgentOptions = {}
+  options: SpatialSearchAgentOptions = {},
+  callbacks?: AgentRuntimeCallbacks,
 ): Promise<SelectionResult> {
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "selection",
+      summary: `正在综合 ${Math.min(rankedCandidates.length, 5)} 个候选并生成最终回答`,
+      detail: rankedCandidates.length === 0
+        ? "当前没有可信候选，准备返回兜底说明"
+        : `当前最高候选分数 ${(rankedCandidates[0]!.score * 100).toFixed(1)}%`,
+    },
+  });
   const structuredModel = model.withStructuredOutput(selectionSchema);
   const best = rankedCandidates[0] ?? null;
 
@@ -1043,10 +1093,11 @@ async function executeAgentToolLoop(input: {
   intent: SpatialIntent;
   tools: DynamicStructuredTool[];
   options?: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
-  const { model, intent, tools, options = {} } = input;
+  const { model, intent, tools, options = {}, callbacks } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
   const trace: ToolTraceEntry[] = [];
@@ -1062,6 +1113,14 @@ async function executeAgentToolLoop(input: {
   ];
 
   for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "spatial_tool_round",
+        summary: `正在进行第 ${round + 1} 轮空间检索决策`,
+        detail: `当前已累计 ${candidates.size} 个候选场景`,
+      },
+    });
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
@@ -1083,6 +1142,15 @@ async function executeAgentToolLoop(input: {
         break;
       }
 
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "spatial_tool_force_continue",
+          summary: "当前证据不足，继续补充检索来源",
+          detail: `自动追加 ${forcedToolCall.name} 以补齐候选和交叉证据`,
+        },
+      });
+
       messages.push(
         new SystemMessage(
           `当前证据不足，需要继续补充检索。
@@ -1094,6 +1162,15 @@ async function executeAgentToolLoop(input: {
     }
 
     for (const toolCall of toolCalls) {
+      await emitProgress(callbacks, {
+        event: "tool_call",
+        data: {
+          name: toolCall.name,
+          args: toolCall.args ?? {},
+          summary: `开始执行 ${toolCall.name}`,
+          round: round + 1,
+        },
+      });
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
         messages.push(
@@ -1110,10 +1187,20 @@ async function executeAgentToolLoop(input: {
         ? toolResult
         : JSON.stringify(toolResult);
       const count = collectSceneCandidates(tool.name, resultText, candidates);
+      const resultSummary = summarizeToolResult(tool.name, count);
       trace.push({
         toolName: tool.name,
         args: toolCall.args ?? {},
-        resultSummary: summarizeToolResult(tool.name, count),
+        resultSummary,
+      });
+      await emitProgress(callbacks, {
+        event: "tool_result",
+        data: {
+          name: tool.name,
+          summary: `${resultSummary}，当前累计 ${candidates.size} 个候选场景`,
+          count,
+          round: round + 1,
+        },
       });
       messages.push(
         new ToolMessage({
@@ -1132,8 +1219,9 @@ async function executeAssetToolLoop(input: {
   query: string;
   tools: DynamicStructuredTool[];
   options?: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<{ trace: ToolTraceEntry[]; state: AssetToolState }> {
-  const { model, query, tools, options = {} } = input;
+  const { model, query, tools, options = {}, callbacks } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
@@ -1150,6 +1238,13 @@ async function executeAssetToolLoop(input: {
   ];
 
   for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "asset_tool_round",
+        summary: `正在进行第 ${round + 1} 轮资产工具分析`,
+      },
+    });
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
@@ -1161,6 +1256,15 @@ async function executeAssetToolLoop(input: {
     }
 
     for (const toolCall of toolCalls) {
+      await emitProgress(callbacks, {
+        event: "tool_call",
+        data: {
+          name: toolCall.name,
+          args: toolCall.args ?? {},
+          summary: `开始执行 ${toolCall.name}`,
+          round: round + 1,
+        },
+      });
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
         messages.push(
@@ -1177,10 +1281,20 @@ async function executeAssetToolLoop(input: {
         ? toolResult
         : JSON.stringify(toolResult);
       const count = collectAssetToolResult(tool.name, resultText, state);
+      const resultSummary = summarizeToolResult(tool.name, count);
       trace.push({
         toolName: tool.name,
         args: toolCall.args ?? {},
-        resultSummary: summarizeToolResult(tool.name, count),
+        resultSummary,
+      });
+      await emitProgress(callbacks, {
+        event: "tool_result",
+        data: {
+          name: tool.name,
+          summary: resultSummary,
+          count,
+          round: round + 1,
+        },
       });
       messages.push(
         new ToolMessage({
@@ -1206,7 +1320,15 @@ function emptyViewerPayload() {
 async function buildTimeCompareModeResponse(
   query: string,
   options: SpatialSearchAgentOptions,
+  callbacks?: AgentRuntimeCallbacks,
 ): Promise<SpatialSearchResponse> {
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "time_compare",
+      summary: "已进入时间对比模式，正在对比时间窗口中的场景差异",
+    },
+  });
   const result = await runTimeCompareAgent(query);
   const selectedReason = result.comparison.target
     ? "优先选择最近时间窗口中的目标版本作为主候选"
@@ -1274,7 +1396,15 @@ async function buildCreativeModeResponse(input: {
   supabase: SupabaseClient;
   query: string;
   options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "creative_prepare",
+      summary: "已进入创作模式，正在整理故事素材和时间线",
+    },
+  });
   const modelIds = input.options.selectedModelIds ??
     (input.options.currentModelId ? [input.options.currentModelId] : []);
   if (modelIds.length === 0) {
@@ -1287,6 +1417,14 @@ async function buildCreativeModeResponse(input: {
     selectedModelIds: modelIds,
   });
   const outline = generateStoryOutlineFromContext(storyContext, input.query);
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "creative_outline",
+      summary: `已生成 ${outline.outline.length} 段创作大纲`,
+      detail: `本次整理了 ${storyContext.model_count} 个模型素材`,
+    },
+  });
   const task = input.options.executionMode === "execute"
     ? await enqueueCreativeTask(input.supabase, {
       query: input.query,
@@ -1356,7 +1494,15 @@ async function buildMemoryGraphModeResponse(input: {
   supabase: SupabaseClient;
   query: string;
   options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "memory_graph",
+      summary: "已进入长期记忆模式，正在汇总趋势、缺失模式和变化时间线",
+    },
+  });
   const focusModelId = input.options.currentModelId ?? input.options.selectedModelIds?.[0];
   if (!focusModelId) {
     throw new Error("长期记忆模式需要当前模型或至少一个已选模型");
@@ -1437,14 +1583,30 @@ async function buildMemoryGraphModeResponse(input: {
 export async function runSpatialSearchAgent(
   query: string,
   options: SpatialSearchAgentOptions = {},
+  callbacks: AgentRuntimeCallbacks = {},
 ): Promise<SpatialSearchResponse> {
   const env = ensureRuntimeEnv();
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "bootstrap",
+      summary: "Agent 已收到请求，正在初始化检索上下文",
+      detail: `执行模式：${options.executionMode ?? "preview"}`,
+    },
+  });
   const mode = await classifyAgentMode(model, query, options);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "route",
+      summary: `已完成模式判断：${mode}`,
+    },
+  });
 
   if (mode === "time_compare") {
-    return await buildTimeCompareModeResponse(query, options);
+    return await buildTimeCompareModeResponse(query, options, callbacks);
   }
 
   if (mode === "creative") {
@@ -1452,6 +1614,7 @@ export async function runSpatialSearchAgent(
       supabase,
       query,
       options,
+      callbacks,
     });
   }
 
@@ -1460,6 +1623,7 @@ export async function runSpatialSearchAgent(
       supabase,
       query,
       options,
+      callbacks,
     });
   }
 
@@ -1505,6 +1669,7 @@ export async function runSpatialSearchAgent(
       query,
       tools: assetTools,
       options,
+      callbacks,
     });
 
     return {
@@ -1554,7 +1719,22 @@ export async function runSpatialSearchAgent(
 
   const embeddings = createEmbeddingsModel(env);
 
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "intent",
+      summary: "正在解析空间意图和时间约束",
+    },
+  });
   const intent = await parseSpatialIntent(model, query, options);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "intent_done",
+      summary: `意图解析完成，目标类型为 ${intent.targetType}`,
+      detail: intent.rewrittenQuery,
+    },
+  });
   const tools = [
     await buildPoseTool(supabase, embeddings),
     await buildSceneTool(supabase),
@@ -1565,6 +1745,7 @@ export async function runSpatialSearchAgent(
     intent,
     tools,
     options,
+    callbacks,
   });
 
   const rankedCandidates = [...candidateMap.values()]
@@ -1584,7 +1765,14 @@ export async function runSpatialSearchAgent(
   });
 
   const selection = rankedCandidates.length > 0
-    ? await selectBestResult(model, intent, rankedCandidates, suggestedActions, options)
+    ? await selectBestResult(
+      model,
+      intent,
+      rankedCandidates,
+      suggestedActions,
+      options,
+      callbacks,
+    )
     : {
       selectedSceneId: null,
       selectedModelId: null,
@@ -1594,6 +1782,17 @@ export async function runSpatialSearchAgent(
       answer: "当前没有找到可信的空间检索结果。",
       actions: [],
     };
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "finalize",
+      summary: rankedCandidates.length === 0
+        ? "未找到可信候选，准备返回兜底说明"
+        : `已选定场景 ${selection.selectedSceneId ?? rankedCandidates[0]!.sceneId}`,
+      detail: selection.selectionReason,
+    },
+  });
 
   const finalScene =
     rankedCandidates.find((candidate) =>
