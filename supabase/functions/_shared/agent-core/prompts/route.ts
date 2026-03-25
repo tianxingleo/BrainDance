@@ -31,4 +31,4 @@ Assistant: mode -> creative, reasoning -> "用户要生成创作型输出，应�
 User: "最近三次扫描里书桌是不是越来越空了"
 Assistant: mode -> memory_graph, reasoning -> "用户关注长期趋势而不是单次检索，应进入长期记忆模式。"
 
-请只输出符合规范的结构化结果。`;
+请只输出符合规范的 JSON 结构化结果，不要输出额外说明。`;
