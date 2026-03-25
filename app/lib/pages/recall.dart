@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -100,6 +101,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String _lastOwnModelSignature = '';
   bool _isAgentSearching = false;
   AgentRecallResponse? _agentResult;
+  ChatMessage? _agentChatMessage;
 
   String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
@@ -1560,6 +1562,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         }
         if (_searchMode == RecallSearchMode.agent) {
           _agentResult = null;
+          _agentChatMessage = null;
         }
         _isLoading = false;
       });
@@ -1657,20 +1660,79 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     setState(() {
       _isAgentSearching = true;
       _agentResult = null;
+      _agentChatMessage = ChatMessage(isUser: false);
     });
     try {
-      final result = await AgentRecallService().query(query);
-      if (!mounted) return;
-      setState(() {
-        _agentResult = result;
-        _isAgentSearching = false;
-      });
+      final stream = AgentRecallService().queryStream(query);
+      await for (final chunk in stream) {
+        if (!mounted) break;
+        if (chunk.isEmpty) continue;
+        
+        try {
+          final data = jsonDecode(chunk);
+          setState(() {
+            if (data['event'] == 'thought') {
+              _agentChatMessage!.steps.add(AgentStep(type: 'thought', content: data['data']));
+            } else if (data['event'] == 'tool_call') {
+              // Convert args map to string if it's a map
+              final argsStr = data['args'] is Map ? jsonEncode(data['args']) : data['args'].toString();
+              _agentChatMessage!.steps.add(
+                AgentStep(type: 'tool_call', toolName: data['name'], content: argsStr)
+              );
+            } else if (data['event'] == 'tool_result') {
+              var lastTool = _agentChatMessage!.steps.lastWhere(
+                (s) => s.type == 'tool_call' && s.toolName == data['name'],
+                orElse: () => AgentStep(type: 'tool_call', toolName: data['name'], content: ''),
+              );
+              lastTool.isCompleted = true;
+            } else if (data['event'] == 'message') {
+              _agentChatMessage!.finalAnswer += data['data'] ?? '';
+            } else if (data['event'] == 'done') {
+              // Finish using old format for backward compatibility or action parsing
+              if (data['result'] != null) {
+                _agentResult = AgentRecallResponse.fromJson(data['result']);
+              }
+              _isAgentSearching = false;
+            }
+          });
+        } catch (e) {
+          debugPrint('Error parsing chunk: $e');
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _isAgentSearching = false;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isAgentSearching = false;
       });
-      TDToast.showText('Agent 检索失败：$e', context: context);
+      TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
+      
+      // Fallback
+      if (mounted) {
+        setState(() {
+          _isAgentSearching = true;
+        });
+      }
+      try {
+        final result = await AgentRecallService().query(query);
+        if (!mounted) return;
+        setState(() {
+          _agentResult = result;
+          _agentChatMessage!.finalAnswer = result.answer; 
+          _isAgentSearching = false;
+        });
+      } catch (ex) {
+         if (!mounted) return;
+        setState(() {
+          _isAgentSearching = false;
+        });
+        TDToast.showText('Agent 检索失败：$ex', context: context);
+      }
     }
   }
 
@@ -1793,6 +1855,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       }
       if (mode != RecallSearchMode.agent) {
         _agentResult = null;
+        _agentChatMessage = null;
       }
     });
     final keyword = _searchController.text.trim();
@@ -1827,31 +1890,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
 
-    if (_isAgentSearching) {
-      return BDPanelCard(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            const SizedBox(
-              width: 18,
-              height: 18,
-              child: TDLoading(
-                size: TDLoadingSize.small,
-                icon: TDLoadingIcon.circle,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Agent 正在检索空间...',
-              style: TextStyle(color: hintColor, fontSize: 13),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final result = _agentResult;
-    if (result == null) {
+    if (_agentChatMessage == null && _agentResult == null && !_isAgentSearching) {
       return BDPanelCard(
         padding: const EdgeInsets.all(16),
         child: Text(
@@ -1861,7 +1900,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       );
     }
 
-    final hasActions = result.actions.any((a) => a.type == 'open_scene');
+    final hasActions = _agentResult != null && _agentResult!.actions.any((a) => a.type == 'open_scene');
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -1877,27 +1916,97 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               ),
               const SizedBox(width: 8),
               Text(
-                'Agent 回答',
+                'Agent',
                 style: TextStyle(
                   color: textColor,
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              if (_isAgentSearching) ...[
+                const SizedBox(width: 12),
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: TDLoading(
+                    size: TDLoadingSize.small,
+                    icon: TDLoadingIcon.circle,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            result.answer,
-            style: TextStyle(color: textColor, fontSize: 14, height: 1.5),
-          ),
-          if (result.evidence != null) ...[
+          
+          if (_agentChatMessage != null) ...[
+            ..._agentChatMessage!.steps.map((step) {
+              if (step.type == 'tool_call') {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      minTileHeight: 0,
+                      leading: step.isCompleted 
+                          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
+                          : const SizedBox(
+                              width: 16, height: 16, 
+                              child: CircularProgressIndicator(strokeWidth: 2)
+                            ),
+                      title: Text(
+                        'Using ${step.toolName}...',
+                        style: TextStyle(fontSize: 13, color: textColor),
+                      ),
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.grey[900] : Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            step.content, 
+                            style: TextStyle(
+                              fontFamily: 'monospace', 
+                              color: isDark ? Colors.greenAccent : Colors.green[800],
+                              fontSize: 12,
+                            ),
+                          ),
+                        )
+                      ],
+                    ),
+                  ),
+                );
+              } else if (step.type == 'thought') {
+                 return Padding(
+                   padding: const EdgeInsets.symmetric(vertical: 4.0),
+                   child: Text('🤔 思考中: ${step.content}', style: TextStyle(color: hintColor, fontSize: 13)),
+                 );
+              }
+              return const SizedBox.shrink();
+            }),
+            
+            if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              MarkdownBody(
+                data: _agentChatMessage!.finalAnswer,
+                styleSheet: MarkdownStyleSheet(
+                  p: TextStyle(color: textColor, fontSize: 14, height: 1.5),
+                ),
+              ),
+            ],
+          ],
+
+          if (_agentResult?.evidence != null) ...[
             const SizedBox(height: 10),
             Text(
-              '场景：${result.evidence!.sceneId}  ·  相似度：${(result.evidence!.similarity * 100).toStringAsFixed(1)}%',
+              '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
               style: TextStyle(color: hintColor, fontSize: 12),
             ),
           ],
+          
           if (hasActions) ...[
             const SizedBox(height: 14),
             SizedBox(
@@ -1913,7 +2022,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 theme: TDButtonTheme.primary,
                 shape: TDButtonShape.round,
                 size: TDButtonSize.medium,
-                onTap: () => _openAgentRecallResult(result),
+                onTap: () => _openAgentRecallResult(_agentResult!),
               ),
             ),
           ],

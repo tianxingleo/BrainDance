@@ -1,6 +1,34 @@
+import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 // ── Data models ──────────────────────────────────────────────
+
+class AgentStep {
+  final String type; // 'thought', 'tool_call', 'tool_result'
+  final String? toolName;
+  final String content;
+  bool isCompleted;
+
+  AgentStep({
+    required this.type,
+    this.toolName,
+    required this.content,
+    this.isCompleted = false,
+  });
+}
+
+class ChatMessage {
+  final bool isUser;
+  String finalAnswer; 
+  List<AgentStep> steps;
+
+  ChatMessage({
+    required this.isUser,
+    this.finalAnswer = '',
+    List<AgentStep>? steps,
+  }) : steps = steps ?? [];
+}
 
 class AgentRecallResponse {
   final String answer;
@@ -119,6 +147,27 @@ class AgentAction {
 
 class AgentRecallService {
   final SupabaseClient _client = Supabase.instance.client;
+
+  Stream<String> queryStream(String query) async* {
+    // If the endpoint is deployed on supabase functions
+    final functionUrl = '${_client.functions.url}/agent-recall';
+    
+    final request = http.Request('POST', Uri.parse(functionUrl));
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      if (_client.auth.currentSession != null)
+        'Authorization': 'Bearer ${_client.auth.currentSession!.accessToken}',
+    });
+    request.body = jsonEncode({'query': query});
+
+    final response = await http.Client().send(request);
+    
+    if (response.statusCode != 200) {
+      throw Exception('agent-recall 请求失败: ${response.statusCode}');
+    }
+
+    yield* response.stream.transform(utf8.decoder).transform(const LineSplitter());
+  }
 
   Future<AgentRecallResponse> query(String query) async {
     final response = await _client.functions.invoke(
