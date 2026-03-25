@@ -17,6 +17,7 @@ class RecallLocalAiPanel extends StatelessWidget {
   final int modelDownloadedBytes;
   final int? modelDownloadTotalBytes;
   final String localAnswer;
+  final String localReasoning;
   final String localAnswerStatus;
   final String localContextPreview;
   final String defaultModelDownloadUrl;
@@ -43,6 +44,7 @@ class RecallLocalAiPanel extends StatelessWidget {
     required this.modelDownloadedBytes,
     required this.modelDownloadTotalBytes,
     required this.localAnswer,
+    required this.localReasoning,
     required this.localAnswerStatus,
     required this.localContextPreview,
     required this.defaultModelDownloadUrl,
@@ -60,6 +62,7 @@ class RecallLocalAiPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final answerText = localAnswer.trim();
+    final reasoningText = localReasoning.trim();
     final contextPreview = localContextPreview.trim();
 
     return _RecallLocalQnaPanel(
@@ -75,6 +78,7 @@ class RecallLocalAiPanel extends StatelessWidget {
       modelDownloadTotalBytes: modelDownloadTotalBytes,
       localAnswerStatus: localAnswerStatus,
       answerText: answerText,
+      reasoningText: reasoningText,
       contextPreview: contextPreview,
       defaultModelDownloadUrl: defaultModelDownloadUrl,
       localModelCatalog: localModelCatalog,
@@ -103,6 +107,7 @@ class _RecallLocalQnaPanel extends StatelessWidget {
   final int? modelDownloadTotalBytes;
   final String localAnswerStatus;
   final String answerText;
+  final String reasoningText;
   final String contextPreview;
   final String defaultModelDownloadUrl;
   final List<LocalModelCatalogItem> localModelCatalog;
@@ -128,6 +133,7 @@ class _RecallLocalQnaPanel extends StatelessWidget {
     required this.modelDownloadTotalBytes,
     required this.localAnswerStatus,
     required this.answerText,
+    required this.reasoningText,
     required this.contextPreview,
     required this.defaultModelDownloadUrl,
     required this.localModelCatalog,
@@ -522,6 +528,35 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                 ),
                 maxLines: 10,
                 overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+          if (reasoningText.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              '模型思考链',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: 72),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isDark ? darkInput : theme.grayColor3,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Text(
+                reasoningText,
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 12.5,
+                  height: 1.45,
+                ),
               ),
             ),
           ],

@@ -74,6 +74,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   String _localAnswer = '';
+  String _localReasoning = '';
   String _localAnswerStatus = 'Qwen3-1.7B 端侧模型未加载';
   String _localContextPreview = '';
   bool _isLocalModelLoading = false;
@@ -648,10 +649,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final prompt =
         '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
         '<|im_start|>user\n$userPayload<|im_end|>\n'
-        '<|im_start|>assistant\n';
+        '<|im_start|>assistant\n'
+        '请直接给出最终回答；如果你仍然生成 <think> 思考链，系统会将其与正式回答分离，仅正式回答会作为最终结果展示。\n';
 
     setState(() {
       _localAnswer = '';
+      _localReasoning = '';
       // 预览上下文现在展示构建好的 JSON，方便调试
       const encoder = JsonEncoder.withIndent('  ');
       _localContextPreview = encoder.convert(retrieval);
@@ -683,20 +686,26 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               if (token.isEmpty) {
                 return;
               }
-              final nextAnswer = _sanitizeLocalAnswer(streamedAnswer + token);
+              final nextRaw = streamedAnswer + token;
+              final parsedOutput = _parseLocalModelOutput(nextRaw);
+              final nextReasoning = parsedOutput.reasoning;
+              final nextAnswer = parsedOutput.answer;
               if (lockedAnswer) {
-                if (nextAnswer != streamedAnswer) {
+                if (nextAnswer != _localAnswer ||
+                    nextReasoning != _localReasoning) {
                   _localQnaModel!.cancelGeneration();
                 }
                 return;
               }
-              final shouldStop = nextAnswer == streamedAnswer;
-              if (nextAnswer.isNotEmpty) {
-                streamedAnswer = nextAnswer;
-              }
-              lockedAnswer = _shouldLockAnswer(streamedAnswer);
+              final previousParsed = _parseLocalModelOutput(streamedAnswer);
+              final shouldStop =
+                  nextAnswer == previousParsed.answer &&
+                  nextReasoning == previousParsed.reasoning;
+              streamedAnswer = nextRaw;
+              lockedAnswer = _shouldLockAnswer(nextAnswer);
               setState(() {
-                _localAnswer = streamedAnswer;
+                _localReasoning = nextReasoning;
+                _localAnswer = nextAnswer;
               });
               if (shouldStop || lockedAnswer) {
                 _localQnaModel!.cancelGeneration();
@@ -862,6 +871,46 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
 
     return cleaned;
+  }
+
+  _ParsedLocalModelOutput _parseLocalModelOutput(String raw) {
+    final normalized = raw.replaceAll('\r\n', '\n');
+    final thinkStart = normalized.indexOf('<think>');
+    if (thinkStart < 0) {
+      return _ParsedLocalModelOutput(
+        reasoning: '',
+        answer: _sanitizeLocalAnswer(_stripDanglingThinkTag(normalized)),
+      );
+    }
+
+    final reasoningStart = thinkStart + '<think>'.length;
+    final thinkEnd = normalized.indexOf('</think>', reasoningStart);
+    if (thinkEnd < 0) {
+      return _ParsedLocalModelOutput(
+        reasoning: normalized.substring(reasoningStart).trim(),
+        answer: '',
+      );
+    }
+
+    final reasoning = normalized.substring(reasoningStart, thinkEnd).trim();
+    final answer = normalized.substring(thinkEnd + '</think>'.length);
+    return _ParsedLocalModelOutput(
+      reasoning: reasoning,
+      answer: _sanitizeLocalAnswer(_stripDanglingThinkTag(answer)),
+    );
+  }
+
+  String _stripDanglingThinkTag(String value) {
+    var cleaned = value;
+    const danglingPrefixes = ['<think>', '<thin', '<thi', '<th', '<t', '<'];
+    for (final prefix in danglingPrefixes) {
+      if (cleaned.trimLeft().startsWith(prefix)) {
+        final index = cleaned.indexOf(prefix);
+        cleaned = index >= 0 ? cleaned.substring(0, index) : cleaned;
+        break;
+      }
+    }
+    return cleaned.replaceAll('</think>', '');
   }
 
   bool _shouldLockAnswer(String value) {
@@ -1345,6 +1394,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                             modelDownloadedBytes: _modelDownloadedBytes,
                             modelDownloadTotalBytes: _modelDownloadTotalBytes,
                             localAnswer: _localAnswer,
+                            localReasoning: _localReasoning,
                             localAnswerStatus: _localAnswerStatus,
                             localContextPreview: _localContextPreview,
                             defaultModelDownloadUrl: _defaultModelDownloadUrl,
@@ -1500,6 +1550,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _models = List<Map<String, dynamic>>.from(_allModels);
         if (_searchMode == RecallSearchMode.localAi) {
           _localAnswer = '';
+          _localReasoning = '';
           _localContextPreview = '';
         }
         _isLoading = false;
@@ -1649,6 +1700,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _searchMode = mode;
       if (mode != RecallSearchMode.localAi) {
         _localAnswer = '';
+        _localReasoning = '';
         _localContextPreview = '';
       }
     });
@@ -2277,4 +2329,14 @@ class _RecallSearchCacheEntry {
 
   final DateTime createdAt;
   final List<Map<String, dynamic>> results;
+}
+
+class _ParsedLocalModelOutput {
+  const _ParsedLocalModelOutput({
+    required this.reasoning,
+    required this.answer,
+  });
+
+  final String reasoning;
+  final String answer;
 }

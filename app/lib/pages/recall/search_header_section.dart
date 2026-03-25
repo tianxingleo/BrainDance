@@ -30,6 +30,7 @@ class RecallSearchHeaderSection extends StatefulWidget {
   final int modelDownloadedBytes;
   final int? modelDownloadTotalBytes;
   final String localAnswer;
+  final String localReasoning;
   final String localAnswerStatus;
   final String localContextPreview;
   final String defaultModelDownloadUrl;
@@ -65,6 +66,7 @@ class RecallSearchHeaderSection extends StatefulWidget {
     required this.modelDownloadedBytes,
     required this.modelDownloadTotalBytes,
     required this.localAnswer,
+    required this.localReasoning,
     required this.localAnswerStatus,
     required this.localContextPreview,
     required this.defaultModelDownloadUrl,
@@ -240,6 +242,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
             modelDownloadedBytes: widget.modelDownloadedBytes,
             modelDownloadTotalBytes: widget.modelDownloadTotalBytes,
             localAnswer: widget.localAnswer,
+            localReasoning: widget.localReasoning,
             localAnswerStatus: widget.localAnswerStatus,
             localContextPreview: widget.localContextPreview,
             defaultModelDownloadUrl: widget.defaultModelDownloadUrl,
