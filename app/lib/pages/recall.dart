@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -458,6 +459,16 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
+  static const String _kSystemPrompt =
+      '你是 BrainDance 的本地记忆问答助手。'
+      '你只能根据 retrieval 提供的证据回答，不要猜测。'
+      '规则：'
+      '1. hit_count > 0 时，必须回答具体内容，不能只说有记录。'
+      '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
+      '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
+      '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
+      '5. 不复述问题，不解释规则，不说‘根据给定证据’。';
+
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
@@ -469,27 +480,24 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return;
     }
 
-    final memoryContext = await _buildMemoryContext(userQuestion);
-    var streamedAnswer = '';
-    var lockedAnswer = false;
-    final prompt =
-        '''
-请根据下面的记忆片段，直接回答问题。
-如果记忆片段没有明确答案，再简短回答不知道。
-不要解释规则，不要重复题目。
+    // 1. 构建符合 Qwen3-1.7B-Instruct 格式的 retrieval payload
+    final retrieval = await _buildRetrievalPayload(userQuestion);
+    final userPayload = jsonEncode({
+      'question': userQuestion,
+      'retrieval': retrieval,
+    });
 
-记忆片段：
-$memoryContext
-
-问题：
-$userQuestion
-
-回答：
-''';
+    // 2. 构建 ChatML 格式 Prompt
+    // 注意：微调后的模型对 System Prompt 和 JSON Payload 格式非常敏感
+    final prompt = '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
+        '<|im_start|>user\n$userPayload<|im_end|>\n'
+        '<|im_start|>assistant\n';
 
     setState(() {
       _localAnswer = '';
-      _localContextPreview = memoryContext;
+      // 预览上下文现在展示构建好的 JSON，方便调试
+      const encoder = JsonEncoder.withIndent('  ');
+      _localContextPreview = encoder.convert(retrieval);
       _localAnswerStatus = '正在根据本地记忆片段生成回答...';
     });
 
@@ -500,12 +508,12 @@ $userQuestion
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 64,
-              temp: 0.1,
+              maxTokens: 128, // 对齐 Python 脚本的 max_new_tokens=96，稍微给点余量
+              temp: 0.1, // 接近 Greedy Search，减少幻觉
               topK: 20,
-              topP: 0.85,
-              penalty: 1.12,
-              stopSequences: ['【说明】', '\n答案：', '\n问题：', '\n记忆片段：'],
+              topP: 0.1, // 进一步限制采样范围
+              penalty: 1.05, // 对齐 Python 脚本的 repetition_penalty=1.05
+              stopSequences: ['<|im_end|>', '<|endoftext|>'], // Qwen3 停止符
             ),
           )
           .listen(
@@ -567,10 +575,16 @@ $userQuestion
     }
   }
 
-  Future<String> _buildMemoryContext(String question) async {
+  Future<Map<String, dynamic>> _buildRetrievalPayload(String question) async {
     List<Map<String, dynamic>> matches = [];
     try {
-      matches = await _localRagIndex.search(question, limit: 3, minScore: 0.08);
+      // 本地语义扩展，弥补 HashingEmbedder 的语义缺失
+      final expandedQuery = _expandQuery(question);
+      matches = await _localRagIndex.search(
+        expandedQuery,
+        limit: 3,
+        minScore: 0.08,
+      );
     } catch (_) {
       matches = const [];
     }
@@ -583,40 +597,72 @@ $userQuestion
       matches = fallbackModels;
     }
 
-    if (matches.isEmpty) {
-      return '暂无可用记忆片段。';
-    }
+    // 转换为微调模型预期的 evidence 格式
+    final evidence = matches.map((item) {
+      final metaInfo = _toMap(item['meta_info']);
+      final tags = _joinList(item['tags']);
+      final objects = _joinList(item['objects']);
+      final summary = _collectStrings(metaInfo)
+          .take(6)
+          .map((t) => t.trim())
+          .where((t) => t.isNotEmpty)
+          .join('；');
 
-    return matches
-        .asMap()
-        .entries
-        .map((entry) {
-          return _formatMemorySnippet(entry.key + 1, entry.value);
-        })
-        .join('\n\n');
+      return {
+        'id': item['id']?.toString() ?? '',
+        'created_at': item['created_at']?.toString() ?? '',
+        'description': item['description']?.toString() ?? '',
+        'tags': tags,
+        'objects': objects,
+        'summary': summary,
+        'scene_id': item['scene_id']?.toString() ?? '',
+      };
+    }).toList();
+
+    return {
+      'evidence': evidence,
+      'hit_count': evidence.length,
+      // 本地暂无 Intent 识别模型，先默认为 unknown 或根据是否有结果判断
+      'intent': evidence.isEmpty ? 'unknown' : 'object_lookup',
+    };
   }
 
-  String _formatMemorySnippet(int index, Map<String, dynamic> model) {
-    final metaInfo = _toMap(model['meta_info']);
-    final tags = _joinList(model['tags']);
-    final objects = _joinList(model['objects']);
-    final summary = _collectStrings(metaInfo)
-        .take(6)
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .join('；');
+  String _expandQuery(String query) {
+    if (query.trim().isEmpty) return query;
+    var expanded = query;
+    
+    // 关键领域词汇扩展 - 对齐 ai_engine 的 SEMANTIC_QUERY_EXPANSIONS
+    const semanticExpansions = {
+      "理工": ["算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"],
+      "计算机": ["电脑", "笔记本电脑", "显示器", "机械键盘", "办公桌", "白板"],
+      "学习": ["教材", "词典", "地球仪", "白板", "办公桌", "笔记本电脑"],
+      "书房": ["办公桌", "椅子", "书架", "电脑", "书"],
+    };
 
-    final parts = <String>[
-      '片段$index',
-      '场景：${_modelDisplayName(model, fallback: '未知场景')}',
-      '描述：${model['description']?.toString() ?? '暂无描述'}',
-      if (tags.isNotEmpty) '标签：$tags',
-      if (objects.isNotEmpty) '对象：$objects',
-      if (summary.isNotEmpty) '摘要：$summary',
-    ];
+    // 对象查找扩展 - 对齐 ai_engine 的 OBJECT_LOOKUP_PHRASE_EXPANSIONS
+    const objectExpansions = {
+      "洛天依": ["洛天依", "手办", "展台"],
+      "学习摆件": ["学习相关", "地球仪", "手办"],
+      "桌面设备": ["显示器", "笔记本电脑", "键盘", "办公桌"],
+    };
 
-    return parts.join('\n');
+    // 简单包含匹配
+    semanticExpansions.forEach((key, values) {
+      if (query.contains(key)) {
+        expanded += ' ${values.join(' ')}';
+      }
+    });
+
+    objectExpansions.forEach((key, values) {
+      if (query.contains(key)) {
+        expanded += ' ${values.join(' ')}';
+      }
+    });
+
+    return expanded;
   }
+
+
 
   String _sanitizeLocalAnswer(String raw) {
     final original = raw.trim();
