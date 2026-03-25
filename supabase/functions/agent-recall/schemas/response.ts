@@ -27,18 +27,9 @@ export const flyToPoseActionSchema = z.object({
   matrix: z.unknown().nullable().optional(),
 });
 
-export const highlightRegionActionSchema = z.object({
-  type: z.literal("highlight_region"),
-  sceneId: z.string(),
-  imageName: z.string().optional(),
-  label: z.string().optional(),
-  matrix: z.unknown().nullable().optional(),
-});
-
 export const agentRecallActionSchema = z.union([
   openSceneActionSchema,
   flyToPoseActionSchema,
-  highlightRegionActionSchema,
 ]);
 
 export const agentRecallResponseSchema = z.object({

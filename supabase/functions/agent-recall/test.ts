@@ -41,13 +41,6 @@ Deno.test("buildRecallActionsFromSearchResult 会从搜索结果构造稳定动�
       imageName: "frame_01.jpg",
       matrix: [1, 0, 0, 0],
     },
-    {
-      type: "highlight_region",
-      sceneId: "scene-a",
-      imageName: "frame_01.jpg",
-      label: "黑色耳机",
-      matrix: [1, 0, 0, 0],
-    },
   ]);
 });
 

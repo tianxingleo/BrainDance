@@ -127,7 +127,6 @@ type AgentRecallResponse = {
   actions: Array<
     | { type: "open_scene"; sceneId: string }
     | { type: "fly_to_pose"; sceneId: string; imageName?: string }
-    | { type: "highlight_region"; sceneId: string; label?: string }
   >;
 };
 ```

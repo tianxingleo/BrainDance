@@ -19,7 +19,7 @@ export const corsHeaders = {
 
 const DEFAULT_DASHSCOPE_BASE_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_CHAT_MODEL = "qwen-turbo";
+const DEFAULT_CHAT_MODEL = "qwen3.5-plus";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-v2";
 const DEFAULT_BUCKET = "braindance-assets";
 const MAX_AGENT_TOOL_ROUNDS = 3;

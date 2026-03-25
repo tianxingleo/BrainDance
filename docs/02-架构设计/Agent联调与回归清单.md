@@ -55,13 +55,6 @@
       "sceneId": "scene-demo",
       "imageName": "frame_0001.jpg",
       "matrix": [1, 0, 0, 0]
-    },
-    {
-      "type": "highlight_region",
-      "sceneId": "scene-demo",
-      "imageName": "frame_0001.jpg",
-      "label": "红色杯子",
-      "matrix": [1, 0, 0, 0]
     }
   ]
 }
@@ -79,17 +72,14 @@
   - 含义：飞到证据视角
   - 必要字段：`sceneId`
   - 常用附加字段：`imageName`、`matrix`
-- `highlight_region`
-  - 含义：高亮证据区域或热点
-  - 必要字段：`sceneId`
-  - 常用附加字段：`imageName`、`label`、`matrix`
 
 前端不要再直接依赖旧命名：
 
 - `open_model`
 - `highlight_hotspot`
 
-这些命名目前只允许存在于实验链路 `spatial-search-agent` 中。
+这些命名目前只允许存在于实验链路 `spatial-search-agent` 中。`agent-recall`
+稳定协议只保留 `open_scene` 和 `fly_to_pose`。
 
 ## 4. 联调检查项
 
@@ -106,7 +96,6 @@
 2. 是否返回 `evidence.sceneId`
 3. 是否返回至少一个稳定动作
 4. `fly_to_pose.matrix` 是否能驱动 Viewer 到达可信位置
-5. `highlight_region` 的标签是否与实际命中内容一致
 
 ## 5. 回归分层
 

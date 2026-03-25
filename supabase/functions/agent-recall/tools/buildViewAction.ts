@@ -54,17 +54,6 @@ export function buildRecallActionsFromSearchResult(
       imageName,
       matrix,
     });
-    mapped.push({
-      type: "highlight_region",
-      sceneId,
-      imageName,
-      label: typeof bestFrame.tag === "string"
-        ? bestFrame.tag
-        : typeof topResult.description === "string"
-        ? topResult.description
-        : undefined,
-      matrix,
-    });
   }
 
   return mapped;
