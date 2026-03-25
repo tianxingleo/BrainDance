@@ -6,11 +6,13 @@ class AgentRecallResponse {
   final String answer;
   final AgentEvidence? evidence;
   final List<AgentAction> actions;
+  final List<AgentCandidate> candidates;
 
   AgentRecallResponse({
     required this.answer,
     required this.evidence,
     required this.actions,
+    this.candidates = const [],
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -27,6 +29,38 @@ class AgentRecallResponse {
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      candidates: ((json['candidates'] as List?) ?? [])
+          .map(
+            (item) =>
+                AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
+          )
+          .toList(),
+    );
+  }
+}
+
+class AgentCandidate {
+  final String sceneId;
+  final String modelId;
+  final double score;
+  final String description;
+  final String? poseImageId;
+
+  AgentCandidate({
+    required this.sceneId,
+    required this.modelId,
+    required this.score,
+    required this.description,
+    this.poseImageId,
+  });
+
+  factory AgentCandidate.fromJson(Map<String, dynamic> json) {
+    return AgentCandidate(
+      sceneId: json['scene_id']?.toString() ?? '',
+      modelId: json['model_id']?.toString() ?? '',
+      score: (json['score'] as num?)?.toDouble() ?? 0.0,
+      description: json['description']?.toString() ?? '',
+      poseImageId: json['pose_image_id']?.toString(),
     );
   }
 }

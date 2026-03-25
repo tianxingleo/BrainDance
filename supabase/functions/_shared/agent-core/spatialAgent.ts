@@ -67,7 +67,7 @@ const agentRouteSchema = z.object({
 });
 
 const visualizationActionSchema = z.object({
-  type: z.enum(["open_model", "fly_to_pose"]),
+  type: z.enum(["open_scene", "fly_to_pose"]),
   title: z.string(),
   payload: z.record(z.string(), z.unknown()),
 });
@@ -800,7 +800,7 @@ export function buildVisualizationActions(input: {
 
   const actions: VisualizationAction[] = [
     {
-      type: "open_model",
+      type: "open_scene",
       title: `打开场景 ${scene.sceneId}`,
       payload: {
         sceneId: scene.sceneId,
