@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
-import 'package:braindance/pages/webgl_viewer.dart';
+import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -88,15 +88,11 @@ class _CommunityPageState extends State<CommunityPage>
   }
 
   void _openViewer(CommunityPost post) {
-    Navigator.push(
+    openViewer(
       context,
-      MaterialPageRoute(
-        builder: (_) => WebGLViewerPage(
-          initialModelUrl: post.modelUrl,
-          posesUrl: post.posesUrl,
-          sceneId: post.modelName,
-        ),
-      ),
+      initialModelUrl: post.modelUrl,
+      posesUrl: post.posesUrl,
+      sceneId: post.modelName,
     );
   }
 

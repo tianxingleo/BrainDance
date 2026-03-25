@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../../configs/app_config.dart';
-import '../webgl_viewer.dart';
+import '../../services/viewer_navigation.dart';
 
 /// 空状态组件
 class EmptyState extends StatelessWidget {
@@ -87,13 +87,10 @@ class EmptyState extends StatelessWidget {
               shape: TDButtonShape.round,
               size: TDButtonSize.large,
               onTap: () {
-                Navigator.push(
+                openViewer(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => WebGLViewerPage(
-                      sceneId: textLocalize("recall_demo_title"),
-                    ),
-                  ),
+                  initialModelUrl: './models/scene_auto_sync_raw.ply',
+                  sceneId: textLocalize("recall_demo_title"),
                 );
               },
             ),
