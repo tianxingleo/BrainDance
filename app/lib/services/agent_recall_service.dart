@@ -234,6 +234,45 @@ class AgentAction {
 class AgentRecallService {
   final SupabaseClient _client = Supabase.instance.client;
 
+  Stream<String> queryStream(String query) async* {
+    // 调用 Supabase 边缘函数
+    try {
+      final response = await _client.functions.invoke(
+        'agent-recall',
+        body: {'query': query},
+      );
+
+      if (response.status != 200) {
+        yield jsonEncode({
+          'event': 'error',
+          'data': 'API Invoke Error: ${response.status}',
+        });
+        return;
+      }
+
+      // 注意：如果函数返回的是流式响应，需确认 invoke 的处理方式
+      // 这里的原始代码似乎是想手动处理流式响应，但 supabase_flutter 的 invoke 默认返回全部数据
+      // 如果业务确实需要流式，通常需要更复杂的 http 处理或函数支持
+      var responseData = response.data;
+      if (responseData is String) {
+        yield responseData;
+      } else if (responseData is Map && responseData.containsKey('event')) {
+        yield jsonEncode(responseData);
+      } else {
+        yield jsonEncode({'event': 'done', 'data': responseData});
+      }
+    } catch (e) {
+      if (e is FunctionException) {
+        yield jsonEncode({
+          'event': 'error',
+          'data': e.details ?? e.status.toString(),
+        });
+      } else {
+        yield jsonEncode({'event': 'error', 'data': 'Function Error: $e'});
+      }
+    }
+  }
+
   Future<AgentRecallResponse> query(
     String query, {
     List<String>? selectedModelIds,
@@ -245,16 +284,25 @@ class AgentRecallService {
     String? sessionId,
     String? conversationSummary,
   }) async {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) {
+      throw Exception('查询语句不能为空');
+    }
+
     final response = await _client.functions.invoke(
       'agent-recall',
       body: {
-        'query': query,
+        'query': trimmedQuery,
         if (selectedModelIds != null) 'selectedModelIds': selectedModelIds,
         'executionMode': executionMode,
         if (currentSceneId != null) 'currentSceneId': currentSceneId,
         if (currentModelId != null) 'currentModelId': currentModelId,
         if (currentMode != null) 'currentMode': currentMode,
         if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
+        if (sessionId != null) 'sessionId': sessionId,
+        if (conversationSummary != null) 'conversationSummary': conversationSummary,
+      },
+    );
         if (sessionId != null) 'sessionId': sessionId,
         if (conversationSummary != null) 'conversationSummary': conversationSummary,
       },

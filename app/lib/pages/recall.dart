@@ -1674,7 +1674,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   }
 
   Future<void> _askAgentRecall(String query) async {
-    if (query.isEmpty) return;
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) return;
+    
     setState(() {
       _isAgentSearching = true;
       _agentResult = null;
@@ -1689,7 +1691,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _isAgentSearching = true;
       });
       try {
-        final result = await AgentRecallService().query(query);
+        final result = await AgentRecallService().query(trimmedQuery);
         if (!mounted) return;
         setState(() {
           _agentResult = result;
@@ -1706,7 +1708,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
 
     try {
-      final stream = AgentRecallService().queryStream(query);
+      final stream = AgentRecallService().queryStream(trimmedQuery);
       _agentStreamSubscription = stream.listen(
         (chunk) {
           if (!mounted) return;
@@ -2170,17 +2172,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         },
       ),
     );
-                type: TDButtonType.fill,
-                theme: TDButtonTheme.primary,
-                shape: TDButtonShape.round,
-                size: TDButtonSize.medium,
-                onTap: () => _openAgentRecallResult(result),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark) {
@@ -2300,19 +2291,18 @@ class _RecallPageState extends ConsumerState<RecallPage> {
             const SizedBox(height: 8),
             TDText(
               switch (_searchMode) {
-                _RecallSearchMode.local => textLocalize('recall_local_empty'),
-                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
-                _RecallSearchMode.localAi => textLocalize(
+                RecallSearchMode.local => textLocalize('recall_local_empty'),
+                RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                RecallSearchMode.localAi => textLocalize(
                   'recall_local_ai_empty',
                 ),
-                _RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
+                RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
               },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
             ),
           ],
         ),
->>>>>>> origin/dev
       ),
     );
   }
