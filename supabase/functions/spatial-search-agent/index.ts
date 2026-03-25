@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { corsHeaders, runSpatialSearchAgent } from "./agent.ts";
+import { corsHeaders, runSpatialSearchAgent } from "../_shared/agent-core/spatialAgent.ts";
 
 function errorResponse(message: string, status = 500): Response {
   console.error(`[SpatialSearchAgent] 错误: ${message}`);

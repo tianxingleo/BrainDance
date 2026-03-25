@@ -1,43 +1,122 @@
-import { searchSpace } from "../tools/searchSpace.ts";
-import { buildEvidenceFromSpatialResult } from "../tools/getSceneAsset.ts";
-import { buildRecallActionsFromSearchResult } from "../tools/buildViewAction.ts";
+import { runSpatialSearchAgent } from "../../_shared/agent-core/spatialAgent.ts";
 import {
   type AgentRecallResponse,
+  type AgentRecallStreamEvent,
+  agentRecallStreamEventSchema,
   agentRecallResponseSchema,
+  type agentRecallActionSchema,
 } from "../schemas/response.ts";
 
-function buildAnswerFromSearchResult(
-  result: Awaited<ReturnType<typeof searchSpace>>,
-): string {
-  const topResult = result.results[0];
-  if (!topResult) {
-    return "当前没有找到可信的空间检索结果。";
-  }
+type RecallAgentOptions = {
+  onEvent?: (event: AgentRecallStreamEvent) => void | Promise<void>;
+};
 
-  const description = typeof topResult.description === "string"
-    ? topResult.description
-    : result.intent.parsed_search_text;
-  const displayName = typeof topResult.display_name === "string"
-    ? topResult.display_name.trim()
-    : "";
-  const sceneId = displayName.length > 0
-    ? displayName
-    : typeof topResult.scene_id === "string"
-    ? topResult.scene_id
-    : "未知场景";
-  const similarity = Math.round(Number(topResult.similarity ?? 0) * 100);
-  return `已找到最相关的空间记忆，命中场景 ${sceneId}，相关描述为“${description}”，相似度约 ${similarity}%。`;
+async function emitEvent(
+  options: RecallAgentOptions,
+  event: AgentRecallStreamEvent,
+) {
+  if (!options.onEvent) {
+    return;
+  }
+  await options.onEvent(agentRecallStreamEventSchema.parse(event));
 }
 
 export async function runRecallAgent(
   query: string,
+  options: RecallAgentOptions = {},
 ): Promise<AgentRecallResponse> {
-  const searchResult = await searchSpace(query);
+  await emitEvent(options, {
+    event: "plan",
+    data: {
+      title: "多工具检索 Agent 执行计划",
+      steps: [
+        "理解用户意图并路由（空间检索或资产管理）",
+        "执行多工具检索或资产对比操作",
+        "提候选与裁决",
+        "生成最终回答并返回可执行动作",
+      ],
+    },
+  });
+
+  await emitEvent(options, {
+    event: "thinking",
+    data: {
+      content: "开始调用统一 Agent 核心处理请求...",
+    },
+  });
+
+  const spatialResult = await runSpatialSearchAgent(query, {
+    executionMode: "preview" // default to preview for safety
+  });
+
+  await emitEvent(options, {
+    event: "tool_result",
+    data: {
+      name: "shared_agent_core",
+      status: spatialResult.success ? "success" : "error",
+      result: {
+        mode: spatialResult.mode,
+        candidates_count: spatialResult.candidates?.length ?? 0
+      }
+    },
+  });
+
+  await emitEvent(options, {
+    event: "thinking",
+    data: {
+      content: spatialResult.candidates?.length === 0 && spatialResult.mode === 'spatial_search'
+        ? "当前没有命中可信场景，需要明确告诉用户暂无结果。"
+        : "已经拿到候选结果，接下来整理证据和所需的界面动作。",
+    },
+  });
+
+  // Map actions
+  const mappedActions: any[] = [];
+  for (const a of spatialResult.actions) {
+    if (a.type === 'open_model') {
+      mappedActions.push({
+        type: 'open_scene',
+        ...a.payload
+      });
+    } else if (a.type === 'fly_to_pose') {
+      mappedActions.push({
+        type: 'fly_to_pose',
+        ...a.payload
+      });
+    }
+  }
+
   const response: AgentRecallResponse = {
-    answer: buildAnswerFromSearchResult(searchResult),
-    evidence: buildEvidenceFromSpatialResult(searchResult),
-    actions: buildRecallActionsFromSearchResult(searchResult),
+    answer: spatialResult.answer || "已处理您的请求。",
+    evidence: spatialResult.mode === 'spatial_search' && spatialResult.candidates && spatialResult.candidates.length > 0 ? {
+      sceneId: spatialResult.candidates[0].scene_id,
+      similarity: spatialResult.candidates[0].score,
+      matchedFrames: spatialResult.candidates[0].pose_image_id ? [{
+        imageName: spatialResult.candidates[0].pose_image_id,
+        similarity: spatialResult.candidates[0].score,
+        transformMatrix: spatialResult.viewer_payload.matrix
+      }] : []
+    } : null,
+    actions: mappedActions,
+    top_candidates: spatialResult.candidates?.map(c => ({
+      sceneId: c.scene_id,
+      similarity: c.score,
+      description: c.description
+    })) || [],
+    selected_candidate_reason: spatialResult.selection?.reason || "",
   };
 
-  return agentRecallResponseSchema.parse(response);
+  const parsed = agentRecallResponseSchema.parse(response);
+  await emitEvent(options, {
+    event: "message",
+    data: {
+      delta: parsed.answer,
+    },
+  });
+  await emitEvent(options, {
+    event: "done",
+    data: parsed,
+  });
+
+  return parsed;
 }
