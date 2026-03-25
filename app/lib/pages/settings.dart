@@ -235,7 +235,7 @@ class _SettingsTabSwitch extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BDDesign.radiusLarge,
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
+          filter: ui.ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
           child: Container(
             padding: const EdgeInsets.all(4.0),
             decoration: BoxDecoration(

@@ -473,7 +473,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         : widget.theme.fontGyColor3,
                     elevated: true,
                     toPublicUrl: widget.toPublicUrl,
-                    imageOnly: widget.model['_imageOnly'] == true,
+                    imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
                   ),
                 ),
               ),

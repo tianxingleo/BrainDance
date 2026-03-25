@@ -1,0 +1,16 @@
+Analyzing app...
+
+warning - lib\pages\record.dart:72:10 - The value of the field '_accelDelta' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\pages\record.dart:81:10 - The value of the field '_yaw' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\pages\record.dart:82:10 - The value of the field '_pitch' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\pages\record.dart:513:16 - The declaration '_buildCameraSwitchButtons' isn't referenced. Try removing the declaration of '_buildCameraSwitchButtons'. - unused_element
+warning - lib\pages\record\record_accel_history_painter.dart:3:7 - The declaration '_AccelHistoryPainter' isn't referenced. Try removing the declaration of '_AccelHistoryPainter'. - unused_element
+warning - lib\pages\settings.dart:16:8 - Unused import: 'package:tdesign_flutter/tdesign_flutter.dart'. Try removing the import directive. - unused_import
+warning - lib\pages\settings.dart:33:26 - The value of the field 'tabTextStyle' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\pages\settings.dart:62:11 - The value of the local variable 'hintColor' isn't used. Try removing the variable or using it. - unused_local_variable
+warning - lib\pages\settings.dart:205:11 - A value for optional parameter 'key' isn't ever given. Try removing the unused parameter. - unused_element_parameter
+warning - lib\widgets\theme_animation_overlay.dart:130:18 - The value of the local variable 'scaleX' isn't used. Try removing the variable or using it. - unused_local_variable
+warning - lib\widgets\theme_animation_overlay.dart:131:18 - The value of the local variable 'scaleY' isn't used. Try removing the variable or using it. - unused_local_variable
+   info - lib\widgets\theme_animation_overlay.dart:10:9 - Parameter 'key' could be a super parameter. Trying converting 'key' to a super parameter. - use_super_parameters
+
+12 issues found.
