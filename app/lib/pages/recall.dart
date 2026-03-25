@@ -2234,7 +2234,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
                       '过程已自动折叠，默认只突出最终回复；展开后可查看阶段总结与工具调用。',
-                      style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                      style: TextStyle(
+                        color: hintColor,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
                     ),
                   )
                 else ...[

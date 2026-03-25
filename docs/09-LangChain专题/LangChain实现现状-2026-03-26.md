@@ -157,3 +157,45 @@
 - 2026-03-26 针对 Flutter Recall Agent 消费层又做了一次兼容修复，静态检查已确认 `agent_recall_service.dart` 可通过分析。
 - 这次修复主要解决前端仍按旧协议读取 `sceneId / ply / poses / matrix` 顶层字段的问题；当前正式协议应从 `actions[].payload` 读取。
 - 若后续仍出现 upstream 类 502/504，需要继续从 Supabase Edge Function 日志与 DashScope / OpenAI 网关侧排查，而不是再把问题归因到 Flutter JSON 解析层。
+
+## 2026-03-26 第二次补充：Flutter Agent 流式过程体验
+
+### 背景
+
+- Flutter Recall 页原先虽然有 `queryStream()` 入口，但实际上仍然退化为一次性 `invoke`，前端只能看到非常粗的中间步骤，无法像 Codex 一样持续看到最新进展。
+- 用户侧核心诉求不是再加一个 loading，而是要让 Agent 在执行过程中持续输出“当前在做什么”，并在完成后自动把过程收起，只强调最终答案。
+
+### 本次实现
+
+- 更新 [agent-recall/index.ts](/home/ltx/projects/BrainDance/supabase/functions/agent-recall/index.ts)
+  - 新增 `stream=1` 流式分支，返回 `application/x-ndjson`。
+  - Edge Function 现在会把 `runSpatialSearchAgent()` 内部进度事件逐条下发，并在最终结果生成后继续把 `answer` 切成增量 `message` 事件，再发送 `done`。
+- 更新 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)
+  - 新增 `AgentProgressEvent` / `AgentRuntimeCallbacks`。
+  - 在模式路由、空间意图解析、工具轮次、工具调用、工具结果、最终候选定稿等节点发出结构化状态事件。
+  - 这样 Flutter 不再只能依赖最后的 `tool_trace` 事后回放，而能真正消费执行中的过程态。
+- 更新 [agent_recall_service.dart](/home/ltx/projects/BrainDance/app/lib/services/agent_recall_service.dart)
+  - `queryStream()` 改为直接请求 Supabase Edge Function 流式端点并逐行解析 NDJSON。
+  - 保留普通 `query()` 兜底；若流式链路失败，仍会自动回退到一次性结果，避免功能不可用。
+  - `ChatMessage` 新增 `liveStatus`、`summaries`、`isProcessCollapsed`，为“实时进展 + 自动折叠”提供状态承载。
+- 更新 [recall.dart](/home/ltx/projects/BrainDance/app/lib/pages/recall.dart)
+  - 新增实时状态卡，优先展示 Agent 当前最新摘要。
+  - 将 `status/tool_call/tool_result/message/done/error` 统一收口到 `_consumeAgentEvent()`，让前端逻辑不再散落在监听回调里。
+  - 完成后默认自动折叠“执行过程”，只突出最终答案；用户如需排查，再手动展开过程和工具调用明细。
+
+### 当前效果口径
+
+- 现在的“流式”重点是：
+  - 阶段摘要实时推进
+  - 工具调用/结果实时追加
+  - 最终回答以增量 `message` 形式写入前端
+- 需要明确的是：
+  - 目前最终回答的 token 级生成仍不是直接透传底层模型的原生 token stream，而是基于服务端阶段事件 + 最终答案切片输出。
+  - 这已经能显著改善 Recall 页体验，但如果后续要进一步做到真正 LLM token 级实时生成，仍需要继续改 LangChain / 模型 SDK 的原生 streaming 接入方式。
+
+### 本次涉及文件
+
+- `supabase/functions/agent-recall/index.ts`
+- `supabase/functions/_shared/agent-core/spatialAgent.ts`
+- `app/lib/services/agent_recall_service.dart`
+- `app/lib/pages/recall.dart`
