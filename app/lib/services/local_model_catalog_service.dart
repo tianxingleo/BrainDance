@@ -34,7 +34,7 @@ class LocalModelCatalogService {
 
   Future<List<LocalModelCatalogItem>> fetchCatalog() async {
     final items = <LocalModelCatalogItem>[];
-    
+
     // 从 catalog/model_catalog.json 获取
     final catalogUrl = _buildPublicUrl(_catalogObjectPath);
     if (catalogUrl.isNotEmpty) {
@@ -54,36 +54,45 @@ class LocalModelCatalogService {
     try {
       final supabase = Supabase.instance.client;
       final bucket = SupabaseConfig.localModelBucket;
-      
+
       final pathsToScan = [''];
       final scannedPaths = <String>{};
-      
+
       while (pathsToScan.isNotEmpty) {
         final currentPath = pathsToScan.removeLast();
         if (scannedPaths.contains(currentPath)) continue;
         scannedPaths.add(currentPath);
-        
+
         try {
-          final objects = await supabase.storage.from(bucket).list(path: currentPath);
+          final objects = await supabase.storage
+              .from(bucket)
+              .list(
+                path: currentPath,
+                searchOptions: const SearchOptions(limit: 1000),
+              );
           for (final obj in objects) {
             if (obj.name == '.emptyFolderPlaceholder') continue;
-            
-            final objPath = currentPath.isEmpty ? obj.name : '$currentPath/${obj.name}';
-            
-            // 没有metadata且没有扩展名的通常是文件夹，不过可靠一点可以这样判断
+
+            final objPath = currentPath.isEmpty
+                ? obj.name
+                : '$currentPath/${obj.name}';
+
+            // 如果对象没有 metadata 或者是明确的文件夹
             if (obj.id == null || obj.metadata == null) {
               pathsToScan.add(objPath);
             } else if (obj.name.toLowerCase().endsWith('.gguf')) {
               final url = _buildPublicUrl(objPath);
-              items.add(LocalModelCatalogItem(
-                id: objPath,
-                name: obj.name,
-                downloadUrl: url,
-                fileName: obj.name,
-                description: 'Supabase Storage: $objPath',
-                sizeBytes: obj.metadata?['size'] as int?,
-                isRecommended: url == SupabaseConfig.localModelUrl,
-              ));
+              items.add(
+                LocalModelCatalogItem(
+                  id: objPath,
+                  name: obj.name,
+                  downloadUrl: url,
+                  fileName: obj.name,
+                  description: 'Supabase Storage: /$objPath',
+                  sizeBytes: obj.metadata?['size'] as int?,
+                  isRecommended: url == SupabaseConfig.localModelUrl,
+                ),
+              );
             }
           }
         } catch (_) {}

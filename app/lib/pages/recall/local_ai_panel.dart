@@ -154,6 +154,109 @@ class _RecallLocalQnaPanel extends StatelessWidget {
       }
     }
 
+    Widget buildModelTile({
+      required BuildContext context,
+      required LocalModelCatalogItem item,
+      required bool isSelected,
+      required VoidCallback onTap,
+    }) {
+      final labels = <String>[
+        if (item.isRecommended) '推荐',
+        if (downloadedLocalModelUrls.contains(item.downloadUrl)) '已下载',
+        if (activeLocalModelUrl == item.downloadUrl) '当前使用',
+      ];
+      final suffix = labels.isEmpty ? '' : labels.join(' · ');
+      final modelSize = item.sizeBytes != null
+          ? '${(item.sizeBytes! / 1024 / 1024 / 1024).toStringAsFixed(2)} GB'
+          : '';
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: BDMotion.durationFast,
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? BDDesign.colorMutedBlue.withValues(
+                      alpha: isDark ? 0.22 : 0.10,
+                    )
+                  : (isDark ? darkInput : const Color(0xFFF6F8FC)),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isSelected
+                    ? BDDesign.colorMutedBlue
+                    : (isDark
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? BDDesign.colorMutedBlue.withValues(alpha: 0.18)
+                        : (isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.white),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.memory_rounded, color: textColor, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 14,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (suffix.isNotEmpty || modelSize.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            [
+                              if (suffix.isNotEmpty) suffix,
+                              if (modelSize.isNotEmpty) modelSize,
+                            ].join(' | '),
+                            style: TextStyle(color: hintColor, fontSize: 12),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (isSelected) ...[
+                  const SizedBox(width: 12),
+                  Icon(
+                    Icons.check_circle_rounded,
+                    color: BDDesign.colorMutedBlue,
+                    size: 22,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -196,121 +299,93 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           ),
           if (localModelCatalog.isNotEmpty) ...[
             const SizedBox(height: 12),
-            InkWell(
-              onTap: () {
-                showModalBottomSheet(
-                  context: context,
-                  backgroundColor: isDark ? const Color(0xFF1C2331) : Colors.white,
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                  ),
-                  builder: (BuildContext ctx) {
-                    return SafeArea(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                            child: Row(
-                              children: [
-                                Text(
-                                  '选择模型',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: textColor,
-                                  ),
+            if (selectedCatalogModel != null)
+              buildModelTile(
+                context: context,
+                item: selectedCatalogModel,
+                isSelected: false,
+                onTap: () {
+                  showModalBottomSheet(
+                    context: context,
+                    backgroundColor: isDark
+                        ? const Color(0xFF1C2331)
+                        : Colors.white,
+                    isScrollControlled: true,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(24),
+                      ),
+                    ),
+                    builder: (BuildContext ctx) {
+                      return SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 4,
+                                margin: const EdgeInsets.only(bottom: 16),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white24
+                                      : Colors.black12,
+                                  borderRadius: BorderRadius.circular(2),
                                 ),
-                                const Spacer(),
-                                IconButton(
-                                  icon: Icon(Icons.close, color: hintColor),
-                                  onPressed: () => Navigator.pop(ctx),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Divider(height: 1),
-                          Flexible(
-                            child: ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: localModelCatalog.length,
-                              itemBuilder: (context, index) {
-                                final item = localModelCatalog[index];
-                                final isSelected = item.downloadUrl == selectedLocalModelUrl;
-                                final labels = <String>[
-                                  if (item.isRecommended) '推荐',
-                                  if (downloadedLocalModelUrls.contains(item.downloadUrl)) '已下载',
-                                  if (activeLocalModelUrl == item.downloadUrl) '当前使用',
-                                ];
-                                final suffix = labels.isEmpty ? '' : ' · ${labels.join(' · ')}';
-                                return ListTile(
-                                  title: Text(
-                                    '${item.name}$suffix',
-                                    style: TextStyle(
-                                      color: isSelected ? TDTheme.of(context).brandNormalColor : textColor,
-                                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '选择端侧模型',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                      ),
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  trailing: isSelected ? Icon(Icons.check, color: TDTheme.of(context).brandNormalColor) : null,
-                                  onTap: () {
-                                    Navigator.pop(ctx);
-                                    onSelectCatalogModel(item.downloadUrl);
+                                  IconButton(
+                                    icon: Icon(Icons.close, color: hintColor),
+                                    onPressed: () => Navigator.pop(ctx),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight:
+                                      MediaQuery.of(context).size.height * 0.5,
+                                ),
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: localModelCatalog.length,
+                                  itemBuilder: (context, index) {
+                                    final item = localModelCatalog[index];
+                                    final isSelected =
+                                        item.downloadUrl ==
+                                        selectedLocalModelUrl;
+                                    return buildModelTile(
+                                      context: ctx,
+                                      item: item,
+                                      isSelected: isSelected,
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        onSelectCatalogModel(item.downloadUrl);
+                                      },
+                                    );
                                   },
-                                );
-                              },
-                            ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                );
-              },
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: hintColor.withValues(alpha: 0.3)),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        selectedCatalogModel?.name ?? 'Supabase 模型仓 - 选择模型',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 15,
                         ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(
-                      Icons.arrow_drop_down,
-                      color: hintColor,
-                    ),
-                  ],
-                ),
+                      );
+                    },
+                  );
+                },
               ),
-            ),
-          ],
-          if (selectedCatalogModel != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              [
-                if ((selectedCatalogModel.description ?? '').isNotEmpty)
-                  selectedCatalogModel.description!,
-                if (selectedCatalogModel.sizeBytes != null)
-                  '大小 ${(selectedCatalogModel.sizeBytes! / 1024 / 1024 / 1024).toStringAsFixed(2)} GB',
-                if (selectedCatalogModel.tags.isNotEmpty)
-                  '标签 ${selectedCatalogModel.tags.join(' / ')}',
-              ].join(' · '),
-              style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
-            ),
           ],
           const SizedBox(height: 12),
           TextField(
