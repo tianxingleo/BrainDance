@@ -24,6 +24,10 @@ export function buildAgentContextBlock(options: SpatialSearchAgentOptions): stri
     parts.push(`- 当前 Viewer 中打开的模型 ID: ${options.currentModelId}`);
   }
 
+  if (options.currentMode) {
+    parts.push(`- 当前工作台模式: ${options.currentMode}`);
+  }
+
   if (options.candidateSceneIds && options.candidateSceneIds.length > 0) {
     parts.push(`- 当前历史候选列表包含了 ${options.candidateSceneIds.length} 个模型 (如果用户说“上一个”、“第二个”，可能指代这个列表中的项目)`);
   }

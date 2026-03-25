@@ -1,11 +1,15 @@
 import { assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import { agentRecallRequestSchema } from "./schemas/request.ts";
 
-Deno.test("agentRecallRequestSchema 可以正确解析包含 executionMode 和 selectedModelIds 的请求", () => {
+Deno.test("agentRecallRequestSchema 可以正确解析包含上下文字段的请求", () => {
   const result = agentRecallRequestSchema.safeParse({
     query: "把这三个模型统加上宿舍标签",
     selectedModelIds: ["uuid1", "uuid2"],
     executionMode: "preview",
+    currentSceneId: "scene-1",
+    currentModelId: "model-1",
+    currentMode: "batch_edit",
+    conversationSummary: "上一轮已经确认这是宿舍相关模型。",
   });
 
   assertEquals(result.success, true);
@@ -13,6 +17,7 @@ Deno.test("agentRecallRequestSchema 可以正确解析包含 executionMode 和 s
     assertEquals(result.data.query, "把这三个模型统加上宿舍标签");
     assertEquals(result.data.selectedModelIds, ["uuid1", "uuid2"]);
     assertEquals(result.data.executionMode, "preview");
+    assertEquals(result.data.currentMode, "batch_edit");
   }
 });
 

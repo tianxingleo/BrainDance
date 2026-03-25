@@ -1884,6 +1884,7 @@ $userQuestion
     }
 
     final hasActions = result.actions.any((a) => a.type == 'open_scene');
+    final topCandidates = result.candidates.take(3).toList();
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -1917,12 +1918,45 @@ $userQuestion
               height: 1.5,
             ),
           ),
+          const SizedBox(height: 8),
+          Text(
+            '模式：${result.mode}',
+            style: TextStyle(color: hintColor, fontSize: 12),
+          ),
+          if (result.selectedCandidateReason != null &&
+              result.selectedCandidateReason!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '选择理由：${result.selectedCandidateReason!}',
+              style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+            ),
+          ],
           if (result.evidence != null) ...[
             const SizedBox(height: 10),
             Text(
               '场景：${result.evidence!.sceneId}  ·  相似度：${(result.evidence!.similarity * 100).toStringAsFixed(1)}%',
               style: TextStyle(color: hintColor, fontSize: 12),
             ),
+          ],
+          if (topCandidates.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              '候选结果',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            for (final candidate in topCandidates)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
+                  style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                ),
+              ),
           ],
           if (hasActions) ...[
             const SizedBox(height: 14),

@@ -3,38 +3,60 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ── Data models ──────────────────────────────────────────────
 
 class AgentRecallResponse {
+  final String mode;
   final String answer;
   final AgentEvidence? evidence;
   final List<AgentAction> actions;
   final List<AgentCandidate> candidates;
+  final String? selectedCandidateReason;
+  final Map<String, dynamic>? assetContext;
+  final Map<String, dynamic>? compareContext;
+  final Map<String, dynamic>? collectionContext;
 
   AgentRecallResponse({
+    required this.mode,
     required this.answer,
     required this.evidence,
     required this.actions,
     this.candidates = const [],
+    this.selectedCandidateReason,
+    this.assetContext,
+    this.compareContext,
+    this.collectionContext,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
+    final rawCandidates = (json['top_candidates'] as List?) ?? (json['candidates'] as List?) ?? const [];
+    final rawEvidence = json['evidence'];
+    final evidenceMap = rawEvidence is Map ? Map<String, dynamic>.from(rawEvidence as Map) : null;
     return AgentRecallResponse(
+      mode: json['mode']?.toString() ?? 'spatial_search',
       answer: json['answer']?.toString() ?? '',
-      evidence: json['evidence'] == null
+      evidence: evidenceMap == null || (!evidenceMap.containsKey('sceneId') && !evidenceMap.containsKey('similarity'))
           ? null
-          : AgentEvidence.fromJson(
-              Map<String, dynamic>.from(json['evidence'] as Map),
-            ),
+          : AgentEvidence.fromJson(evidenceMap),
       actions: ((json['actions'] as List?) ?? [])
           .map(
             (item) =>
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      candidates: ((json['candidates'] as List?) ?? [])
+      candidates: rawCandidates
           .map(
             (item) =>
                 AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      selectedCandidateReason: json['selected_candidate_reason']?.toString(),
+      assetContext: json['asset_context'] is Map
+          ? Map<String, dynamic>.from(json['asset_context'] as Map)
+          : null,
+      compareContext: json['compare_context'] is Map
+          ? Map<String, dynamic>.from(json['compare_context'] as Map)
+          : null,
+      collectionContext: json['collection_context'] is Map
+          ? Map<String, dynamic>.from(json['collection_context'] as Map)
+          : null,
     );
   }
 }
@@ -160,6 +182,7 @@ class AgentRecallService {
     String executionMode = 'preview',
     String? currentSceneId,
     String? currentModelId,
+    String? currentMode,
     List<String>? candidateSceneIds,
     String? sessionId,
     String? conversationSummary,
@@ -172,6 +195,7 @@ class AgentRecallService {
         'executionMode': executionMode,
         if (currentSceneId != null) 'currentSceneId': currentSceneId,
         if (currentModelId != null) 'currentModelId': currentModelId,
+        if (currentMode != null) 'currentMode': currentMode,
         if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
         if (sessionId != null) 'sessionId': sessionId,
         if (conversationSummary != null) 'conversationSummary': conversationSummary,

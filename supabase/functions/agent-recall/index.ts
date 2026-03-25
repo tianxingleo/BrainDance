@@ -40,6 +40,7 @@ serve(async (req: Request) => {
       executionMode: parsed.data.executionMode,
       currentSceneId: parsed.data.currentSceneId,
       currentModelId: parsed.data.currentModelId,
+      currentMode: parsed.data.currentMode,
       candidateSceneIds: parsed.data.candidateSceneIds,
       sessionId: parsed.data.sessionId,
       conversationSummary: parsed.data.conversationSummary,

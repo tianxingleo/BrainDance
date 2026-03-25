@@ -1,30 +1,149 @@
 # LangChain 实现现状 (2026-03-26)
 
-## 本次工作核心：收口、统一与补强
+## 本轮目标
 
-基于 3 月 25 日的代码审查建议，本次提交对 `agent-recall` 及其核心实现进行了全面重构收口，解决了多个模块间的协议漂移问题。
+本轮工作不是继续堆新入口，而是把 `agent-recall` 真正收口成统一入口，并把时间对比、记忆整理、多模态创作、长期记忆摘要这几类能力接进共享 Core，避免能力散落在独立函数和旧文档描述里。
 
-### 1. 入口统一 (agent-recall 变成真正的 Façade)
-- **已完成**：将 `agent-recall` 中的独立 `runRecallAgent` 废弃，现已直接接入 `_shared/agent-core/spatialAgent.ts` 里的 `runSpatialSearchAgent`。
-- **已完成**：移除 `agent-recall` 下的多余 `agent/` 与 `tools/` 目录，使其成为轻量级入口。
-- **现状**：真正实现了“强能力写在共享 Core，正式入口走新逻辑”的架构统一，前端、测试和动作协议全部收口。
+## 当前真实实现
 
-### 2. 补全正式产品能力 (支持选中及执行模式)
-- **已完成**：`agent-recall` 的请求 Schema 全面升级。
-- **现状**：现已支持接受 `selectedModelIds` 和 `executionMode: "preview" | "execute"` 参数。资产相关的选中模型批量操作、安全预览现已向前端彻底开放。
+### 1. 统一入口
 
-### 3. 解决三处协议漂移
-- **漂移 A (名称来源)**：已修改 `search-models/shared.ts`，彻底移除从 `processing_tasks` 中回填 `display_name` 的 fallback 逻辑。现**严格以 `model_assets.display_name` 为唯一名称来源**。
-- **漂移 B (动作协议)**：在共享 Core 及 `agent-recall` 的测试中，统一下游的返回协议。**只保留了 `open_model` 和 `fly_to_pose`，正式从核心逻辑中移除了不稳定的 `highlight_hotspot`**，避免因前端缺乏热点数据层导致的消费异常。
-- **漂移 C (测试错位)**：重写了 `agent-recall/test.ts` 和 `agent-recall/smoke.ts`，专注于验证代理接口层 (Façade) 对请求协议 (`selectedModelIds` / `executionMode`) 的防腐解析，并且在集成测试阶段检测正确的动作协议。
+- 正式入口仍然是 [agent-recall/index.ts](/home/ltx/projects/BrainDance/supabase/functions/agent-recall/index.ts)。
+- `agent-recall` 现在直接把请求上下文透传给共享 Core [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)。
+- 当前请求已支持：
+  - `query`
+  - `selectedModelIds`
+  - `executionMode`
+  - `currentSceneId`
+  - `currentModelId`
+  - `currentMode`
+  - `candidateSceneIds`
+  - `sessionId`
+  - `conversationSummary`
 
-## 待办与下一步计划 (下周工作)
-1. **新增解释型工具 `get_pose_summary`**：需要通过 `memory_poses` 提取摘要，以强化模型对比解释能力。
-2. **新增资产工具 `find_related_models`**：实现同空间场景的模糊搜索匹配工具 (基于 tags、时间和 scene_id)，加强版本整理与相关性比对能力。
+### 2. 共享 Core 已扩成多模式
 
+[spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts) 当前可路由到：
 
-### 4. 解决上下文管理不足与 Prompt 模块化
-- **已完成**：将请求 Schema 进一步升级，添加 UI Context (`currentSceneId`, `currentModelId`, `candidateSceneIds`) 以及会话记忆 (`conversationSummary`, `sessionId`)。
-- **已完成**：抽取原内联于 `spatialAgent.ts` 的各类系统提示词至独立的 `prompts/` 目录下（如 `route.ts`、`spatial_intent.ts`、`asset_tool_loop.ts`、`spatial_tool_loop.ts`、`selection.ts`，新增 `context.ts`）。
-- **已完成**：在提示词中补全了大量 Few-Shot 示例并实现了标准化的统一上下文注入块 (`buildAgentContextBlock`)，强化了多轮执行连贯性、以及基于预览执行写操作的逻辑稳健性。
-- **已补强**：在空间结果组织的 Prompt 中补上了“面向 UI”的三段式回答模板要求（一句结论、一句证据、一句下一步建议）。
+- `spatial_search`
+  - 继续负责空间检索、候选打分、多轮补工具与最终动作生成。
+- `asset_metadata`
+  - 在原有资产工具基础上，新增专题归档、线程归组、pose 摘要、相关模型查找。
+- `time_compare`
+  - 复用 [time-compare-agent/agent.ts](/home/ltx/projects/BrainDance/supabase/functions/time-compare-agent/agent.ts) 的时间窗口比较能力，并统一返回到 `agent-recall` 协议。
+- `creative`
+  - 基于选中模型生成创作上下文与导览大纲；`execute` 时会向 `processing_tasks` 入队异步创作任务。
+- `memory_graph`
+  - 基于当前模型生成最近趋势、缺失模式、变化时间线与弱图谱摘要。
+
+### 3. 正式返回协议
+
+当前 `agent-recall` / 共享 Core 的正式返回结构已补齐：
+
+- `mode`
+- `answer`
+- `evidence`
+- `actions`
+- `top_candidates`
+- `selected_candidate_reason`
+- `asset_context`
+- `compare_context`
+- `collection_context`
+- `creative_context`
+- `memory_graph_context`
+
+兼容性处理：
+
+- 仍保留 `candidates` 字段，作为 `top_candidates` 的兼容别名，避免 Flutter 端旧解析立即失效。
+- 正式动作协议只保留：
+  - `open_scene`
+  - `fly_to_pose`
+
+### 4. 资产与记忆工具
+
+新增共享工具文件 [memoryTools.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/memoryTools.ts)，当前已实现：
+
+- `get_pose_summary`
+- `find_related_models`
+- `list_place_versions`
+- `create_memory_collection`
+- `add_models_to_collection`
+- `summarize_collection`
+- `group_models_into_thread`
+- `prepare_story_context`
+- `generate_story_outline`
+- `enqueue_creative_task`
+- `get_recent_place_trend`
+- `find_missing_object_pattern`
+- `summarize_place_change_timeline`
+- `build_personal_memory_graph_summary`
+
+其中：
+
+- `asset_metadata` 模式主要消费前 7 类工具。
+- `creative` 模式消费创作上下文、大纲和异步入队能力。
+- `memory_graph` 模式消费趋势、缺失、时间线和关系摘要能力。
+
+### 5. 数据库迁移
+
+本轮新增了两组迁移：
+
+- [20260326121000_add_agent_memory_fields.sql](/home/ltx/projects/BrainDance/supabase/migrations/20260326121000_add_agent_memory_fields.sql)
+  - 为 `model_assets` 增加 `place_id / memory_thread_id / version_label / summary_title / event_label / agent_meta`
+- [20260326122000_create_memory_links_and_collections.sql](/home/ltx/projects/BrainDance/supabase/migrations/20260326122000_create_memory_links_and_collections.sql)
+  - 新增 `related_model_links`
+  - 新增 `memory_collections`
+  - 新增 `memory_collection_items`
+
+额外修复：
+
+- 清理了被运行日志污染的 [20260225020151_create_memory_poses_table.sql](/home/ltx/projects/BrainDance/supabase/migrations/20260225020151_create_memory_poses_table.sql)，避免新环境重放迁移时失败。
+
+### 6. 前端消费层
+
+[agent_recall_service.dart](/home/ltx/projects/BrainDance/app/lib/services/agent_recall_service.dart) 当前已补齐：
+
+- `mode`
+- `top_candidates`
+- `selected_candidate_reason`
+- `asset_context`
+- `compare_context`
+- `collection_context`
+
+[recall.dart](/home/ltx/projects/BrainDance/app/lib/pages/recall.dart) 当前已做最小展示增强：
+
+- 展示 `mode`
+- 展示 `selected_candidate_reason`
+- 展示前 3 个候选项摘要
+
+## 已完成 / 未完成
+
+### 已完成
+
+- 统一入口上下文透传
+- 统一正式动作协议为 `open_scene / fly_to_pose`
+- `model_assets.display_name` 继续作为正式资产名称来源
+- 共享 Core 多模式扩展
+- 记忆专题与线程归组的数据库基础
+- 创作任务异步入队
+- 长期记忆的弱图谱摘要能力
+
+### 仍未完成
+
+- `place_id`、`memory_thread_id` 的历史数据回填策略还没有做
+- `related_model_links` 仍缺少后台批量构建任务，当前以启发式检索为主
+- Flutter Recall 页还没有做 mode-aware 的完整卡片 UI，只做了最小展示
+- `creative` 模式目前只入队任务，没有新增 Worker 端创作产出流水线
+- `memory_graph` 模式目前仍是弱图谱摘要，不是完整图数据库能力
+
+## 验证
+
+本轮已通过：
+
+- `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts supabase/functions/time-compare-agent/test.ts`
+- `deno check supabase/functions/agent-recall/index.ts supabase/functions/spatial-search-agent/index.ts supabase/functions/_shared/agent-core/spatialAgent.ts supabase/functions/_shared/agent-core/memoryTools.ts`
+
+未完成的验证：
+
+- 本地未执行 Flutter `dart format`，原因是当前环境缺少 `dart` 命令。
+- 未执行需要真实 Supabase 环境的 `agent-recall` smoke 集成调用，因为当前会话未注入可用的线上/本地服务配置。

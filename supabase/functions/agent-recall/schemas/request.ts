@@ -9,6 +9,7 @@ export const agentRecallRequestSchema = z.object({
   executionMode: z.enum(["preview", "execute"]).default("execute"),
   currentSceneId: z.string().nullable().optional(),
   currentModelId: z.string().nullable().optional(),
+  currentMode: z.enum(["search", "compare", "batch_edit", "collection"]).nullable().optional(),
   candidateSceneIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
   conversationSummary: z.string().nullable().optional(),

@@ -24,6 +24,23 @@ import {
   type ListedModelAsset,
   type ModelAssetBundle,
 } from "./assetTools.ts";
+import {
+  buildAddModelsToCollectionTool,
+  buildCreateMemoryCollectionTool,
+  buildFindRelatedModelsTool,
+  buildGetPoseSummaryTool,
+  buildGroupModelsIntoThreadTool,
+  buildListPlaceVersionsTool,
+  buildSummarizeCollectionTool,
+  buildPersonalMemoryGraphSummary,
+  enqueueCreativeTask,
+  findMissingObjectPattern,
+  generateStoryOutlineFromContext,
+  getRecentPlaceTrend,
+  prepareStoryContext,
+  summarizePlaceChangeTimeline,
+} from "./memoryTools.ts";
+import { runTimeCompareAgent } from "../../time-compare-agent/agent.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,7 +76,13 @@ const spatialIntentSchema = z.object({
   reasoning: z.string(),
 });
 
-const agentModeSchema = z.enum(["spatial_search", "asset_metadata"]);
+const agentModeSchema = z.enum([
+  "spatial_search",
+  "asset_metadata",
+  "time_compare",
+  "creative",
+  "memory_graph",
+]);
 
 const agentRouteSchema = z.object({
   mode: agentModeSchema,
@@ -93,6 +116,7 @@ export type SpatialSearchAgentOptions = {
   executionMode?: "preview" | "execute";
   currentSceneId?: string | null;
   currentModelId?: string | null;
+  currentMode?: "search" | "compare" | "batch_edit" | "collection" | null;
   candidateSceneIds?: string[];
   sessionId?: string;
   conversationSummary?: string | null;
@@ -168,7 +192,7 @@ type ToolCallLike = {
 
 export type SpatialSearchResponse = {
   success: true;
-  mode: "spatial_search" | "asset_metadata";
+  mode: "spatial_search" | "asset_metadata" | "time_compare" | "creative" | "memory_graph";
   intent: SpatialIntent | null;
   selection: {
     scene_id: string | null;
@@ -185,6 +209,7 @@ export type SpatialSearchResponse = {
     matrix: number[] | number[][] | null;
     imageId: string | null;
   };
+  evidence?: Record<string, unknown> | null;
   candidates: Array<{
     scene_id: string;
     model_id: string;
@@ -192,6 +217,14 @@ export type SpatialSearchResponse = {
     description: string;
     pose_image_id: string | null;
   }>;
+  top_candidates?: Array<{
+    scene_id: string;
+    model_id: string;
+    score: number;
+    description: string;
+    pose_image_id: string | null;
+  }>;
+  selected_candidate_reason?: string | null;
   tool_trace: ToolTraceEntry[];
   asset_context?: {
     last_tool_name: string | null;
@@ -199,7 +232,16 @@ export type SpatialSearchResponse = {
     bundle: ModelAssetBundle[] | null;
     comparison: CompareModelAssetsResult | null;
     operation: ReturnType<typeof serializeAssetOperation>;
+    pose_summary?: AssetToolState["poseSummary"];
+    related_models?: AssetToolState["relatedModels"];
+    place_versions?: AssetToolState["placeVersions"];
+    collection_summary?: AssetToolState["collectionSummary"];
+    thread_grouping?: AssetToolState["threadGrouping"];
   };
+  compare_context?: Record<string, unknown> | null;
+  collection_context?: Record<string, unknown> | null;
+  creative_context?: Record<string, unknown> | null;
+  memory_graph_context?: Record<string, unknown> | null;
 };
 
 function ensureRuntimeEnv(): RuntimeEnv {
@@ -415,6 +457,21 @@ function serializeAssetOperation(state: AssetToolState) {
       preview: state.operation.preview,
     }
     : null;
+}
+
+function serializeAssetContext(state: AssetToolState) {
+  return {
+    last_tool_name: state.lastToolName,
+    list: state.list,
+    bundle: state.bundle,
+    comparison: state.comparison,
+    operation: serializeAssetOperation(state),
+    pose_summary: state.poseSummary,
+    related_models: state.relatedModels,
+    place_versions: state.placeVersions,
+    collection_summary: state.collectionSummary,
+    thread_grouping: state.threadGrouping,
+  };
 }
 
 async function classifyAgentMode(
@@ -1137,6 +1194,246 @@ async function executeAssetToolLoop(input: {
   return { trace, state };
 }
 
+function emptyViewerPayload() {
+  return {
+    ply: null,
+    poses: null,
+    matrix: null,
+    imageId: null,
+  };
+}
+
+async function buildTimeCompareModeResponse(
+  query: string,
+  options: SpatialSearchAgentOptions,
+): Promise<SpatialSearchResponse> {
+  const result = await runTimeCompareAgent(query);
+  const selectedReason = result.comparison.target
+    ? "优先选择最近时间窗口中的目标版本作为主候选"
+    : "当前仅命中单侧时间窗口，保留现有可信证据";
+
+  const topCandidates = [result.comparison.target, result.comparison.baseline]
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .map((item) => ({
+      scene_id: item.sceneId,
+      model_id: item.modelId,
+      score: item.similarity,
+      description: item.description ?? item.displayName ?? item.sceneId,
+      pose_image_id: item.matchedFrames[0]?.imageName ?? null,
+    }));
+
+  return {
+    success: true,
+    mode: "time_compare",
+    intent: null,
+    selection: {
+      scene_id: result.comparison.target?.sceneId ?? result.comparison.baseline?.sceneId ?? null,
+      model_id: result.comparison.target?.modelId ?? result.comparison.baseline?.modelId ?? null,
+      pose_image_id: result.comparison.target?.matchedFrames[0]?.imageName ??
+        result.comparison.baseline?.matchedFrames[0]?.imageName ??
+        null,
+      confidence: result.comparison.target?.similarity ?? result.comparison.baseline?.similarity ?? 0,
+      reason: selectedReason,
+    },
+    answer: result.answer,
+    actions: result.actions.map((action) => ({
+      type: action.type,
+      title: action.type === "open_scene"
+        ? `打开${action.slot === "baseline" ? "旧版" : "新版"}场景`
+        : `飞到${action.slot === "baseline" ? "旧版" : "新版"}视角`,
+      payload: { ...action },
+    })),
+    viewer_payload: emptyViewerPayload(),
+    evidence: {
+      baseline: result.comparison.baseline,
+      target: result.comparison.target,
+      diff: result.comparison.diff,
+    },
+    candidates: topCandidates,
+    top_candidates: topCandidates,
+    selected_candidate_reason: selectedReason,
+    tool_trace: result.toolTrace.map((entry) => ({
+      toolName: entry.toolName,
+      args: entry.args,
+      resultSummary: entry.resultSummary,
+    })),
+    asset_context: serializeAssetContext(createEmptyAssetToolState()),
+    compare_context: {
+      baseline: result.comparison.baseline,
+      target: result.comparison.target,
+      diff: result.comparison.diff,
+      windows: result.intent,
+    },
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  };
+}
+
+async function buildCreativeModeResponse(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+}): Promise<SpatialSearchResponse> {
+  const modelIds = input.options.selectedModelIds ??
+    (input.options.currentModelId ? [input.options.currentModelId] : []);
+  if (modelIds.length === 0) {
+    throw new Error("创作模式需要至少一个已选模型或当前模型上下文");
+  }
+
+  const storyContext = await prepareStoryContext(input.supabase, {
+    modelIds,
+  }, {
+    selectedModelIds: modelIds,
+  });
+  const outline = generateStoryOutlineFromContext(storyContext, input.query);
+  const task = input.options.executionMode === "execute"
+    ? await enqueueCreativeTask(input.supabase, {
+      query: input.query,
+      modelIds,
+      outline,
+      currentSceneId: input.options.currentSceneId,
+    })
+    : null;
+
+  return {
+    success: true,
+    mode: "creative",
+    intent: null,
+    selection: {
+      scene_id: input.options.currentSceneId ?? null,
+      model_id: modelIds[0] ?? null,
+      pose_image_id: null,
+      confidence: 0.78,
+      reason: "已根据选中模型整理创作上下文并生成导览大纲",
+    },
+    answer: task
+      ? `已创建创作任务，任务 ID 为 ${task.task_id}。你可以基于当前大纲继续生成正式旁白或视频脚本。`
+      : `已生成 ${outline.outline.length} 段创作大纲。当前为预览模式，如需正式生成任务，请切换到 execute。`,
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: {
+      model_count: storyContext.model_count,
+      timeline_summary: storyContext.timeline_summary,
+    },
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "创作模式不返回空间候选，而是返回素材上下文和大纲",
+    tool_trace: [
+      {
+        toolName: "prepare_story_context",
+        args: { modelIds },
+        resultSummary: `prepare_story_context 读取 ${storyContext.model_count} 个模型`,
+      },
+      {
+        toolName: "generate_story_outline",
+        args: { query: input.query },
+        resultSummary: `generate_story_outline 生成 ${outline.outline.length} 段大纲`,
+      },
+      ...(task
+        ? [{
+          toolName: "enqueue_creative_task",
+          args: { executionMode: input.options.executionMode },
+          resultSummary: `enqueue_creative_task 创建任务 ${task.task_id}`,
+        }]
+        : []),
+    ],
+    asset_context: serializeAssetContext(createEmptyAssetToolState()),
+    compare_context: null,
+    collection_context: {
+      story_context: storyContext,
+    },
+    creative_context: {
+      story_context: storyContext,
+      outline,
+      task,
+    },
+    memory_graph_context: null,
+  };
+}
+
+async function buildMemoryGraphModeResponse(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+}): Promise<SpatialSearchResponse> {
+  const focusModelId = input.options.currentModelId ?? input.options.selectedModelIds?.[0];
+  if (!focusModelId) {
+    throw new Error("长期记忆模式需要当前模型或至少一个已选模型");
+  }
+
+  const trend = await getRecentPlaceTrend(input.supabase, { modelId: focusModelId, lookback: 5 });
+  const missing = await findMissingObjectPattern(input.supabase, {
+    modelId: focusModelId,
+    objectName: "耳机",
+    lookback: 5,
+  });
+  const timeline = await summarizePlaceChangeTimeline(input.supabase, {
+    modelId: focusModelId,
+    limit: 8,
+  });
+  const graph = await buildPersonalMemoryGraphSummary(input.supabase, {
+    modelId: focusModelId,
+  });
+
+  return {
+    success: true,
+    mode: "memory_graph",
+    intent: null,
+    selection: {
+      scene_id: input.options.currentSceneId ?? null,
+      model_id: focusModelId,
+      pose_image_id: null,
+      confidence: 0.72,
+      reason: "已围绕当前模型生成地点趋势、缺失模式与关系摘要",
+    },
+    answer: `${trend.summary}${missing.missing ? ` ${missing.summary}` : ""} ${timeline.summary}`,
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: {
+      trend,
+      missing,
+      timeline,
+      graph,
+    },
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "长期记忆模式以关系摘要为主，不输出空间候选列表",
+    tool_trace: [
+      {
+        toolName: "get_recent_place_trend",
+        args: { modelId: focusModelId },
+        resultSummary: trend.summary,
+      },
+      {
+        toolName: "find_missing_object_pattern",
+        args: { modelId: focusModelId, objectName: "耳机" },
+        resultSummary: missing.summary,
+      },
+      {
+        toolName: "summarize_place_change_timeline",
+        args: { modelId: focusModelId },
+        resultSummary: timeline.summary,
+      },
+      {
+        toolName: "build_personal_memory_graph_summary",
+        args: { modelId: focusModelId },
+        resultSummary: graph.summary,
+      },
+    ],
+    asset_context: serializeAssetContext(createEmptyAssetToolState()),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: {
+      trend,
+      missing,
+      timeline,
+      graph,
+    },
+  };
+}
+
 export async function runSpatialSearchAgent(
   query: string,
   options: SpatialSearchAgentOptions = {},
@@ -1145,6 +1442,26 @@ export async function runSpatialSearchAgent(
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
   const mode = await classifyAgentMode(model, query, options);
+
+  if (mode === "time_compare") {
+    return await buildTimeCompareModeResponse(query, options);
+  }
+
+  if (mode === "creative") {
+    return await buildCreativeModeResponse({
+      supabase,
+      query,
+      options,
+    });
+  }
+
+  if (mode === "memory_graph") {
+    return await buildMemoryGraphModeResponse({
+      supabase,
+      query,
+      options,
+    });
+  }
 
   if (mode === "asset_metadata") {
     const assetTools = [
@@ -1163,6 +1480,23 @@ export async function runSpatialSearchAgent(
         selectedModelIds: options.selectedModelIds,
       }),
       buildCompareModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildGetPoseSummaryTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildFindRelatedModelsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildListPlaceVersionsTool(supabase),
+      buildCreateMemoryCollectionTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildAddModelsToCollectionTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildSummarizeCollectionTool(supabase),
+      buildGroupModelsIntoThreadTool(supabase, {
         selectedModelIds: options.selectedModelIds,
       }),
     ];
@@ -1186,21 +1520,35 @@ export async function runSpatialSearchAgent(
       },
       answer: buildAssetAnswer(state) ?? "当前没有生成有效的模型资产结果。",
       actions: [],
-      viewer_payload: {
-        ply: null,
-        poses: null,
-        matrix: null,
-        imageId: null,
-      },
+      viewer_payload: emptyViewerPayload(),
+      evidence: state.poseSummary
+        ? {
+          pose_summary: state.poseSummary,
+        }
+        : state.relatedModels
+        ? {
+          related_models: state.relatedModels,
+        }
+        : null,
       candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: state.lastToolName
+        ? `资产模式最后一次有效工具为 ${state.lastToolName}`
+        : null,
       tool_trace: trace,
-      asset_context: {
-        last_tool_name: state.lastToolName,
-        list: state.list,
-        bundle: state.bundle,
-        comparison: state.comparison,
-        operation: serializeAssetOperation(state),
-      },
+      asset_context: serializeAssetContext(state),
+      compare_context: state.placeVersions
+        ? {
+          place_versions: state.placeVersions,
+        }
+        : null,
+      collection_context: state.collectionSummary
+        ? {
+          collection_summary: state.collectionSummary,
+        }
+        : null,
+      creative_context: null,
+      memory_graph_context: null,
     };
   }
 
@@ -1289,6 +1637,23 @@ export async function runSpatialSearchAgent(
       matrix: finalPose?.transform_matrix ?? null,
       imageId: finalPose?.image_name ?? null,
     },
+    evidence: finalScene
+      ? {
+        sceneId: finalScene.sceneId,
+        modelId: finalScene.modelId,
+        similarity: selection.confidence,
+        matchedFrames: finalPose
+          ? [{
+            imageName: finalPose.image_name,
+            similarity: finalPose.similarity,
+            transformMatrix: finalPose.transform_matrix,
+            tag: finalPose.tag,
+          }]
+          : [],
+        description: finalScene.description,
+        tags: finalScene.tags,
+      }
+      : null,
     candidates: rankedCandidates.slice(0, 5).map((candidate) => ({
       scene_id: candidate.sceneId,
       model_id: candidate.modelId,
@@ -1296,13 +1661,19 @@ export async function runSpatialSearchAgent(
       description: candidate.description,
       pose_image_id: candidate.bestPose?.image_name ?? null,
     })),
+    top_candidates: rankedCandidates.slice(0, 5).map((candidate) => ({
+      scene_id: candidate.sceneId,
+      model_id: candidate.modelId,
+      score: candidate.score,
+      description: candidate.description,
+      pose_image_id: candidate.bestPose?.image_name ?? null,
+    })),
+    selected_candidate_reason: selection.selectionReason,
     tool_trace: trace,
-    asset_context: {
-      last_tool_name: null,
-      list: null,
-      bundle: null,
-      comparison: null,
-      operation: null,
-    },
+    asset_context: serializeAssetContext(createEmptyAssetToolState()),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
   };
 }
