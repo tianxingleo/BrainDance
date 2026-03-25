@@ -1657,6 +1657,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Future<void> _showSearchModeSheet() async {
     final selected = await showModalBottomSheet<RecallSearchMode>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
         return RecallSearchModeSheet(

@@ -121,8 +121,15 @@ class RecallSearchHeaderSection extends StatelessWidget {
                       if (hasText)
                         IconButton(
                           onPressed: onClear,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 36,
+                          ),
+                          padding: EdgeInsets.zero,
                           icon: Icon(
                             Icons.close_rounded,
+                            size: 18,
                             color: isDark
                                 ? Colors.white.withValues(alpha: 0.5)
                                 : BDDesign.colorMutedBlue,
@@ -131,6 +138,10 @@ class RecallSearchHeaderSection extends StatelessWidget {
                     ],
                   );
                 },
+              ),
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 0,
+                minHeight: 0,
               ),
               filled: true,
               fillColor: Colors.transparent,
@@ -352,40 +363,45 @@ class RecallSearchModeSheet extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
         child: SafeArea(
           top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                textLocalize('recall_search_mode'),
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  textLocalize('recall_search_mode'),
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '选择当前搜索栏要优先使用的检索方式。',
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12.5,
-                  height: 1.35,
+                const SizedBox(height: 6),
+                Text(
+                  '选择当前搜索栏要优先使用的检索方式。',
+                  style: TextStyle(
+                    color: hintColor,
+                    fontSize: 12.5,
+                    height: 1.35,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              modeTile(mode: RecallSearchMode.cloud, icon: Icons.cloud_rounded),
-              const SizedBox(height: 10),
-              modeTile(
-                mode: RecallSearchMode.local,
-                icon: Icons.privacy_tip_rounded,
-              ),
-              const SizedBox(height: 10),
-              modeTile(
-                mode: RecallSearchMode.localAi,
-                icon: Icons.auto_awesome_rounded,
-              ),
-            ],
+                const SizedBox(height: 16),
+                modeTile(
+                  mode: RecallSearchMode.cloud,
+                  icon: Icons.cloud_rounded,
+                ),
+                const SizedBox(height: 10),
+                modeTile(
+                  mode: RecallSearchMode.local,
+                  icon: Icons.privacy_tip_rounded,
+                ),
+                const SizedBox(height: 10),
+                modeTile(
+                  mode: RecallSearchMode.localAi,
+                  icon: Icons.auto_awesome_rounded,
+                ),
+              ],
+            ),
           ),
         ),
       ),
