@@ -84,6 +84,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final Map<String, GlobalKey> _modelCardKeys = {};
   final Map<String, _RecallSearchCacheEntry> _searchCache = {};
   final GlobalKey _actionOverlayStackKey = GlobalKey();
+  final GlobalKey<RecallModelActionOverlayState> _overlayKey = GlobalKey();
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
@@ -1468,6 +1469,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           ),
           if (_activeModelAction != null && _activeModelActionRect != null)
             RecallModelActionOverlay(
+              key: _overlayKey,
               theme: theme,
               isDark: isDark,
               darkCard: darkCard,
@@ -2034,14 +2036,22 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
-  void _dismissModelActions() {
+  Future<void> _dismissModelActions() async {
     if (_activeModelAction == null && _activeModelActionRect == null) {
       return;
     }
-    setState(() {
-      _activeModelAction = null;
-      _activeModelActionRect = null;
-    });
+    
+    final overlayState = _overlayKey.currentState;
+    if (overlayState != null) {
+      await overlayState.hide();
+    }
+    
+    if (mounted) {
+      setState(() {
+        _activeModelAction = null;
+        _activeModelActionRect = null;
+      });
+    }
   }
 
   CommunityModelOption _modelToCommunityOption(Map<String, dynamic> model) {

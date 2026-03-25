@@ -291,7 +291,7 @@ class RecallModelGrid extends StatelessWidget {
   }
 }
 
-class RecallModelActionOverlay extends StatelessWidget {
+class RecallModelActionOverlay extends StatefulWidget {
   final TDThemeData theme;
   final bool isDark;
   final Color darkCard;
@@ -324,16 +324,85 @@ class RecallModelActionOverlay extends StatelessWidget {
   });
 
   @override
+  State<RecallModelActionOverlay> createState() =>
+      RecallModelActionOverlayState();
+}
+
+class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _blurOpacityAnimation;
+  late final Animation<double> _cardScaleAnimation;
+  late final Animation<double> _cardTranslateAnimation;
+  late final Animation<double> _menuOpacityAnimation;
+  late final Animation<double> _menuTranslateAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+      reverseDuration: const Duration(milliseconds: 240),
+    );
+
+    _blurOpacityAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _cardScaleAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _cardTranslateAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _menuOpacityAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.1, 1.0, curve: Curves.easeOutCubic),
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _menuTranslateAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> hide() async {
+    if (mounted) {
+      await _controller.reverse();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final localSizeLabel = model['_local_size_label']?.toString().trim() ?? '';
+    final localSizeLabel =
+        widget.model['_local_size_label']?.toString().trim() ?? '';
     final deleteLabel = localSizeLabel.isEmpty
-        ? '\u5220\u9664\u6A21\u578B'
-        : '\u5220\u9664\u6A21\u578B($localSizeLabel)';
+        ? '删除模型'
+        : '删除模型($localSizeLabel)';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
     const actionWidth = 128.0;
-    final preferredLeft = rect.right + horizontalGap;
+    final preferredLeft = widget.rect.right + horizontalGap;
     final maxLeft = screenWidth - screenPadding - actionWidth;
     final actionLeft = preferredLeft.clamp(
       screenPadding,
@@ -343,14 +412,13 @@ class RecallModelActionOverlay extends StatelessWidget {
     return Positioned.fill(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onDismiss,
+        onTap: widget.onDismiss,
         child: Stack(
           children: [
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              builder: (context, value, child) {
+            AnimatedBuilder(
+              animation: _blurOpacityAnimation,
+              builder: (context, child) {
+                final value = _blurOpacityAnimation.value;
                 return Opacity(
                   opacity: value,
                   child: ClipRect(
@@ -368,58 +436,57 @@ class RecallModelActionOverlay extends StatelessWidget {
               },
             ),
             Positioned(
-              left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, child) {
+              left: widget.rect.left,
+              top: widget.rect.top,
+              width: widget.rect.width,
+              height: widget.rect.height,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final tValue = _cardTranslateAnimation.value;
+                  final sValue = _cardScaleAnimation.value;
                   return Transform.translate(
-                    offset: Offset(0, -10 * value),
+                    offset: Offset(0, -10 * tValue),
                     child: Transform.scale(
-                      scale: 1 + (0.045 * value),
+                      scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
                       child: child,
                     ),
                   );
                 },
                 child: GestureDetector(
-                  onTap: () => onNavigateToViewer(model, null),
-                  onLongPress: onDismiss,
+                  onTap: () => widget.onNavigateToViewer(widget.model, null),
+                  onLongPress: widget.onDismiss,
                   child: RecallModelTile(
-                    model: model,
-                    theme: theme,
-                    isDark: isDark,
-                    darkCard: darkCard,
-                    darkInput: darkInput,
-                    textColor: isDark
+                    model: widget.model,
+                    theme: widget.theme,
+                    isDark: widget.isDark,
+                    darkCard: widget.darkCard,
+                    darkInput: widget.darkInput,
+                    textColor: widget.isDark
                         ? const Color(0xFFFFFFFF)
                         : BDDesign.colorInkBlack,
-                    hintTextColor: isDark
+                    hintTextColor: widget.isDark
                         ? const Color(0xFF888888)
-                        : theme.fontGyColor3,
+                        : widget.theme.fontGyColor3,
                     elevated: true,
-                    toPublicUrl: toPublicUrl,
+                    toPublicUrl: widget.toPublicUrl,
                   ),
                 ),
               ),
             ),
             Positioned(
               left: actionLeft,
-              top: rect.top + 24,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutBack,
-                builder: (context, value, child) {
-                  final safeOpacity = value.clamp(0.0, 1.0);
+              top: widget.rect.top + 24,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final mValue = _menuTranslateAnimation.value;
+                  final oValue = _menuOpacityAnimation.value;
                   return Opacity(
-                    opacity: safeOpacity,
+                    opacity: oValue.clamp(0.0, 1.0),
                     child: Transform.translate(
-                      offset: Offset(18 * (1 - value), 0),
+                      offset: Offset(18 * (1 - mValue), 0),
                       child: child,
                     ),
                   );
@@ -429,8 +496,8 @@ class RecallModelActionOverlay extends StatelessWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
                     onTap: () async {
-                      onDismiss();
-                      await onShareModelToCommunity(model);
+                      widget.onDismiss();
+                      await widget.onShareModelToCommunity(widget.model);
                     },
                     child: Ink(
                       width: actionWidth,
@@ -439,12 +506,12 @@ class RecallModelActionOverlay extends StatelessWidget {
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color: isDark
+                        color: widget.isDark
                             ? const Color(0xEE1F2430)
                             : Colors.white.withAlpha(236),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: isDark
+                          color: widget.isDark
                               ? Colors.white.withValues(alpha: 0.08)
                               : BDDesign.colorMutedBlue.withValues(alpha: 0.14),
                         ),
@@ -461,42 +528,42 @@ class RecallModelActionOverlay extends StatelessWidget {
                         children: [
                           _ActionMenuItem(
                             icon: Icons.info_outline_rounded,
-                            label: '\u67E5\u770B\u8BE6\u60C5',
-                            isDark: isDark,
+                            label: '查看详情',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onShowModelDetails(model);
+                              widget.onDismiss();
+                              await widget.onShowModelDetails(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.edit_rounded,
-                            label: '\u91CD\u547D\u540D',
-                            isDark: isDark,
+                            label: '重命名',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onRenameModel(model);
+                              widget.onDismiss();
+                              await widget.onRenameModel(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.delete_outline_rounded,
                             label: deleteLabel,
-                            isDark: isDark,
+                            isDark: widget.isDark,
                             destructive: true,
                             onTap: () async {
-                              onDismiss();
-                              await onDeleteLocalModel(model);
+                              widget.onDismiss();
+                              await widget.onDeleteLocalModel(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.public_rounded,
-                            label: '\u5206\u4EAB\u5230\u793E\u533A',
-                            isDark: isDark,
+                            label: '分享到社区',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onShareModelToCommunity(model);
+                              widget.onDismiss();
+                              await widget.onShareModelToCommunity(widget.model);
                             },
                           ),
                         ],
@@ -512,7 +579,6 @@ class RecallModelActionOverlay extends StatelessWidget {
     );
   }
 }
-
 class _ActionMenuItem extends StatelessWidget {
   final IconData icon;
   final String label;
