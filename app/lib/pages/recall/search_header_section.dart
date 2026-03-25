@@ -110,7 +110,6 @@ class RecallSearchHeaderSection extends StatelessWidget {
                     children: [
                       RecallSearchModeButton(
                         isDark: isDark,
-                        title: searchModeTitleBuilder(searchMode),
                         icon: switch (searchMode) {
                           RecallSearchMode.cloud => Icons.cloud_rounded,
                           RecallSearchMode.local => Icons.privacy_tip_rounded,
@@ -196,14 +195,12 @@ class RecallSearchHeaderSection extends StatelessWidget {
 
 class RecallSearchModeButton extends StatelessWidget {
   final bool isDark;
-  final String title;
   final IconData icon;
   final VoidCallback onTap;
 
   const RecallSearchModeButton({
     super.key,
     required this.isDark,
-    required this.title,
     required this.icon,
     required this.onTap,
   });
@@ -222,9 +219,8 @@ class RecallSearchModeButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            constraints: const BoxConstraints(minWidth: 68),
             height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            width: 32,
             decoration: BoxDecoration(
               color: isDark
                   ? Colors.white.withValues(alpha: 0.06)
@@ -240,21 +236,6 @@ class RecallSearchModeButton extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(icon, size: 16, color: foreground),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Icon(Icons.expand_more_rounded, size: 16, color: foreground),
               ],
             ),
           ),
