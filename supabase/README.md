@@ -1,6 +1,7 @@
 # BrainDance Supabase
 
-`supabase/` 提供 BrainDance 当前使用的本地后端基础设施，包括数据库迁移、Edge Functions 和本地开发配置。
+`supabase/` 提供 BrainDance 当前使用的本地后端基础设施，包括数据库迁移、Edge
+Functions 和本地开发配置。
 
 ## 目录内容
 
@@ -114,14 +115,15 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-如果要测试接口，可以参考 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+如果要测试接口，可以参考
+[tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
 
 ### `agent-recall`
 
 `agent-recall` 是当前按架构路线新增的稳定总入口，负责：
 
 1. 识别用户查询意图
-2. 复用现有空间检索 Agent 能力组织召回结果
+2. 复用 `search-models/shared.ts` 中的共享搜索逻辑组织召回结果
 3. 组织 `answer + evidence + actions` 结构化响应
 4. 把空间证据和前端动作一起返回给 Flutter / Web
 
@@ -138,7 +140,8 @@ cd supabase/functions/agent-recall
 supabase functions serve agent-recall --no-verify-jwt
 ```
 
-最小回归题集位于 [tests/agent_recall_cases.jsonl](/home/ltx/projects/BrainDance/tests/agent_recall_cases.jsonl)。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
+最小回归题集位于
+[tests/agent_recall_cases.jsonl](/home/ltx/projects/BrainDance/tests/agent_recall_cases.jsonl)。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
 
 ### `test-timeout`
 
@@ -146,7 +149,8 @@ supabase functions serve agent-recall --no-verify-jwt
 
 ### `spatial-search-agent`
 
-这是新增的空间检索 Agent，用于把用户自然语言请求编排成“意图解析 → 类型判断 → 搜索工具调用 → scene/pose 选择 → 可视化动作生成”的闭环。
+这是新增的空间检索 Agent，用于把用户自然语言请求编排成“意图解析 → 类型判断 →
+搜索工具调用 → scene/pose 选择 → 可视化动作生成”的闭环。
 
 它当前具备：
 
@@ -154,7 +158,8 @@ supabase functions serve agent-recall --no-verify-jwt
 2. 判断是在找物体、位置、时间还是场景
 3. 通过 LangChain tool calling 调用多个检索工具
 4. 选择最可信的 scene / pose
-5. 返回 `open_model`、`fly_to_pose`、`highlight_hotspot` 等可视化动作，以及可直接给 3D Viewer 使用的 `viewer_payload`
+5. 返回 `open_model`、`fly_to_pose`、`highlight_hotspot`
+   等可视化动作，以及可直接给 3D Viewer 使用的 `viewer_payload`
 
 本地运行：
 
@@ -166,9 +171,13 @@ supabase functions serve spatial-search-agent --no-verify-jwt
 ## 与其他模块的关系
 
 - `app/`：使用 Anon Key 直连数据库、Storage 和 Realtime
-- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入 `desired_state`
-- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和 Storage，同时持续更新 `worker_nodes`
+- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入
+  `desired_state`
+- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和
+  Storage，同时持续更新 `worker_nodes`
 
 ## 说明
 
-这份 README 只描述当前仓库里的 Supabase 层，不覆盖线上部署策略，也不替代具体的表结构设计文档。更完整的系统链路请参考项目根目录的 [README.md](/home/ltx/projects/BrainDance/README.md)。
+这份 README 只描述当前仓库里的 Supabase
+层，不覆盖线上部署策略，也不替代具体的表结构设计文档。更完整的系统链路请参考项目根目录的
+[README.md](/home/ltx/projects/BrainDance/README.md)。

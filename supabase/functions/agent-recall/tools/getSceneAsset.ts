@@ -1,19 +1,7 @@
-type SpatialSearchResponse = {
-  selection: {
-    scene_id: string | null;
-  };
-  candidates: Array<{
-    scene_id: string;
-    score: number;
-    pose_image_id: string | null;
-  }>;
-  viewer_payload: {
-    matrix: unknown;
-  };
-};
+import type { SearchModelsResponse } from "../../search-models/shared.ts";
 
 export function buildEvidenceFromSpatialResult(
-  result: SpatialSearchResponse,
+  result: SearchModelsResponse,
 ): {
   sceneId: string;
   similarity: number;
@@ -23,30 +11,31 @@ export function buildEvidenceFromSpatialResult(
     transformMatrix: unknown;
   }>;
 } | null {
-  const sceneId = result.selection.scene_id;
+  const topResult = result.results[0];
+  if (!topResult) {
+    return null;
+  }
+
+  const sceneId = typeof topResult.scene_id === "string"
+    ? topResult.scene_id
+    : null;
   if (!sceneId) {
     return null;
   }
 
-  const selectedCandidate =
-    result.candidates.find((candidate) => candidate.scene_id === sceneId) ??
-      result.candidates[0];
-
-  if (!selectedCandidate) {
-    return null;
-  }
-
-  const matchedFrames = selectedCandidate.pose_image_id
-    ? [{
-      imageName: selectedCandidate.pose_image_id,
-      similarity: selectedCandidate.score,
-      transformMatrix: result.viewer_payload.matrix ?? null,
-    }]
+  const similarity = Number(topResult.similarity ?? 0);
+  const rawFrames = Array.isArray(topResult.matched_frames)
+    ? topResult.matched_frames as Array<Record<string, unknown>>
     : [];
+  const matchedFrames = rawFrames.map((frame) => ({
+    imageName: String(frame.image_name ?? ""),
+    similarity: Number(frame.similarity ?? similarity),
+    transformMatrix: frame.transform_matrix ?? null,
+  })).filter((frame) => frame.imageName.length > 0);
 
   return {
     sceneId,
-    similarity: selectedCandidate.score,
+    similarity,
     matchedFrames,
   };
 }

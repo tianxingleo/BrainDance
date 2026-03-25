@@ -1,53 +1,69 @@
+import type { SearchModelsResponse } from "../../search-models/shared.ts";
 import type { AgentRecallResponse } from "../schemas/response.ts";
 
-type SpatialAction = {
-  type: "open_model" | "fly_to_pose" | "highlight_hotspot";
-  payload?: Record<string, unknown>;
-};
+function buildOpenSceneAction(
+  topResult: Record<string, unknown>,
+): AgentRecallResponse["actions"][number] | null {
+  const sceneId = typeof topResult.scene_id === "string"
+    ? topResult.scene_id
+    : null;
+  if (!sceneId) {
+    return null;
+  }
 
-export function mapSpatialActionsToRecallActions(
-  actions: SpatialAction[],
+  return {
+    type: "open_scene",
+    sceneId,
+    modelId: typeof topResult.id === "string" ? topResult.id : null,
+    ply: typeof topResult.ply_path === "string" ? topResult.ply_path : null,
+    poses: null,
+  };
+}
+
+export function buildRecallActionsFromSearchResult(
+  result: SearchModelsResponse,
 ): AgentRecallResponse["actions"] {
   const mapped: AgentRecallResponse["actions"] = [];
+  const topResult = result.results[0];
 
-  for (const action of actions) {
-    const payload = action.payload ?? {};
-    const sceneId = typeof payload.sceneId === "string"
-      ? payload.sceneId
-      : null;
-    if (!sceneId) continue;
+  if (!topResult || typeof topResult !== "object") {
+    return mapped;
+  }
 
-    if (action.type === "open_model") {
-      mapped.push({
-        type: "open_scene" as const,
-        sceneId,
-        modelId: typeof payload.modelId === "string" ? payload.modelId : null,
-        ply: typeof payload.ply === "string" ? payload.ply : null,
-        poses: typeof payload.poses === "string" ? payload.poses : null,
-      });
-      continue;
-    }
+  const openAction = buildOpenSceneAction(topResult);
+  if (openAction) {
+    mapped.push(openAction);
+  }
 
-    if (action.type === "fly_to_pose") {
-      mapped.push({
-        type: "fly_to_pose" as const,
-        sceneId,
-        imageName: typeof payload.imageId === "string"
-          ? payload.imageId
-          : undefined,
-        matrix: payload.matrix ?? null,
-      });
-      continue;
-    }
+  const sceneId = typeof topResult.scene_id === "string"
+    ? topResult.scene_id
+    : null;
+  const rawFrames = Array.isArray(topResult.matched_frames)
+    ? topResult.matched_frames as Array<Record<string, unknown>>
+    : [];
+  const bestFrame = rawFrames[0];
 
+  if (sceneId && bestFrame) {
+    const imageName = typeof bestFrame.image_name === "string"
+      ? bestFrame.image_name
+      : undefined;
+    const matrix = bestFrame.transform_matrix ?? null;
     mapped.push({
-      type: "highlight_region" as const,
+      type: "fly_to_pose",
       sceneId,
-      imageName: typeof payload.imageId === "string"
-        ? payload.imageId
+      imageName,
+      matrix,
+    });
+    mapped.push({
+      type: "highlight_region",
+      sceneId,
+      imageName,
+      label: typeof bestFrame.tag === "string"
+        ? bestFrame.tag
+        : typeof topResult.description === "string"
+        ? topResult.description
         : undefined,
-      label: typeof payload.label === "string" ? payload.label : undefined,
-      matrix: payload.matrix ?? null,
+      matrix,
     });
   }
 
