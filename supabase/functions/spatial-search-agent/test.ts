@@ -1,8 +1,13 @@
-import { assertEquals, assertExists } from "https://deno.land/std@0.168.0/testing/asserts.ts";
+import {
+  assertEquals,
+  assertExists,
+} from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
   buildVisualizationActions,
   normalizeExplicitTimeRange,
   scoreSceneCandidate,
+  shouldForceAnotherToolRound,
+  summarizeCandidateEvidence,
 } from "./agent.ts";
 
 Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
@@ -108,4 +113,188 @@ Deno.test("buildVisualizationActions 会生成打开模型与飞行动作", () =
   assertEquals(actions[0]?.type, "open_model");
   assertEquals(actions[1]?.type, "fly_to_pose");
   assertEquals(actions[2]?.type, "highlight_hotspot");
+});
+
+Deno.test("summarizeCandidateEvidence 会识别多来源证据与最高分", () => {
+  const candidates = new Map([
+    ["scene-demo", {
+      modelId: "m1",
+      sceneId: "scene-demo",
+      userId: "u1",
+      description: "桌面上的红色杯子",
+      objects: ["杯子"],
+      tags: ["桌面"],
+      plyPath: "u1/scene-demo/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-24T08:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.88,
+        scene_metadata_search: 0.74,
+      },
+      bestPose: {
+        image_name: "frame_0001.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.88,
+        tag: "红色杯子近景",
+      },
+    }],
+  ]);
+
+  const evidence = summarizeCandidateEvidence(candidates, {
+    rewrittenQuery: "红色杯子",
+    targetType: "object",
+  });
+
+  assertEquals(evidence.candidateCount, 1);
+  assertEquals(evidence.hasMultiSourceEvidence, true);
+  assertEquals(evidence.topScore > 0.62, true);
+});
+
+Deno.test("shouldForceAnotherToolRound 在单来源低覆盖时返回 true", () => {
+  const candidates = new Map([
+    ["scene-demo", {
+      modelId: "m1",
+      sceneId: "scene-demo",
+      userId: "u1",
+      description: "桌面上的红色杯子",
+      objects: [],
+      tags: ["红色杯子近景"],
+      plyPath: "u1/scene-demo/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-24T08:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.55,
+      },
+      bestPose: {
+        image_name: "frame_0001.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.55,
+        tag: "红色杯子近景",
+      },
+    }],
+  ]);
+
+  const shouldContinue = shouldForceAnotherToolRound({
+    intent: {
+      rewrittenQuery: "红色杯子",
+      targetType: "object",
+      objectHint: "杯子",
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "先找物体，再补场景证据。",
+    },
+    candidates,
+    trace: [{
+      toolName: "pose_semantic_search",
+      args: { query: "红色杯子" },
+      resultSummary: "pose_semantic_search 返回 1 条候选",
+    }],
+  });
+
+  assertEquals(shouldContinue, true);
+});
+
+Deno.test("shouldForceAnotherToolRound 在证据充分时返回 false", () => {
+  const candidates = new Map([
+    ["scene-1", {
+      modelId: "m1",
+      sceneId: "scene-1",
+      userId: "u1",
+      description: "桌面上的红色杯子",
+      objects: ["杯子"],
+      tags: ["桌面"],
+      plyPath: "u1/scene-1/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-24T08:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.92,
+        scene_metadata_search: 0.82,
+      },
+      bestPose: {
+        image_name: "frame_0001.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.92,
+        tag: "红色杯子近景",
+      },
+    }],
+    ["scene-2", {
+      modelId: "m2",
+      sceneId: "scene-2",
+      userId: "u1",
+      description: "桌角附近的水杯",
+      objects: ["水杯"],
+      tags: ["桌角"],
+      plyPath: "u1/scene-2/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-24T07:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.8,
+        scene_metadata_search: 0.76,
+      },
+      bestPose: {
+        image_name: "frame_0002.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.8,
+        tag: "桌角水杯",
+      },
+    }],
+    ["scene-3", {
+      modelId: "m3",
+      sceneId: "scene-3",
+      userId: "u1",
+      description: "柜子边上的咖啡杯",
+      objects: ["咖啡杯"],
+      tags: ["柜子"],
+      plyPath: "u1/scene-3/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-24T06:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.78,
+        scene_metadata_search: 0.72,
+      },
+      bestPose: {
+        image_name: "frame_0003.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.78,
+        tag: "柜子边咖啡杯",
+      },
+    }],
+  ]);
+
+  const shouldContinue = shouldForceAnotherToolRound({
+    intent: {
+      rewrittenQuery: "红色杯子",
+      targetType: "object",
+      objectHint: "杯子",
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "已经拿到足够多的候选和多来源证据。",
+    },
+    candidates,
+    trace: [
+      {
+        toolName: "pose_semantic_search",
+        args: { query: "红色杯子" },
+        resultSummary: "pose_semantic_search 返回 3 条候选",
+      },
+      {
+        toolName: "scene_metadata_search",
+        args: { query: "红色杯子" },
+        resultSummary: "scene_metadata_search 返回 3 条候选",
+      },
+    ],
+  });
+
+  assertEquals(shouldContinue, false);
 });
