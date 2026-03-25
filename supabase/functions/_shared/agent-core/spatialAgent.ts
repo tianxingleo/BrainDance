@@ -56,6 +56,21 @@ const DEFAULT_BUCKET = "braindance-assets";
 const MAX_AGENT_TOOL_ROUNDS = 3;
 const MIN_AGENT_CANDIDATES = 3;
 const MIN_AGENT_TOP_SCORE = 0.62;
+const DIRECT_REPLY_TOKENS = new Set([
+  "你好",
+  "您好",
+  "嗨",
+  "哈喽",
+  "hello",
+  "hi",
+  "在吗",
+  "在不在",
+  "有人吗",
+  "谢谢",
+  "多谢",
+  "谢了",
+  "辛苦了",
+]);
 
 export const searchTargetTypeSchema = z.enum([
   "object",
@@ -535,6 +550,31 @@ async function emitProgress(
   await callbacks?.onEvent?.(event);
 }
 
+function normalizeDirectReplyQuery(query: string): string {
+  return query
+    .trim()
+    .toLowerCase()
+    .replace(/[！!。.,，?？~～\s]+/g, "");
+}
+
+export function isDirectReplyQuery(query: string): boolean {
+  const normalized = normalizeDirectReplyQuery(query);
+  if (!normalized) {
+    return false;
+  }
+  return DIRECT_REPLY_TOKENS.has(normalized);
+}
+
+function buildDirectReplyAnswer(query: string): string {
+  const normalized = normalizeDirectReplyQuery(query);
+
+  if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
+    return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
+  }
+
+  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
+}
+
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
@@ -588,46 +628,6 @@ async function classifyAgentMode(
     new HumanMessage(query),
   ]);
   return result.mode;
-}
-
-export function isDirectReplyQuery(query: string): boolean {
-  const normalized = query
-    .trim()
-    .toLowerCase()
-    .replace(/[！!。.,，?？~～\s]+/g, "");
-
-  if (!normalized) {
-    return false;
-  }
-
-  return [
-    "你好",
-    "您好",
-    "嗨",
-    "哈喽",
-    "hello",
-    "hi",
-    "在吗",
-    "在不在",
-    "有人吗",
-    "谢谢",
-    "多谢",
-    "谢了",
-    "辛苦了",
-  ].includes(normalized);
-}
-
-function buildDirectReplyAnswer(query: string): string {
-  const normalized = query
-    .trim()
-    .toLowerCase()
-    .replace(/[！!。.,，?？~～\s]+/g, "");
-
-  if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
-    return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
-  }
-
-  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
 }
 
 async function parseSpatialIntent(

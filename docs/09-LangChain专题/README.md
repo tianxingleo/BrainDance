@@ -18,6 +18,13 @@
 - 正式稳定动作协议以 `open_scene`、`fly_to_pose` 为准，不再把 `highlight_hotspot` 视为正式前端能力。
 - 2026-03-26 已补充纯问候/致谢直答模式：`你好`、`谢谢` 这类闲聊不再误进 `spatial_search` 工具链，Flutter 端也会在 `done` 事件兜底显示最终 `answer`，避免只剩选择理由和工具调试信息。
 
+## 2026-03-26 修复记录
+
+- 已修复共享 Agent Core 中 `isDirectReplyQuery is not defined` 的运行时风险。
+- 处理方式是把纯问候/致谢判定逻辑前移到共享常量和纯函数，避免在 `classifyAgentMode` 首次路由时出现未定义引用。
+- 影响范围是 `agent-recall` 与 `spatial-search-agent` 两个依赖 `runSpatialSearchAgent` 的 Supabase Edge Function。
+- 本地环境当前缺少 `deno` 可执行文件，未能在仓库内直接完成 Deno 侧自动化验证；部署前需在具备 Deno/Supabase CLI 的环境补跑对应测试或最小联调。
+
 ## 维护规则
 
 - 只要涉及 LangChain 相关实现修改，就优先在本目录补充记录，而不是把信息继续散落到别的目录里。
