@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../configs/motion_tokens.dart';
+import '../../services/local_model_catalog_service.dart';
 import '../../widgets/bd_surfaces.dart';
 
 class RecallLocalAiPanel extends StatelessWidget {
@@ -19,8 +20,13 @@ class RecallLocalAiPanel extends StatelessWidget {
   final String localAnswerStatus;
   final String localContextPreview;
   final String defaultModelDownloadUrl;
+  final List<LocalModelCatalogItem> localModelCatalog;
+  final String? selectedLocalModelUrl;
+  final String? activeLocalModelUrl;
+  final Set<String> downloadedLocalModelUrls;
   final TextEditingController localModelUrlController;
   final TextEditingController localModelPathController;
+  final ValueChanged<String?> onSelectCatalogModel;
   final VoidCallback onDownloadModel;
   final VoidCallback onLoadModel;
 
@@ -40,8 +46,13 @@ class RecallLocalAiPanel extends StatelessWidget {
     required this.localAnswerStatus,
     required this.localContextPreview,
     required this.defaultModelDownloadUrl,
+    required this.localModelCatalog,
+    required this.selectedLocalModelUrl,
+    required this.activeLocalModelUrl,
+    required this.downloadedLocalModelUrls,
     required this.localModelUrlController,
     required this.localModelPathController,
+    required this.onSelectCatalogModel,
     required this.onDownloadModel,
     required this.onLoadModel,
   });
@@ -66,8 +77,13 @@ class RecallLocalAiPanel extends StatelessWidget {
       answerText: answerText,
       contextPreview: contextPreview,
       defaultModelDownloadUrl: defaultModelDownloadUrl,
+      localModelCatalog: localModelCatalog,
+      selectedLocalModelUrl: selectedLocalModelUrl,
+      activeLocalModelUrl: activeLocalModelUrl,
+      downloadedLocalModelUrls: downloadedLocalModelUrls,
       localModelUrlController: localModelUrlController,
       localModelPathController: localModelPathController,
+      onSelectCatalogModel: onSelectCatalogModel,
       onDownloadModel: onDownloadModel,
       onLoadModel: onLoadModel,
     );
@@ -89,8 +105,13 @@ class _RecallLocalQnaPanel extends StatelessWidget {
   final String answerText;
   final String contextPreview;
   final String defaultModelDownloadUrl;
+  final List<LocalModelCatalogItem> localModelCatalog;
+  final String? selectedLocalModelUrl;
+  final String? activeLocalModelUrl;
+  final Set<String> downloadedLocalModelUrls;
   final TextEditingController localModelUrlController;
   final TextEditingController localModelPathController;
+  final ValueChanged<String?> onSelectCatalogModel;
   final VoidCallback onDownloadModel;
   final VoidCallback onLoadModel;
 
@@ -109,8 +130,13 @@ class _RecallLocalQnaPanel extends StatelessWidget {
     required this.answerText,
     required this.contextPreview,
     required this.defaultModelDownloadUrl,
+    required this.localModelCatalog,
+    required this.selectedLocalModelUrl,
+    required this.activeLocalModelUrl,
+    required this.downloadedLocalModelUrls,
     required this.localModelUrlController,
     required this.localModelPathController,
+    required this.onSelectCatalogModel,
     required this.onDownloadModel,
     required this.onLoadModel,
   });
@@ -120,6 +146,13 @@ class _RecallLocalQnaPanel extends StatelessWidget {
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
+    LocalModelCatalogItem? selectedCatalogModel;
+    for (final item in localModelCatalog) {
+      if (item.downloadUrl == selectedLocalModelUrl) {
+        selectedCatalogModel = item;
+        break;
+      }
+    }
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -161,6 +194,57 @@ class _RecallLocalQnaPanel extends StatelessWidget {
             '切到上方的“本地 AI 问答”模式后，直接在主搜索框里提问。这里仅保留端侧模型下载、加载和回答状态。',
             style: TextStyle(color: hintColor, fontSize: 12.5, height: 1.4),
           ),
+          if (localModelCatalog.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue:
+                  localModelCatalog.any(
+                    (item) => item.downloadUrl == selectedLocalModelUrl,
+                  )
+                  ? selectedLocalModelUrl
+                  : null,
+              dropdownColor: isDark ? const Color(0xFF17202B) : Colors.white,
+              decoration: InputDecoration(
+                labelText: 'Supabase 模型仓',
+                filled: true,
+                fillColor: Colors.transparent,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              items: localModelCatalog.map((item) {
+                final labels = <String>[
+                  if (item.isRecommended) '推荐',
+                  if (downloadedLocalModelUrls.contains(item.downloadUrl))
+                    '已下载',
+                  if (activeLocalModelUrl == item.downloadUrl) '当前使用',
+                ];
+                final suffix = labels.isEmpty ? '' : ' · ${labels.join(' · ')}';
+                return DropdownMenuItem<String>(
+                  value: item.downloadUrl,
+                  child: Text(
+                    '${item.name}$suffix',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }).toList(),
+              onChanged: onSelectCatalogModel,
+            ),
+          ],
+          if (selectedCatalogModel != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              [
+                if ((selectedCatalogModel.description ?? '').isNotEmpty)
+                  selectedCatalogModel.description!,
+                if (selectedCatalogModel.sizeBytes != null)
+                  '大小 ${(selectedCatalogModel.sizeBytes! / 1024 / 1024 / 1024).toStringAsFixed(2)} GB',
+                if (selectedCatalogModel.tags.isNotEmpty)
+                  '标签 ${selectedCatalogModel.tags.join(' / ')}',
+              ].join(' · '),
+              style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: localModelUrlController,

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:llamadart/llamadart.dart';
+import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,6 +20,7 @@ import '../main.dart'
         pageIndexProvider;
 import '../configs/motion_tokens.dart';
 import '../services/local_rag_index.dart';
+import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
 import '../widgets/bd_surfaces.dart';
 import 'community.dart';
@@ -26,9 +28,6 @@ import 'recall/local_ai_panel.dart';
 import 'recall/model_grid.dart';
 import 'recall/processing_section.dart';
 import 'webgl_viewer.dart';
-import 'task_list.dart';
-import 'recall/top_summary_card.dart';
-import 'recall/model_card.dart';
 
 enum _RecallSearchMode { cloud, local, localAi }
 
@@ -43,6 +42,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
   static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
   static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
+  final LocalModelCatalogService _localModelCatalogService =
+      const LocalModelCatalogService();
 
   List<Map<String, dynamic>> _models = [];
   List<Map<String, dynamic>> _allModels = [];
@@ -57,6 +58,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       TextEditingController();
   late final TextEditingController _localModelUrlController;
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
+  List<LocalModelCatalogItem> _localModelCatalog = const [];
+  final Map<String, String> _downloadedLocalModelPathsByUrl = {};
+  String? _selectedLocalModelUrl;
+  String? _activeLocalModelUrl;
   RealtimeChannel? _realtimeChannel;
   Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
@@ -94,6 +99,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     _localModelUrlController = TextEditingController(
       text: _defaultModelDownloadUrl,
     );
+    _localModelUrlController.addListener(_handleLocalModelUrlChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bootstrapPage();
     });
@@ -104,6 +110,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     _modelPollingTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
+    _localModelUrlController.removeListener(_handleLocalModelUrlChanged);
     _localModelUrlController.dispose();
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
@@ -131,10 +138,32 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
     _didBootstrap = true;
     unawaited(_restoreLocalModelPath());
+    unawaited(_loadLocalModelCatalog());
     unawaited(_fetchModels());
     unawaited(_fetchProcessingTasks());
     _setupRealtimeListener();
     _syncModelPollingState();
+  }
+
+  void _handleLocalModelUrlChanged() {
+    final currentUrl = _localModelUrlController.text.trim();
+    final matchedItem = _findCatalogItemByUrl(currentUrl);
+    final nextSelectedUrl = matchedItem?.downloadUrl ?? currentUrl;
+    final downloadedPath = _downloadedLocalModelPathsByUrl[currentUrl];
+    if (_selectedLocalModelUrl == nextSelectedUrl &&
+        (downloadedPath == null ||
+            _localModelPathController.text.trim() == downloadedPath)) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
+      if (downloadedPath != null) {
+        _localModelPathController.text = downloadedPath;
+      }
+    });
   }
 
   void _syncModelPollingState() {
@@ -166,15 +195,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (models.isEmpty) {
       return '';
     }
-    final parts = models
-        .map((model) {
-          final id = model['id']?.toString() ?? '';
-          final sceneId = model['scene_id']?.toString() ?? '';
-          final createdAt = model['created_at']?.toString() ?? '';
-          return '$id|$sceneId|$createdAt';
-        })
-        .toList()
-      ..sort();
+    final parts = models.map((model) {
+      final id = model['id']?.toString() ?? '';
+      final sceneId = model['scene_id']?.toString() ?? '';
+      final createdAt = model['created_at']?.toString() ?? '';
+      return '$id|$sceneId|$createdAt';
+    }).toList()..sort();
     return parts.join('||');
   }
 
@@ -244,19 +270,60 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   }
 
   Future<void> _restoreLocalModelPath() async {
-    final defaultPath = await _getDefaultPrivateModelPath();
     final prefs = await SharedPreferences.getInstance();
     final savedPath = prefs.getString(_localModelPathPrefKey)?.trim();
     final savedUrl = prefs.getString(_localModelUrlPrefKey)?.trim();
+    final effectiveUrl = (savedUrl == null || savedUrl.isEmpty)
+        ? _defaultModelDownloadUrl
+        : savedUrl;
+    final defaultPath = await _getPrivateModelPathForUrl(effectiveUrl);
+    final effectivePath = (savedPath == null || savedPath.isEmpty)
+        ? defaultPath
+        : savedPath;
+    final hasLocalFile = await File(effectivePath).exists();
     if (!mounted) return;
     setState(() {
-      _localModelPathController.text = (savedPath == null || savedPath.isEmpty)
-          ? defaultPath
-          : savedPath;
-      if (savedUrl != null && savedUrl.isNotEmpty) {
-        _localModelUrlController.text = savedUrl;
+      _localModelPathController.text = effectivePath;
+      _localModelUrlController.text = effectiveUrl;
+      _selectedLocalModelUrl = effectiveUrl;
+      if (hasLocalFile) {
+        _downloadedLocalModelPathsByUrl[effectiveUrl] = effectivePath;
       }
     });
+  }
+
+  Future<void> _loadLocalModelCatalog() async {
+    final catalog = await _localModelCatalogService.fetchCatalog();
+    final downloadedPaths = await _collectDownloadedModelPaths(catalog);
+    final currentUrl = _localModelUrlController.text.trim();
+    final savedUrl = currentUrl.isEmpty ? _defaultModelDownloadUrl : currentUrl;
+    final matchedItem = _findCatalogItemByUrl(savedUrl, catalog);
+    final preferredItem =
+        matchedItem ??
+        catalog.cast<LocalModelCatalogItem?>().firstWhere(
+          (item) => item?.isRecommended == true,
+          orElse: () => catalog.isEmpty ? null : catalog.first,
+        );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _localModelCatalog = catalog;
+      _downloadedLocalModelPathsByUrl
+        ..clear()
+        ..addAll(downloadedPaths);
+      if (matchedItem != null) {
+        _selectedLocalModelUrl = matchedItem.downloadUrl;
+      } else if (_selectedLocalModelUrl == null && preferredItem != null) {
+        _selectedLocalModelUrl = preferredItem.downloadUrl;
+      }
+    });
+
+    if (currentUrl.isEmpty && preferredItem != null) {
+      await _selectCatalogModel(preferredItem.downloadUrl, persist: false);
+    }
   }
 
   Future<void> _persistLocalModelPath(String modelPath) async {
@@ -269,9 +336,80 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     await prefs.setString(_localModelUrlPrefKey, modelUrl);
   }
 
-  Future<String> _getDefaultPrivateModelPath() async {
+  Future<String> _getPrivateModelPathForUrl(String? modelUrl) async {
     final dir = await getApplicationDocumentsDirectory();
-    return '${dir.path}/$_defaultModelFileName';
+    var fileName = _defaultModelFileName;
+    final trimmedUrl = modelUrl?.trim() ?? '';
+    if (trimmedUrl.isNotEmpty) {
+      final uri = Uri.tryParse(trimmedUrl);
+      final segments = (uri?.pathSegments ?? const <String>[])
+          .where((segment) => segment.isNotEmpty)
+          .toList();
+      if (segments.isNotEmpty) {
+        fileName = segments.last;
+      }
+    }
+    return path.join(dir.path, fileName);
+  }
+
+  LocalModelCatalogItem? _findCatalogItemByUrl(
+    String? modelUrl, [
+    List<LocalModelCatalogItem>? source,
+  ]) {
+    if (modelUrl == null || modelUrl.isEmpty) {
+      return null;
+    }
+    final catalog = source ?? _localModelCatalog;
+    for (final item in catalog) {
+      if (item.downloadUrl == modelUrl) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, String>> _collectDownloadedModelPaths(
+    List<LocalModelCatalogItem> catalog,
+  ) async {
+    final downloaded = <String, String>{};
+    for (final item in catalog) {
+      final modelPath = await _getPrivateModelPathForUrl(item.downloadUrl);
+      if (await File(modelPath).exists()) {
+        downloaded[item.downloadUrl] = modelPath;
+      }
+    }
+    final currentUrl = _localModelUrlController.text.trim();
+    final currentPath = _localModelPathController.text.trim();
+    if (currentUrl.isNotEmpty &&
+        currentPath.isNotEmpty &&
+        await File(currentPath).exists()) {
+      downloaded[currentUrl] = currentPath;
+    }
+    return downloaded;
+  }
+
+  Future<void> _selectCatalogModel(
+    String? modelUrl, {
+    bool persist = true,
+  }) async {
+    if (modelUrl == null || modelUrl.isEmpty) {
+      return;
+    }
+    final modelPath =
+        _downloadedLocalModelPathsByUrl[modelUrl] ??
+        await _getPrivateModelPathForUrl(modelUrl);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedLocalModelUrl = modelUrl;
+      _localModelUrlController.text = modelUrl;
+      _localModelPathController.text = modelPath;
+    });
+    if (persist) {
+      await _persistLocalModelUrl(modelUrl);
+      await _persistLocalModelPath(modelPath);
+    }
   }
 
   Future<void> _downloadModelToPrivateDir() async {
@@ -281,7 +419,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return;
     }
 
-    final modelPath = await _getDefaultPrivateModelPath();
+    final modelPath = await _getPrivateModelPathForUrl(modelUrl);
     setState(() {
       _isModelDownloading = true;
       _modelDownloadProgress = 0;
@@ -322,6 +460,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
         _modelDownloadTotalBytes = fileSize;
+        _selectedLocalModelUrl = modelUrl;
+        _downloadedLocalModelPathsByUrl[modelUrl] = modelPath;
         _localAnswerStatus =
             '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
@@ -356,6 +496,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   Future<void> _loadLocalQnaModel() async {
     final modelPath = _localModelPathController.text.trim();
+    final modelUrl = _localModelUrlController.text.trim();
+    final selectedCatalogItem = _findCatalogItemByUrl(modelUrl);
+    final modelLabel =
+        selectedCatalogItem?.name ??
+        path.basename(modelPath.isEmpty ? _defaultModelFileName : modelPath);
     if (modelPath.isEmpty) {
       TDToast.showText(context: context, '请先填写 GGUF 模型路径');
       return;
@@ -365,11 +510,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
       _localAnswer = '';
-      _localAnswerStatus = '正在加载 Qwen3-1.7B 端侧模型...';
+      _localAnswerStatus = '正在加载端侧模型：$modelLabel...';
     });
 
     try {
       await _disposeLocalQnaModel();
+      await _persistLocalModelUrl(modelUrl);
       await _persistLocalModelPath(modelPath);
 
       final modelFile = File(modelPath);
@@ -426,8 +572,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _localQnaModel = fallbackLlama;
           _isLocalModelLoading = false;
           _isLocalModelReady = true;
+          _activeLocalModelUrl = modelUrl.isEmpty ? null : modelUrl;
           _localAnswerStatus =
-              'Qwen3-1.7B 已加载，当前后端：$backendName（已从 GPU 回退到 CPU），模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+              '$modelLabel 已加载，当前后端：$backendName（已从 GPU 回退到 CPU），模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
         });
         return;
       }
@@ -442,8 +589,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _localQnaModel = llama;
         _isLocalModelLoading = false;
         _isLocalModelReady = true;
+        _activeLocalModelUrl = modelUrl.isEmpty ? null : modelUrl;
         _localAnswerStatus =
-            'Qwen3-1.7B 已加载，当前后端：$backendSummary，模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+            '$modelLabel 已加载，当前后端：$backendSummary，模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
     } catch (e) {
       await _disposeLocalQnaModel();
@@ -453,6 +601,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
+        _activeLocalModelUrl = null;
         _localAnswerStatus = '模型加载失败：$e';
       });
       TDToast.showText(context: context, '端侧模型加载失败：$e');
@@ -489,7 +638,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     // 2. 构建 ChatML 格式 Prompt
     // 注意：微调后的模型对 System Prompt 和 JSON Payload 格式非常敏感
-    final prompt = '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
+    final prompt =
+        '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
         '<|im_start|>user\n$userPayload<|im_end|>\n'
         '<|im_start|>assistant\n';
 
@@ -502,6 +652,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     });
 
     try {
+      var streamedAnswer = '';
+      var lockedAnswer = false;
       _localQnaModel!.cancelGeneration();
       await _llamaStreamSubscription?.cancel();
       _llamaStreamSubscription = _localQnaModel!
@@ -602,11 +754,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       final metaInfo = _toMap(item['meta_info']);
       final tags = _joinList(item['tags']);
       final objects = _joinList(item['objects']);
-      final summary = _collectStrings(metaInfo)
-          .take(6)
-          .map((t) => t.trim())
-          .where((t) => t.isNotEmpty)
-          .join('；');
+      final summary = _collectStrings(
+        metaInfo,
+      ).take(6).map((t) => t.trim()).where((t) => t.isNotEmpty).join('；');
 
       return {
         'id': item['id']?.toString() ?? '',
@@ -630,10 +780,21 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String _expandQuery(String query) {
     if (query.trim().isEmpty) return query;
     var expanded = query;
-    
+
     // 关键领域词汇扩展 - 对齐 ai_engine 的 SEMANTIC_QUERY_EXPANSIONS
     const semanticExpansions = {
-      "理工": ["算法", "算法导论", "数学", "高等数学", "教材", "词典", "电脑", "笔记本电脑", "显示器", "白板"],
+      "理工": [
+        "算法",
+        "算法导论",
+        "数学",
+        "高等数学",
+        "教材",
+        "词典",
+        "电脑",
+        "笔记本电脑",
+        "显示器",
+        "白板",
+      ],
       "计算机": ["电脑", "笔记本电脑", "显示器", "机械键盘", "办公桌", "白板"],
       "学习": ["教材", "词典", "地球仪", "白板", "办公桌", "笔记本电脑"],
       "书房": ["办公桌", "椅子", "书架", "电脑", "书"],
@@ -661,8 +822,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     return expanded;
   }
-
-
 
   String _sanitizeLocalAnswer(String raw) {
     final original = raw.trim();
@@ -1267,10 +1426,19 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                                   localContextPreview: _localContextPreview,
                                   defaultModelDownloadUrl:
                                       _defaultModelDownloadUrl,
+                                  localModelCatalog: _localModelCatalog,
+                                  selectedLocalModelUrl: _selectedLocalModelUrl,
+                                  activeLocalModelUrl: _activeLocalModelUrl,
+                                  downloadedLocalModelUrls:
+                                      _downloadedLocalModelPathsByUrl.keys
+                                          .toSet(),
                                   localModelUrlController:
                                       _localModelUrlController,
                                   localModelPathController:
                                       _localModelPathController,
+                                  onSelectCatalogModel: (value) {
+                                    unawaited(_selectCatalogModel(value));
+                                  },
                                   onDownloadModel: _downloadModelToPrivateDir,
                                   onLoadModel: _loadLocalQnaModel,
                                 ),
@@ -1932,8 +2100,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         ? _toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId =
-        _modelDisplayName(model);
+    final sceneId = _modelDisplayName(model);
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -2031,8 +2198,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final cardKey = _modelCardKeyFor(model);
     final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
     final overlayRenderBox =
-        _actionOverlayStackKey.currentContext?.findRenderObject()
-            as RenderBox?;
+        _actionOverlayStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null || overlayRenderBox == null) return;
     final offset = renderBox.localToGlobal(
       Offset.zero,
@@ -2079,11 +2245,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-    final displayName =
-        _modelDisplayName(
-          model,
-          fallback: textLocalize('recall_unnamed_model'),
-        );
+    final displayName = _modelDisplayName(
+      model,
+      fallback: textLocalize('recall_unnamed_model'),
+    );
 
     // 格式化日期
     String formatDate(String? raw) {
@@ -2369,11 +2534,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId:
-          _modelDisplayName(
-            model,
-            fallback: textLocalize('recall_unnamed_model'),
-          ),
+      sceneId: _modelDisplayName(
+        model,
+        fallback: textLocalize('recall_unnamed_model'),
+      ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
