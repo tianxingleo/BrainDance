@@ -1,5 +1,7 @@
-import 'dart:ui';
+import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
+import 'package:braindance/extra_func/theme_animation_notifier.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -26,6 +28,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
   late final TabController tabController;
   int _currentTabIndex = 0;
+  final GlobalKey _themeSwitchKey = GlobalKey();
 
   static const TextStyle tabTextStyle = TextStyle(
     fontSize: 16,
@@ -74,12 +77,41 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                 BDPageHeader(
                   title: textLocalize('manage'),
                   trailing: GestureDetector(
-                    onTap: () {
+                    onTap: () async {
+                      // 1. Capture the UI before changing theme
+                      final boundary = themeAnimationKey.currentContext
+                          ?.findRenderObject() as RenderRepaintBoundary?;
+                      if (boundary != null) {
+                        try {
+                          final image = await boundary.toImage(
+                              pixelRatio:
+                                  MediaQuery.of(context).devicePixelRatio);
+
+                          final RenderBox? buttonBox =
+                              _themeSwitchKey.currentContext?.findRenderObject()
+                                  as RenderBox?;
+
+                          if (buttonBox != null) {
+                            final offset = buttonBox.localToGlobal(Offset.zero);
+                            final center = offset +
+                                Offset(buttonBox.size.width / 2,
+                                    buttonBox.size.height / 2);
+
+                            ref
+                                .read(themeAnimationProvider.notifier)
+                                .startBase(image, center);
+                          }
+                        } catch (e) {
+                          debugPrint('Theme transition error: $e');
+                        }
+                      }
+
                       SetConfig.setNightMode(!AppConfig.isNightMode, ref);
                       SetConfig.saveMsgToFile();
                       onUpdate();
                     },
                     child: BDStatusPill(
+                      key: _themeSwitchKey,
                       label: textLocalize(
                         isDark ? 'set_theme_night' : 'set_theme_day',
                       ),
