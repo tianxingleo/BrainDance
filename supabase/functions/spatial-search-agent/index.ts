@@ -18,7 +18,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { query } = await req.json();
+    const { query, selectedModelIds, executionMode } = await req.json();
 
     if (!query || typeof query !== "string") {
       return errorResponse("缺少或无效的搜索语句 'query'", 400);
@@ -30,7 +30,19 @@ serve(async (req: Request) => {
       return errorResponse("搜索语句过长（最大 500 字符）", 400);
     }
 
-    const result = await runSpatialSearchAgent(query.trim());
+    const normalizedSelectedModelIds = Array.isArray(selectedModelIds)
+      ? selectedModelIds.filter((item): item is string =>
+        typeof item === "string" && item.trim().length > 0
+      )
+      : undefined;
+    const normalizedExecutionMode = executionMode === "execute"
+      ? "execute"
+      : "preview";
+
+    const result = await runSpatialSearchAgent(query.trim(), {
+      selectedModelIds: normalizedSelectedModelIds,
+      executionMode: normalizedExecutionMode,
+    });
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

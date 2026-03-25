@@ -160,12 +160,34 @@ supabase functions serve agent-recall --no-verify-jwt
 4. 选择最可信的 scene / pose
 5. 返回 `open_model`、`fly_to_pose`、`highlight_hotspot`
    等可视化动作，以及可直接给 3D Viewer 使用的 `viewer_payload`
+6. 处理模型资产元数据类请求，包括：
+   - `list_model_assets`
+   - `rename_model_asset`
+   - `batch_patch_model_metadata`
+   - `get_model_asset_bundle`
+   - `compare_model_assets`
+7. 对写工具默认走 `dry_run` 预览，只有请求显式传入
+   `executionMode: "execute"` 时才正式写库
+8. 可选接收前端多选传入的 `selectedModelIds`，把 Agent 操作范围限制在已选模型内
 
 本地运行：
 
 ```bash
 cd supabase/functions/spatial-search-agent
 supabase functions serve spatial-search-agent --no-verify-jwt
+```
+
+请求体示例：
+
+```json
+{
+  "query": "把这几个模型统一改成宿舍-{{created_date}}",
+  "selectedModelIds": [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222"
+  ],
+  "executionMode": "preview"
+}
 ```
 
 ## 与其他模块的关系

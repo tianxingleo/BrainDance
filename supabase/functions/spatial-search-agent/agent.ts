@@ -10,6 +10,20 @@ import {
 import { DynamicStructuredTool } from "npm:@langchain/core@0.3/tools";
 import { ChatOpenAI, OpenAIEmbeddings } from "npm:@langchain/openai@0.6";
 import { z } from "npm:zod@3.25";
+import {
+  type AssetToolState,
+  buildAssetAnswer,
+  buildBatchPatchModelMetadataTool,
+  buildCompareModelAssetsTool,
+  buildGetModelAssetBundleTool,
+  buildListModelAssetsTool,
+  buildRenameModelAssetTool,
+  collectAssetToolResult,
+  type CompareModelAssetsResult,
+  createEmptyAssetToolState,
+  type ListedModelAsset,
+  type ModelAssetBundle,
+} from "./assetTools.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,6 +37,8 @@ const DEFAULT_CHAT_MODEL = "qwen3.5-plus";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-v2";
 const DEFAULT_BUCKET = "braindance-assets";
 const MAX_AGENT_TOOL_ROUNDS = 3;
+const MIN_AGENT_CANDIDATES = 3;
+const MIN_AGENT_TOP_SCORE = 0.62;
 
 export const searchTargetTypeSchema = z.enum([
   "object",
@@ -40,6 +56,13 @@ const spatialIntentSchema = z.object({
   timeHint: z.string().nullable(),
   startTime: z.string().datetime({ offset: true }).nullable(),
   endTime: z.string().datetime({ offset: true }).nullable(),
+  reasoning: z.string(),
+});
+
+const agentModeSchema = z.enum(["spatial_search", "asset_metadata"]);
+
+const agentRouteSchema = z.object({
+  mode: agentModeSchema,
   reasoning: z.string(),
 });
 
@@ -61,8 +84,14 @@ const selectionSchema = z.object({
 
 type SearchTargetType = z.infer<typeof searchTargetTypeSchema>;
 type SpatialIntent = z.infer<typeof spatialIntentSchema>;
+type AgentMode = z.infer<typeof agentModeSchema>;
 type VisualizationAction = z.infer<typeof visualizationActionSchema>;
 type SelectionResult = z.infer<typeof selectionSchema>;
+
+export type SpatialSearchAgentOptions = {
+  selectedModelIds?: string[];
+  executionMode?: "preview" | "execute";
+};
 
 type RuntimeEnv = {
   dashscopeApiKey: string;
@@ -126,9 +155,16 @@ type ToolTraceEntry = {
   resultSummary: string;
 };
 
+type ToolCallLike = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+};
+
 export type SpatialSearchResponse = {
   success: true;
-  intent: SpatialIntent;
+  mode: "spatial_search" | "asset_metadata";
+  intent: SpatialIntent | null;
   selection: {
     scene_id: string | null;
     model_id: string | null;
@@ -152,6 +188,13 @@ export type SpatialSearchResponse = {
     pose_image_id: string | null;
   }>;
   tool_trace: ToolTraceEntry[];
+  asset_context?: {
+    last_tool_name: string | null;
+    list: ListedModelAsset[] | null;
+    bundle: ModelAssetBundle[] | null;
+    comparison: CompareModelAssetsResult | null;
+    operation: ReturnType<typeof serializeAssetOperation>;
+  };
 };
 
 function ensureRuntimeEnv(): RuntimeEnv {
@@ -355,6 +398,35 @@ function derivePosesPath(scene: SceneCandidate): string | null {
 
 function summarizeToolResult(toolName: string, count: number): string {
   return `${toolName} 返回 ${count} 条候选`;
+}
+
+function serializeAssetOperation(state: AssetToolState) {
+  return state.operation
+    ? {
+      tool_name: state.operation.tool_name,
+      dry_run: state.operation.dry_run,
+      requires_confirmation: state.operation.requires_confirmation,
+      affected_count: state.operation.affected_count,
+      preview: state.operation.preview,
+    }
+    : null;
+}
+
+async function classifyAgentMode(
+  model: ChatOpenAI,
+  query: string,
+): Promise<AgentMode> {
+  const structuredModel = model.withStructuredOutput(agentRouteSchema);
+  const result = await structuredModel.invoke([
+    new SystemMessage(
+      `你是 BrainDance Agent 路由器。
+如果用户是在找空间记忆、物体、位置、镜头、最近场景，选择 spatial_search。
+如果用户是在做模型资产元数据操作或分析，比如改名、批量打标签、批量改描述、拉取多个模型摘要、对比多个模型，选择 asset_metadata。
+只输出结构化结果。`,
+    ),
+    new HumanMessage(query),
+  ]);
+  return result.mode;
 }
 
 async function parseSpatialIntent(
@@ -762,6 +834,120 @@ export function buildVisualizationActions(input: {
   return actions;
 }
 
+function getPreferredToolOrder(intent: SpatialIntent): string[] {
+  switch (intent.targetType) {
+    case "object":
+    case "location":
+      return ["pose_semantic_search", "scene_metadata_search"];
+    case "time":
+      return ["recent_scene_search", "scene_metadata_search"];
+    case "scene":
+      return ["scene_metadata_search", "recent_scene_search"];
+    default:
+      return ["scene_metadata_search"];
+  }
+}
+
+function buildToolArgs(
+  toolName: string,
+  intent: SpatialIntent,
+): Record<string, unknown> {
+  if (toolName === "pose_semantic_search") {
+    return {
+      query: intent.rewrittenQuery,
+      threshold: 0.35,
+      limit: 5,
+      startTime: intent.startTime,
+      endTime: intent.endTime,
+    };
+  }
+
+  if (toolName === "scene_metadata_search") {
+    return {
+      query: intent.rewrittenQuery,
+      sceneId: intent.sceneHint,
+      limit: 8,
+      startTime: intent.startTime,
+      endTime: intent.endTime,
+    };
+  }
+
+  return {
+    limit: 5,
+    startTime: intent.startTime,
+    endTime: intent.endTime,
+  };
+}
+
+export function summarizeCandidateEvidence(
+  candidates: Map<string, SceneCandidate>,
+  intent: Pick<SpatialIntent, "rewrittenQuery" | "targetType">,
+): {
+  candidateCount: number;
+  topScore: number;
+  hasMultiSourceEvidence: boolean;
+} {
+  const ranked = [...candidates.values()]
+    .map((candidate) => scoreSceneCandidate(candidate, intent))
+    .sort((a, b) => b - a);
+
+  const hasMultiSourceEvidence = [...candidates.values()].some((candidate) =>
+    Object.keys(candidate.sourceScores).length >= 2
+  );
+
+  return {
+    candidateCount: candidates.size,
+    topScore: ranked[0] ?? 0,
+    hasMultiSourceEvidence,
+  };
+}
+
+export function shouldForceAnotherToolRound(input: {
+  intent: SpatialIntent;
+  candidates: Map<string, SceneCandidate>;
+  trace: ToolTraceEntry[];
+}): boolean {
+  const { intent, candidates, trace } = input;
+  const evidence = summarizeCandidateEvidence(candidates, intent);
+  const usedTools = new Set(trace.map((entry) => entry.toolName));
+  const preferredTools = getPreferredToolOrder(intent);
+  const hasUnusedPreferredTool = preferredTools.some((toolName) =>
+    !usedTools.has(toolName)
+  );
+
+  if (evidence.candidateCount < MIN_AGENT_CANDIDATES) {
+    return true;
+  }
+  if (evidence.topScore < MIN_AGENT_TOP_SCORE) {
+    return true;
+  }
+  if (!evidence.hasMultiSourceEvidence && hasUnusedPreferredTool) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildForcedToolCall(input: {
+  intent: SpatialIntent;
+  trace: ToolTraceEntry[];
+}): ToolCallLike | null {
+  const { intent, trace } = input;
+  const usedTools = new Set(trace.map((entry) => entry.toolName));
+  const preferredTools = getPreferredToolOrder(intent);
+  const nextTool = preferredTools.find((toolName) => !usedTools.has(toolName));
+
+  if (!nextTool) {
+    return null;
+  }
+
+  return {
+    id: `forced-${trace.length + 1}-${nextTool}`,
+    name: nextTool,
+    args: buildToolArgs(nextTool, intent),
+  };
+}
+
 async function selectBestResult(
   model: ChatOpenAI,
   intent: SpatialIntent,
@@ -828,11 +1014,32 @@ async function executeAgentToolLoop(input: {
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
-    const toolCalls = Array.isArray(response.tool_calls)
+    let toolCalls = Array.isArray(response.tool_calls)
       ? response.tool_calls
       : [];
     if (toolCalls.length === 0) {
-      break;
+      const shouldForceContinue = round < MAX_AGENT_TOOL_ROUNDS - 1 &&
+        shouldForceAnotherToolRound({
+          intent,
+          candidates,
+          trace,
+        });
+      const forcedToolCall = shouldForceContinue
+        ? buildForcedToolCall({ intent, trace })
+        : null;
+
+      if (!forcedToolCall) {
+        break;
+      }
+
+      messages.push(
+        new SystemMessage(
+          `当前证据不足，需要继续补充检索。
+- 候选数不足 ${MIN_AGENT_CANDIDATES} 个、或最高分低于 ${MIN_AGENT_TOP_SCORE}、或证据来源过单时，不得直接结束。
+- 下一步请补充执行 ${forcedToolCall.name}。`,
+        ),
+      );
+      toolCalls = [forcedToolCall];
     }
 
     for (const toolCall of toolCalls) {
@@ -869,12 +1076,142 @@ async function executeAgentToolLoop(input: {
   return { candidates, trace };
 }
 
+async function executeAssetToolLoop(input: {
+  model: ChatOpenAI;
+  query: string;
+  tools: DynamicStructuredTool[];
+}): Promise<{ trace: ToolTraceEntry[]; state: AssetToolState }> {
+  const { model, query, tools } = input;
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const trace: ToolTraceEntry[] = [];
+  const state = createEmptyAssetToolState();
+  const agentModel = model.bindTools(tools);
+  const today = new Date().toISOString().slice(0, 10);
+  const messages = [
+    new SystemMessage(
+      `你是 BrainDance 的模型资产元数据 Agent。当前日期是 ${today}。
+你的职责：
+- 处理模型资产元数据的改名、批量打标签、批量改描述、读取摘要、结构化对比。
+- 写入前优先先做候选筛选，再做 dry run 预览。
+- 如果用户已经指定了模型 ID，就直接围绕这些模型工作，不要额外扩散范围。
+- 绝对不要改动 ply_path、scene_id、embedding、user_id 之类的系统字段。
+- 如果需要批量改名，优先使用 batch_patch_model_metadata，并通过 displayNameTemplate / Prefix / Suffix 生成新名称。
+- 工具调用最多 3 轮，拿到足够结果后停止。`,
+    ),
+    new HumanMessage(query),
+  ];
+
+  for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    const response = await agentModel.invoke(messages);
+    messages.push(response);
+
+    const toolCalls = Array.isArray(response.tool_calls)
+      ? response.tool_calls
+      : [];
+    if (toolCalls.length === 0) {
+      break;
+    }
+
+    for (const toolCall of toolCalls) {
+      const tool = toolsByName.get(toolCall.name);
+      if (!tool) {
+        messages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id ?? toolCall.name,
+            content: JSON.stringify({ error: `未知工具 ${toolCall.name}` }),
+          }),
+        );
+        continue;
+      }
+
+      const toolResult = await tool.invoke(toolCall.args);
+      const resultText = typeof toolResult === "string"
+        ? toolResult
+        : JSON.stringify(toolResult);
+      const count = collectAssetToolResult(tool.name, resultText, state);
+      trace.push({
+        toolName: tool.name,
+        args: toolCall.args ?? {},
+        resultSummary: summarizeToolResult(tool.name, count),
+      });
+      messages.push(
+        new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: resultText,
+        }),
+      );
+    }
+  }
+
+  return { trace, state };
+}
+
 export async function runSpatialSearchAgent(
   query: string,
+  options: SpatialSearchAgentOptions = {},
 ): Promise<SpatialSearchResponse> {
   const env = ensureRuntimeEnv();
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
+  const mode = await classifyAgentMode(model, query);
+
+  if (mode === "asset_metadata") {
+    const assetTools = [
+      buildListModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildRenameModelAssetTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: options.executionMode === "execute",
+      }),
+      buildBatchPatchModelMetadataTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: options.executionMode === "execute",
+      }),
+      buildGetModelAssetBundleTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+      buildCompareModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+      }),
+    ];
+    const { trace, state } = await executeAssetToolLoop({
+      model,
+      query,
+      tools: assetTools,
+    });
+
+    return {
+      success: true,
+      mode: "asset_metadata",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前请求属于模型资产元数据操作",
+      },
+      answer: buildAssetAnswer(state) ?? "当前没有生成有效的模型资产结果。",
+      actions: [],
+      viewer_payload: {
+        ply: null,
+        poses: null,
+        matrix: null,
+        imageId: null,
+      },
+      candidates: [],
+      tool_trace: trace,
+      asset_context: {
+        last_tool_name: state.lastToolName,
+        list: state.list,
+        bundle: state.bundle,
+        comparison: state.comparison,
+        operation: serializeAssetOperation(state),
+      },
+    };
+  }
+
   const embeddings = createEmbeddingsModel(env);
 
   const intent = await parseSpatialIntent(model, query);
@@ -934,6 +1271,7 @@ export async function runSpatialSearchAgent(
 
   return {
     success: true,
+    mode: "spatial_search",
     intent,
     selection: {
       scene_id: selection.selectedSceneId,
@@ -966,5 +1304,12 @@ export async function runSpatialSearchAgent(
       pose_image_id: candidate.bestPose?.image_name ?? null,
     })),
     tool_trace: trace,
+    asset_context: {
+      last_tool_name: null,
+      list: null,
+      bundle: null,
+      comparison: null,
+      operation: null,
+    },
   };
 }

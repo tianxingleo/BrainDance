@@ -45,39 +45,72 @@ async function attachDisplayNames(
   supabase: any,
   rows: SearchResultRow[],
 ): Promise<SearchResultRow[]> {
+  const modelIds = rows
+    .map((row) => typeof row.id === "string" ? row.id : "")
+    .filter((id) => id.length > 0);
   const sceneIds = rows
     .map((row) => typeof row.scene_id === "string" ? row.scene_id : "")
     .filter((sceneId) => sceneId.length > 0);
 
-  if (sceneIds.length == 0) {
+  if (modelIds.length === 0 && sceneIds.length == 0) {
     return rows;
   }
 
   try {
-    const { data, error } = await supabase
-      .from("processing_tasks")
-      .select("scene_id, display_name")
-      .in("scene_id", sceneIds);
+    const displayNameByModelId = new Map<string, string>();
+    const displayNameBySceneId = new Map<string, string>();
 
-    if (error) {
-      console.warn("[Search] display_name 补全失败:", error.message);
-      return rows;
+    if (modelIds.length > 0) {
+      const { data: modelAssets, error: modelError } = await supabase
+        .from("model_assets")
+        .select("id, scene_id, display_name")
+        .in("id", modelIds);
+
+      if (modelError) {
+        console.warn("[Search] model_assets.display_name 补全失败:", modelError.message);
+      } else {
+        for (const item of modelAssets ?? []) {
+          const modelId = typeof item.id === "string" ? item.id : "";
+          const sceneId = typeof item.scene_id === "string" ? item.scene_id : "";
+          const displayName = typeof item.display_name === "string"
+            ? item.display_name.trim()
+            : "";
+          if (modelId && displayName) {
+            displayNameByModelId.set(modelId, displayName);
+          }
+          if (sceneId && displayName) {
+            displayNameBySceneId.set(sceneId, displayName);
+          }
+        }
+      }
     }
 
-    const displayNameMap = new Map<string, string>();
-    for (const item of data ?? []) {
-      const sceneId = typeof item.scene_id === "string" ? item.scene_id : "";
-      const displayName = typeof item.display_name === "string"
-        ? item.display_name.trim()
-        : "";
-      if (sceneId && displayName) {
-        displayNameMap.set(sceneId, displayName);
+    if (sceneIds.length > 0) {
+      const { data: tasks, error: taskError } = await supabase
+        .from("processing_tasks")
+        .select("scene_id, display_name")
+        .in("scene_id", sceneIds);
+
+      if (taskError) {
+        console.warn("[Search] processing_tasks.display_name 补全失败:", taskError.message);
+      } else {
+        for (const item of tasks ?? []) {
+          const sceneId = typeof item.scene_id === "string" ? item.scene_id : "";
+          const displayName = typeof item.display_name === "string"
+            ? item.display_name.trim()
+            : "";
+          if (sceneId && displayName && !displayNameBySceneId.has(sceneId)) {
+            displayNameBySceneId.set(sceneId, displayName);
+          }
+        }
       }
     }
 
     return rows.map((row) => {
+      const modelId = typeof row.id === "string" ? row.id : "";
       const sceneId = typeof row.scene_id === "string" ? row.scene_id : "";
-      const displayName = displayNameMap.get(sceneId);
+      const displayName = displayNameByModelId.get(modelId) ??
+        displayNameBySceneId.get(sceneId);
       if (!displayName) {
         return row;
       }
