@@ -20,12 +20,18 @@ class ThemeAnimationOverlay extends ConsumerStatefulWidget {
 class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  late Animation<double> _animation;
   
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-        duration: const Duration(milliseconds: 500), vsync: this);
+        duration: const Duration(milliseconds: 800), vsync: this);
+    
+    _animation = CurvedAnimation(
+        parent: _controller, 
+        curve: Curves.easeOutQuint,
+    );
     
     // Listen to provider changes to trigger animation
     // But ref.listen in build() is safer? No, usually in build or initState/dispose
@@ -70,13 +76,13 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
               // Allow touches to pass through during animation? 
               // Usually safer to block touches or ignore. Ignoring is better if the animation is purely visual overlay.
               child: AnimatedBuilder(
-                animation: _controller,
+                animation: _animation,
                 builder: (context, child) {
                   return CustomPaint(
                     painter: _ScreenshotPainter(
                       image: screenshot,
                       center: animationState.center,
-                      radiusValid: _controller.value,
+                      radiusValid: _animation.value,
                     ),
                   );
                 },
@@ -101,44 +107,27 @@ class _ScreenshotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // We want to draw the image BUT with a hole in it.
-    // The hole allows the content below (new theme) to show through.
+    final dst = Rect.fromLTWH(0, 0, size.width, size.height);
     
-    final paint = Paint();
+    // 使用离屏渲染层来做遮罩，相比复杂的 clipPath 更能够利用硬件加速，极大提升帧率
+    canvas.saveLayer(dst, Paint());
     
-    // Determine max radius needed to cover the screen from center
-    // Distance to farthest corner
+    // 绘制旧主题的截屏，降低 filterQuality 到 low，避免缩放时过度消耗 GPU
+    final paint = Paint()..filterQuality = FilterQuality.low;
+    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    canvas.drawImageRect(image, src, dst, paint);
+    
     final double maxRadius = _maxDistance(center, size);
     final double specificRadius = maxRadius * radiusValid;
 
-    // We can use saveLayer with a blend mode or path operation.
-    // Simplest approach: Use a Path that covers the whole screen minus the circle.
-    // Then clip to that path and draw the image.
-
-    final path = Path()
-      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..addOval(Rect.fromCircle(center: center, radius: specificRadius))
-      ..fillType = PathFillType.evenOdd; // This subtracts the circle from the rect
-
-    canvas.save();
-    canvas.clipPath(path);
+    // 用 BlendMode.clear '挖' 出一个不断扩大的圆洞，露出底层的新主题
+    final clearPaint = Paint()
+      ..blendMode = BlendMode.clear
+      ..style = PaintingStyle.fill;
     
-    // Draw the image to fit the screen size.
-    // Assuming the screenshot matches the screen size exactly.
-    // If pixel ratio makes image larger, we need to scale.
-    // ui.Image dimensions are in pixels, canvas is in logical pixels.
-    final double scaleX = size.width / image.width.toDouble();
-    final double scaleY = size.height / image.height.toDouble();
+    canvas.drawCircle(center, specificRadius, clearPaint);
     
-    // Typically screenshots from toImage(pixelRatio: view.devicePixelRatio) have higher res.
-    // We should draw it scaled down into the canvas rect.
-    
-    // Better: use drawImageRect
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    
-    canvas.drawImageRect(image, src, dst, paint);
-    
+    // 合成图层
     canvas.restore();
   }
 
