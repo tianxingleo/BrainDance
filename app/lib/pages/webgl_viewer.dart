@@ -519,14 +519,40 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final payload = jsonEncode(payloadData);
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
 
-    // 发送 TimePeeling 模型列表
-    if (widget.timePeelingModels.length > 1) {
-      _sendTimePeelingList();
-    }
+    // 发送 TimePeeling 模型列表（无条件发送，空列表时 JS 端显示空态）
+    _sendTimePeelingList();
   }
 
   void _sendTimePeelingList() {
-    final list = widget.timePeelingModels.map((model) {
+    final models = widget.timePeelingModels;
+
+    // 如果没有兄弟模型数据，用当前模型参数构造单元素列表
+    if (models.isEmpty) {
+      final currentModelUrl = widget.initialModelUrl;
+      String plyUrl = '';
+      if (currentModelUrl.startsWith('http://') ||
+          currentModelUrl.startsWith('https://')) {
+        plyUrl =
+            'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(currentModelUrl)}';
+      }
+      final fallbackList = [
+        {
+          'id': widget.sceneId,
+          'name': widget.sceneId,
+          'ply': plyUrl,
+          'poses': widget.posesUrl ?? '',
+          'previewImg': '',
+          'createdAt': '',
+        },
+      ];
+      final json = jsonEncode(fallbackList);
+      debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
+      _controller?.runJavaScript(
+          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+      return;
+    }
+
+    final list = models.map((model) {
       final plyPath = model['ply_path'] as String? ?? '';
       String plyUrl = '';
       if (plyPath.isNotEmpty) {
