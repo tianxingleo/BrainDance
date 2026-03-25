@@ -1,4 +1,5 @@
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/services/local_model_catalog_service.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
@@ -8,7 +9,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'local_ai_panel.dart';
 import 'search_mode.dart';
 
-class RecallSearchHeaderSection extends StatelessWidget {
+class RecallSearchHeaderSection extends StatefulWidget {
   final TDThemeData theme;
   final bool isDark;
   final Color textColor;
@@ -79,58 +80,115 @@ class RecallSearchHeaderSection extends StatelessWidget {
   });
 
   @override
+  State<RecallSearchHeaderSection> createState() =>
+      _RecallSearchHeaderSectionState();
+}
+
+class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
+  static final BorderRadius _searchFieldRadius = BorderRadius.circular(16);
+  late final FocusNode _searchFocusNode;
+  bool _isSearchFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchFocusNode = FocusNode()
+      ..addListener(() {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _isSearchFocused = _searchFocusNode.hasFocus;
+        });
+      });
+  }
+
+  @override
+  void dispose() {
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final panelBackground = widget.isDark
+        ? AppTheme.darkSurface.withValues(alpha: 0.94)
+        : BDDesign.colorPaperWhite.withValues(alpha: 0.94);
+    final panelBorderColor = _isSearchFocused
+        ? BDDesign.colorMutedBlue
+        : (widget.isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : BDDesign.colorMutedBlue.withValues(alpha: 0.10));
+
     return Column(
       children: [
-        BDPanelCard(
+        AnimatedContainer(
+          duration: BDMotion.durationFast,
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: panelBackground,
+            borderRadius: _searchFieldRadius,
+            border: Border.all(
+              color: panelBorderColor,
+              width: _isSearchFocused ? 1.5 : 1,
+            ),
+            boxShadow: [
+              widget.isDark ? BDDesign.shadowLight : BDDesign.shadowElevated,
+            ],
+          ),
           child: TextField(
-            controller: searchController,
-            style: TextStyle(color: textColor, fontSize: 15),
+            focusNode: _searchFocusNode,
+            controller: widget.searchController,
+            style: TextStyle(color: widget.textColor, fontSize: 15),
             decoration: InputDecoration(
-              hintText: searchFieldHint,
+              hintText: widget.searchFieldHint,
               hintStyle: TextStyle(
-                color: isDark
+                color: widget.isDark
                     ? Colors.white.withValues(alpha: 0.45)
                     : BDDesign.colorMutedBlue.withValues(alpha: 0.78),
                 fontSize: 15,
               ),
               prefixIcon: Icon(
                 Icons.search_rounded,
-                color: isDark
+                color: widget.isDark
                     ? Colors.white.withValues(alpha: 0.5)
                     : BDDesign.colorMutedBlue,
               ),
               suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: searchController,
+                valueListenable: widget.searchController,
                 builder: (context, value, _) {
                   final hasText = value.text.trim().isNotEmpty;
                   return Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       RecallSearchModeButton(
-                        isDark: isDark,
-                        icon: switch (searchMode) {
+                        isDark: widget.isDark,
+                        icon: switch (widget.searchMode) {
                           RecallSearchMode.cloud => Icons.cloud_rounded,
                           RecallSearchMode.local => Icons.privacy_tip_rounded,
                           RecallSearchMode.localAi =>
                             Icons.auto_awesome_rounded,
                         },
-                        onTap: onTapSearchMode,
+                        onTap: widget.onTapSearchMode,
                       ),
                       if (hasText)
                         IconButton(
-                          onPressed: onClear,
+                          onPressed: widget.onClear,
                           visualDensity: VisualDensity.compact,
                           constraints: const BoxConstraints.tightFor(
                             width: 36,
                             height: 36,
                           ),
                           padding: EdgeInsets.zero,
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
+                          hoverColor: Colors.transparent,
+                          focusColor: Colors.transparent,
                           icon: Icon(
                             Icons.close_rounded,
                             size: 18,
-                            color: isDark
+                            color: widget.isDark
                                 ? Colors.white.withValues(alpha: 0.5)
                                 : BDDesign.colorMutedBlue,
                           ),
@@ -150,53 +208,50 @@ class RecallSearchHeaderSection extends StatelessWidget {
                 horizontal: 16,
               ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: _searchFieldRadius,
                 borderSide: BorderSide.none,
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: _searchFieldRadius,
                 borderSide: BorderSide.none,
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: const BorderSide(
-                  color: BDDesign.colorMutedBlue,
-                  width: 1.5,
-                ),
+                borderRadius: _searchFieldRadius,
+                borderSide: BorderSide.none,
               ),
             ),
             onSubmitted: (value) {
-              onSubmit(value);
+              widget.onSubmit(value);
             },
-            onChanged: onChanged,
+            onChanged: widget.onChanged,
           ),
         ),
-        if (searchMode == RecallSearchMode.localAi) ...[
+        if (widget.searchMode == RecallSearchMode.localAi) ...[
           const SizedBox(height: 10),
           RecallLocalAiPanel(
-            theme: theme,
-            isDark: isDark,
-            textColor: textColor,
-            darkInput: darkInput,
-            isLocalModelReady: isLocalModelReady,
-            isModelDownloading: isModelDownloading,
-            isLocalModelLoading: isLocalModelLoading,
-            modelDownloadProgress: modelDownloadProgress,
-            modelDownloadedBytes: modelDownloadedBytes,
-            modelDownloadTotalBytes: modelDownloadTotalBytes,
-            localAnswer: localAnswer,
-            localAnswerStatus: localAnswerStatus,
-            localContextPreview: localContextPreview,
-            defaultModelDownloadUrl: defaultModelDownloadUrl,
-            localModelCatalog: localModelCatalog,
-            selectedLocalModelUrl: selectedLocalModelUrl,
-            activeLocalModelUrl: activeLocalModelUrl,
-            downloadedLocalModelUrls: downloadedLocalModelUrls,
-            localModelUrlController: localModelUrlController,
-            localModelPathController: localModelPathController,
-            onSelectCatalogModel: onSelectCatalogModel,
-            onDownloadModel: onDownloadModel,
-            onLoadModel: onLoadModel,
+            theme: widget.theme,
+            isDark: widget.isDark,
+            textColor: widget.textColor,
+            darkInput: widget.darkInput,
+            isLocalModelReady: widget.isLocalModelReady,
+            isModelDownloading: widget.isModelDownloading,
+            isLocalModelLoading: widget.isLocalModelLoading,
+            modelDownloadProgress: widget.modelDownloadProgress,
+            modelDownloadedBytes: widget.modelDownloadedBytes,
+            modelDownloadTotalBytes: widget.modelDownloadTotalBytes,
+            localAnswer: widget.localAnswer,
+            localAnswerStatus: widget.localAnswerStatus,
+            localContextPreview: widget.localContextPreview,
+            defaultModelDownloadUrl: widget.defaultModelDownloadUrl,
+            localModelCatalog: widget.localModelCatalog,
+            selectedLocalModelUrl: widget.selectedLocalModelUrl,
+            activeLocalModelUrl: widget.activeLocalModelUrl,
+            downloadedLocalModelUrls: widget.downloadedLocalModelUrls,
+            localModelUrlController: widget.localModelUrlController,
+            localModelPathController: widget.localModelPathController,
+            onSelectCatalogModel: widget.onSelectCatalogModel,
+            onDownloadModel: widget.onDownloadModel,
+            onLoadModel: widget.onLoadModel,
           ),
         ],
       ],
@@ -218,6 +273,7 @@ class RecallSearchModeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const buttonRadius = BorderRadius.all(Radius.circular(10));
     final foreground = isDark
         ? Colors.white.withValues(alpha: 0.82)
         : BDDesign.colorInkBlack;
@@ -226,9 +282,15 @@ class RecallSearchModeButton extends StatelessWidget {
       message: textLocalize('recall_search_mode'),
       child: Material(
         color: Colors.transparent,
+        shape: const RoundedRectangleBorder(borderRadius: buttonRadius),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          customBorder: const RoundedRectangleBorder(
+            borderRadius: buttonRadius,
+          ),
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
           child: Container(
             height: 32,
             width: 32,
@@ -236,16 +298,14 @@ class RecallSearchModeButton extends StatelessWidget {
               color: isDark
                   ? Colors.white.withValues(alpha: 0.06)
                   : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: buttonRadius,
               border: Border.all(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.08)
                     : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
               ),
             ),
-            child: Center(
-              child: Icon(icon, size: 16, color: foreground),
-            ),
+            child: Center(child: Icon(icon, size: 16, color: foreground)),
           ),
         ),
       ),

@@ -88,17 +88,26 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor, width: 1.5),
+        boxShadow: widget.isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: widget.color.withAlpha(15),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
             onTap: _toggleExpand,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(24),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
                 children: [
                   Container(
@@ -191,21 +200,25 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     final isProcessing = widget.color == BDDesign.colorMutedBlue;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? BDDesign.colorInkBlack : BDDesign.colorPaperWhite,
-        border: Border(
-          left: BorderSide(color: widget.color, width: 4),
-          bottom: BorderSide(
-            color: isDark
-                ? BDDesign.colorAshGray.withAlpha(20)
-                : BDDesign.colorInkBlack.withAlpha(20),
-            width: 1,
-          ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: widget.color.withAlpha(isDark ? 80 : 40),
+          width: 1.5,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: widget.color.withAlpha(isDark ? 10 : 20),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: InkWell(
         onTap: widget.onTaskTap != null ? () => widget.onTaskTap!(task) : null,
+        borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -281,7 +294,7 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                           color: isDark
                               ? darkInput
                               : BDDesign.colorAshGray.withAlpha(28),
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           latestLog ?? description,
