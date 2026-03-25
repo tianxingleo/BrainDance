@@ -1696,14 +1696,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _agentChatMessage!.finalAnswer = result.answer;
           _isAgentSearching = false;
         });
-
-        if (_recallScrollController.hasClients) {
-          _recallScrollController.animateTo(
-            _recallScrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
       } catch (ex) {
         if (!mounted) return;
         setState(() {
@@ -1732,7 +1724,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 AgentStep(type: 'thought', content: 'Plan: $title\n$stepsStr'),
               );
             } else if (event == 'thinking' || event == 'thought') {
-              final content = payload is Map ? payload['content']?.toString() ?? '' : payload?.toString() ?? '';
+              final content = payload is Map
+                  ? payload['content']?.toString() ?? ''
+                  : payload?.toString() ?? '';
               _agentChatMessage!.addStep(
                 AgentStep(type: 'thought', content: content),
               );
@@ -1751,44 +1745,44 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               final name = payload['name']?.toString() ?? '';
               var lastTool = _agentChatMessage!.steps.lastWhere(
                 (s) => s.type == 'tool_call' && s.toolName == name,
-                orElse: () => AgentStep(
-                  type: 'tool_call',
-                  toolName: name,
-                  content: '',
-                ),
+                orElse: () =>
+                    AgentStep(type: 'tool_call', toolName: name, content: ''),
               );
               lastTool.isCompleted = true;
             } else if (event == 'message' && payload is Map) {
-              _agentChatMessage!.finalAnswer += payload['delta']?.toString() ?? '';
-            } else if (event == 'error' && payload is Map) {
+              _agentChatMessage!.finalAnswer +=
+                  payload['delta']?.toString() ?? '';
+            } else if (event == 'error') {
+              String errorMsg = 'Unknown error';
+              if (payload is Map) {
+                errorMsg =
+                    payload['message']?.toString() ??
+                    payload['error']?.toString() ??
+                    'Unknown error';
+              } else if (payload != null) {
+                errorMsg = payload.toString();
+              }
               _agentChatMessage!.addStep(
-                AgentStep(
-                  type: 'error',
-                  content: payload['message']?.toString() ?? 'Unknown error',
-                ),
+                AgentStep(type: 'error', content: errorMsg),
               );
             } else if (event == 'done') {
               if (payload != null && payload is Map) {
                 setState(() {
-                  _agentResult = AgentRecallResponse.fromJson(Map<String, dynamic>.from(payload));
+                  _agentResult = AgentRecallResponse.fromJson(
+                    Map<String, dynamic>.from(payload),
+                  );
                 });
               } else if (data['result'] != null && data['result'] is Map) {
                 // 回退兼容旧格式
                 setState(() {
-                  _agentResult = AgentRecallResponse.fromJson(Map<String, dynamic>.from(data['result']));
+                  _agentResult = AgentRecallResponse.fromJson(
+                    Map<String, dynamic>.from(data['result']),
+                  );
                 });
               }
               setState(() {
                 _isAgentSearching = false;
               });
-            }
-
-            if (_recallScrollController.hasClients) {
-              _recallScrollController.animateTo(
-                _recallScrollController.position.maxScrollExtent,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-              );
             }
           } catch (e) {
             debugPrint('Error parsing chunk: $e');
