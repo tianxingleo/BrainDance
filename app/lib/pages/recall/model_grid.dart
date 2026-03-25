@@ -398,6 +398,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
 
   @override
   Widget build(BuildContext context) {
+    final blurProgress = _blurOpacityAnimation.value;
     final localSizeLabel =
         widget.model['_local_size_label']?.toString().trim() ?? '';
     final deleteLabel = localSizeLabel.isEmpty
@@ -452,11 +453,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                     child: Transform.scale(
                       scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
-                      child: child,
-                    ),
-                  );
-                },
-                child: GestureDetector(
+                      child: GestureDetector(
                   onTap: () => widget.onNavigateToViewer(widget.model, null),
                   onLongPress: widget.onDismiss,
                   child: RecallModelTile(
@@ -472,10 +469,39 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         ? const Color(0xFF888888)
                         : widget.theme.fontGyColor3,
                     elevated: true,
+                    elevationProgress: sValue,
                     toPublicUrl: widget.toPublicUrl,
                     imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
                   ),
                 ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: _blurOpacityAnimation,
+                builder: (context, child) {
+                  final bValue = _blurOpacityAnimation.value;
+                  return IgnorePointer(
+                    child: Opacity(
+                      opacity: bValue,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              widget.theme.brandColor4.withValues(alpha: widget.isDark ? 0.25 : 0.15),
+                              Colors.transparent,
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
             Positioned(
@@ -881,6 +907,7 @@ class RecallModelTile extends StatelessWidget {
   final Color textColor;
   final Color hintTextColor;
   final bool elevated;
+  final double? elevationProgress;
   final String Function(String)? toPublicUrl;
   final bool imageOnly;
 
@@ -894,6 +921,7 @@ class RecallModelTile extends StatelessWidget {
     required this.textColor,
     required this.hintTextColor,
     this.elevated = false,
+    this.elevationProgress,
     this.toPublicUrl,
     this.imageOnly = false,
   });
@@ -915,10 +943,23 @@ class RecallModelTile extends StatelessWidget {
         borderRadius: radius,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(elevated ? 46 : 20),
-            blurRadius: elevated ? 26 : 10,
-            spreadRadius: elevated ? 2 : 0,
-            offset: Offset(0, elevated ? 16 : 4),
+            color: Colors.black.withAlpha(
+              elevationProgress != null
+                  ? (elevationProgress! > 0 ? (20 + (46 - 20) * elevationProgress!).round() : 20)
+                  : (elevated ? 46 : 20),
+            ),
+            blurRadius: elevationProgress != null
+                ? (10 + (26 - 10) * elevationProgress!)
+                : (elevated ? 26 : 10),
+            spreadRadius: elevationProgress != null
+                ? (0 + (2 - 0) * elevationProgress!)
+                : (elevated ? 2 : 0),
+            offset: Offset(
+              0,
+              elevationProgress != null
+                  ? (4 + (16 - 4) * elevationProgress!)
+                  : (elevated ? 16 : 4),
+            ),
           ),
         ],
       ),
