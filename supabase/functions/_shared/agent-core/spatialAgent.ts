@@ -67,7 +67,7 @@ const agentRouteSchema = z.object({
 });
 
 const visualizationActionSchema = z.object({
-  type: z.enum(["open_model", "fly_to_pose", "highlight_hotspot"]),
+  type: z.enum(["open_model", "fly_to_pose"]),
   title: z.string(),
   payload: z.record(z.string(), z.unknown()),
 });
@@ -819,16 +819,6 @@ export function buildVisualizationActions(input: {
       },
     });
 
-    actions.push({
-      type: "highlight_hotspot",
-      title: hotspotLabel ? `圈出热点：${hotspotLabel}` : "圈出热点区域",
-      payload: {
-        sceneId: scene.sceneId,
-        imageId,
-        matrix,
-        label: hotspotLabel,
-      },
-    });
   }
 
   return actions;

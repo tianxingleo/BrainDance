@@ -45,7 +45,7 @@ Deno.test({
         );
         assertEquals(
           actionTypes.some((type: string) =>
-            ["open_scene", "fly_to_pose"].includes(type)
+            ["open_model", "fly_to_pose"].includes(type)
           ),
           true,
           `${query} 的动作类型必须属于稳定协议`,
