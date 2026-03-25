@@ -364,6 +364,21 @@ export function normalizeExplicitTimeRange(input: {
     start.setUTCDate(start.getUTCDate() - 7);
     return { startTime: asUtcIso(start), endTime: asUtcIso(now) };
   }
+  if (hint.includes("上周")) {
+    const day = now.getUTCDay() || 7;
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - day - 6);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    return { startTime: startOfDayUtc(start), endTime: endOfDayUtc(end) };
+  }
+  if (hint.includes("去年")) {
+    const year = now.getUTCFullYear() - 1;
+    return {
+      startTime: asUtcIso(new Date(Date.UTC(year, 0, 1, 0, 0, 0))),
+      endTime: asUtcIso(new Date(Date.UTC(year, 11, 31, 23, 59, 59))),
+    };
+  }
 
   return { startTime: null, endTime: null };
 }
@@ -479,6 +494,40 @@ async function classifyAgentMode(
   query: string,
   options: SpatialSearchAgentOptions = {}
 ): Promise<AgentMode> {
+  const normalized = query.trim().toLowerCase();
+  const currentMode = options.currentMode ?? null;
+
+  if (
+    currentMode === "compare" ||
+    /比较|对比|变化|前后|两个月前|现在/.test(query)
+  ) {
+    return "time_compare";
+  }
+  if (/导览|旁白|脚本|大纲|故事|创作|生成一个.*记忆集/.test(query)) {
+    return "creative";
+  }
+  if (/越来越|趋势|缺失|时间线|最近三次|长期记忆|关系摘要/.test(query)) {
+    return "memory_graph";
+  }
+  if (
+    currentMode === "batch_edit" ||
+    currentMode === "collection" ||
+    /改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|对比.*模型|模型.*对比/.test(query) ||
+    ((options.selectedModelIds?.length ?? 0) > 0 &&
+      /这些模型|这几个模型|选中的模型|这三个模型/.test(query))
+  ) {
+    return "asset_metadata";
+  }
+  if (
+    normalized.includes("找") ||
+    normalized.includes("在哪") ||
+    normalized.includes("有没有") ||
+    normalized.includes("空间") ||
+    normalized.includes("场景")
+  ) {
+    return "spatial_search";
+  }
+
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getRoutePrompt } = await import("./prompts/route.ts");
   const contextBlock = buildAgentContextBlock(options);
@@ -496,6 +545,45 @@ async function parseSpatialIntent(
   query: string,
   options: SpatialSearchAgentOptions = {}
 ): Promise<SpatialIntent> {
+  const trimmed = query.trim();
+  const heuristicTimeHint = (
+    trimmed.match(/今天|昨天|最近|最新|刚才|上周|去年/g) ?? []
+  ).join(" ");
+  const heuristicTargetType: SearchTargetType =
+    /最近|最新|今天|昨天|上周|去年/.test(trimmed)
+      ? "time"
+      : /角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/.test(trimmed)
+      ? "location"
+      : /场景|空间|房间/.test(trimmed)
+      ? "scene"
+      : "object";
+
+  const heuristic: SpatialIntent = {
+    rewrittenQuery: trimmed
+      .replace(/^(帮我|给我|请你|麻烦你|找一下|帮我找|请帮我找)/, "")
+      .replace(/(在哪|在哪里|还在吗|有没有|给我看看|帮我找出来)$/g, "")
+      .trim() || trimmed,
+    targetType: heuristicTargetType,
+    objectHint: heuristicTargetType === "object" ? trimmed : null,
+    locationHint: trimmed.match(/角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/)?.[0] ?? null,
+    sceneHint: null,
+    timeHint: heuristicTimeHint || null,
+    startTime: null,
+    endTime: null,
+    reasoning: "优先使用规则解析，减少同步路径上的 LLM 延迟。",
+  };
+  const heuristicRange = normalizeExplicitTimeRange(heuristic);
+  if (
+    heuristic.rewrittenQuery &&
+    (heuristic.targetType !== "scene" || heuristic.locationHint !== null || heuristic.timeHint !== null)
+  ) {
+    return {
+      ...heuristic,
+      startTime: heuristicRange.startTime,
+      endTime: heuristicRange.endTime,
+    };
+  }
+
   const structuredModel = model.withStructuredOutput(spatialIntentSchema);
   const today = new Date().toISOString().slice(0, 10);
   
@@ -1005,8 +1093,20 @@ async function selectBestResult(
   actions: VisualizationAction[],
   options: SpatialSearchAgentOptions = {}
 ): Promise<SelectionResult> {
-  const structuredModel = model.withStructuredOutput(selectionSchema);
   const best = rankedCandidates[0] ?? null;
+  if (best) {
+    return {
+      selectedSceneId: best.sceneId,
+      selectedModelId: best.modelId,
+      selectedPoseImageId: best.bestPose?.image_name ?? null,
+      selectionReason: "综合候选得分、证据来源数量与关键词命中度后选择最高分结果",
+      confidence: best.score,
+      answer: `已找到最相关的空间结果：${best.description || best.sceneId}。证据来自${Object.keys(best.sourceScores).join(" + ")}。你可以直接打开场景，或查看其他候选。`,
+      actions,
+    };
+  }
+
+  const structuredModel = model.withStructuredOutput(selectionSchema);
 
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getSelectionPrompt } = await import("./prompts/selection.ts");
@@ -1025,15 +1125,7 @@ async function selectBestResult(
         bestPose: candidate.bestPose,
       })),
       suggestedActions: actions,
-      defaultSelection: best
-        ? {
-          selectedSceneId: best.sceneId,
-          selectedModelId: best.modelId,
-          selectedPoseImageId: best.bestPose?.image_name ?? null,
-          selectionReason: "综合工具检索得分最高",
-          confidence: best.score,
-        }
-        : null,
+      defaultSelection: null,
     })),
   ]);
 }
@@ -1046,81 +1138,38 @@ async function executeAgentToolLoop(input: {
 }): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
-  const { model, intent, tools, options = {} } = input;
+  const { intent, tools } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
   const trace: ToolTraceEntry[] = [];
-  const agentModel = model.bindTools(tools);
+  const preferredTools = getPreferredToolOrder(intent);
 
-  const { buildAgentContextBlock } = await import("./prompts/context.ts");
-  const { getSpatialToolLoopPrompt } = await import("./prompts/spatial_tool_loop.ts");
-  const contextBlock = buildAgentContextBlock(options);
-
-  const messages = [
-    new SystemMessage(getSpatialToolLoopPrompt(contextBlock)),
-    new HumanMessage(JSON.stringify(intent)),
-  ];
-
-  for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
-    const response = await agentModel.invoke(messages);
-    messages.push(response);
-
-    let toolCalls = Array.isArray(response.tool_calls)
-      ? response.tool_calls
-      : [];
-    if (toolCalls.length === 0) {
-      const shouldForceContinue = round < MAX_AGENT_TOOL_ROUNDS - 1 &&
-        shouldForceAnotherToolRound({
-          intent,
-          candidates,
-          trace,
-        });
-      const forcedToolCall = shouldForceContinue
-        ? buildForcedToolCall({ intent, trace })
-        : null;
-
-      if (!forcedToolCall) {
-        break;
-      }
-
-      messages.push(
-        new SystemMessage(
-          `当前证据不足，需要继续补充检索。
-- 候选数不足 ${MIN_AGENT_CANDIDATES} 个、或最高分低于 ${MIN_AGENT_TOP_SCORE}、或证据来源过单时，不得直接结束。
-- 下一步请补充执行 ${forcedToolCall.name}。`,
-        ),
-      );
-      toolCalls = [forcedToolCall];
+  for (let round = 0; round < Math.min(MAX_AGENT_TOOL_ROUNDS, preferredTools.length); round += 1) {
+    const toolName = preferredTools[round];
+    const tool = toolsByName.get(toolName);
+    if (!tool) {
+      continue;
     }
+    const args = buildToolArgs(toolName, intent);
+    const toolResult = await tool.invoke(args);
+    const resultText = typeof toolResult === "string"
+      ? toolResult
+      : JSON.stringify(toolResult);
+    const count = collectSceneCandidates(tool.name, resultText, candidates);
+    trace.push({
+      toolName: tool.name,
+      args,
+      resultSummary: summarizeToolResult(tool.name, count),
+    });
 
-    for (const toolCall of toolCalls) {
-      const tool = toolsByName.get(toolCall.name);
-      if (!tool) {
-        messages.push(
-          new ToolMessage({
-            tool_call_id: toolCall.id ?? toolCall.name,
-            content: JSON.stringify({ error: `未知工具 ${toolCall.name}` }),
-          }),
-        );
-        continue;
-      }
-
-      const toolResult = await tool.invoke(toolCall.args);
-      const resultText = typeof toolResult === "string"
-        ? toolResult
-        : JSON.stringify(toolResult);
-      const count = collectSceneCandidates(tool.name, resultText, candidates);
-      trace.push({
-        toolName: tool.name,
-        args: toolCall.args ?? {},
-        resultSummary: summarizeToolResult(tool.name, count),
-      });
-      messages.push(
-        new ToolMessage({
-          tool_call_id: toolCall.id ?? toolCall.name,
-          content: resultText,
-        }),
-      );
+    if (
+      !shouldForceAnotherToolRound({
+        intent,
+        candidates,
+        trace,
+      })
+    ) {
+      break;
     }
   }
 

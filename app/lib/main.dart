@@ -22,6 +22,7 @@ import 'package:braindance/configs/set_config.dart';
 import 'services/task_notification_service.dart';
 import 'floating_nav_bar.dart';
 import 'widgets/bd_surfaces.dart';
+import 'widgets/theme_animation_overlay.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
@@ -132,7 +133,7 @@ class Home extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.watch(localeProvider);
+    final localeCode = ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
 
     // 启动时检查是否有会话
@@ -143,6 +144,7 @@ class Home extends ConsumerWidget {
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: "Brain Dance",
+      locale: _parseLocale(localeCode),
       theme: AppTheme.buildLightTheme(themeData).copyWith(
         textTheme: themeData.systemThemeDataLight?.textTheme.apply(
           fontFamily: AppConfig.fontFamily,
@@ -169,15 +171,28 @@ class Home extends ConsumerWidget {
       },
       // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
       builder: (context, child) {
-        return Stack(
-          children: [
-            child!,
-            // 全局通知 Overlay 层
-            const GlobalNotificationOverlay(),
-          ],
+        return KeyedSubtree(
+          key: ValueKey<String>(localeCode),
+          child: ThemeAnimationOverlay(
+            child: Stack(
+              children: [
+                child!,
+                // 语言切换时一并重建全局通知和页面树，避免旧文案残留
+                const GlobalNotificationOverlay(),
+              ],
+            ),
+          ),
         );
       },
     );
+  }
+
+  Locale _parseLocale(String localeCode) {
+    final parts = localeCode.split('_');
+    if (parts.length == 2) {
+      return Locale(parts[0], parts[1]);
+    }
+    return Locale(parts.first);
   }
 }
 

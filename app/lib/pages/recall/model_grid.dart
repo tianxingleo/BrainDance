@@ -63,7 +63,7 @@ class RecallModelGrid extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
@@ -100,7 +100,8 @@ class RecallModelGrid extends StatelessWidget {
               final isActionTarget = isSameModel(activeModelAction, model);
               final displayName = _modelDisplayName(model);
               final sceneStorageId = model['scene_id']?.toString() ?? '';
-              final desc = model['description'] ?? textLocalize("recall_no_desc");
+              final desc =
+                  model['description'] ?? textLocalize("recall_no_desc");
               final similarity = model['similarity'] as double?;
               final userId = model['user_id'] ?? '';
               final matchedFrames =
@@ -129,7 +130,7 @@ class RecallModelGrid extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () => onNavigateToViewer(model, null),
-                            onLongPressStart: (_) => onShowModelActions(model),
+                            onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Row(
@@ -169,7 +170,9 @@ class RecallModelGrid extends StatelessWidget {
                                           color: theme.brandColor4.withAlpha(
                                             220,
                                           ),
-                                          borderRadius: BorderRadius.circular(6),
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
                                         ),
                                         child: TDText(
                                           _formatSimilarity(similarity),
@@ -258,7 +261,7 @@ class RecallModelGrid extends StatelessWidget {
                   opacity: isActionTarget ? 0.0 : 1.0,
                   child: GestureDetector(
                     onTap: () => onNavigateToViewer(model, null),
-                    onLongPressStart: (_) => onShowModelActions(model),
+                    onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
                     child: Container(
                       key: cardKey,
                       child: RecallModelTile(
@@ -291,7 +294,7 @@ class RecallModelGrid extends StatelessWidget {
   }
 }
 
-class RecallModelActionOverlay extends StatelessWidget {
+class RecallModelActionOverlay extends StatefulWidget {
   final TDThemeData theme;
   final bool isDark;
   final Color darkCard;
@@ -301,9 +304,10 @@ class RecallModelActionOverlay extends StatelessWidget {
   final VoidCallback onDismiss;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final Future<void> Function(Map<String, dynamic>) onShowModelDetails;
+  final Future<void> Function(Map<String, dynamic>) onDownloadModel;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
   final Future<void> Function(Map<String, dynamic>) onRenameModel;
-  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteCloudModel;
   final String Function(String) toPublicUrl;
 
   const RecallModelActionOverlay({
@@ -317,40 +321,103 @@ class RecallModelActionOverlay extends StatelessWidget {
     required this.onDismiss,
     required this.onNavigateToViewer,
     required this.onShowModelDetails,
+    required this.onDownloadModel,
     required this.onShareModelToCommunity,
     required this.onRenameModel,
-    required this.onDeleteLocalModel,
+    required this.onDeleteCloudModel,
     required this.toPublicUrl,
   });
 
   @override
+  State<RecallModelActionOverlay> createState() =>
+      RecallModelActionOverlayState();
+}
+
+class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _blurOpacityAnimation;
+  late final Animation<double> _cardScaleAnimation;
+  late final Animation<double> _cardTranslateAnimation;
+  late final Animation<double> _menuOpacityAnimation;
+  late final Animation<double> _menuTranslateAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+      reverseDuration: const Duration(milliseconds: 240),
+    );
+
+    _blurOpacityAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _cardScaleAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _cardTranslateAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _menuOpacityAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.1, 1.0, curve: Curves.easeOutCubic),
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _menuTranslateAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> hide() async {
+    if (mounted) {
+      await _controller.reverse();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final localSizeLabel = model['_local_size_label']?.toString().trim() ?? '';
-    final deleteLabel = localSizeLabel.isEmpty
-        ? '\u5220\u9664\u6A21\u578B'
-        : '\u5220\u9664\u6A21\u578B($localSizeLabel)';
+    const deleteLabel = '删除云端模型';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
     const actionWidth = 128.0;
-    final preferredLeft = rect.right + horizontalGap;
     final maxLeft = screenWidth - screenPadding - actionWidth;
-    final actionLeft = preferredLeft.clamp(
-      screenPadding,
-      maxLeft,
-    ).toDouble();
+    final actionLeft = (widget.rect.right + horizontalGap)
+        .clamp(screenPadding, maxLeft)
+        .toDouble();
 
     return Positioned.fill(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onDismiss,
+        onTap: widget.onDismiss,
         child: Stack(
           children: [
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              builder: (context, value, child) {
+            AnimatedBuilder(
+              animation: _blurOpacityAnimation,
+              builder: (context, child) {
+                final value = _blurOpacityAnimation.value;
                 return Opacity(
                   opacity: value,
                   child: ClipRect(
@@ -368,58 +435,83 @@ class RecallModelActionOverlay extends StatelessWidget {
               },
             ),
             Positioned(
-              left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeOutCubic,
-                builder: (context, value, child) {
+              left: widget.rect.left,
+              top: widget.rect.top,
+              width: widget.rect.width,
+              height: widget.rect.height,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final tValue = _cardTranslateAnimation.value;
+                  final sValue = _cardScaleAnimation.value;
                   return Transform.translate(
-                    offset: Offset(0, -10 * value),
+                    offset: Offset(0, -10 * tValue),
                     child: Transform.scale(
-                      scale: 1 + (0.045 * value),
+                      scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
-                      child: child,
+                      child: GestureDetector(
+                  onTap: () => widget.onNavigateToViewer(widget.model, null),
+                  onLongPress: widget.onDismiss,
+                  child: RecallModelTile(
+                    model: widget.model,
+                    theme: widget.theme,
+                    isDark: widget.isDark,
+                    darkCard: widget.darkCard,
+                    darkInput: widget.darkInput,
+                    textColor: widget.isDark
+                        ? const Color(0xFFFFFFFF)
+                        : BDDesign.colorInkBlack,
+                    hintTextColor: widget.isDark
+                        ? const Color(0xFF888888)
+                        : widget.theme.fontGyColor3,
+                    elevated: true,
+                    elevationProgress: sValue,
+                    toPublicUrl: widget.toPublicUrl,
+                    imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
+                  ),
+                ),
                     ),
                   );
                 },
-                child: GestureDetector(
-                  onTap: () => onNavigateToViewer(model, null),
-                  onLongPress: onDismiss,
-                  child: RecallModelTile(
-                    model: model,
-                    theme: theme,
-                    isDark: isDark,
-                    darkCard: darkCard,
-                    darkInput: darkInput,
-                    textColor: isDark
-                        ? const Color(0xFFFFFFFF)
-                        : BDDesign.colorInkBlack,
-                    hintTextColor: isDark
-                        ? const Color(0xFF888888)
-                        : theme.fontGyColor3,
-                    elevated: true,
-                    toPublicUrl: toPublicUrl,
-                  ),
-                ),
+              ),
+            ),
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: _blurOpacityAnimation,
+                builder: (context, child) {
+                  final bValue = _blurOpacityAnimation.value;
+                  return IgnorePointer(
+                    child: Opacity(
+                      opacity: bValue,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              widget.theme.brandColor4.withValues(alpha: widget.isDark ? 0.25 : 0.15),
+                              Colors.transparent,
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
             Positioned(
               left: actionLeft,
-              top: rect.top + 24,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutBack,
-                builder: (context, value, child) {
-                  final safeOpacity = value.clamp(0.0, 1.0);
+              top: widget.rect.top + 24,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final mValue = _menuTranslateAnimation.value;
+                  final oValue = _menuOpacityAnimation.value;
                   return Opacity(
-                    opacity: safeOpacity,
+                    opacity: oValue.clamp(0.0, 1.0),
                     child: Transform.translate(
-                      offset: Offset(18 * (1 - value), 0),
+                      offset: Offset(18 * (1 - mValue), 0),
                       child: child,
                     ),
                   );
@@ -429,8 +521,8 @@ class RecallModelActionOverlay extends StatelessWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
                     onTap: () async {
-                      onDismiss();
-                      await onShareModelToCommunity(model);
+                      widget.onDismiss();
+                      await widget.onShareModelToCommunity(widget.model);
                     },
                     child: Ink(
                       width: actionWidth,
@@ -439,12 +531,12 @@ class RecallModelActionOverlay extends StatelessWidget {
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color: isDark
+                        color: widget.isDark
                             ? const Color(0xEE1F2430)
                             : Colors.white.withAlpha(236),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: isDark
+                          color: widget.isDark
                               ? Colors.white.withValues(alpha: 0.08)
                               : BDDesign.colorMutedBlue.withValues(alpha: 0.14),
                         ),
@@ -461,42 +553,54 @@ class RecallModelActionOverlay extends StatelessWidget {
                         children: [
                           _ActionMenuItem(
                             icon: Icons.info_outline_rounded,
-                            label: '\u67E5\u770B\u8BE6\u60C5',
-                            isDark: isDark,
+                            label: '查看详情',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onShowModelDetails(model);
+                              widget.onDismiss();
+                              await widget.onShowModelDetails(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.edit_rounded,
-                            label: '\u91CD\u547D\u540D',
-                            isDark: isDark,
+                            label: '重命名',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onRenameModel(model);
+                              widget.onDismiss();
+                              await widget.onRenameModel(widget.model);
+                            },
+                          ),
+                          const SizedBox(height: 6),
+                          _ActionMenuItem(
+                            icon: Icons.download_rounded,
+                            label: textLocalize('recall_download_model'),
+                            isDark: widget.isDark,
+                            onTap: () async {
+                              widget.onDismiss();
+                              await widget.onDownloadModel(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.delete_outline_rounded,
                             label: deleteLabel,
-                            isDark: isDark,
+                            isDark: widget.isDark,
                             destructive: true,
                             onTap: () async {
-                              onDismiss();
-                              await onDeleteLocalModel(model);
+                              widget.onDismiss();
+                              await widget.onDeleteCloudModel(widget.model);
                             },
                           ),
                           const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.public_rounded,
-                            label: '\u5206\u4EAB\u5230\u793E\u533A',
-                            isDark: isDark,
+                            label: '分享到社区',
+                            isDark: widget.isDark,
                             onTap: () async {
-                              onDismiss();
-                              await onShareModelToCommunity(model);
+                              widget.onDismiss();
+                              await widget.onShareModelToCommunity(
+                                widget.model,
+                              );
                             },
                           ),
                         ],
@@ -668,9 +772,7 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail>
   @override
   Widget build(BuildContext context) {
     final img = resolvedImage;
-    final aspectRatio = img == null
-        ? 4 / 3
-        : img.width / img.height;
+    final aspectRatio = img == null ? 4 / 3 : img.width / img.height;
     final width = (widget.height * aspectRatio).clamp(76.0, 220.0);
 
     return AnimatedContainer(
@@ -783,10 +885,7 @@ class _CoverNetworkImageState extends State<_CoverNetworkImage>
                 child: SizedBox(
                   width: img.width.toDouble(),
                   height: img.height.toDouble(),
-                  child: RawImage(
-                    image: img,
-                    filterQuality: FilterQuality.low,
-                  ),
+                  child: RawImage(image: img, filterQuality: FilterQuality.low),
                 ),
               ),
             )
@@ -804,6 +903,7 @@ class RecallModelTile extends StatelessWidget {
   final Color textColor;
   final Color hintTextColor;
   final bool elevated;
+  final double? elevationProgress;
   final String Function(String)? toPublicUrl;
   final bool imageOnly;
 
@@ -817,6 +917,7 @@ class RecallModelTile extends StatelessWidget {
     required this.textColor,
     required this.hintTextColor,
     this.elevated = false,
+    this.elevationProgress,
     this.toPublicUrl,
     this.imageOnly = false,
   });
@@ -838,10 +939,23 @@ class RecallModelTile extends StatelessWidget {
         borderRadius: radius,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(elevated ? 46 : 20),
-            blurRadius: elevated ? 26 : 10,
-            spreadRadius: elevated ? 2 : 0,
-            offset: Offset(0, elevated ? 16 : 4),
+            color: Colors.black.withAlpha(
+              elevationProgress != null
+                  ? (elevationProgress! > 0 ? (20 + (46 - 20) * elevationProgress!).round() : 20)
+                  : (elevated ? 46 : 20),
+            ),
+            blurRadius: elevationProgress != null
+                ? (10 + (26 - 10) * elevationProgress!)
+                : (elevated ? 26 : 10),
+            spreadRadius: elevationProgress != null
+                ? (0 + (2 - 0) * elevationProgress!)
+                : (elevated ? 2 : 0),
+            offset: Offset(
+              0,
+              elevationProgress != null
+                  ? (4 + (16 - 4) * elevationProgress!)
+                  : (elevated ? 16 : 4),
+            ),
           ),
         ],
       ),
@@ -926,7 +1040,11 @@ class RecallModelTile extends StatelessWidget {
                   ),
                   if (toPublicUrl != null) ...[
                     const SizedBox(height: 6),
-                    ModelDownloadBadge(modelUrl: modelUrl, isDark: isDark, theme: theme),
+                    ModelDownloadBadge(
+                      modelUrl: modelUrl,
+                      isDark: isDark,
+                      theme: theme,
+                    ),
                   ],
                 ],
               ),
@@ -993,7 +1111,7 @@ class TimePeelingList extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
@@ -1019,46 +1137,48 @@ class TimePeelingList extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.55)
         : BDDesign.colorMutedBlue;
 
-    final sortedKeys = groupedModels.keys.toList()..sort((a, b) {
-      final ta = _newestTime(groupedModels[a]!);
-      final tb = _newestTime(groupedModels[b]!);
-      return tb.compareTo(ta);
-    });
+    final sortedKeys = groupedModels.keys.toList()
+      ..sort((a, b) {
+        final ta = _newestTime(groupedModels[a]!);
+        final tb = _newestTime(groupedModels[b]!);
+        return tb.compareTo(ta);
+      });
 
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(0, 6, 0, 16),
       sliver: SliverList(
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final name = sortedKeys[index];
-            final models = groupedModels[name]!;
-            return _TimePeelingSlot(
-              name: name,
-              models: models,
-              theme: theme,
-              isDark: isDark,
-              darkCard: darkCard,
-              darkInput: darkInput,
-              textColor: textColor,
-              hintTextColor: hintTextColor,
-              hintColor: hintColor,
-              activeModelAction: activeModelAction,
-              modelCardKeyFor: modelCardKeyFor,
-              isSameModel: isSameModel,
-              onNavigateToViewer: onNavigateToViewer,
-              onShowModelActions: onShowModelActions,
-              onAddNewTask: onAddNewTask,
-            );
-          },
-          childCount: sortedKeys.length,
-        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final name = sortedKeys[index];
+          final models = groupedModels[name]!;
+          return _TimePeelingSlot(
+            name: name,
+            models: models,
+            theme: theme,
+            isDark: isDark,
+            darkCard: darkCard,
+            darkInput: darkInput,
+            textColor: textColor,
+            hintTextColor: hintTextColor,
+            hintColor: hintColor,
+            activeModelAction: activeModelAction,
+            modelCardKeyFor: modelCardKeyFor,
+            isSameModel: isSameModel,
+            onNavigateToViewer: onNavigateToViewer,
+            onShowModelActions: onShowModelActions,
+            onAddNewTask: onAddNewTask,
+          );
+        }, childCount: sortedKeys.length),
       ),
     );
   }
 
   DateTime _newestTime(List<Map<String, dynamic>> models) {
     return models
-        .map((m) => DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime(0))
+        .map(
+          (m) =>
+              DateTime.tryParse(m['created_at']?.toString() ?? '') ??
+              DateTime(0),
+        )
         .reduce((a, b) => a.isAfter(b) ? a : b);
   }
 }
@@ -1082,7 +1202,7 @@ class _TimePeelingSlot extends StatefulWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic>) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const _TimePeelingSlot({
@@ -1172,7 +1292,9 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
           border: Border.all(color: slotBorder, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: widget.isDark ? 0.12 : 0.04),
+              color: Colors.black.withValues(
+                alpha: widget.isDark ? 0.12 : 0.04,
+              ),
               blurRadius: 12,
               offset: const Offset(0, 3),
             ),
@@ -1200,7 +1322,10 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: widget.hintColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
@@ -1246,7 +1371,10 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
                   itemCount: _totalCount,
                   clipBehavior: Clip.hardEdge,
                   itemBuilder: (context, index) {
-                    final distance = (index - _currentPage).abs().clamp(0.0, 1.0);
+                    final distance = (index - _currentPage).abs().clamp(
+                      0.0,
+                      1.0,
+                    );
                     final scale = ui.lerpDouble(1.0, 0.82, distance)!;
                     final opacity = ui.lerpDouble(1.0, 0.5, distance)!;
 
@@ -1262,8 +1390,10 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
 
                     final model = widget.models[index - 1];
                     final cardKey = widget.modelCardKeyFor(model);
-                    final isActionTarget =
-                        widget.isSameModel(widget.activeModelAction, model);
+                    final isActionTarget = widget.isSameModel(
+                      widget.activeModelAction,
+                      model,
+                    );
 
                     return _buildCarouselItem(
                       scale: scale,
@@ -1274,7 +1404,7 @@ class _TimePeelingSlotState extends State<_TimePeelingSlot> {
                         child: GestureDetector(
                           onTap: () => widget.onNavigateToViewer(model, null),
                           onLongPressStart: (_) =>
-                              widget.onShowModelActions(model),
+                              widget.onShowModelActions(model, imageOnly: true),
                           child: Container(
                             key: cardKey,
                             decoration: BoxDecoration(
@@ -1464,8 +1594,11 @@ class _TimelinePainter extends CustomPainter {
 
       // Distance from the selected model node (continuous for smooth animation)
       final distFromSelected = ((i + 1) - currentPage).abs().clamp(0.0, 1.0);
-      final radius =
-          ui.lerpDouble(selectedRadius, normalRadius, distFromSelected)!;
+      final radius = ui.lerpDouble(
+        selectedRadius,
+        normalRadius,
+        distFromSelected,
+      )!;
       final alpha = ui.lerpDouble(0.95, 0.4, distFromSelected)!;
 
       final dotPaint = Paint()
@@ -1492,8 +1625,10 @@ class _TimelinePainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
 
-      final textX = (labelX - textPainter.width / 2)
-          .clamp(4.0, size.width - textPainter.width - 4);
+      final textX = (labelX - textPainter.width / 2).clamp(
+        4.0,
+        size.width - textPainter.width - 4,
+      );
       textPainter.paint(canvas, Offset(textX, lineY + selectedRadius + 6));
     }
   }
