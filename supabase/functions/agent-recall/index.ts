@@ -19,6 +19,15 @@ function errorResponse(message: string, status = 500): Response {
   );
 }
 
+function isSseRequest(req: Request): boolean {
+  const accept = req.headers.get("accept") ?? "";
+  return accept.toLowerCase().includes("text/event-stream");
+}
+
+function buildSseFrame(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -34,7 +43,40 @@ serve(async (req: Request) => {
       );
     }
 
-    const result = await runRecallAgent(parsed.data.query, req.signal);
+    if (isSseRequest(req)) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = async (payload: unknown) => {
+            controller.enqueue(encoder.encode(buildSseFrame(payload)));
+          };
+
+          try {
+            await runRecallAgent(parsed.data.query, { onEvent: send });
+          } catch (error) {
+            await send({
+              event: "error",
+              data: {
+                message: error instanceof Error ? error.message : String(error),
+              },
+            });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+        },
+      });
+    }
+
+    const result = await runRecallAgent(parsed.data.query);
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

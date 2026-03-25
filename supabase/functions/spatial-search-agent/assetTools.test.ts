@@ -3,7 +3,7 @@ import {
   buildComparisonResult,
   type ModelAssetBundle,
   renderDisplayNameTemplate,
-} from "./assetTools.ts";
+} from "../_shared/agent-core/assetTools.ts";
 
 Deno.test("renderDisplayNameTemplate 支持 scene_id 与 created_date 占位符", () => {
   const displayName = renderDisplayNameTemplate(
