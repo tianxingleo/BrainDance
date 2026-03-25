@@ -106,6 +106,19 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   AgentRecallResponse? _agentResult;
   ChatMessage? _agentChatMessage;
   final ScrollController _recallScrollController = ScrollController();
+  StreamSubscription<String>? _agentStreamSubscription;
+
+  void _stopAgentSearch() {
+    if (_isAgentSearching) {
+      _agentStreamSubscription?.cancel();
+      setState(() {
+        _isAgentSearching = false;
+        _agentChatMessage?.addStep(
+          AgentStep(type: 'error', content: '🚫 用户已强行中断 Agent'),
+        );
+      });
+    }
+  }
 
   String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
@@ -1667,30 +1680,127 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _agentResult = null;
       _agentChatMessage = ChatMessage(isUser: false);
     });
-    try {
-      final result = await AgentRecallService().query(query);
-      if (!mounted) return;
-      
-      setState(() {
-        _agentResult = result;
-        _agentChatMessage!.finalAnswer = result.answer;
-        _isAgentSearching = false;
-      });
 
-      // Auto scroll
-      if (_recallScrollController.hasClients) {
-        _recallScrollController.animateTo(
-          _recallScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+    _agentStreamSubscription?.cancel();
+
+    void fallback() async {
+      if (!mounted) return;
+      setState(() {
+        _isAgentSearching = true;
+      });
+      try {
+        final result = await AgentRecallService().query(query);
+        if (!mounted) return;
+        setState(() {
+          _agentResult = result;
+          _agentChatMessage!.finalAnswer = result.answer;
+          _isAgentSearching = false;
+        });
+
+        if (_recallScrollController.hasClients) {
+          _recallScrollController.animateTo(
+            _recallScrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      } catch (ex) {
+        if (!mounted) return;
+        setState(() {
+          _isAgentSearching = false;
+        });
+        TDToast.showText('Agent 检索失败：$ex', context: context);
       }
+    }
+
+    try {
+      final stream = AgentRecallService().queryStream(query);
+      _agentStreamSubscription = stream.listen(
+        (chunk) {
+          if (!mounted) return;
+          if (chunk.isEmpty) return;
+
+          try {
+            final data = jsonDecode(chunk);
+            if (data['event'] == 'thought') {
+              _agentChatMessage!.addStep(
+                AgentStep(type: 'thought', content: data['data']),
+              );
+            } else if (data['event'] == 'tool_call') {
+              final argsStr = data['args'] is Map
+                  ? jsonEncode(data['args'])
+                  : data['args'].toString();
+              _agentChatMessage!.addStep(
+                AgentStep(
+                  type: 'tool_call',
+                  toolName: data['name'],
+                  content: argsStr,
+                ),
+              );
+            } else if (data['event'] == 'tool_result') {
+              var lastTool = _agentChatMessage!.steps.lastWhere(
+                (s) => s.type == 'tool_call' && s.toolName == data['name'],
+                orElse: () => AgentStep(
+                  type: 'tool_call',
+                  toolName: data['name'],
+                  content: '',
+                ),
+              );
+              lastTool.isCompleted = true;
+            } else if (data['event'] == 'message') {
+              _agentChatMessage!.finalAnswer += data['data'] ?? '';
+            } else if (data['event'] == 'error') {
+              _agentChatMessage!.addStep(
+                AgentStep(
+                  type: 'error',
+                  content: data['data'] ?? 'Unknown error',
+                ),
+              );
+            } else if (data['event'] == 'done') {
+              if (data['result'] != null) {
+                setState(() {
+                  _agentResult = AgentRecallResponse.fromJson(data['result']);
+                });
+              }
+              setState(() {
+                _isAgentSearching = false;
+              });
+            }
+
+            if (_recallScrollController.hasClients) {
+              _recallScrollController.animateTo(
+                _recallScrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
+          } catch (e) {
+            debugPrint('Error parsing chunk: $e');
+          }
+        },
+        onError: (e) {
+          if (!mounted) return;
+          setState(() {
+            _isAgentSearching = false;
+          });
+          TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
+          fallback();
+        },
+        onDone: () {
+          if (mounted) {
+            setState(() {
+              _isAgentSearching = false;
+            });
+          }
+        },
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isAgentSearching = false;
       });
-      TDToast.showText('Agent 检索失败：$e', context: context);
+      TDToast.showText('Agent 流启动失败 (尝试回退)：$e', context: context);
+      fallback();
     }
   }
 
@@ -1848,7 +1958,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
 
-    if (_agentChatMessage == null && _agentResult == null && !_isAgentSearching) {
+    if (_agentChatMessage == null &&
+        _agentResult == null &&
+        !_isAgentSearching) {
       return BDPanelCard(
         padding: const EdgeInsets.all(16),
         child: Text(
@@ -1858,7 +1970,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       );
     }
 
-    final hasActions = _agentResult != null && _agentResult!.actions.any((a) => a.type == 'open_scene');
+    final hasActions =
+        _agentResult != null &&
+        _agentResult!.actions.any((a) => a.type == 'open_scene');
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -1891,11 +2005,25 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
+                    const Spacer(),
+                    SizedBox(
+                      height: 24,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          side: const BorderSide(color: Colors.red, width: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: _stopAgentSearch,
+                        icon: const Icon(Icons.stop_circle_outlined, size: 14),
+                        label: const Text('停止', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
                   ],
                 ],
               ),
               const SizedBox(height: 10),
-              
+
               ..._agentChatMessage!.steps.map((step) {
                 return ListenableBuilder(
                   listenable: step,
@@ -1904,26 +2032,42 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8.0),
                         child: Theme(
-                          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                          child: _AgentStepTile(step: step, isDark: isDark, textColor: textColor),
+                          data: Theme.of(
+                            context,
+                          ).copyWith(dividerColor: Colors.transparent),
+                          child: _AgentStepTile(
+                            step: step,
+                            isDark: isDark,
+                            textColor: textColor,
+                          ),
                         ),
                       );
                     } else if (step.type == 'thought') {
-                       return Padding(
-                         padding: const EdgeInsets.symmetric(vertical: 4.0),
-                         child: Text('🤔 思考中: ${step.content}', style: TextStyle(color: hintColor, fontSize: 13)),
-                       );
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          '🤔 思考中: ${step.content}',
+                          style: TextStyle(color: hintColor, fontSize: 13),
+                        ),
+                      );
                     } else if (step.type == 'error') {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4.0),
                         child: Row(
                           children: [
-                            const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                            const Icon(
+                              Icons.error_outline,
+                              color: Colors.red,
+                              size: 16,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 step.content,
-                                style: const TextStyle(color: Colors.red, fontSize: 13),
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
                           ],
@@ -1931,10 +2075,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       );
                     }
                     return const SizedBox.shrink();
-                  }
+                  },
                 );
               }),
-              
+
               if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 MarkdownBody(
@@ -1952,7 +2096,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                   style: TextStyle(color: hintColor, fontSize: 12),
                 ),
               ],
-              
+
               if (hasActions) ...[
                 const SizedBox(height: 14),
                 SizedBox(
@@ -1975,7 +2119,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               ],
             ],
           );
-        }
+        },
       ),
     );
   }
@@ -2598,16 +2742,20 @@ class _AgentStepTile extends StatefulWidget {
   State<_AgentStepTile> createState() => _AgentStepTileState();
 }
 
-class _AgentStepTileState extends State<_AgentStepTile> {
+class _AgentStepTileState extends State<_AgentStepTile>
+    with AutomaticKeepAliveClientMixin {
   final ExpansionTileController _controller = ExpansionTileController();
   bool _wasCompleted = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     _wasCompleted = widget.step.isCompleted;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.step.isCompleted) {
+      if (!widget.step.isCompleted && mounted) {
         _controller.expand();
       }
     });
@@ -2634,15 +2782,17 @@ class _AgentStepTileState extends State<_AgentStepTile> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return ExpansionTile(
       controller: _controller,
       tilePadding: EdgeInsets.zero,
       minTileHeight: 0,
-      leading: widget.step.isCompleted 
-          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
+      leading: widget.step.isCompleted
+          ? const Icon(Icons.check_circle, color: Colors.green, size: 20)
           : const SizedBox(
-              width: 16, height: 16, 
-              child: CircularProgressIndicator(strokeWidth: 2)
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
       title: Text(
         'Using ${widget.step.toolName}...',
@@ -2656,19 +2806,18 @@ class _AgentStepTileState extends State<_AgentStepTile> {
           decoration: BoxDecoration(
             color: widget.isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+            border: Border.all(
+              color: widget.isDark ? Colors.white10 : Colors.black12,
+            ),
           ),
           child: HighlightView(
             widget.step.content,
             language: 'json',
             theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
             padding: const EdgeInsets.all(4),
-            textStyle: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-            ),
+            textStyle: const TextStyle(fontFamily: 'monospace', fontSize: 12),
           ),
-        )
+        ),
       ],
     );
   }

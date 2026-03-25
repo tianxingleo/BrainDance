@@ -32,7 +32,7 @@ class AgentStep extends ChangeNotifier {
 
 class ChatMessage extends ChangeNotifier {
   final bool isUser;
-  String _finalAnswer; 
+  String _finalAnswer;
   final List<AgentStep> steps;
 
   ChatMessage({
@@ -184,17 +184,28 @@ class AgentRecallService {
         'agent-recall',
         body: {'query': query},
       );
-      
+
       if (response.status != 200) {
-        throw Exception('Failed to invoke function: ${response.status}');
+        yield jsonEncode({
+          'event': 'error',
+          'data': 'API Invoke Error: ${response.status}',
+        });
+        return;
       }
-      
+
       // 注意：如果函数返回的是流式响应，需确认 invoke 的处理方式
       // 这里的原始代码似乎是想手动处理流式响应，但 supabase_flutter 的 invoke 默认返回全部数据
       // 如果业务确实需要流式，通常需要更复杂的 http 处理或函数支持
       yield response.data.toString();
     } catch (e) {
-      yield 'Error: $e';
+      if (e is FunctionException) {
+        yield jsonEncode({
+          'event': 'error',
+          'data': e.details ?? e.reason ?? e.message,
+        });
+      } else {
+        yield jsonEncode({'event': 'error', 'data': 'Function Error: $e'});
+      }
     }
   }
 
