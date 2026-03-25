@@ -2151,8 +2151,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   Future<void> _deleteCloudModel(Map<String, dynamic> model) async {
     final modelId = model['id']?.toString().trim() ?? '';
-    final currentUserId =
-        Supabase.instance.client.auth.currentUser?.id.trim() ?? '';
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    final currentUserId = currentUser == null ? '' : currentUser.id.trim();
     final modelUserId = model['user_id']?.toString().trim() ?? '';
     if (modelId.isEmpty) {
       if (mounted) {

@@ -403,9 +403,10 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
     const actionWidth = 128.0;
-    final preferredLeft = widget.rect.right + horizontalGap;
     final maxLeft = screenWidth - screenPadding - actionWidth;
-    final actionLeft = preferredLeft.clamp(screenPadding, maxLeft).toDouble();
+    final actionLeft = (widget.rect.right + horizontalGap)
+        .clamp(screenPadding, maxLeft)
+        .toDouble();
 
     return Positioned.fill(
       child: GestureDetector(
