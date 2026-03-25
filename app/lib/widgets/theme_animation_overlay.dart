@@ -7,10 +7,7 @@ import 'dart:ui' as ui;
 class ThemeAnimationOverlay extends ConsumerStatefulWidget {
   final Widget child;
 
-  const ThemeAnimationOverlay({
-    Key? key,
-    required this.child,
-  }) : super(key: key);
+  const ThemeAnimationOverlay({super.key, required this.child});
 
   @override
   ConsumerState<ThemeAnimationOverlay> createState() =>

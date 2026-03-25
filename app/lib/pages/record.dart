@@ -22,7 +22,6 @@ import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
 part 'record/record_ui_widgets.dart';
 part 'record/record_motion_guidance_card.dart';
-part 'record/record_accel_history_painter.dart';
 
 const double _kIdealAccelMin = 0.08;
 const double _kIdealAccelMax = 0.65;
@@ -69,7 +68,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _linearAccel = 0;
   double _smoothedLinearAccel = 0;
   double _peakLinearAccel = 0;
-  double _accelDelta = 0;
   double _motionMeter = 0;
   String _motionHint = textLocalize('reco_motion_steady');
   String _motionDetail = textLocalize('reco_motion_detail');
@@ -77,9 +75,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
   _MotionState _motionState = _MotionState.steady;
-
-  double _yaw = 0;
-  double _pitch = 0;
 
   final List<double> _accelHistory = [];
 
@@ -286,12 +281,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       yaw += 360;
     }
 
-    if (mounted) {
-      setState(() {
-        _yaw = yaw;
-        _pitch = (pitch * (180 / pi)).clamp(-90.0, 90.0);
-      });
-    }
   }
 
   void _updateMotionFeedback(
@@ -370,7 +359,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _linearAccel = linearAccel;
         _smoothedLinearAccel = smoothedAccel;
         _peakLinearAccel = nextPeak;
-        _accelDelta = accelDelta;
         _motionMeter = displayMotionMeter;
         _motionHint = nextHint;
         _motionDetail = nextDetail;
@@ -380,7 +368,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _linearAccel = linearAccel;
       _smoothedLinearAccel = smoothedAccel;
       _peakLinearAccel = nextPeak;
-      _accelDelta = accelDelta;
       _motionMeter = displayMotionMeter;
       _motionHint = nextHint;
       _motionDetail = nextDetail;
@@ -440,7 +427,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _linearAccel = 0;
     _smoothedLinearAccel = 0;
     _peakLinearAccel = 0;
-    _accelDelta = 0;
     _motionMeter = 0;
     _motionHint = textLocalize('reco_motion_steady');
     _motionDetail = textLocalize('reco_motion_detail');
@@ -508,147 +494,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
   Future<void> _onRecordTap() async {
     await _toggleVideoRecording();
-  }
-
-  List<Widget> _buildCameraSwitchButtons(
-    BuildContext context,
-    bool isAnyRecording,
-  ) {
-    final theme = TDTheme.of(context);
-    final isDark = AppConfig.isNightMode;
-    final cameras = RecoConfig.cameras;
-    final cameraSwitchButtons = <Widget>[];
-
-    int getLensPriority(CameraLensDirection dir) {
-      if (dir == CameraLensDirection.back) {
-        return 1;
-      }
-      if (dir == CameraLensDirection.front) {
-        return 2;
-      }
-      return 3;
-    }
-
-    final sortedIndices = List<int>.generate(cameras.length, (i) => i)
-      ..sort(
-        (a, b) => getLensPriority(
-          cameras[a].lensDirection,
-        ).compareTo(getLensPriority(cameras[b].lensDirection)),
-      );
-
-    var backCount = 1;
-    var frontCount = 1;
-    var externalCount = 1;
-
-    for (final i in sortedIndices) {
-      final cam = cameras[i];
-      late final String label;
-      switch (cam.lensDirection) {
-        case CameraLensDirection.back:
-          label = 'Rear$backCount';
-          backCount++;
-          break;
-        case CameraLensDirection.front:
-          label = 'Front$frontCount';
-          frontCount++;
-          break;
-        case CameraLensDirection.external:
-          label = 'External$externalCount';
-          externalCount++;
-          break;
-      }
-
-      final isSelected = RecoConfig.camNum == i;
-
-      cameraSwitchButtons.add(
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(24),
-              onTap: () async {
-                if (!RecoConfig.cameraEnabled) {
-                  return;
-                }
-
-                if (isAnyRecording) {
-                  try {
-                    await RecoConfig.trySwitchCameraDescription(i);
-                  } catch (_) {
-                    if (context.mounted) {
-                      TDToast.showText(
-                        textLocalize('reco_no_switch'),
-                        context: context,
-                      );
-                    }
-                  }
-                  return;
-                }
-
-                RecoConfig.camNum = i;
-                await RecoConfig.cameraInitialize();
-                if (mounted) {
-                  setState(() {});
-                }
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? (isDark
-                            ? const Color(0xFF4582FF).withAlpha(200)
-                            : theme.brandColor7.withAlpha(220))
-                      : (isDark
-                            ? const Color(0xFF23232A).withAlpha(150)
-                            : Colors.white.withAlpha(150)),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: isSelected
-                        ? (isDark ? const Color(0xFF4582FF) : theme.brandColor7)
-                        : (isDark
-                              ? Colors.white.withAlpha(30)
-                              : Colors.black.withAlpha(20)),
-                    width: isSelected ? 1.5 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      RecoConfig.getCameraLensIcon(cam.lensDirection),
-                      size: 20,
-                      color: isSelected
-                          ? Colors.white
-                          : (isDark ? Colors.white70 : const Color(0xFF555555)),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: isSelected
-                            ? Colors.white
-                            : (isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF555555)),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return cameraSwitchButtons;
   }
 
   int? _findPrimaryCameraIndex(CameraLensDirection direction) {

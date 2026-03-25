@@ -13,7 +13,6 @@ import 'package:braindance/pages/task_list.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../main.dart' show overviewLocalIndexingProvider, overviewStatsProvider;
 
@@ -29,11 +28,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   late final TabController tabController;
   int _currentTabIndex = 0;
   final GlobalKey _themeSwitchKey = GlobalKey();
-
-  static const TextStyle tabTextStyle = TextStyle(
-    fontSize: 16,
-    fontFamily: AppConfig.fontFamily,
-  );
 
   @override
   void initState() {
@@ -59,9 +53,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final textColor = isDark
         ? BDDesign.colorPaperWhite
         : BDDesign.colorInkBlack;
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final bottomContentPadding = bottomInset + 132.0;
 
@@ -201,10 +192,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
 class _SettingsTabSwitch extends StatelessWidget {
   final TabController controller;
 
-  const _SettingsTabSwitch({
-    super.key,
-    required this.controller,
-  });
+  const _SettingsTabSwitch({required this.controller});
 
   @override
   Widget build(BuildContext context) {
