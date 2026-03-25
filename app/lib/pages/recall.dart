@@ -1980,99 +1980,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     );
   }
 
-}
-
-class _AgentStepTile extends StatefulWidget {
-  final AgentStep step;
-  final bool isDark;
-  final Color textColor;
-
-  const _AgentStepTile({
-    required this.step,
-    required this.isDark,
-    required this.textColor,
-  });
-
-  @override
-  State<_AgentStepTile> createState() => _AgentStepTileState();
-}
-
-class _AgentStepTileState extends State<_AgentStepTile> {
-  final ExpansionTileController _controller = ExpansionTileController();
-  bool _wasCompleted = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _wasCompleted = widget.step.isCompleted;
-    // initial state: expand if not completed
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.step.isCompleted) {
-        _controller.expand();
-      }
-    });
-
-    widget.step.addListener(_handleStepChange);
-  }
-
-  @override
-  void dispose() {
-    widget.step.removeListener(_handleStepChange);
-    super.dispose();
-  }
-
-  void _handleStepChange() {
-    if (widget.step.isCompleted && !_wasCompleted) {
-      _wasCompleted = true;
-      // Auto-collapse when completed
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          _controller.collapse();
-        }
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ExpansionTile(
-      controller: _controller,
-      tilePadding: EdgeInsets.zero,
-      minTileHeight: 0,
-      leading: widget.step.isCompleted 
-          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
-          : const SizedBox(
-              width: 16, height: 16, 
-              child: CircularProgressIndicator(strokeWidth: 2)
-            ),
-      title: Text(
-        'Using ${widget.step.toolName}...',
-        style: TextStyle(fontSize: 13, color: widget.textColor),
-      ),
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(8),
-          margin: const EdgeInsets.only(top: 4),
-          decoration: BoxDecoration(
-            color: widget.isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
-          ),
-          child: HighlightView(
-            widget.step.content,
-            language: 'json',
-            theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
-            padding: const EdgeInsets.all(4),
-            textStyle: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-            ),
-          ),
-        )
-      ],
-    );
-  }
+  String _modelKey(Map<String, dynamic> model) {
     return model['id']?.toString() ??
         model['scene_id']?.toString() ??
         model.hashCode.toString();
@@ -2673,4 +2581,95 @@ class _ParsedLocalModelOutput {
 
   final String reasoning;
   final String answer;
+}
+
+class _AgentStepTile extends StatefulWidget {
+  final AgentStep step;
+  final bool isDark;
+  final Color textColor;
+
+  const _AgentStepTile({
+    required this.step,
+    required this.isDark,
+    required this.textColor,
+  });
+
+  @override
+  State<_AgentStepTile> createState() => _AgentStepTileState();
+}
+
+class _AgentStepTileState extends State<_AgentStepTile> {
+  final ExpansionTileController _controller = ExpansionTileController();
+  bool _wasCompleted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasCompleted = widget.step.isCompleted;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!widget.step.isCompleted) {
+        _controller.expand();
+      }
+    });
+
+    widget.step.addListener(_handleStepChange);
+  }
+
+  @override
+  void dispose() {
+    widget.step.removeListener(_handleStepChange);
+    super.dispose();
+  }
+
+  void _handleStepChange() {
+    if (widget.step.isCompleted && !_wasCompleted) {
+      _wasCompleted = true;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _controller.collapse();
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      controller: _controller,
+      tilePadding: EdgeInsets.zero,
+      minTileHeight: 0,
+      leading: widget.step.isCompleted 
+          ? const Icon(Icons.check_circle, color: Colors.green, size: 20) 
+          : const SizedBox(
+              width: 16, height: 16, 
+              child: CircularProgressIndicator(strokeWidth: 2)
+            ),
+      title: Text(
+        'Using ${widget.step.toolName}...',
+        style: TextStyle(fontSize: 13, color: widget.textColor),
+      ),
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          margin: const EdgeInsets.only(top: 4),
+          decoration: BoxDecoration(
+            color: widget.isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+          ),
+          child: HighlightView(
+            widget.step.content,
+            language: 'json',
+            theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
+            padding: const EdgeInsets.all(4),
+            textStyle: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
+          ),
+        )
+      ],
+    );
+  }
 }
