@@ -109,13 +109,11 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '[ ${widget.title.toUpperCase()} ]',
+                      widget.title,
                       style: TextStyle(
-                        fontFamily: 'Courier',
-                        fontSize: 14,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: widget.color,
-                        letterSpacing: 1.2,
+                        color: widget.textColor ?? (widget.isDark ? Colors.white : Colors.black87),
                       ),
                     ),
                   ),
@@ -254,20 +252,18 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                         if (createdAt != null)
                           Text(
                             _formatDate(createdAt),
-                            style: const TextStyle(
-                              fontFamily: 'Courier',
-                              fontSize: 11,
-                              color: BDDesign.colorMutedBlue,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? BDDesign.colorAshGray : theme.fontGyColor3,
                             ),
                           ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'JOB_ID: ${taskId.length > 8 ? taskId.substring(0, 8) : taskId} | TYPE: ${_getTaskTypeLabel(taskType)}',
+                      'ID: ${taskId.length > 8 ? taskId.substring(0, 8) : taskId} • ${_getTaskTypeLabel(taskType)}',
                       style: TextStyle(
-                        fontFamily: 'Courier',
-                        fontSize: 11,
+                        fontSize: 12,
                         color: isDark
                             ? BDDesign.colorAshGray
                             : BDDesign.colorInkBlack.withAlpha(150),
@@ -285,14 +281,13 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                           color: isDark
                               ? darkInput
                               : BDDesign.colorAshGray.withAlpha(28),
-                          border: Border.all(color: widget.color.withAlpha(50)),
+                          borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '> ${latestLog ?? description}',
+                          latestLog ?? description,
                           style: TextStyle(
-                            fontFamily: 'Courier',
-                            fontSize: 11,
-                            color: widget.color,
+                            fontSize: 12,
+                            color: isDark ? BDDesign.colorAshGray : theme.fontGyColor2,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,

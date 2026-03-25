@@ -8,6 +8,7 @@ import '../configs/app_config.dart';
 import '../configs/motion_tokens.dart';
 import '../configs/supabase_config.dart';
 import '../services/task_notification_service.dart';
+import '../widgets/bd_surfaces.dart';
 import 'task_list/category_section.dart';
 import 'task_list/status_category.dart';
 import 'webgl_viewer.dart';
@@ -217,81 +218,35 @@ class _TaskListPageState extends State<TaskListPage> {
         : const Color(0xFF333333);
 
     return Scaffold(
-      backgroundColor: isDark
-          ? BDDesign.colorInkBlack
-          : BDDesign.colorPaperWhite,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildTerminalHeader(isDark, textColor),
-            Expanded(child: _buildBody(theme, isDark, textColor)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTerminalHeader(bool isDark, Color textColor) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: isDark
-                ? BDDesign.colorAshGray.withAlpha(40)
-                : BDDesign.colorInkBlack.withAlpha(40),
-            width: 1,
-          ),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Column(
+      backgroundColor: Colors.transparent,
+      body: BDPageBackdrop(
+        child: SafeArea(
+          bottom: false,
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'SYSTEM.TASKS',
-                style: TextStyle(
-                  fontFamily: 'Courier',
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: BDDesign.colorMutedBlue,
-                  letterSpacing: 2.0,
+              BDPageHeader(
+                title: textLocalize('task_list_title'),
+                trailing: IconButton(
+                  icon: AnimatedRotation(
+                    turns: _isLoading ? 1 : 0,
+                    duration: const Duration(milliseconds: 600),
+                    child: Icon(
+                      Icons.refresh,
+                      color: isDark
+                          ? BDDesign.colorPaperWhite
+                          : BDDesign.colorInkBlack,
+                      size: 20,
+                    ),
+                  ),
+                  tooltip: textLocalize('refresh'),
+                  onPressed: _isLoading ? null : _fetchTasks,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                textLocalize('task_list_title'),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: isDark
-                      ? BDDesign.colorPaperWhite
-                      : BDDesign.colorInkBlack,
-                  letterSpacing: 0.5,
-                ),
-              ),
+              Expanded(child: _buildBody(theme, isDark, textColor)),
             ],
           ),
-          IconButton(
-            icon: AnimatedRotation(
-              turns: _isLoading ? 1 : 0,
-              duration: const Duration(milliseconds: 600),
-              child: Icon(
-                Icons.refresh,
-                color: isDark
-                    ? BDDesign.colorPaperWhite
-                    : BDDesign.colorInkBlack,
-                size: 20,
-              ),
-            ),
-            tooltip: textLocalize('refresh'),
-            onPressed: _isLoading ? null : _fetchTasks,
-          ),
-        ],
+        ),
       ),
     );
   }
