@@ -670,7 +670,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 128, // 对齐 Python 脚本的 max_new_tokens=96，稍微给点余量
+              maxTokens: 384, // 给 <think> + 正式回答留出更充足的联合预算，降低被截断概率
               temp: 0.1, // 接近 Greedy Search，减少幻觉
               topK: 20,
               topP: 0.1, // 进一步限制采样范围
@@ -697,17 +697,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 }
                 return;
               }
-              final previousParsed = _parseLocalModelOutput(streamedAnswer);
-              final shouldStop =
-                  nextAnswer == previousParsed.answer &&
-                  nextReasoning == previousParsed.reasoning;
               streamedAnswer = nextRaw;
-              lockedAnswer = _shouldLockAnswer(nextAnswer);
+              lockedAnswer =
+                  nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
               setState(() {
                 _localReasoning = nextReasoning;
                 _localAnswer = nextAnswer;
               });
-              if (shouldStop || lockedAnswer) {
+              if (lockedAnswer) {
                 _localQnaModel!.cancelGeneration();
               }
             },
