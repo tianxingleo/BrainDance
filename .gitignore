@@ -205,3 +205,23 @@ docs/old/idea.pdf
 *.mp4.bak
 ai_engine/demo/webgl/test.mp4.bak
 ai_engine/demo/webgl/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
+
+# =========================
+# 11. Local Build Artifacts (本地构建产物)
+# =========================
+.cache/
+tmp_papers/
+
+# 3DGS viewer local build outputs
+3dgs_viewer/**/node_modules/
+3dgs_viewer/**/dist/
+3dgs_viewer/**/*.splat
+
+# Dashboard local env and build outputs
+dashboard/.env
+dashboard/node_modules/
+dashboard/dist/
+
+# WebGL bundler generated assets
+app/assets/webgl/assets/index-*.js
+app/assets/webgl/assets/index-*.css
