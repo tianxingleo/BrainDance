@@ -77,7 +77,6 @@ const spatialIntentSchema = z.object({
 });
 
 const agentModeSchema = z.enum([
-  "chat",
   "spatial_search",
   "asset_metadata",
   "time_compare",
@@ -191,15 +190,41 @@ type ToolCallLike = {
   args: Record<string, unknown>;
 };
 
+export type AgentProgressEvent =
+  | {
+    event: "status";
+    data: {
+      phase: string;
+      summary: string;
+      detail?: string;
+    };
+  }
+  | {
+    event: "tool_call";
+    data: {
+      name: string;
+      args: Record<string, unknown>;
+      summary?: string;
+      round?: number;
+    };
+  }
+  | {
+    event: "tool_result";
+    data: {
+      name: string;
+      summary: string;
+      count?: number;
+      round?: number;
+    };
+  };
+
+type AgentRuntimeCallbacks = {
+  onEvent?: (event: AgentProgressEvent) => void | Promise<void>;
+};
+
 export type SpatialSearchResponse = {
   success: true;
-  mode:
-    | "chat"
-    | "spatial_search"
-    | "asset_metadata"
-    | "time_compare"
-    | "creative"
-    | "memory_graph";
+  mode: "spatial_search" | "asset_metadata" | "time_compare" | "creative" | "memory_graph";
   intent: SpatialIntent | null;
   selection: {
     scene_id: string | null;
@@ -371,21 +396,6 @@ export function normalizeExplicitTimeRange(input: {
     start.setUTCDate(start.getUTCDate() - 7);
     return { startTime: asUtcIso(start), endTime: asUtcIso(now) };
   }
-  if (hint.includes("上周")) {
-    const day = now.getUTCDay() || 7;
-    const start = new Date(now);
-    start.setUTCDate(start.getUTCDate() - day - 6);
-    const end = new Date(start);
-    end.setUTCDate(start.getUTCDate() + 6);
-    return { startTime: startOfDayUtc(start), endTime: endOfDayUtc(end) };
-  }
-  if (hint.includes("去年")) {
-    const year = now.getUTCFullYear() - 1;
-    return {
-      startTime: asUtcIso(new Date(Date.UTC(year, 0, 1, 0, 0, 0))),
-      endTime: asUtcIso(new Date(Date.UTC(year, 11, 31, 23, 59, 59))),
-    };
-  }
 
   return { startTime: null, endTime: null };
 }
@@ -496,49 +506,18 @@ function serializeAssetContext(state: AssetToolState) {
   };
 }
 
+async function emitProgress(
+  callbacks: AgentRuntimeCallbacks | undefined,
+  event: AgentProgressEvent,
+): Promise<void> {
+  await callbacks?.onEvent?.(event);
+}
+
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
-  options: SpatialSearchAgentOptions = {},
+  options: SpatialSearchAgentOptions = {}
 ): Promise<AgentMode> {
-  const normalized = query.trim().toLowerCase();
-  const currentMode = options.currentMode ?? null;
-
-  if (isDirectReplyQuery(query)) {
-    return "chat";
-  }
-
-  if (
-    currentMode === "compare" ||
-    /比较|对比|变化|前后|两个月前|现在/.test(query)
-  ) {
-    return "time_compare";
-  }
-  if (/导览|旁白|脚本|大纲|故事|创作|生成一个.*记忆集/.test(query)) {
-    return "creative";
-  }
-  if (/越来越|趋势|缺失|时间线|最近三次|长期记忆|关系摘要/.test(query)) {
-    return "memory_graph";
-  }
-  if (
-    currentMode === "batch_edit" ||
-    currentMode === "collection" ||
-    /改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|对比.*模型|模型.*对比/.test(query) ||
-    ((options.selectedModelIds?.length ?? 0) > 0 &&
-      /这些模型|这几个模型|选中的模型|这三个模型/.test(query))
-  ) {
-    return "asset_metadata";
-  }
-  if (
-    normalized.includes("找") ||
-    normalized.includes("在哪") ||
-    normalized.includes("有没有") ||
-    normalized.includes("空间") ||
-    normalized.includes("场景")
-  ) {
-    return "spatial_search";
-  }
-
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getRoutePrompt } = await import("./prompts/route.ts");
   const contextBlock = buildAgentContextBlock(options);
@@ -551,90 +530,11 @@ async function classifyAgentMode(
   return result.mode;
 }
 
-export function isDirectReplyQuery(query: string): boolean {
-  const normalized = query
-    .trim()
-    .toLowerCase()
-    .replace(/[！!。.,，?？~～\s]+/g, "");
-
-  if (!normalized) {
-    return false;
-  }
-
-  return [
-    "你好",
-    "您好",
-    "嗨",
-    "哈喽",
-    "hello",
-    "hi",
-    "在吗",
-    "在不在",
-    "有人吗",
-    "谢谢",
-    "多谢",
-    "谢了",
-    "辛苦了",
-  ].includes(normalized);
-}
-
-function buildDirectReplyAnswer(query: string): string {
-  const normalized = query
-    .trim()
-    .toLowerCase()
-    .replace(/[！!。.,，?？~～\s]+/g, "");
-
-  if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
-    return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
-  }
-
-  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
-}
-
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {}
 ): Promise<SpatialIntent> {
-  const trimmed = query.trim();
-  const heuristicTimeHint = (
-    trimmed.match(/今天|昨天|最近|最新|刚才|上周|去年/g) ?? []
-  ).join(" ");
-  const heuristicTargetType: SearchTargetType =
-    /最近|最新|今天|昨天|上周|去年/.test(trimmed)
-      ? "time"
-      : /角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/.test(trimmed)
-      ? "location"
-      : /场景|空间|房间/.test(trimmed)
-      ? "scene"
-      : "object";
-
-  const heuristic: SpatialIntent = {
-    rewrittenQuery: trimmed
-      .replace(/^(帮我|给我|请你|麻烦你|找一下|帮我找|请帮我找)/, "")
-      .replace(/(在哪|在哪里|还在吗|有没有|给我看看|帮我找出来)$/g, "")
-      .trim() || trimmed,
-    targetType: heuristicTargetType,
-    objectHint: heuristicTargetType === "object" ? trimmed : null,
-    locationHint: trimmed.match(/角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/)?.[0] ?? null,
-    sceneHint: null,
-    timeHint: heuristicTimeHint || null,
-    startTime: null,
-    endTime: null,
-    reasoning: "优先使用规则解析，减少同步路径上的 LLM 延迟。",
-  };
-  const heuristicRange = normalizeExplicitTimeRange(heuristic);
-  if (
-    heuristic.rewrittenQuery &&
-    (heuristic.targetType !== "scene" || heuristic.locationHint !== null || heuristic.timeHint !== null)
-  ) {
-    return {
-      ...heuristic,
-      startTime: heuristicRange.startTime,
-      endTime: heuristicRange.endTime,
-    };
-  }
-
   const structuredModel = model.withStructuredOutput(spatialIntentSchema);
   const today = new Date().toISOString().slice(0, 10);
   
@@ -1142,22 +1042,21 @@ async function selectBestResult(
   intent: SpatialIntent,
   rankedCandidates: Array<SceneCandidate & { score: number }>,
   actions: VisualizationAction[],
-  options: SpatialSearchAgentOptions = {}
+  options: SpatialSearchAgentOptions = {},
+  callbacks?: AgentRuntimeCallbacks,
 ): Promise<SelectionResult> {
-  const best = rankedCandidates[0] ?? null;
-  if (best) {
-    return {
-      selectedSceneId: best.sceneId,
-      selectedModelId: best.modelId,
-      selectedPoseImageId: best.bestPose?.image_name ?? null,
-      selectionReason: "综合候选得分、证据来源数量与关键词命中度后选择最高分结果",
-      confidence: best.score,
-      answer: `已找到最相关的空间结果：${best.description || best.sceneId}。证据来自${Object.keys(best.sourceScores).join(" + ")}。你可以直接打开场景，或查看其他候选。`,
-      actions,
-    };
-  }
-
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "selection",
+      summary: `正在综合 ${Math.min(rankedCandidates.length, 5)} 个候选并生成最终回答`,
+      detail: rankedCandidates.length === 0
+        ? "当前没有可信候选，准备返回兜底说明"
+        : `当前最高候选分数 ${(rankedCandidates[0]!.score * 100).toFixed(1)}%`,
+    },
+  });
   const structuredModel = model.withStructuredOutput(selectionSchema);
+  const best = rankedCandidates[0] ?? null;
 
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getSelectionPrompt } = await import("./prompts/selection.ts");
@@ -1176,7 +1075,15 @@ async function selectBestResult(
         bestPose: candidate.bestPose,
       })),
       suggestedActions: actions,
-      defaultSelection: null,
+      defaultSelection: best
+        ? {
+          selectedSceneId: best.sceneId,
+          selectedModelId: best.modelId,
+          selectedPoseImageId: best.bestPose?.image_name ?? null,
+          selectionReason: "综合工具检索得分最高",
+          confidence: best.score,
+        }
+        : null,
     })),
   ]);
 }
@@ -1186,41 +1093,121 @@ async function executeAgentToolLoop(input: {
   intent: SpatialIntent;
   tools: DynamicStructuredTool[];
   options?: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
-  const { intent, tools } = input;
+  const { model, intent, tools, options = {}, callbacks } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
   const trace: ToolTraceEntry[] = [];
-  const preferredTools = getPreferredToolOrder(intent);
+  const agentModel = model.bindTools(tools);
 
-  for (let round = 0; round < Math.min(MAX_AGENT_TOOL_ROUNDS, preferredTools.length); round += 1) {
-    const toolName = preferredTools[round];
-    const tool = toolsByName.get(toolName);
-    if (!tool) {
-      continue;
-    }
-    const args = buildToolArgs(toolName, intent);
-    const toolResult = await tool.invoke(args);
-    const resultText = typeof toolResult === "string"
-      ? toolResult
-      : JSON.stringify(toolResult);
-    const count = collectSceneCandidates(tool.name, resultText, candidates);
-    trace.push({
-      toolName: tool.name,
-      args,
-      resultSummary: summarizeToolResult(tool.name, count),
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getSpatialToolLoopPrompt } = await import("./prompts/spatial_tool_loop.ts");
+  const contextBlock = buildAgentContextBlock(options);
+
+  const messages = [
+    new SystemMessage(getSpatialToolLoopPrompt(contextBlock)),
+    new HumanMessage(JSON.stringify(intent)),
+  ];
+
+  for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "spatial_tool_round",
+        summary: `正在进行第 ${round + 1} 轮空间检索决策`,
+        detail: `当前已累计 ${candidates.size} 个候选场景`,
+      },
     });
+    const response = await agentModel.invoke(messages);
+    messages.push(response);
 
-    if (
-      !shouldForceAnotherToolRound({
-        intent,
-        candidates,
-        trace,
-      })
-    ) {
-      break;
+    let toolCalls = Array.isArray(response.tool_calls)
+      ? response.tool_calls
+      : [];
+    if (toolCalls.length === 0) {
+      const shouldForceContinue = round < MAX_AGENT_TOOL_ROUNDS - 1 &&
+        shouldForceAnotherToolRound({
+          intent,
+          candidates,
+          trace,
+        });
+      const forcedToolCall = shouldForceContinue
+        ? buildForcedToolCall({ intent, trace })
+        : null;
+
+      if (!forcedToolCall) {
+        break;
+      }
+
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "spatial_tool_force_continue",
+          summary: "当前证据不足，继续补充检索来源",
+          detail: `自动追加 ${forcedToolCall.name} 以补齐候选和交叉证据`,
+        },
+      });
+
+      messages.push(
+        new SystemMessage(
+          `当前证据不足，需要继续补充检索。
+- 候选数不足 ${MIN_AGENT_CANDIDATES} 个、或最高分低于 ${MIN_AGENT_TOP_SCORE}、或证据来源过单时，不得直接结束。
+- 下一步请补充执行 ${forcedToolCall.name}。`,
+        ),
+      );
+      toolCalls = [forcedToolCall];
+    }
+
+    for (const toolCall of toolCalls) {
+      await emitProgress(callbacks, {
+        event: "tool_call",
+        data: {
+          name: toolCall.name,
+          args: toolCall.args ?? {},
+          summary: `开始执行 ${toolCall.name}`,
+          round: round + 1,
+        },
+      });
+      const tool = toolsByName.get(toolCall.name);
+      if (!tool) {
+        messages.push(
+          new ToolMessage({
+            tool_call_id: toolCall.id ?? toolCall.name,
+            content: JSON.stringify({ error: `未知工具 ${toolCall.name}` }),
+          }),
+        );
+        continue;
+      }
+
+      const toolResult = await tool.invoke(toolCall.args);
+      const resultText = typeof toolResult === "string"
+        ? toolResult
+        : JSON.stringify(toolResult);
+      const count = collectSceneCandidates(tool.name, resultText, candidates);
+      const resultSummary = summarizeToolResult(tool.name, count);
+      trace.push({
+        toolName: tool.name,
+        args: toolCall.args ?? {},
+        resultSummary,
+      });
+      await emitProgress(callbacks, {
+        event: "tool_result",
+        data: {
+          name: tool.name,
+          summary: `${resultSummary}，当前累计 ${candidates.size} 个候选场景`,
+          count,
+          round: round + 1,
+        },
+      });
+      messages.push(
+        new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: resultText,
+        }),
+      );
     }
   }
 
@@ -1232,8 +1219,9 @@ async function executeAssetToolLoop(input: {
   query: string;
   tools: DynamicStructuredTool[];
   options?: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<{ trace: ToolTraceEntry[]; state: AssetToolState }> {
-  const { model, query, tools, options = {} } = input;
+  const { model, query, tools, options = {}, callbacks } = input;
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
@@ -1250,6 +1238,13 @@ async function executeAssetToolLoop(input: {
   ];
 
   for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "asset_tool_round",
+        summary: `正在进行第 ${round + 1} 轮资产工具分析`,
+      },
+    });
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
@@ -1261,6 +1256,15 @@ async function executeAssetToolLoop(input: {
     }
 
     for (const toolCall of toolCalls) {
+      await emitProgress(callbacks, {
+        event: "tool_call",
+        data: {
+          name: toolCall.name,
+          args: toolCall.args ?? {},
+          summary: `开始执行 ${toolCall.name}`,
+          round: round + 1,
+        },
+      });
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
         messages.push(
@@ -1277,10 +1281,20 @@ async function executeAssetToolLoop(input: {
         ? toolResult
         : JSON.stringify(toolResult);
       const count = collectAssetToolResult(tool.name, resultText, state);
+      const resultSummary = summarizeToolResult(tool.name, count);
       trace.push({
         toolName: tool.name,
         args: toolCall.args ?? {},
-        resultSummary: summarizeToolResult(tool.name, count),
+        resultSummary,
+      });
+      await emitProgress(callbacks, {
+        event: "tool_result",
+        data: {
+          name: tool.name,
+          summary: resultSummary,
+          count,
+          round: round + 1,
+        },
       });
       messages.push(
         new ToolMessage({
@@ -1306,7 +1320,15 @@ function emptyViewerPayload() {
 async function buildTimeCompareModeResponse(
   query: string,
   options: SpatialSearchAgentOptions,
+  callbacks?: AgentRuntimeCallbacks,
 ): Promise<SpatialSearchResponse> {
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "time_compare",
+      summary: "已进入时间对比模式，正在对比时间窗口中的场景差异",
+    },
+  });
   const result = await runTimeCompareAgent(query);
   const selectedReason = result.comparison.target
     ? "优先选择最近时间窗口中的目标版本作为主候选"
@@ -1374,7 +1396,15 @@ async function buildCreativeModeResponse(input: {
   supabase: SupabaseClient;
   query: string;
   options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "creative_prepare",
+      summary: "已进入创作模式，正在整理故事素材和时间线",
+    },
+  });
   const modelIds = input.options.selectedModelIds ??
     (input.options.currentModelId ? [input.options.currentModelId] : []);
   if (modelIds.length === 0) {
@@ -1387,6 +1417,14 @@ async function buildCreativeModeResponse(input: {
     selectedModelIds: modelIds,
   });
   const outline = generateStoryOutlineFromContext(storyContext, input.query);
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "creative_outline",
+      summary: `已生成 ${outline.outline.length} 段创作大纲`,
+      detail: `本次整理了 ${storyContext.model_count} 个模型素材`,
+    },
+  });
   const task = input.options.executionMode === "execute"
     ? await enqueueCreativeTask(input.supabase, {
       query: input.query,
@@ -1456,7 +1494,15 @@ async function buildMemoryGraphModeResponse(input: {
   supabase: SupabaseClient;
   query: string;
   options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "memory_graph",
+      summary: "已进入长期记忆模式，正在汇总趋势、缺失模式和变化时间线",
+    },
+  });
   const focusModelId = input.options.currentModelId ?? input.options.selectedModelIds?.[0];
   if (!focusModelId) {
     throw new Error("长期记忆模式需要当前模型或至少一个已选模型");
@@ -1537,42 +1583,30 @@ async function buildMemoryGraphModeResponse(input: {
 export async function runSpatialSearchAgent(
   query: string,
   options: SpatialSearchAgentOptions = {},
+  callbacks: AgentRuntimeCallbacks = {},
 ): Promise<SpatialSearchResponse> {
   const env = ensureRuntimeEnv();
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "bootstrap",
+      summary: "Agent 已收到请求，正在初始化检索上下文",
+      detail: `执行模式：${options.executionMode ?? "preview"}`,
+    },
+  });
   const mode = await classifyAgentMode(model, query, options);
-
-  if (mode === "chat") {
-    return {
-      success: true,
-      mode: "chat",
-      intent: null,
-      selection: {
-        scene_id: null,
-        model_id: null,
-        pose_image_id: null,
-        confidence: 1,
-        reason: "该请求属于纯问候或致谢，不需要进入工具调用链路。",
-      },
-      answer: buildDirectReplyAnswer(query),
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason: null,
-      tool_trace: [],
-      asset_context: serializeAssetContext(createEmptyAssetToolState()),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    };
-  }
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "route",
+      summary: `已完成模式判断：${mode}`,
+    },
+  });
 
   if (mode === "time_compare") {
-    return await buildTimeCompareModeResponse(query, options);
+    return await buildTimeCompareModeResponse(query, options, callbacks);
   }
 
   if (mode === "creative") {
@@ -1580,6 +1614,7 @@ export async function runSpatialSearchAgent(
       supabase,
       query,
       options,
+      callbacks,
     });
   }
 
@@ -1588,6 +1623,7 @@ export async function runSpatialSearchAgent(
       supabase,
       query,
       options,
+      callbacks,
     });
   }
 
@@ -1633,6 +1669,7 @@ export async function runSpatialSearchAgent(
       query,
       tools: assetTools,
       options,
+      callbacks,
     });
 
     return {
@@ -1682,7 +1719,22 @@ export async function runSpatialSearchAgent(
 
   const embeddings = createEmbeddingsModel(env);
 
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "intent",
+      summary: "正在解析空间意图和时间约束",
+    },
+  });
   const intent = await parseSpatialIntent(model, query, options);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "intent_done",
+      summary: `意图解析完成，目标类型为 ${intent.targetType}`,
+      detail: intent.rewrittenQuery,
+    },
+  });
   const tools = [
     await buildPoseTool(supabase, embeddings),
     await buildSceneTool(supabase),
@@ -1693,6 +1745,7 @@ export async function runSpatialSearchAgent(
     intent,
     tools,
     options,
+    callbacks,
   });
 
   const rankedCandidates = [...candidateMap.values()]
@@ -1712,7 +1765,14 @@ export async function runSpatialSearchAgent(
   });
 
   const selection = rankedCandidates.length > 0
-    ? await selectBestResult(model, intent, rankedCandidates, suggestedActions, options)
+    ? await selectBestResult(
+      model,
+      intent,
+      rankedCandidates,
+      suggestedActions,
+      options,
+      callbacks,
+    )
     : {
       selectedSceneId: null,
       selectedModelId: null,
@@ -1722,6 +1782,17 @@ export async function runSpatialSearchAgent(
       answer: "当前没有找到可信的空间检索结果。",
       actions: [],
     };
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "finalize",
+      summary: rankedCandidates.length === 0
+        ? "未找到可信候选，准备返回兜底说明"
+        : `已选定场景 ${selection.selectedSceneId ?? rankedCandidates[0]!.sceneId}`,
+      detail: selection.selectionReason,
+    },
+  });
 
   const finalScene =
     rankedCandidates.find((candidate) =>

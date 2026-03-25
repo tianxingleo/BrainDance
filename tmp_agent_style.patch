@@ -1,0 +1,4 @@
+diff --git a/app/lib/pages/recall.dart b/app/lib/pages/recall.dart
+index 9f7af11..9cf73c4 100644
+--- a/app/lib/pages/recall.dart
++++ b/app/lib/pages/recall.dart
