@@ -3,6 +3,10 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from requests.exceptions import ChunkedEncodingError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -139,3 +143,59 @@ def test_resolve_log_target_supports_directory_mode(tmp_path: Path):
     assert event_log_target.parent == tmp_path
     assert log_target.suffix == ".json"
     assert event_log_target.suffix == ".jsonl"
+
+
+def test_run_single_turn_reports_partial_context_when_stream_interrupts(monkeypatch: pytest.MonkeyPatch):
+    module = load_module()
+
+    class FakeResponse:
+        status_code = 200
+        reason = "OK"
+        headers = {"content-type": "text/event-stream; charset=utf-8"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=None, decode_unicode=True):
+            yield 'event: ping\ndata: {"message":"ok"}\n\n'
+            yield 'event: status\ndata: {"phase":"request_received","summary":"已收到请求"}\n\n'
+            raise ChunkedEncodingError("Response ended prematurely")
+
+    monkeypatch.setattr(module, "extract_supabase_config", lambda: ("https://example.supabase.co", "test-key"))
+    monkeypatch.setattr(module.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    args = SimpleNamespace(
+        accept="sse",
+        execution_mode="preview",
+        current_scene_id="",
+        current_model_id="",
+        current_mode="",
+        selected_model_ids="",
+        candidate_scene_ids="",
+        session_id="",
+        conversation_summary="",
+        session_state_file="",
+        show_request=False,
+        show_response_meta=False,
+        show_raw_event=False,
+        show_event_timeline=False,
+        show_full_result=False,
+        hide_candidates=False,
+        hide_tool_trace=False,
+        timeout=10,
+    )
+
+    with pytest.raises(module.StreamInterruptedError) as exc_info:
+        module.run_single_turn("你是谁", args)
+
+    partial_result = exc_info.value.partial_result
+    assert "流式响应在收到 done 事件前中断" in str(exc_info.value)
+    assert partial_result["response_meta"]["status_code"] == 200
+    assert partial_result["stream_error"]["type"] == "chunked_encoding_error"
+    assert [item["event"] for item in partial_result["events"]] == ["ping", "status"]

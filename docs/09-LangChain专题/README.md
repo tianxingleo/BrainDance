@@ -35,6 +35,7 @@
 - 2026-03-26 已补充 `spatial_search` 链路级提速：空间检索不再依赖“多轮 LLM 工具调度 + 最终 LLM 裁决”的串行结构，改为“单次意图解析 + 并行检索工具 + 确定性评分选优”，同时去掉 `pose_semantic_search` 内部按行补标签的 N+1 查询。
 - 2026-03-26 已补充空间意图解析超时兜底：`parseSpatialIntent` 现在有 8 秒超时保护，若结构化解析超时或失败，会自动切到规则版意图解析并继续检索，不再长期卡在“正在解析空间意图和时间约束”。
 - 2026-03-27 已新增电脑端调试 CLI：`ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py` 可以直接按 Flutter 的请求体和流式协议调 `agent-recall`，并打印 `status / plan / thought / tool_call / tool_result / message / done`，最终再汇总 `top_candidates`、`tool_trace`、`follow_up` 与 `session_state`，用于不启动 Flutter 时的桌面联调。
+- 2026-03-27 已补充调试 CLI 断流诊断：当 `agent-recall` 在 `done` 前提前断开连接，或只返回 `error` 事件未返回 `done` 时，CLI 不再直接抛 Python `ChunkedEncodingError` 栈，而会保留已收到的事件、时间线、响应元信息与中断原因，方便继续归因是“后端主动报错”还是“HTTP 流被中途截断”。
 
 ## 2026-03-26 修复记录
 

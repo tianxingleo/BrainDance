@@ -56,6 +56,7 @@
   - 调试统计（首包、首个状态、首次工具调用、首字、done 耗时与事件计数）
   - `evidence` 摘要输出
   - 更完整的 JSON 落盘与可选 JSONL 事件时间线落盘
+  - 当 HTTP 流在 `done` 前提前断开，或后端只返回 `error` 事件时，CLI 会保留已收到的事件、时间线、响应元信息和中断原因，并以受控失败退出，避免只留下 Python `ChunkedEncodingError` 回溯
 
 ## 当前用途
 
@@ -121,6 +122,7 @@ python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
 - 事件时间线摘要生成
 - 核心耗时统计汇总
 - 目录模式日志路径生成
+- 提前断流时的部分事件保留与诊断报错
 
 本轮只补了 CLI 和解析测试，没有在当前文档里声称已经完成真实线上联调结论；真实链路是否可跑仍取决于：
 

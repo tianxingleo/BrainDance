@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import requests
+from requests.exceptions import ChunkedEncodingError, RequestException
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -32,6 +33,14 @@ DEFAULT_LOG_DIR = PROJECT_ROOT / "ai_engine" / "finetune_qwen3" / "logs" / "agen
 class ParsedEvents:
     events: list[dict[str, Any]]
     remaining: str
+
+
+class StreamInterruptedError(RuntimeError):
+    """在保留已收到流式上下文的前提下，报告中断原因。"""
+
+    def __init__(self, message: str, partial_result: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.partial_result = partial_result
 
 
 def parse_args() -> argparse.Namespace:
@@ -541,6 +550,40 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def build_debug_result(
+    *,
+    endpoint: str,
+    accept_mode: str,
+    payload: dict[str, Any],
+    request_started_iso: str,
+    response_meta: dict[str, Any] | None,
+    events: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+    final_result: dict[str, Any] | None,
+    stream_error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "request": {
+            "started_at": request_started_iso,
+            "ended_at": now_iso(),
+            "endpoint": endpoint,
+            "accept_mode": accept_mode,
+            "payload": payload,
+        },
+        "response_meta": response_meta,
+        "stats": {
+            "timing": compute_timing_stats(timeline),
+            "event_counts": build_event_counts(events),
+        },
+        "query": str(payload.get("query") or ""),
+        "payload": payload,
+        "events": events,
+        "timeline": timeline,
+        "result": final_result,
+        "stream_error": stream_error,
+    }
+
+
 def run_single_turn(question: str, args: argparse.Namespace) -> dict[str, Any]:
     supabase_url, supabase_key = extract_supabase_config()
     access_token = os.getenv("SUPABASE_ACCESS_TOKEN", "").strip()
@@ -563,6 +606,8 @@ def run_single_turn(question: str, args: argparse.Namespace) -> dict[str, Any]:
     final_result: dict[str, Any] | None = None
     answer_started = False
     response_meta: dict[str, Any] | None = None
+    transport_error: dict[str, Any] | None = None
+    error_event: dict[str, Any] | None = None
 
     if args.show_request:
         print_request_summary(endpoint=endpoint, headers=headers, payload=payload)
@@ -580,27 +625,44 @@ def run_single_turn(question: str, args: argparse.Namespace) -> dict[str, Any]:
         if args.show_response_meta:
             print_response_meta(response_meta)
         buffer = ""
-        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-            if not chunk:
-                continue
-            buffer += chunk
-            parsed = drain_streaming_events(buffer)
-            buffer = parsed.remaining
-            for event in parsed.events:
-                events.append(event)
-                timeline.append(
-                    build_timeline_entry(
-                        seq=len(events),
-                        event=event,
-                        started_at_monotonic=started_at_monotonic,
-                    ),
-                )
-                if event.get("event") == "message" and not answer_started:
-                    print_section("流式回答")
-                    answer_started = True
-                print_event(event, show_raw_event=args.show_raw_event)
-                if event.get("event") == "done" and isinstance(event.get("data"), dict):
-                    final_result = event["data"]
+        try:
+            for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                if not chunk:
+                    continue
+                buffer += chunk
+                parsed = drain_streaming_events(buffer)
+                buffer = parsed.remaining
+                for event in parsed.events:
+                    events.append(event)
+                    timeline.append(
+                        build_timeline_entry(
+                            seq=len(events),
+                            event=event,
+                            started_at_monotonic=started_at_monotonic,
+                        ),
+                    )
+                    if event.get("event") == "message" and not answer_started:
+                        print_section("流式回答")
+                        answer_started = True
+                    print_event(event, show_raw_event=args.show_raw_event)
+                    if event.get("event") == "done" and isinstance(event.get("data"), dict):
+                        final_result = event["data"]
+                    if event.get("event") == "error":
+                        payload = event.get("data")
+                        if isinstance(payload, dict):
+                            error_event = payload
+                        else:
+                            error_event = {"message": stringify(payload).strip()}
+        except ChunkedEncodingError as error:
+            transport_error = {
+                "type": "chunked_encoding_error",
+                "message": str(error),
+            }
+        except RequestException as error:
+            transport_error = {
+                "type": error.__class__.__name__,
+                "message": str(error),
+            }
 
         tail = buffer.strip()
         if tail:
@@ -616,19 +678,38 @@ def run_single_turn(question: str, args: argparse.Namespace) -> dict[str, Any]:
                 print_event(event, show_raw_event=args.show_raw_event)
                 if event.get("event") == "done" and isinstance(event.get("data"), dict):
                     final_result = event["data"]
+                if event.get("event") == "error":
+                    payload = event.get("data")
+                    if isinstance(payload, dict):
+                        error_event = payload
+                    else:
+                        error_event = {"message": stringify(payload).strip()}
 
     if final_result is None:
-        raise RuntimeError("流式结束后未收到 done 事件")
+        partial_result = build_debug_result(
+            endpoint=endpoint,
+            accept_mode=args.accept,
+            payload=payload,
+            request_started_iso=request_started_iso,
+            response_meta=response_meta,
+            events=events,
+            timeline=timeline,
+            final_result=None,
+            stream_error=transport_error or error_event,
+        )
+        if error_event:
+            message = f"后端返回 error 事件，且未收到 done 事件：{stringify(error_event).strip()}"
+        elif transport_error:
+            message = (
+                "流式响应在收到 done 事件前中断："
+                f"{transport_error.get('message') or transport_error.get('type')}"
+            )
+        else:
+            message = "流式结束后未收到 done 事件"
+        raise StreamInterruptedError(message, partial_result)
 
     event_counts = build_event_counts(events)
     timing = compute_timing_stats(timeline)
-    request_summary = {
-        "started_at": request_started_iso,
-        "ended_at": now_iso(),
-        "endpoint": endpoint,
-        "accept_mode": args.accept,
-        "payload": payload,
-    }
 
     print()
     print_stats(timing, event_counts)
@@ -642,19 +723,16 @@ def run_single_turn(question: str, args: argparse.Namespace) -> dict[str, Any]:
         show_full_result=args.show_full_result,
     )
 
-    return {
-        "request": request_summary,
-        "response_meta": response_meta,
-        "stats": {
-            "timing": timing,
-            "event_counts": event_counts,
-        },
-        "query": question,
-        "payload": payload,
-        "events": events,
-        "timeline": timeline,
-        "result": final_result,
-    }
+    return build_debug_result(
+        endpoint=endpoint,
+        accept_mode=args.accept,
+        payload=payload,
+        request_started_iso=request_started_iso,
+        response_meta=response_meta,
+        events=events,
+        timeline=timeline,
+        final_result=final_result,
+    )
 
 
 def persist_log(path: Path, payload: dict[str, Any]) -> None:
@@ -675,7 +753,28 @@ def main() -> None:
     event_log_path = Path(args.event_log_file) if args.event_log_file else None
 
     if args.query.strip():
-        result = run_single_turn(args.query.strip(), args)
+        try:
+            result = run_single_turn(args.query.strip(), args)
+        except StreamInterruptedError as error:
+            result = error.partial_result
+            final_log_path = resolve_log_target(log_path, args.query.strip())
+            final_event_log_path = resolve_event_log_target(event_log_path, args.query.strip())
+            if final_log_path:
+                persist_log(final_log_path, result)
+            if final_event_log_path:
+                write_jsonl(final_event_log_path, result["timeline"])
+            print(file=sys.stderr)
+            print_section("调试失败")
+            print(str(error), file=sys.stderr)
+            if result.get("stats"):
+                print_stats(
+                    result["stats"].get("timing") or {},
+                    result["stats"].get("event_counts") or {},
+                )
+            if args.show_event_timeline:
+                print_section("事件时间线")
+                print_event_timeline(result.get("timeline") or [])
+            raise SystemExit(1) from error
         final_log_path = resolve_log_target(log_path, args.query.strip())
         final_event_log_path = resolve_event_log_target(event_log_path, args.query.strip())
         if final_log_path:
