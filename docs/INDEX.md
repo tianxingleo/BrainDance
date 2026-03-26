@@ -43,6 +43,7 @@
 | Agent 规划与 LangChain 实践路线 | Agent 三步实施路线、LangChain TS 落点、工具与动作协议 | [02-架构设计/Agent规划与LangChain实践路线.md](02-架构设计/Agent规划与LangChain实践路线.md) |
 | LangChain 专题目录 | LangChain 相关实现现状、阶段总结与联调记录入口 | [09-LangChain专题/README.md](09-LangChain专题/README.md) |
 | LangChain 实现现状（2026-03-25） | 以当前代码为准整理已落地能力 | [09-LangChain专题/LangChain实现现状-2026-03-25.md](09-LangChain专题/LangChain实现现状-2026-03-25.md) |
+| LangChain 实现现状（2026-03-26） | 记录统一入口、多模式共享 Core、流式协议与 Flutter 消费层现状 | [09-LangChain专题/LangChain实现现状-2026-03-26.md](09-LangChain专题/LangChain实现现状-2026-03-26.md) |
 
 ### 3️⃣ API 与接口
 

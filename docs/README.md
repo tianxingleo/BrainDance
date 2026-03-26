@@ -59,6 +59,7 @@
 |----------|------|--------|
 | [LangChain 专题目录](09-LangChain专题/README.md) | LangChain 文档入口、维护规则与分卷说明 | ⭐⭐⭐ 推荐 |
 | [LangChain 实现现状（2026-03-25）](09-LangChain专题/LangChain实现现状-2026-03-25.md) | 以代码为准记录当前 LangChain 相关实现 | ⭐⭐⭐ 推荐 |
+| [LangChain 实现现状（2026-03-26）](09-LangChain专题/LangChain实现现状-2026-03-26.md) | 记录统一入口、多模式共享 Core、流式协议与 Flutter 消费层现状 | ⭐⭐⭐ 推荐 |
 
 ### 3️⃣ API 参考
 
