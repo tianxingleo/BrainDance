@@ -127,8 +127,6 @@ Core `supabase/functions/_shared/agent-core/spatialAgent.ts`。这条链路不�
 
 > 完整的模型探索、蒸馏微调流程、严格无泄露 OOD 基准测试，以及由于量化评估诞生的 Part 1 到 Part 30 全面技术演进记录，请参阅 [`docs/04-本地问答与微调/`](docs/04-本地问答与微调/) 记录架构文档与其对应的 `ai_engine/finetune_qwen3/` 工程模块。
 
-> 当前端侧本地问答的统一结论可直接参考 [Qwen3-本地问答模型综合横评总览-2026-03-24.md](./docs/04-本地问答与微调/Qwen3-本地问答模型综合横评总览-2026-03-24.md) 与 [Qwen3-评测快照复现说明-2026-03-24.md](./docs/04-本地问答与微调/Qwen3-评测快照复现说明-2026-03-24.md)：`1.7B LoRA` 是稳定质量基线，`1.7B Q5_K_M + imatrix GGUF` 是当前部署主线首选，评测已支持 `live / frozen retrieval snapshot` 双口径复现。
-
 系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
 1. **Client (Flutter)**  
