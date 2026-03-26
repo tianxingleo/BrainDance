@@ -166,7 +166,7 @@ class RecallSearchEmptyState extends StatelessWidget {
                 RecallSearchMode.localAi => textLocalize(
                   'recall_local_ai_empty',
                 ),
-                RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
+                RecallSearchMode.agent => '输入空间问题或管理指令后点击搜索，Agent 会处理对应的三维记忆任务',
               },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,

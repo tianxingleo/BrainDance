@@ -1,6 +1,50 @@
 part of '../recall.dart';
 
 extension _RecallPageSearch on _RecallPageState {
+  void _restoreRecallScrollOffset(double offset) {
+    if (!mounted || !_recallScrollController.hasClients) {
+      return;
+    }
+    final position = _recallScrollController.position;
+    final clampedOffset = offset.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((position.pixels - clampedOffset).abs() < 0.5) {
+      return;
+    }
+    _recallScrollController.jumpTo(clampedOffset);
+  }
+
+  void _preserveRecallScrollOffset() {
+    if (!_recallScrollController.hasClients) {
+      return;
+    }
+    final offset = _recallScrollController.offset;
+
+    // Agent 追问会立刻重建结果卡片，连续两帧恢复可避免视口被重排推到底部。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreRecallScrollOffset(offset);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _restoreRecallScrollOffset(offset);
+      });
+    });
+  }
+
+  Future<void> _submitAgentFollowUp(String query) async {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) {
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchController.value = TextEditingValue(
+      text: trimmedQuery,
+      selection: TextSelection.collapsed(offset: trimmedQuery.length),
+    );
+    _preserveRecallScrollOffset();
+    await _askAgentRecall(trimmedQuery);
+  }
+
   Future<void> _searchModels(String query) async {
     final normalizedQuery = query.trim();
     if (normalizedQuery.isEmpty) {
@@ -432,8 +476,7 @@ extension _RecallPageSearch on _RecallPageState {
       side: BorderSide.none,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       onPressed: () {
-        _searchController.text = text;
-        _handleSearchSubmitted(text);
+        unawaited(_submitAgentFollowUp(text));
       },
     );
   }
@@ -886,7 +929,7 @@ extension _RecallPageSearch on _RecallPageState {
                               onPressed: () {
                                 final query = _searchController.text.trim();
                                 if (query.isNotEmpty) {
-                                  _handleSearchSubmitted(query);
+                                  unawaited(_submitAgentFollowUp(query));
                                 }
                               },
                               icon: const Icon(Icons.refresh, size: 14),
@@ -1000,12 +1043,7 @@ extension _RecallPageSearch on _RecallPageState {
                                 style: const TextStyle(fontSize: 12),
                               ),
                               onPressed: () {
-                                _searchController.text = reply;
-                                _searchController.selection =
-                                    TextSelection.collapsed(
-                                      offset: reply.length,
-                                    );
-                                unawaited(_askAgentRecall(reply));
+                                unawaited(_submitAgentFollowUp(reply));
                               },
                             );
                           }).toList(),
