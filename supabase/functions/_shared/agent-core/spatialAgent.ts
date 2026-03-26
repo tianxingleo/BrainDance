@@ -1755,35 +1755,54 @@ async function buildPoseTool(
         ? data as Array<Record<string, unknown>>
         : [];
       const enriched: PoseSearchRow[] = [];
+      const modelIds = [...new Set(
+        rows
+          .map((row) => String(row.id ?? ""))
+          .filter((value) => value.length > 0),
+      )];
+      const imageNames = [...new Set(
+        rows.flatMap((row) => {
+          const rawFrames = Array.isArray(row.matched_frames)
+            ? row.matched_frames as Array<Record<string, unknown>>
+            : [];
+          return rawFrames
+            .map((frame) =>
+              typeof frame.image_name === "string" ? frame.image_name : ""
+            )
+            .filter((value) => value.length > 0);
+        }),
+      )];
+      const tagMap = new Map<string, string | null>();
+
+      if (modelIds.length > 0 && imageNames.length > 0) {
+        const { data: poseRows, error: poseError } = await supabase
+          .from("memory_poses")
+          .select("model_id, image_name, tag")
+          .in("model_id", modelIds)
+          .in("image_name", imageNames);
+
+        if (poseError) {
+          throw new Error(`pose_semantic_search 标签补全失败: ${poseError.message}`);
+        }
+
+        for (const poseRow of poseRows ?? []) {
+          if (
+            typeof poseRow.model_id === "string" &&
+            typeof poseRow.image_name === "string"
+          ) {
+            tagMap.set(
+              `${poseRow.model_id}::${poseRow.image_name}`,
+              typeof poseRow.tag === "string" ? poseRow.tag : null,
+            );
+          }
+        }
+      }
 
       for (const row of rows) {
         const modelId = String(row.id ?? "");
         const rawFrames = Array.isArray(row.matched_frames)
           ? row.matched_frames as Array<Record<string, unknown>>
           : [];
-        const imageNames = rawFrames
-          .map((frame) =>
-            typeof frame.image_name === "string" ? frame.image_name : ""
-          )
-          .filter((value) => value.length > 0);
-
-        const tagMap = new Map<string, string | null>();
-        if (modelId && imageNames.length > 0) {
-          const { data: poseRows } = await supabase
-            .from("memory_poses")
-            .select("image_name, tag")
-            .eq("model_id", modelId)
-            .in("image_name", imageNames);
-
-          for (const poseRow of poseRows ?? []) {
-            if (typeof poseRow.image_name === "string") {
-              tagMap.set(
-                poseRow.image_name,
-                typeof poseRow.tag === "string" ? poseRow.tag : null,
-              );
-            }
-          }
-        }
 
         enriched.push({
           id: modelId,
@@ -1799,7 +1818,8 @@ async function buildPoseTool(
             image_name: String(frame.image_name ?? ""),
             transform_matrix: normalizeMatrix(frame.transform_matrix),
             similarity: Number(frame.similarity ?? 0),
-            tag: tagMap.get(String(frame.image_name ?? "")) ?? null,
+            tag: tagMap.get(`${modelId}::${String(frame.image_name ?? "")}`) ??
+              null,
           })),
         });
       }
@@ -2409,6 +2429,107 @@ async function executeDeterministicSpatialToolLoop(input: {
       break;
     }
   }
+
+  return { candidates, trace };
+}
+
+async function executeParallelSpatialToolLoop(input: {
+  intent: SpatialIntent;
+  tools: DynamicStructuredTool[];
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<
+  { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
+> {
+  const { intent, tools, callbacks } = input;
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const candidates = new Map<string, SceneCandidate>();
+  const trace: ToolTraceEntry[] = [];
+  const orderedToolNames = [...new Set(getPreferredToolOrder(intent))];
+
+  await emitPlan(callbacks, "空间检索并行计划已生成", [
+    `目标类型：${intent.targetType}；改写后的检索语句：${intent.rewrittenQuery}`,
+    `并行工具：${orderedToolNames.join(" + ")}`,
+    "先并行取回多路候选，再用统一评分函数直接选优，避免多轮 LLM 调度阻塞。",
+  ]);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "spatial_parallel_start",
+      summary: `开始并行执行 ${orderedToolNames.length} 个空间检索工具`,
+      detail: "本轮会一次性收集候选与交叉证据，不再串行等待多轮工具决策。",
+    },
+  });
+
+  const taskResults = await Promise.all(orderedToolNames.map(async (
+    toolName,
+    index,
+  ) => {
+    const tool = toolsByName.get(toolName);
+    if (!tool) {
+      return null;
+    }
+
+    const args = buildToolArgs(toolName, intent);
+    await emitProgress(callbacks, {
+      event: "tool_call",
+      data: {
+        name: toolName,
+        args,
+        summary: `开始并行执行 ${toolName}`,
+        round: index + 1,
+      },
+    });
+
+    const toolResult = await tool.invoke(args);
+    const resultText = typeof toolResult === "string"
+      ? toolResult
+      : JSON.stringify(toolResult);
+    const localCandidates = new Map<string, SceneCandidate>();
+    const count = collectSceneCandidates(toolName, resultText, localCandidates);
+    const resultSummary = summarizeToolResult(toolName, count);
+
+    return {
+      toolName,
+      args,
+      count,
+      resultSummary,
+      localCandidates,
+    };
+  }));
+
+  for (const [index, result] of taskResults.entries()) {
+    if (!result) {
+      continue;
+    }
+
+    for (const candidate of result.localCandidates.values()) {
+      mergeSceneCandidate(candidates, candidate);
+    }
+    trace.push({
+      toolName: result.toolName,
+      args: result.args,
+      resultSummary: result.resultSummary,
+    });
+    await emitProgress(callbacks, {
+      event: "tool_result",
+      data: {
+        name: result.toolName,
+        summary: `${result.resultSummary}，当前累计 ${candidates.size} 个候选场景`,
+        count: result.count,
+        round: index + 1,
+      },
+    });
+  }
+
+  const evidence = summarizeCandidateEvidence(candidates, intent);
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "spatial_parallel_done",
+      summary: "并行空间检索完成，开始统一评分选优",
+      detail: summarizeEvidenceForHumans(evidence),
+    },
+  });
 
   return { candidates, trace };
 }
@@ -3411,9 +3532,6 @@ export async function runSpatialSearchAgent(
       memory_graph_context: null,
     });
   }
-
-  const embeddings = createEmbeddingsModel(env);
-
   await emitProgress(callbacks, {
     event: "status",
     data: {
@@ -3438,21 +3556,25 @@ export async function runSpatialSearchAgent(
         : "未指定"
     }。`,
   );
-  const tools = [
-    await buildPoseTool(supabase, embeddings),
-    await buildSceneTool(supabase),
-    await buildRecentSceneTool(supabase),
-  ];
+  const requiredToolNames = [...new Set(getPreferredToolOrder(intent))];
+  const tools: DynamicStructuredTool[] = [];
+  if (requiredToolNames.includes("pose_semantic_search")) {
+    const embeddings = createEmbeddingsModel(env);
+    tools.push(await buildPoseTool(supabase, embeddings));
+  }
+  if (requiredToolNames.includes("scene_metadata_search")) {
+    tools.push(await buildSceneTool(supabase));
+  }
+  if (requiredToolNames.includes("recent_scene_search")) {
+    tools.push(await buildRecentSceneTool(supabase));
+  }
   let candidateMap: Map<string, SceneCandidate>;
   let trace: ToolTraceEntry[];
-  let usedDeterministicFallback = false;
 
   try {
-    ({ candidates: candidateMap, trace } = await executeAgentToolLoop({
-      model,
+    ({ candidates: candidateMap, trace } = await executeParallelSpatialToolLoop({
       intent,
       tools,
-      options,
       callbacks,
     }));
   } catch (error) {
@@ -3460,7 +3582,7 @@ export async function runSpatialSearchAgent(
       event: "status",
       data: {
         phase: "spatial_fallback",
-        summary: "空间工具编排阶段出现异常，已回退到确定性检索路径",
+        summary: "并行空间检索阶段出现异常，已回退到顺序确定性检索路径",
         detail: error instanceof Error ? error.message : String(error),
       },
     });
@@ -3470,7 +3592,6 @@ export async function runSpatialSearchAgent(
         tools,
         callbacks,
       }));
-    usedDeterministicFallback = true;
   }
 
   const rankedCandidates = [...candidateMap.values()]
@@ -3482,38 +3603,14 @@ export async function runSpatialSearchAgent(
 
   const bestCandidate = rankedCandidates[0] ?? null;
   const selectedPose = bestCandidate?.bestPose ?? null;
-  const suggestedActions = buildVisualizationActions({
-    scene: bestCandidate,
-    selectedPose,
-    supabase,
-    bucket: env.storageBucket,
-  });
 
   let selection: SelectionResult;
   if (rankedCandidates.length === 0) {
     throw new Error("No candidates found");
-  } else {
-    try {
-      selection = await selectBestResult(
-        model,
-        intent,
-        rankedCandidates,
-        suggestedActions,
-        options,
-        callbacks,
-      );
-    } catch (error) {
-      await emitProgress(callbacks, {
-        event: "status",
-        data: {
-          phase: "selection_fallback",
-          summary: "最终裁决阶段出现异常",
-          detail: error instanceof Error ? error.message : String(error),
-        },
-      });
-      throw error;
-    }
   }
+  selection = buildDeterministicSpatialSelection({
+    rankedCandidates,
+  });
 
   await emitProgress(callbacks, {
     event: "status",
@@ -3602,16 +3699,7 @@ export async function runSpatialSearchAgent(
       pose_image_id: candidate.bestPose?.image_name ?? null,
     })),
     selected_candidate_reason: selection.selectionReason,
-    tool_trace: usedDeterministicFallback
-      ? [
-        ...trace,
-        {
-          toolName: "deterministic_spatial_fallback",
-          args: { query },
-          resultSummary: "已使用确定性空间检索兜底，避免简单查询依赖上游模型",
-        },
-      ]
-      : trace,
+    tool_trace: trace,
     asset_context: serializeAssetContext(createEmptyAssetToolState()),
     compare_context: null,
     collection_context: null,
