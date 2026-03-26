@@ -609,7 +609,7 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
     }`;
   }
   if (state.bundle) {
-    return `已读取 ${state.bundle.length} 个模型资产摘要。`;
+    return buildBundleAnswer(state.bundle);
   }
   if (state.collectionSummary) {
     return `已整理专题“${state.collectionSummary.collection.title}”，当前包含 ${state.collectionSummary.model_count} 个模型。`;
@@ -627,9 +627,50 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
     return `已将 ${state.threadGrouping.model_ids.length} 个模型归入同一记忆线程。`;
   }
   if (state.list) {
-    return `已找到 ${state.list.length} 个候选模型资产。`;
+    return buildListAnswer(state.list);
   }
   return null;
+}
+
+function buildBundleAnswer(rows: ModelAssetBundle[]): string {
+  if (rows.length === 0) {
+    return "当前没有读取到可用的模型资产摘要。";
+  }
+
+  const intro = rows.length === 1
+    ? "我先整理出 1 个可参考的模型："
+    : `我先整理出 ${rows.length} 个可参考的模型：`;
+  const details = rows.slice(0, 5).map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const segments = [
+      row.description?.trim() || null,
+      row.tags.length > 0 ? `标签：${row.tags.slice(0, 3).join("、")}` : null,
+      row.pose_count > 0 ? `pose ${row.pose_count} 个` : null,
+    ].filter((item): item is string => Boolean(item));
+    return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
+  }).join("\n");
+
+  return `${intro}\n${details}\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。`;
+}
+
+function buildListAnswer(rows: ListedModelAsset[]): string {
+  if (rows.length === 0) {
+    return "当前没有找到匹配的模型资产。";
+  }
+
+  const intro = rows.length === 1
+    ? "当前找到 1 个候选模型："
+    : `当前找到 ${rows.length} 个候选模型：`;
+  const details = rows.slice(0, 5).map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const segments = [
+      row.description?.trim() || null,
+      row.tags.length > 0 ? `标签：${row.tags.slice(0, 3).join("、")}` : null,
+    ].filter((item): item is string => Boolean(item));
+    return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
+  }).join("\n");
+
+  return `${intro}\n${details}\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`;
 }
 
 export function buildListModelAssetsTool(
