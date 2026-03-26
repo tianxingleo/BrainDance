@@ -113,6 +113,7 @@ extension _RecallPageSearch on _RecallPageState {
     if (trimmedQuery.isEmpty) return;
     _ensureAgentSessionId();
     _agentLatestSubmittedQuery = trimmedQuery;
+    final executionMode = _resolveAgentExecutionMode(trimmedQuery);
 
     setState(() {
       _isAgentSearching = true;
@@ -135,6 +136,7 @@ extension _RecallPageSearch on _RecallPageState {
       try {
         final result = await AgentRecallService().query(
           trimmedQuery,
+          executionMode: executionMode,
           sessionId: _agentSessionId,
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
@@ -168,6 +170,7 @@ extension _RecallPageSearch on _RecallPageState {
       _updateAgentLiveStatus(textLocalize('agent_status_request_started'));
       final stream = AgentRecallService().queryStream(
         trimmedQuery,
+        executionMode: executionMode,
         sessionId: _agentSessionId,
         conversationSummary: _agentConversationSummary,
         sessionState: _agentSessionState,
@@ -298,6 +301,29 @@ extension _RecallPageSearch on _RecallPageState {
 
   bool _usesLocalIndex(RecallSearchMode mode) {
     return mode == RecallSearchMode.local || mode == RecallSearchMode.localAi;
+  }
+
+  String _resolveAgentExecutionMode(String query) {
+    final pendingPreview = _agentSessionState?.lastOperationPreview;
+    if (pendingPreview == null) {
+      return 'preview';
+    }
+    final normalizedQuery = query.trim();
+    final isExecuteConfirmation = RegExp(
+      r'确认执行|正式写入|开始执行|执行刚才|执行上一次|确认写入',
+    ).hasMatch(normalizedQuery);
+    return isExecuteConfirmation ? 'execute' : 'preview';
+  }
+
+  String _formatAgentModeLabel(String mode) {
+    switch (mode.trim()) {
+      case 'preview':
+        return '预览';
+      case 'execute':
+        return '执行';
+      default:
+        return mode;
+    }
   }
 
   String _searchModeTitle(RecallSearchMode mode) {
@@ -929,7 +955,7 @@ extension _RecallPageSearch on _RecallPageState {
               if (_agentResult?.mode != null) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '模式：${_agentResult!.mode}',
+                  '模式：${_formatAgentModeLabel(_agentResult!.mode)}',
                   style: TextStyle(color: hintColor, fontSize: 12),
                 ),
               ],
