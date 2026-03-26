@@ -768,225 +768,56 @@ extension _RecallPageSearch on _RecallPageState {
                 const SizedBox(height: 12),
               ],
 
-              ..._agentChatMessage!.steps.map((step) {
-                return ListenableBuilder(
-                  listenable: step,
-                  builder: (context, _) {
-                    if (step.type == 'status') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF111824)
-                                : const Color(0xFFF5F8FC),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.white12
-                                  : BDDesign.colorMutedBlue.withValues(
-                                      alpha: 0.14,
-                                    ),
-                            ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 1),
-                                child: Icon(
-                                  step.isCompleted
-                                      ? Icons.turned_in_not_rounded
-                                      : Icons.timelapse_rounded,
-                                  size: 16,
-                                  color: BDDesign.colorMutedBlue,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  step.content,
-                                  style: TextStyle(
-                                    color: hintColor,
-                                    fontSize: 12.5,
-                                    height: 1.5,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    } else if (step.type == 'tool_call') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6.0),
-                        child: Theme(
-                          data: Theme.of(
-                            context,
-                          ).copyWith(dividerColor: Colors.transparent),
-                          child: _AgentStepTile(
-                            step: step,
-                            isDark: isDark,
-                            textColor: textColor,
-                          ),
-                        ),
-                      );
-                    } else if (step.type == 'thought') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: MarkdownBody(
-                          data: step.content,
-                          builders: {
-                            'code': _CodeElementBuilder(isDark, context),
-                          },
-                          styleSheet: MarkdownStyleSheet(
-                            p: TextStyle(
-                              color: textColor,
-                              fontSize: 14,
-                              height: 1.6,
-                            ),
-                            h1: TextStyle(
-                              color: textColor,
-                              fontSize: 18,
-                              height: 1.3,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            h2: TextStyle(
-                              color: textColor,
-                              fontSize: 16,
-                              height: 1.3,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            blockquote: TextStyle(
-                              color: hintColor,
-                              fontSize: 13,
-                              height: 1.5,
-                            ),
-                            code: TextStyle(
-                              color: textColor,
-                              fontSize: 12.5,
-                              fontFamily: 'monospace',
-                            ),
-                            codeblockDecoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF131813)
-                                  : const Color(0xFFF1F4EA),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: BDDesign.colorFadedOlive.withValues(
-                                  alpha: isDark ? 0.28 : 0.18,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    } else if (step.type == 'error') {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(
-                                  Icons.error_outline,
-                                  color: Colors.red,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    step.content,
-                                    style: const TextStyle(
-                                      color: Colors.red,
-                                      fontSize: 14,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.red,
-                                side: const BorderSide(
-                                  color: Colors.red,
-                                  width: 1,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 0,
-                                ),
-                              ),
-                              onPressed: () {
-                                final query = _searchController.text.trim();
-                                if (query.isNotEmpty) {
-                                  unawaited(_submitAgentFollowUp(query));
-                                }
-                              },
-                              icon: const Icon(Icons.refresh, size: 14),
-                              label: const Text(
-                                '重试',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
+              if (_agentChatMessage!.steps.isNotEmpty)
+                _AgentProcessPanel(
+                  chatMessage: _agentChatMessage!,
+                  isDark: isDark,
+                  textColor: textColor,
+                  hintColor: hintColor,
+                  isSearching: _isAgentSearching,
+                  onRetry: () {
+                    final query = _searchController.text.trim();
+                    if (query.isNotEmpty) {
+                      unawaited(_submitAgentFollowUp(query));
                     }
-                    return const SizedBox.shrink();
                   },
-                );
-              }),
+                ),
 
               if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                MarkdownBody(
-                  data: _agentChatMessage!.finalAnswer,
-                  builders: {'code': _CodeElementBuilder(isDark, context)},
-                  styleSheet: MarkdownStyleSheet(
-                    p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
-                    h1: TextStyle(
-                      color: textColor,
-                      fontSize: 18,
-                      height: 1.3,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    h2: TextStyle(
-                      color: textColor,
-                      fontSize: 16,
-                      height: 1.3,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    blockquote: TextStyle(
-                      color: hintColor,
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
-                    code: TextStyle(
-                      color: textColor,
-                      fontSize: 12.5,
-                      fontFamily: 'monospace',
-                    ),
-                    codeblockDecoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF131813)
-                          : const Color(0xFFF1F4EA),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: BDDesign.colorFadedOlive.withValues(
-                          alpha: isDark ? 0.28 : 0.18,
-                        ),
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF151B12)
+                        : const Color(0xFFFFFEF6),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: BDDesign.colorFadedOlive.withValues(
+                        alpha: isDark ? 0.24 : 0.18,
                       ),
                     ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '最终回答',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _AnimatedMarkdownAnswer(
+                        data: _agentChatMessage!.finalAnswer,
+                        isDark: isDark,
+                        textColor: textColor,
+                        hintColor: hintColor,
+                      ),
+                    ],
                   ),
                 ),
               ],
