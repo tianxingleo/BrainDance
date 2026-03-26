@@ -890,6 +890,21 @@ function computeKeywordScore(query: string, chunks: string[]): number {
   return hits / tokens.length;
 }
 
+export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return false;
+  if (isDirectReplyQuery(normalized)) return false;
+  if (
+    /比较|对比|变化|前后|两个月前|现在|导览|旁白|脚本|大纲|故事|创作|趋势|缺失|时间线|长期记忆|关系摘要|改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|模型.*对比/
+      .test(normalized)
+  ) {
+    return false;
+  }
+
+  return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
+    .test(normalized) ||
+    /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
+}
 
 
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
@@ -998,7 +1013,7 @@ function buildDirectReplyAnswer(query: string): string {
 }
 
 async function classifyAgentMode(
-  model: BaseChatModel,
+  model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
 ): Promise<AgentMode> {
@@ -1080,7 +1095,24 @@ function parseChineseCountToken(token: string): number | null {
   return null;
 }
 
+function extractLatestModelCount(query: string): number {
+  const patterns = [
+    /最新(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
+    /最近(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
+    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最新模型/,
+    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最近模型/,
+  ];
 
+  for (const pattern of patterns) {
+    const matched = query.match(pattern)?.[1];
+    const count = matched ? parseChineseCountToken(matched) : null;
+    if (count) {
+      return Math.max(1, Math.min(20, count));
+    }
+  }
+
+  return 1;
+}
 
 function isConfirmWriteQuery(query: string): boolean {
   return /^(请)?(确认|执行|正式执行|继续执行)/.test(query.trim()) ||
@@ -1088,15 +1120,31 @@ function isConfirmWriteQuery(query: string): boolean {
 }
 
 function referencesMultipleModels(query: string): boolean {
-  return /这些模型|这几个模型|这批模型|这三?个模型|这\d+个模型|它们|这几个/
-    .test(
-      query,
-    );
+  return /这些模型|这几个模型|这批模型|这三?个模型|这\d+个模型|它们|这几个/.test(
+    query,
+  );
 }
 
+function extractRenameTargetName(query: string): string | null {
+  const trimmed = query.trim();
+  const patterns = [
+    /(?:改名为|重命名为|名字改成|名称改成|改成|叫做|命名为)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
+    /(?:新名字|新名称)(?:是|叫)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
+  ];
 
+  for (const pattern of patterns) {
+    const matched = trimmed.match(pattern)?.[1]?.trim();
+    if (matched) {
+      return matched.replace(/[。！？!,，]+$/g, "").trim() || null;
+    }
+  }
 
-,
+  return null;
+}
+
+export function parseDeterministicAssetRenameIntent(
+  query: string,
+  options: SpatialSearchAgentOptions = {},
 ): DeterministicAssetRenameIntent | null {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -1188,9 +1236,155 @@ async function replayPendingAssetWriteIfNeeded(input: {
   query: string;
   options: SpatialSearchAgentOptions;
   callbacks?: AgentRuntimeCallbacks;
+}): Promise<SpatialSearchResponse | null> {
+  const { query, options, supabase, callbacks } = input;
+  if (!isConfirmWriteQuery(query)) {
+    return null;
+  }
+
+  const pending = options.sessionState?.lastOperationPreview;
+  if (!pending?.toolName || !pending.args) {
+    return null;
+  }
+
+  if (options.executionMode !== "execute") {
+    return finalizeResponse({
+      success: true,
+      mode: "asset_metadata",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: pending.modelIds?.[0] ?? null,
+        pose_image_id: null,
+        confidence: 0.82,
+        reason: "检测到用户希望确认写入，但当前请求仍处于预览模式",
+      },
+      answer: "我已识别到你要确认执行，但当前请求还是 preview 模式。请切换到 execute 后再确认一次。",
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "缺少 execute 模式，已阻止正式写入",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
+
+  const toolsByName = new Map<string, DynamicStructuredTool>([
+    [
+      "rename_model_asset",
+      buildRenameModelAssetTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+    [
+      "batch_patch_model_metadata",
+      buildBatchPatchModelMetadataTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+  ]);
+  const tool = toolsByName.get(pending.toolName);
+  if (!tool) {
+    return null;
+  }
+
+  const executionArgs = {
+    ...pending.args,
+    dryRun: false,
+  };
+  const state = createEmptyAssetToolState();
+  const trace: ToolTraceEntry[] = [];
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "asset_write_replay",
+      summary: "已识别到确认执行请求，准备重放上一轮预览操作",
+    },
+  });
+  await emitProgress(callbacks, {
+    event: "tool_call",
+    data: {
+      name: tool.name,
+      args: executionArgs,
+      summary: "开始正式执行上一轮已确认的资产写操作",
+      round: 1,
+    },
+  });
+
+  const toolResult = await tool.invoke(executionArgs);
+  const resultText = typeof toolResult === "string"
+    ? toolResult
+    : JSON.stringify(toolResult);
+  const count = collectAssetToolResult(tool.name, resultText, state);
+  const resultSummary = summarizeToolResult(tool.name, count);
+  trace.push({
+    toolName: tool.name,
+    args: executionArgs,
+    resultSummary,
+  });
+  await emitProgress(callbacks, {
+    event: "tool_result",
+    data: {
+      name: tool.name,
+      summary: resultSummary,
+      count,
+      round: 1,
+    },
+  });
+
+  const selectionModelId = state.operation?.preview[0]?.model_id ??
+    pending.modelIds?.[0] ?? null;
+  const selectionSceneId = state.operation?.preview[0]?.scene_id ?? null;
+
+  return finalizeResponse({
+    success: true,
+    mode: "asset_metadata",
+    intent: null,
+    selection: {
+      scene_id: selectionSceneId,
+      model_id: selectionModelId,
+      pose_image_id: null,
+      confidence: 0.97,
+      reason: "已按上一轮预览参数正式执行资产写操作",
+    },
+    answer: tool.name === "rename_model_asset"
+      ? `已正式执行改名：${
+        state.operation?.preview[0]?.old_display_name ??
+          selectionSceneId ?? "该模型"
+      } -> ${
+        state.operation?.preview[0]?.new_display_name ?? "新名称"
+      }。`
+      : `已正式执行批量元数据修改，影响 ${state.operation?.affected_count ?? count} 个模型。`,
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "已根据会话中的预览参数完成正式写入",
+    tool_trace: trace,
+    asset_context: serializeAssetContext(state),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
 }
 
-): Promise<SpatialSearchResponse | null> {
+async function runDeterministicAssetRenameFlow(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<SpatialSearchResponse | null> {
   const intent = parseDeterministicAssetRenameIntent(
     input.query,
     input.options,
@@ -1270,8 +1464,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
     targetModelIds = listedRows.map((item) => item.id);
     const latest = listedRows[0] ?? null;
     targetSceneId = latest?.scene_id ?? null;
-    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id ||
-      null;
+    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id || null;
   } else {
     targetModelIds = intent.target.kind === "current"
       ? [intent.target.modelId]
@@ -1388,16 +1581,13 @@ async function replayPendingAssetWriteIfNeeded(input: {
   });
 
   const operationPreview = state.operation?.preview[0] ?? null;
-  const beforeName = operationPreview?.old_display_name || currentDisplayName ||
-    targetSceneId;
+  const beforeName = operationPreview?.old_display_name || currentDisplayName || targetSceneId;
   const afterName = operationPreview?.new_display_name || intent.newName;
   const actionText = state.operation?.dry_run
     ? (isBatchRename ? "已生成批量改名预览" : "已生成改名预览")
     : (isBatchRename ? "已完成批量改名" : "已完成改名");
   const answer = isBatchRename
-    ? `${actionText}：共 ${
-      state.operation?.affected_count ?? targetModelIds.length
-    } 个模型将改为“${intent.newName}”。${
+    ? `${actionText}：共 ${state.operation?.affected_count ?? targetModelIds.length} 个模型将改为“${intent.newName}”。${
       state.operation?.dry_run
         ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
         : ""
@@ -1413,7 +1603,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
     mode: "asset_metadata",
     intent: null,
     selection: {
-      scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
+        scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
       model_id: targetModelIds[0] ?? null,
       pose_image_id: null,
       confidence: 0.96,
@@ -1427,9 +1617,10 @@ async function replayPendingAssetWriteIfNeeded(input: {
     evidence: null,
     candidates: [],
     top_candidates: [],
-    selected_candidate_reason: isBatchRename
-      ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
-      : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
+    selected_candidate_reason:
+      isBatchRename
+        ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
+        : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
     tool_trace: trace,
     asset_context: serializeAssetContext(state),
     compare_context: null,
@@ -1439,7 +1630,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
   });
 }
 async function parseSpatialIntent(
-  model: BaseChatModel,
+  model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
 ): Promise<SpatialIntent> {
@@ -1449,10 +1640,11 @@ async function parseSpatialIntent(
   const today = new Date().toISOString().slice(0, 10);
 
   const structuredModel = model.withStructuredOutput(spatialIntentSchema);
-  const result = await structuredModel.invoke([
+  const rawResult = await structuredModel.invoke([
     new SystemMessage(getSpatialIntentPrompt(today, contextBlock)),
     new HumanMessage(query),
   ]);
+  const result = spatialIntentSchema.parse(rawResult);
 
   const timeRange = normalizeExplicitTimeRange(result);
   return {
@@ -2007,7 +2199,9 @@ async function selectBestResult(
   ]);
 }
 
-): SelectionResult {
+function buildDeterministicSpatialSelection(input: {
+  rankedCandidates: Array<SceneCandidate & { score: number }>;
+}): SelectionResult {
   const best = input.rankedCandidates[0] ?? null;
   if (!best) {
     return {
@@ -2048,7 +2242,11 @@ async function selectBestResult(
   };
 }
 
-): Promise<
+async function executeDeterministicSpatialToolLoop(input: {
+  intent: SpatialIntent;
+  tools: DynamicStructuredTool[];
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
   const { intent, tools, callbacks } = input;

@@ -336,3 +336,41 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - 入口文件和共享依赖是否存在语法错误。
   - 本地是否能先跑过 `deno check`。
 - 只有在 `deno check` 明确通过后，才继续排查 DashScope、Supabase 权限、数据库查询或外部 5xx。
+
+## 2026-03-26 第四次补充：半截函数定义同样会触发 `worker failed to boot`
+
+### 背景
+
+- 本次 Flutter 侧再次出现 `DioException [bad response]`，HTTP 状态码为 503，服务端表现仍然是 `worker failed to boot`。
+- 但这次共享 Core 里已经看不到显式的 `<<<<<<< / ======= / >>>>>>>` 标记，更像是一次“冲突解决到一半”的残留状态。
+
+### 本次结论
+
+- 根因仍在
+  [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)，但表现形式不是冲突标记，而是多个函数声明被截断。
+- 本轮实际补回的缺口包括：
+  - `extractLatestModelCount(...)`
+  - `extractRenameTargetName(...)`
+  - `parseDeterministicAssetRenameIntent(...)`
+  - `buildDeterministicSpatialSelection(...)`
+  - `executeDeterministicSpatialToolLoop(...)`
+  - `shouldPreferHeuristicSpatialRoute(...)`
+- 同时补回了缺失的类型收敛：
+  - 把 `classifyAgentMode(...)`、`parseSpatialIntent(...)` 的模型参数收敛为当前真实使用的 `ChatOpenAI`
+  - 对 `spatialIntentSchema` 结果执行显式 `parse`
+- 这类问题不会在 Flutter 侧暴露具体堆栈，前端最终只会看到 503，所以必须先在 Edge Function 源码层做静态检查。
+
+### 验证方式
+
+- 已执行 `deno check supabase/functions/_shared/agent-core/spatialAgent.ts`
+- 已执行 `deno check supabase/functions/agent-recall/index.ts`
+- 已执行 `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts`
+- 本轮结果为 17 个测试全部通过，说明共享 Core 与 `agent-recall` 入口当前可正常解析并通过相关单测。
+
+### 排查建议
+
+- 后续如果再碰到 `worker failed to boot`，不要只搜索冲突标记，也要检查是否存在：
+  - 孤立的 `): ReturnType {`
+  - 丢失函数名的半截声明
+  - 导入被删但调用仍保留的情况
+  - 导出函数被误删，导致测试或入口依赖失配
