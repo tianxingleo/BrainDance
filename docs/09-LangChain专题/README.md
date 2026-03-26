@@ -24,6 +24,14 @@
 - 2026-03-26 已补充 Agent 多轮续聊协议：共享 Core 现在会返回 `session_state / conversation_summary / follow_up`，Flutter Recall 页会保留最近一轮 Agent 会话，并把“继续输入什么”或快捷回复显式展示出来。
 - 2026-03-26 已补充简单空间问句的确定性兜底：像 `查一下电脑`、`看一下桌上的杯子` 这类短句会优先走规则路由与固定工具顺序，避免因为上游模型 503 导致整个 Agent 看起来像“超时”。
 
+## 2026-03-26 修复记录
+
+- 已修复共享 Agent Core 中 `isDirectReplyQuery is not defined` 的运行时风险。
+- 处理方式是把纯问候/致谢判定逻辑前移到共享常量和纯函数，避免在 `classifyAgentMode` 首次路由时出现未定义引用。
+- 影响范围是 `agent-recall` 与 `spatial-search-agent` 两个依赖 `runSpatialSearchAgent` 的 Supabase Edge Function。
+- 已在本地执行 `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts`，当前 17 个测试全部通过。
+- Flutter / Dart 工具链在当前环境中仍不可用，Recall 页相关改动尚未完成端侧 `analyze` 或真机联调；合并后应在具备 Flutter 环境的机器补跑最小页面验证。
+
 ## 维护规则
 
 - 只要涉及 LangChain 相关实现修改，就优先在本目录补充记录，而不是把信息继续散落到别的目录里。

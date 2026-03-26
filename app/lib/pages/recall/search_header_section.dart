@@ -143,7 +143,11 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
             focusNode: _searchFocusNode,
             controller: widget.searchController,
             style: TextStyle(color: widget.textColor, fontSize: 15),
+            minLines: 1,
+            maxLines: 5,
+            textInputAction: TextInputAction.search,
             decoration: InputDecoration(
+              isDense: true,
               hintText: widget.searchFieldHint,
               hintStyle: TextStyle(
                 color: widget.isDark
@@ -263,7 +267,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
           BDPanelCard(
             padding: const EdgeInsets.all(16),
             child: Text(
-              '输入空间问题后按回车，Agent 将为你检索空间并定位视角。',
+              textLocalize('recall_agent_panel_hint'),
               style: TextStyle(
                 color: widget.isDark
                     ? Colors.white.withValues(alpha: 0.62)
@@ -454,7 +458,7 @@ class RecallSearchModeSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '选择当前搜索栏要优先使用的检索方式。',
+                  textLocalize('recall_search_mode_desc'),
                   style: TextStyle(
                     color: hintColor,
                     fontSize: 12.5,

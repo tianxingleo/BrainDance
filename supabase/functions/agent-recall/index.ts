@@ -81,6 +81,11 @@ serve(async (req: Request) => {
     if (isStreamingRequest(req)) {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
+          // 发送一条占位数据以快速撑破 Nginx 等反向代理的缓冲区 (约2KB)
+          writeNdjsonLine(controller, "ping", {
+            message: " ".repeat(2048),
+          });
+
           void (async () => {
             try {
               const result = await runSpatialSearchAgent(
