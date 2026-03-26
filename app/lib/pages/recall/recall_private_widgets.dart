@@ -47,11 +47,6 @@ class _AgentStepTileState extends State<_AgentStepTile>
   void initState() {
     super.initState();
     _wasCompleted = widget.step.isCompleted;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.step.isCompleted && mounted) {
-        _controller.expand();
-      }
-    });
 
     widget.step.addListener(_handleStepChange);
   }
