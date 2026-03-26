@@ -86,3 +86,56 @@ def test_build_payload_matches_flutter_fields(tmp_path: Path):
             "lastSelectedModelIds": ["m1"],
         },
     }
+
+
+def test_summarize_event_for_timeline_formats_core_events():
+    module = load_module()
+
+    status_summary = module.summarize_event_for_timeline(
+        {"event": "status", "data": {"summary": "已完成模式判断"}}
+    )
+    tool_summary = module.summarize_event_for_timeline(
+        {"event": "tool_call", "data": {"toolName": "read_model_assets"}}
+    )
+    done_summary = module.summarize_event_for_timeline(
+        {"event": "done", "data": {"answer": "当前没有找到匹配的模型资产。"}}
+    )
+
+    assert status_summary == "已完成模式判断"
+    assert tool_summary == "read_model_assets"
+    assert done_summary == "当前没有找到匹配的模型资产。"
+
+
+def test_compute_timing_stats_picks_first_occurrence():
+    module = load_module()
+
+    timeline = [
+        {"event": "ping", "elapsed_ms": 12.5},
+        {"event": "status", "elapsed_ms": 30.0},
+        {"event": "tool_call", "elapsed_ms": 80.0},
+        {"event": "message", "elapsed_ms": 180.0},
+        {"event": "message", "elapsed_ms": 220.0},
+        {"event": "done", "elapsed_ms": 300.0},
+    ]
+    stats = module.compute_timing_stats(timeline)
+
+    assert stats["first_event_ms"] == 12.5
+    assert stats["first_status_ms"] == 30.0
+    assert stats["first_tool_call_ms"] == 80.0
+    assert stats["first_message_ms"] == 180.0
+    assert stats["done_ms"] == 300.0
+    assert stats["total_events"] == 6
+
+
+def test_resolve_log_target_supports_directory_mode(tmp_path: Path):
+    module = load_module()
+
+    log_target = module.resolve_log_target(tmp_path, "请你找一下洛天依相关的模型")
+    event_log_target = module.resolve_event_log_target(tmp_path, "请你找一下洛天依相关的模型")
+
+    assert log_target is not None
+    assert event_log_target is not None
+    assert log_target.parent == tmp_path
+    assert event_log_target.parent == tmp_path
+    assert log_target.suffix == ".json"
+    assert event_log_target.suffix == ".jsonl"

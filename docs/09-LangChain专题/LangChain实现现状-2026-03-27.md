@@ -49,6 +49,13 @@
   - 工具轨迹 `tool_trace`
   - `follow_up`
   - `session_state`
+- 2026-03-27 后续补强了更适合分析的问题归因信息：
+  - 请求摘要（endpoint / headers 摘要 / payload）
+  - HTTP 响应元信息（状态码、关键响应头）
+  - 事件时间线（事件序号、相对耗时、摘要）
+  - 调试统计（首包、首个状态、首次工具调用、首字、done 耗时与事件计数）
+  - `evidence` 摘要输出
+  - 更完整的 JSON 落盘与可选 JSONL 事件时间线落盘
 
 ## 当前用途
 
@@ -87,6 +94,18 @@ python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
   --log-file ai_engine/finetune_qwen3/logs/agent_recall_debug/earphone.json
 ```
 
+打印更详细的分析信息：
+
+```bash
+python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
+  --query "请你找一下洛天依相关的模型" \
+  --show-request \
+  --show-response-meta \
+  --show-event-timeline \
+  --show-full-result \
+  --event-log-file ai_engine/finetune_qwen3/logs/agent_recall_debug
+```
+
 环境要求：
 
 - 默认复用仓库已有 `SUPABASE_URL` / `SUPABASE_KEY` 读取逻辑
@@ -99,6 +118,9 @@ python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
 - SSE 事件切分
 - NDJSON 事件切分与尾包保留
 - 请求体字段构造与 Flutter 对齐
+- 事件时间线摘要生成
+- 核心耗时统计汇总
+- 目录模式日志路径生成
 
 本轮只补了 CLI 和解析测试，没有在当前文档里声称已经完成真实线上联调结论；真实链路是否可跑仍取决于：
 
