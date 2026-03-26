@@ -147,6 +147,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
             maxLines: 5,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
+              isDense: true,
               hintText: widget.searchFieldHint,
               hintStyle: TextStyle(
                 color: widget.isDark

@@ -182,6 +182,7 @@ extension _RecallPageSearch on _RecallPageState {
             if (data is Map) {
               final eventData = Map<String, dynamic>.from(data);
               _consumeAgentEvent(eventData);
+              setState(() {}); // 强制刷新 UI，体现最新状态
               if (eventData['event']?.toString() == 'done') {
                 setState(() {
                   _isAgentSearching = false;
