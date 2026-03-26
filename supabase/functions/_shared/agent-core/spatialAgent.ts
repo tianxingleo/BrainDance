@@ -1012,6 +1012,290 @@ async function classifyAgentMode(
   return result.mode;
 }
 
+type DeterministicAssetRenameIntent = {
+  target:
+    | { kind: "latest" }
+    | { kind: "current"; modelId: string }
+    | { kind: "selected_single"; modelId: string };
+  newName: string | null;
+};
+
+function extractRenameTargetName(query: string): string | null {
+  const trimmed = query.trim();
+  const patterns = [
+    /(?:改名为|重命名为|名字改成|名称改成|改成|叫做|命名为)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
+    /(?:新名字|新名称)(?:是|叫)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const matched = trimmed.match(pattern)?.[1]?.trim();
+    if (matched) {
+      return matched.replace(/[。！？!,，]+$/g, "").trim() || null;
+    }
+  }
+
+  return null;
+}
+
+export function parseDeterministicAssetRenameIntent(
+  query: string,
+  options: SpatialSearchAgentOptions = {},
+): DeterministicAssetRenameIntent | null {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const hasRenameIntent =
+    /改名|重命名|修改.*名字|修改.*名称|模型名字|模型名称|名字改|名称改/.test(trimmed);
+  if (!hasRenameIntent) {
+    return null;
+  }
+
+  const newName = extractRenameTargetName(trimmed);
+
+  if (/最新|最近|刚拍|刚刚|最后一个/.test(trimmed)) {
+    return {
+      target: { kind: "latest" },
+      newName,
+    };
+  }
+
+  if (
+    options.currentModelId &&
+    /当前模型|这个模型|当前这个模型|这个场景|当前场景/.test(trimmed)
+  ) {
+    return {
+      target: { kind: "current", modelId: options.currentModelId },
+      newName,
+    };
+  }
+
+  if ((options.selectedModelIds?.length ?? 0) === 1) {
+    return {
+      target: {
+        kind: "selected_single",
+        modelId: options.selectedModelIds![0]!,
+      },
+      newName,
+    };
+  }
+
+  return null;
+}
+
+async function runDeterministicAssetRenameFlow(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<SpatialSearchResponse | null> {
+  const intent = parseDeterministicAssetRenameIntent(input.query, input.options);
+  if (!intent) {
+    return null;
+  }
+
+  const { supabase, options, callbacks } = input;
+  const trace: ToolTraceEntry[] = [];
+  const state = createEmptyAssetToolState();
+  const listTool = buildListModelAssetsTool(supabase, {
+    selectedModelIds: options.selectedModelIds,
+  });
+  const renameTool = buildRenameModelAssetTool(supabase, {
+    selectedModelIds: options.selectedModelIds,
+    allowWrite: options.executionMode === "execute",
+  });
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "asset_rename_fast_path",
+      summary: "检测到确定性的模型改名请求，优先走改名专用兜底路径",
+    },
+  });
+
+  let targetModelId: string | null = null;
+  let targetSceneId: string | null = null;
+  let currentDisplayName: string | null = null;
+
+  if (intent.target.kind === "latest") {
+    const listArgs = {
+      modelIds: [],
+      sceneIds: [],
+      tags: [],
+      query: "",
+      startTime: null,
+      endTime: null,
+      limit: 1,
+    };
+    await emitProgress(callbacks, {
+      event: "tool_call",
+      data: {
+        name: listTool.name,
+        args: listArgs,
+        summary: "先定位最新模型资产",
+        round: 1,
+      },
+    });
+    const listResult = await listTool.invoke(listArgs);
+    const listText = typeof listResult === "string"
+      ? listResult
+      : JSON.stringify(listResult);
+    const listCount = collectAssetToolResult(listTool.name, listText, state);
+    const listSummary = summarizeToolResult(listTool.name, listCount);
+    trace.push({
+      toolName: listTool.name,
+      args: listArgs,
+      resultSummary: listSummary,
+    });
+    await emitProgress(callbacks, {
+      event: "tool_result",
+      data: {
+        name: listTool.name,
+        summary: listSummary,
+        count: listCount,
+        round: 1,
+      },
+    });
+
+    const latest = state.list?.[0] ?? null;
+    targetModelId = latest?.id ?? null;
+    targetSceneId = latest?.scene_id ?? null;
+    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id || null;
+  } else {
+    targetModelId = intent.target.modelId;
+  }
+
+  if (!targetModelId) {
+    return finalizeResponse({
+      success: true,
+      mode: "asset_metadata",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前请求属于模型资产元数据操作，但没有找到可改名的目标模型",
+      },
+      answer: "我没定位到可改名的目标模型。请先选中模型，或直接指定要改名的模型。",
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "确定性改名兜底未找到目标模型",
+      tool_trace: trace,
+      asset_context: serializeAssetContext(state),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
+
+  if (!intent.newName) {
+    return finalizeResponse({
+      success: true,
+      mode: "asset_metadata",
+      intent: null,
+      selection: {
+        scene_id: targetSceneId,
+        model_id: targetModelId,
+        pose_image_id: null,
+        confidence: 0.88,
+        reason: "已锁定改名目标，但用户尚未提供新名字",
+      },
+      answer: currentDisplayName
+        ? `已定位到要改名的模型“${currentDisplayName}”，但你还没告诉我新名字。请直接说“把它改名为xxx”或“把最新模型改名为xxx”。`
+        : "已定位到要改名的模型，但你还没告诉我新名字。请直接说“把它改名为xxx”。",
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "已通过确定性规则锁定改名目标，等待用户补充新名字",
+      tool_trace: trace,
+      asset_context: serializeAssetContext(state),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
+
+  const renameArgs = {
+    modelId: targetModelId,
+    newName: intent.newName,
+    dryRun: options.executionMode !== "execute",
+  };
+  await emitProgress(callbacks, {
+    event: "tool_call",
+    data: {
+      name: renameTool.name,
+      args: renameArgs,
+      summary: "已锁定目标模型，开始生成改名结果",
+      round: trace.length + 1,
+    },
+  });
+  const renameResult = await renameTool.invoke(renameArgs);
+  const renameText = typeof renameResult === "string"
+    ? renameResult
+    : JSON.stringify(renameResult);
+  const renameCount = collectAssetToolResult(renameTool.name, renameText, state);
+  const renameSummary = summarizeToolResult(renameTool.name, renameCount);
+  trace.push({
+    toolName: renameTool.name,
+    args: renameArgs,
+    resultSummary: renameSummary,
+  });
+  await emitProgress(callbacks, {
+    event: "tool_result",
+    data: {
+      name: renameTool.name,
+      summary: renameSummary,
+      count: renameCount,
+      round: trace.length,
+    },
+  });
+
+  const operationPreview = state.operation?.preview[0] ?? null;
+  const beforeName = operationPreview?.old_display_name || currentDisplayName ||
+    targetSceneId;
+  const afterName = operationPreview?.new_display_name || intent.newName;
+  const actionText = state.operation?.dry_run ? "已生成改名预览" : "已完成改名";
+
+  return finalizeResponse({
+    success: true,
+    mode: "asset_metadata",
+    intent: null,
+    selection: {
+      scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
+      model_id: targetModelId,
+      pose_image_id: null,
+      confidence: 0.96,
+      reason: "已通过确定性规则锁定目标模型并执行改名工具",
+    },
+    answer: `${actionText}：${beforeName ?? "该模型"} -> ${afterName}。${
+      state.operation?.dry_run
+        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
+        : ""
+    }`,
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
+    tool_trace: trace,
+    asset_context: serializeAssetContext(state),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
+}
+
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
@@ -2363,6 +2647,16 @@ export async function runSpatialSearchAgent(
   }
 
   if (mode === "asset_metadata") {
+    const deterministicAssetResponse = await runDeterministicAssetRenameFlow({
+      supabase,
+      query,
+      options,
+      callbacks,
+    });
+    if (deterministicAssetResponse) {
+      return deterministicAssetResponse;
+    }
+
     const assetTools = [
       buildListModelAssetsTool(supabase, {
         selectedModelIds: options.selectedModelIds,

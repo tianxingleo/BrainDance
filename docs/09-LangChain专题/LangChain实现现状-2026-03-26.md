@@ -34,6 +34,7 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - 继续负责空间检索、候选打分、多轮补工具与最终动作生成。
 - `asset_metadata`
   - 在原有资产工具基础上，新增专题归档、线程归组、pose 摘要、相关模型查找。
+  - 已补充“最新模型改名”确定性兜底：这类请求不再只依赖 LLM 自主多轮工具编排，而是会先锁定最新模型，再根据是否给出新名字返回缺参提示或调用 `rename_model_asset`。
 - `time_compare`
   - 复用
     [time-compare-agent/agent.ts](/home/ltx/projects/BrainDance/supabase/functions/time-compare-agent/agent.ts)
