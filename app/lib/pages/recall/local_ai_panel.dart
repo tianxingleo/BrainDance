@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
+import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/atom-one-light.dart';
 
 import '../../configs/motion_tokens.dart';
 import '../../services/local_model_catalog_service.dart';
@@ -533,30 +538,54 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           ],
           if (reasoningText.isNotEmpty) ...[
             const SizedBox(height: 14),
-            Text(
-              '模型思考链',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(minHeight: 72),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isDark ? darkInput : theme.grayColor3,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(
-                reasoningText,
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12.5,
-                  height: 1.45,
+            Theme(
+              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                minTileHeight: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                backgroundColor: isDark ? darkInput : theme.grayColor3,
+                collapsedBackgroundColor: isDark ? darkInput : theme.grayColor3,
+                iconColor: hintColor,
+                collapsedIconColor: hintColor,
+                title: Row(
+                  children: [
+                    Icon(
+                      localAnswerStatus.contains('问答完成') || localAnswerStatus.contains('回答完成')
+                          ? Icons.psychology_rounded
+                          : Icons.stream_rounded,
+                      size: 16,
+                      color: BDDesign.colorMutedBlue,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      localAnswerStatus.contains('问答完成') || localAnswerStatus.contains('回答完成')
+                          ? '查看思考过程'
+                          : 'Agent 正在思考...',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                    child: Text(
+                      reasoningText,
+                      style: TextStyle(
+                        color: hintColor,
+                        fontSize: 12.5,
+                        height: 1.45,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -578,14 +607,35 @@ class _RecallLocalQnaPanel extends StatelessWidget {
               color: isDark ? darkInput : theme.grayColor3,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Text(
-              answerText.isEmpty ? '模型回答会在这里流式出现。' : answerText,
-              style: TextStyle(
-                color: answerText.isEmpty ? hintColor : textColor,
-                fontSize: 13.5,
-                height: 1.5,
-              ),
-            ),
+            child: answerText.isEmpty
+                ? Text(
+                    '模型回答会在这里流式出现。',
+                    style: TextStyle(
+                      color: hintColor,
+                      fontSize: 13.5,
+                      height: 1.5,
+                    ),
+                  )
+                : MarkdownBody(
+                    data: _prepareStreamingMarkdown(answerText),
+                    builders: {
+                      'code': _CodeElementBuilder(isDark: isDark),
+                    },
+                    styleSheet: MarkdownStyleSheet(
+                      p: TextStyle(color: textColor, fontSize: 13.5, height: 1.5),
+                      h1: TextStyle(color: textColor, fontSize: 18, height: 1.3, fontWeight: FontWeight.w700),
+                      h2: TextStyle(color: textColor, fontSize: 16, height: 1.3, fontWeight: FontWeight.w700),
+                      blockquote: TextStyle(color: hintColor, fontSize: 13, height: 1.5),
+                      code: TextStyle(color: textColor, fontSize: 12.5, fontFamily: 'monospace'),
+                      codeblockDecoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF131813) : const Color(0xFFF1F4EA),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: BDDesign.colorFadedOlive.withValues(alpha: isDark ? 0.28 : 0.18),
+                        ),
+                      ),
+                    ),
+                  ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -597,6 +647,61 @@ class _RecallLocalQnaPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  String _prepareStreamingMarkdown(String text) {
+    if (text.isEmpty) return text;
+    final parts = text.split('```');
+    if (parts.length % 2 == 0) {
+      return '$text\n```';
+    }
+    return text;
+  }
+}
+
+class _CodeElementBuilder extends MarkdownElementBuilder {
+  final bool isDark;
+
+  _CodeElementBuilder({required this.isDark});
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    if (element.tag != 'code') return null;
+
+    final language = element.attributes['class']?.replaceFirst('language-', '') ?? '';
+    final codeText = element.textContent;
+
+    // Check if it's an inline code block (without newlines typically, or parent isn't pre)
+    // In flutter_markdown, block code has empty language if not specified, but we can't easily detect inline vs block here if not for 'class' attribute.
+    // Usually inline code doesn't have the class attribute. Let's assume class exists == block or it has newlines.
+    if (!codeText.contains('\n') && language.isEmpty) {
+      return null; // fallback to default style sheet rendering for inline code
+    }
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF12161A) : const Color(0xFFF1F4EA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: BDDesign.colorFadedOlive.withValues(alpha: isDark ? 0.28 : 0.18),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: HighlightView(
+          codeText,
+          language: language.isEmpty ? 'text' : language,
+          theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+          padding: const EdgeInsets.all(12),
+          textStyle: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12.5,
+            height: 1.45,
+          ),
+        ),
       ),
     );
   }
