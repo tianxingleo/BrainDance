@@ -2320,85 +2320,105 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.travel_explore_rounded,
-                    size: 18,
-                    color: BDDesign.colorMutedBlue,
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.travel_explore_rounded,
+                        size: 18,
+                        color: BDDesign.colorMutedBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _isAgentSearching &&
+                                  _agentChatMessage?.finalAnswer.isEmpty == true &&
+                                  _agentElapsedDuration != null &&
+                                  _agentElapsedDuration!.inSeconds > 3
+                              ? [
+                                  textLocalize('agent_status_warming_up'),
+                                  textLocalize('agent_status_reviewing_context'),
+                                  textLocalize('agent_status_deep_thinking'),
+                                ][((_agentElapsedDuration!.inSeconds - 3) ~/ 3) % 3]
+                              : textLocalize('recall_agent_rag'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (_isAgentSearching) ...[
+                        const SizedBox(width: 12),
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isAgentSearching && _agentChatMessage?.finalAnswer.isEmpty == true && _agentElapsedDuration != null && _agentElapsedDuration!.inSeconds > 3
-                        ? [
-                            textLocalize('agent_status_warming_up'),
-                            textLocalize('agent_status_reviewing_context'),
-                            textLocalize('agent_status_deep_thinking'),
-                          ][((_agentElapsedDuration!.inSeconds - 3) ~/ 3) % 3]
-                        : textLocalize('recall_agent_rag'),
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (elapsedLabel != null) ...[
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.08)
-                              : BDDesign.colorMutedBlue.withValues(alpha: 0.16),
-                        ),
-                      ),
-                      child: Text(
-                        _isAgentSearching
-                            ? textLocalize(
-                                'agent_elapsed_running',
-                              ).replaceAll('{duration}', elapsedLabel)
-                            : textLocalize(
-                                'agent_elapsed_finished',
-                              ).replaceAll('{duration}', elapsedLabel),
-                        style: TextStyle(
-                          color: hintColor,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (_isAgentSearching) ...[
-                    const SizedBox(width: 12),
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    const Spacer(),
-                    SizedBox(
-                      height: 24,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: Colors.red, width: 1),
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                        ),
-                        onPressed: _stopAgentSearch,
-                        icon: const Icon(Icons.stop_circle_outlined, size: 14),
-                        label: Text(
-                          textLocalize('agent_action_stop'),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ),
+                  if (elapsedLabel != null || _isAgentSearching) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (elapsedLabel != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.06)
+                                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : BDDesign.colorMutedBlue.withValues(alpha: 0.16),
+                              ),
+                            ),
+                            child: Text(
+                              _isAgentSearching
+                                  ? textLocalize(
+                                      'agent_elapsed_running',
+                                    ).replaceAll('{duration}', elapsedLabel)
+                                  : textLocalize(
+                                      'agent_elapsed_finished',
+                                    ).replaceAll('{duration}', elapsedLabel),
+                              style: TextStyle(
+                                color: hintColor,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        if (_isAgentSearching)
+                          SizedBox(
+                            height: 24,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: const BorderSide(color: Colors.red, width: 1),
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                              ),
+                              onPressed: _stopAgentSearch,
+                              icon: const Icon(Icons.stop_circle_outlined, size: 14),
+                              label: Text(
+                                textLocalize('agent_action_stop'),
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ],
