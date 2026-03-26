@@ -79,6 +79,11 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - `lastOperationPreview`
 - `buildAgentContextBlock()`
   现在会把候选引用列表按编号展开，便于模型理解“上一个”“第二个”这类指代。
+- 当前正式响应还新增：
+  - `session_state`
+  - `conversation_summary`
+  - `follow_up`
+- `follow_up` 用于把“当前还缺什么输入”“推荐继续说什么”结构化返回给前端，而不是只把追问塞进自然语言答案里。
 
 兼容性处理：
 
@@ -157,6 +162,8 @@ Core，避免能力散落在独立函数和旧文档描述里。
 - 展示 `mode`
 - 展示 `selected_candidate_reason`
 - 展示前 3 个候选项摘要
+- Agent 模式会保留最近一轮 `session_state / conversation_summary`，继续提问时自动回传给 `agent-recall`
+- 若服务端返回 `follow_up`，Flutter 会展示“继续对话”卡片和快捷回复 Chip，用户可以直接点选或继续输入
 
 ## 已完成 / 未完成
 
@@ -238,6 +245,39 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - 新增实时状态卡，优先展示 Agent 当前最新摘要。
   - 将 `status/tool_call/tool_result/message/done/error` 统一收口到
     `_consumeAgentEvent()`，让前端逻辑不再散落在监听回调里。
+
+## 2026-03-26 第三次补充：Agent 多轮续聊协议
+
+### 背景
+
+- 之前的 Agent 虽然会在答案里说“请直接说把它改名为 xxx”，但返回协议没有明确告诉前端“现在正在等用户补一个名字”。
+- Flutter Recall 页也没有把上一轮的 `sessionState / conversationSummary` 自动带回下一轮，因此用户即使继续输入，也容易重新走成新的单轮请求。
+
+### 本次实现
+
+- 更新
+  [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)
+  - 正式返回 `session_state / conversation_summary / follow_up`。
+  - `finalizeResponse()` 会根据当前结果自动归纳上一轮模式、候选引用、最近操作预览和后续建议。
+  - 确定性改名解析现在支持读取 `sessionState.lastSelectedModelIds`，因此上一轮锁定目标模型后，下一轮再说“把它改名为 xxx”可以直接续上。
+- 更新
+  [agent_recall_service.dart](/home/ltx/projects/BrainDance/app/lib/services/agent_recall_service.dart)
+  - 新增 `AgentFollowUp`、`AgentSessionState.fromJson()` 等消费模型。
+  - 普通请求和流式请求现在都会透传 `sessionId / conversationSummary / sessionState`。
+- 更新 [recall.dart](/home/ltx/projects/BrainDance/app/lib/pages/recall.dart)
+  - Agent 页面会保留最近一轮会话状态，并在下一次提交时自动带回服务端。
+  - 如果 `follow_up.status=waiting_user_input`，页面会展示“继续对话”区块和快捷回复。
+  - 搜索框提示文案会优先使用 `follow_up.input_placeholder`，让用户知道下一句该怎么说。
+
+### 已完成 / 未完成
+
+- 已完成
+  - 最新模型改名缺参后的续聊闭环
+  - 前端快捷回复入口
+  - 会话状态自动续传
+- 仍未完成
+  - 还没有做独立的 Agent 会话历史列表，当前仍只突出最近一轮结果
+  - `follow_up.kind` 目前只覆盖通用建议、改名补参、候选选择、预览确认四类常见场景
   - 完成后默认自动折叠“执行过程”，只突出最终答案；用户如需排查，再手动展开过程和工具调用明细。
 
 ### 当前效果口径

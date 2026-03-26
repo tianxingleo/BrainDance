@@ -371,6 +371,19 @@ const sessionStateSchema = z.object({
   lastOperationPreview: sessionOperationPreviewSchema.optional(),
 });
 
+const agentFollowUpSchema = z.object({
+  status: z.enum(["idle", "waiting_user_input"]),
+  kind: z.enum([
+    "general",
+    "rename_model",
+    "choose_candidate",
+    "confirm_write",
+  ]),
+  message: z.string(),
+  input_placeholder: z.string().nullable().optional(),
+  suggested_replies: z.array(z.string()).default([]),
+}).nullable();
+
 const assetContextSchema = z.object({
   last_tool_name: z.string().nullable(),
   list: z.array(z.object({
@@ -616,6 +629,9 @@ const responseBaseSchema = z.object({
   selected_candidate_reason: z.string().nullable(),
   tool_trace: z.array(toolTraceEntrySchema),
   asset_context: assetContextSchema,
+  session_state: sessionStateSchema.nullable().optional(),
+  conversation_summary: z.string().nullable().optional(),
+  follow_up: agentFollowUpSchema.optional(),
 });
 
 const spatialSearchResponseSchema = responseBaseSchema.extend({
@@ -877,7 +893,7 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
   }
 
   return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
-      .test(normalized) ||
+    .test(normalized) ||
     /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
 }
 
@@ -1016,7 +1032,8 @@ type DeterministicAssetRenameIntent = {
   target:
     | { kind: "latest" }
     | { kind: "current"; modelId: string }
-    | { kind: "selected_single"; modelId: string };
+    | { kind: "selected_single"; modelId: string }
+    | { kind: "session_single"; modelId: string };
   newName: string | null;
 };
 
@@ -1047,7 +1064,9 @@ export function parseDeterministicAssetRenameIntent(
   }
 
   const hasRenameIntent =
-    /改名|重命名|修改.*名字|修改.*名称|模型名字|模型名称|名字改|名称改/.test(trimmed);
+    /改名|重命名|修改.*名字|修改.*名称|模型名字|模型名称|名字改|名称改/.test(
+      trimmed,
+    );
   if (!hasRenameIntent) {
     return null;
   }
@@ -1081,6 +1100,19 @@ export function parseDeterministicAssetRenameIntent(
     };
   }
 
+  if (
+    (options.sessionState?.lastSelectedModelIds?.length ?? 0) === 1 &&
+    /它|这个|这个模型|该模型|刚才那个|上一轮那个|上一个模型/.test(trimmed)
+  ) {
+    return {
+      target: {
+        kind: "session_single",
+        modelId: options.sessionState!.lastSelectedModelIds![0]!,
+      },
+      newName,
+    };
+  }
+
   return null;
 }
 
@@ -1090,7 +1122,10 @@ async function runDeterministicAssetRenameFlow(input: {
   options: SpatialSearchAgentOptions;
   callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse | null> {
-  const intent = parseDeterministicAssetRenameIntent(input.query, input.options);
+  const intent = parseDeterministicAssetRenameIntent(
+    input.query,
+    input.options,
+  );
   if (!intent) {
     return null;
   }
@@ -1161,7 +1196,8 @@ async function runDeterministicAssetRenameFlow(input: {
     const latest = state.list?.[0] ?? null;
     targetModelId = latest?.id ?? null;
     targetSceneId = latest?.scene_id ?? null;
-    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id || null;
+    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id ||
+      null;
   } else {
     targetModelId = intent.target.modelId;
   }
@@ -1178,7 +1214,8 @@ async function runDeterministicAssetRenameFlow(input: {
         confidence: 0,
         reason: "当前请求属于模型资产元数据操作，但没有找到可改名的目标模型",
       },
-      answer: "我没定位到可改名的目标模型。请先选中模型，或直接指定要改名的模型。",
+      answer:
+        "我没定位到可改名的目标模型。请先选中模型，或直接指定要改名的模型。",
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: null,
@@ -1214,7 +1251,8 @@ async function runDeterministicAssetRenameFlow(input: {
       evidence: null,
       candidates: [],
       top_candidates: [],
-      selected_candidate_reason: "已通过确定性规则锁定改名目标，等待用户补充新名字",
+      selected_candidate_reason:
+        "已通过确定性规则锁定改名目标，等待用户补充新名字",
       tool_trace: trace,
       asset_context: serializeAssetContext(state),
       compare_context: null,
@@ -1242,7 +1280,11 @@ async function runDeterministicAssetRenameFlow(input: {
   const renameText = typeof renameResult === "string"
     ? renameResult
     : JSON.stringify(renameResult);
-  const renameCount = collectAssetToolResult(renameTool.name, renameText, state);
+  const renameCount = collectAssetToolResult(
+    renameTool.name,
+    renameText,
+    state,
+  );
   const renameSummary = summarizeToolResult(renameTool.name, renameCount);
   trace.push({
     toolName: renameTool.name,
@@ -1286,7 +1328,8 @@ async function runDeterministicAssetRenameFlow(input: {
     evidence: null,
     candidates: [],
     top_candidates: [],
-    selected_candidate_reason: "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
+    selected_candidate_reason:
+      "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
     tool_trace: trace,
     asset_context: serializeAssetContext(state),
     compare_context: null,
@@ -1904,21 +1947,27 @@ function buildDeterministicSpatialSelection(input: {
     };
   }
 
-  const poseLabel = best.bestPose?.tag ?? best.bestPose?.image_name ?? "最佳视角";
+  const poseLabel = best.bestPose?.tag ?? best.bestPose?.image_name ??
+    "最佳视角";
   const objectSummary = best.objects.slice(0, 3).join("、");
   const description = best.description.trim();
   const answerSegments = [
     `我先定位到场景 ${best.sceneId}。`,
     description.length > 0 ? description : null,
-    objectSummary.length > 0 ? `该场景里识别到的相关内容包括 ${objectSummary}。` : null,
-    best.bestPose ? `可以直接飞到 ${poseLabel}。` : "当前先打开场景，再继续手动查看。",
+    objectSummary.length > 0
+      ? `该场景里识别到的相关内容包括 ${objectSummary}。`
+      : null,
+    best.bestPose
+      ? `可以直接飞到 ${poseLabel}。`
+      : "当前先打开场景，再继续手动查看。",
   ].filter((segment): segment is string => Boolean(segment && segment.trim()));
 
   return {
     selectedSceneId: best.sceneId,
     selectedModelId: best.modelId,
     selectedPoseImageId: best.bestPose?.image_name ?? null,
-    selectionReason: "已按确定性检索得分选择当前最可信候选，避免因上游模型抖动阻塞简单空间查询",
+    selectionReason:
+      "已按确定性检索得分选择当前最可信候选，避免因上游模型抖动阻塞简单空间查询",
     confidence: best.score,
     answer: answerSegments.join(" "),
     actions: [],
@@ -2222,7 +2271,124 @@ function emptyViewerPayload() {
 function finalizeResponse(
   response: SpatialSearchResponse,
 ): SpatialSearchResponse {
-  return spatialSearchResponseSchemaUnion.parse(response);
+  const normalized = {
+    ...response,
+    session_state: response.session_state ??
+      buildSessionStateFromResponse(response),
+    conversation_summary: response.conversation_summary ??
+      buildConversationSummaryFromResponse(response),
+    follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
+  };
+  return spatialSearchResponseSchemaUnion.parse(normalized);
+}
+
+function buildSessionStateFromResponse(
+  response: SpatialSearchResponse,
+): SessionState {
+  const lastSelectedModelIds = new Set<string>();
+  const selectedModelId = response.selection.model_id;
+  if (selectedModelId) {
+    lastSelectedModelIds.add(selectedModelId);
+  }
+
+  const operationPreview = response.asset_context.operation;
+  if (operationPreview) {
+    for (const item of operationPreview.preview) {
+      if (item.model_id) {
+        lastSelectedModelIds.add(item.model_id);
+      }
+    }
+  }
+
+  const candidateRefs = response.top_candidates.slice(0, 5).map((
+    candidate,
+    index,
+  ) => ({
+    index: index + 1,
+    sceneId: candidate.scene_id,
+    modelId: candidate.model_id,
+    description: candidate.description,
+  }));
+
+  return {
+    lastMode: response.mode,
+    lastSelectedModelIds: lastSelectedModelIds.size > 0
+      ? [...lastSelectedModelIds]
+      : undefined,
+    lastCandidateRefs: candidateRefs.length > 0 ? candidateRefs : undefined,
+    lastOperationPreview: operationPreview
+      ? {
+        toolName: operationPreview.tool_name,
+        affectedCount: operationPreview.affected_count,
+      }
+      : undefined,
+  };
+}
+
+function buildConversationSummaryFromResponse(
+  response: SpatialSearchResponse,
+): string | null {
+  const segments = [
+    `模式: ${response.mode}`,
+    response.selected_candidate_reason
+      ? `判定: ${response.selected_candidate_reason}`
+      : null,
+    response.answer ? `结果: ${response.answer}` : null,
+  ].filter((item): item is string => Boolean(item));
+  return segments.length > 0 ? segments.join(" | ") : null;
+}
+
+function buildFollowUpFromResponse(
+  response: SpatialSearchResponse,
+): z.infer<typeof agentFollowUpSchema> {
+  if (
+    response.mode === "asset_metadata" &&
+    response.selection.model_id &&
+    response.asset_context.operation == null &&
+    /还没告诉我新名字|还没告诉我新名称/.test(response.answer)
+  ) {
+    return {
+      status: "waiting_user_input",
+      kind: "rename_model",
+      message: response.answer,
+      input_placeholder: "例如：把它改名为宿舍书桌-03",
+      suggested_replies: [
+        "把它改名为宿舍书桌-03",
+        "把它改名为客厅扫描-最新",
+      ],
+    };
+  }
+
+  if (
+    response.mode === "asset_metadata" &&
+    response.asset_context.operation?.requires_confirmation === true
+  ) {
+    return {
+      status: "waiting_user_input",
+      kind: "confirm_write",
+      message: "当前返回的是写操作预览。确认后可继续正式执行。",
+      input_placeholder: "例如：确认执行改名",
+      suggested_replies: [
+        "确认执行",
+        "先别执行，换个名字",
+      ],
+    };
+  }
+
+  if (response.top_candidates.length > 1 && response.actions.length === 0) {
+    return {
+      status: "waiting_user_input",
+      kind: "choose_candidate",
+      message: "如果你想继续缩小范围，可以直接说“打开第一个”或“看第二个”。",
+      input_placeholder: "例如：打开第一个",
+      suggested_replies: [
+        "打开第一个",
+        "看第二个",
+      ],
+    };
+  }
+
+  return null;
 }
 
 function normalizeCompareEvidence(
@@ -2583,7 +2749,9 @@ export async function runSpatialSearchAgent(
         confidence: 1,
         reason: "当前输入属于闲聊问候，无需进入检索链路",
       },
-      answer: /谢/.test(query) ? "不客气。" : "你好，我在。你可以直接告诉我想找的物体、位置或场景。",
+      answer: /谢/.test(query)
+        ? "不客气。"
+        : "你好，我在。你可以直接告诉我想找的物体、位置或场景。",
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: null,
@@ -2783,11 +2951,12 @@ export async function runSpatialSearchAgent(
           detail: "减少对上游模型路由和工具编排的依赖，避免简单查询被 503 阻塞",
         },
       });
-      ({ candidates: candidateMap, trace } = await executeDeterministicSpatialToolLoop({
-        intent,
-        tools,
-        callbacks,
-      }));
+      ({ candidates: candidateMap, trace } =
+        await executeDeterministicSpatialToolLoop({
+          intent,
+          tools,
+          callbacks,
+        }));
       usedDeterministicFallback = true;
     } else {
       ({ candidates: candidateMap, trace } = await executeAgentToolLoop({
@@ -2807,11 +2976,12 @@ export async function runSpatialSearchAgent(
         detail: error instanceof Error ? error.message : String(error),
       },
     });
-    ({ candidates: candidateMap, trace } = await executeDeterministicSpatialToolLoop({
-      intent,
-      tools,
-      callbacks,
-    }));
+    ({ candidates: candidateMap, trace } =
+      await executeDeterministicSpatialToolLoop({
+        intent,
+        tools,
+        callbacks,
+      }));
     usedDeterministicFallback = true;
   }
 

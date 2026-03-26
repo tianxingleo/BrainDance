@@ -105,6 +105,9 @@ class AgentRecallResponse {
   final Map<String, dynamic>? collectionContext;
   final Map<String, dynamic>? creativeContext;
   final Map<String, dynamic>? memoryGraphContext;
+  final AgentSessionState? sessionState;
+  final AgentFollowUp? followUp;
+  final String? conversationSummary;
 
   AgentRecallResponse({
     required this.mode,
@@ -118,6 +121,9 @@ class AgentRecallResponse {
     this.collectionContext,
     this.creativeContext,
     this.memoryGraphContext,
+    this.sessionState,
+    this.followUp,
+    this.conversationSummary,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -166,6 +172,17 @@ class AgentRecallResponse {
       memoryGraphContext: json['memory_graph_context'] is Map
           ? Map<String, dynamic>.from(json['memory_graph_context'] as Map)
           : null,
+      sessionState: json['session_state'] is Map
+          ? AgentSessionState.fromJson(
+              Map<String, dynamic>.from(json['session_state'] as Map),
+            )
+          : null,
+      followUp: json['follow_up'] is Map
+          ? AgentFollowUp.fromJson(
+              Map<String, dynamic>.from(json['follow_up'] as Map),
+            )
+          : null,
+      conversationSummary: json['conversation_summary']?.toString(),
     );
   }
 }
@@ -182,6 +199,27 @@ class AgentSessionState {
     this.lastCandidateRefs,
     this.lastOperationPreview,
   });
+
+  factory AgentSessionState.fromJson(Map<String, dynamic> json) {
+    return AgentSessionState(
+      lastMode: json['lastMode']?.toString(),
+      lastSelectedModelIds: (json['lastSelectedModelIds'] as List?)
+          ?.map((item) => item.toString())
+          .toList(),
+      lastCandidateRefs: (json['lastCandidateRefs'] as List?)
+          ?.map(
+            (item) => AgentCandidateRef.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(),
+      lastOperationPreview: json['lastOperationPreview'] is Map
+          ? AgentOperationPreview.fromJson(
+              Map<String, dynamic>.from(json['lastOperationPreview'] as Map),
+            )
+          : null,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -209,6 +247,15 @@ class AgentCandidateRef {
     required this.description,
   });
 
+  factory AgentCandidateRef.fromJson(Map<String, dynamic> json) {
+    return AgentCandidateRef(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      sceneId: json['sceneId']?.toString() ?? '',
+      modelId: json['modelId']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'index': index,
@@ -228,11 +275,49 @@ class AgentOperationPreview {
     required this.affectedCount,
   });
 
+  factory AgentOperationPreview.fromJson(Map<String, dynamic> json) {
+    return AgentOperationPreview(
+      toolName: json['toolName']?.toString() ?? '',
+      affectedCount: (json['affectedCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'toolName': toolName,
       'affectedCount': affectedCount,
     };
+  }
+}
+
+class AgentFollowUp {
+  final String status;
+  final String kind;
+  final String message;
+  final String? inputPlaceholder;
+  final List<String> suggestedReplies;
+
+  AgentFollowUp({
+    required this.status,
+    required this.kind,
+    required this.message,
+    this.inputPlaceholder,
+    this.suggestedReplies = const [],
+  });
+
+  bool get isWaitingUserInput => status == 'waiting_user_input';
+
+  factory AgentFollowUp.fromJson(Map<String, dynamic> json) {
+    return AgentFollowUp(
+      status: json['status']?.toString() ?? 'idle',
+      kind: json['kind']?.toString() ?? 'general',
+      message: json['message']?.toString() ?? '',
+      inputPlaceholder: json['input_placeholder']?.toString(),
+      suggestedReplies: ((json['suggested_replies'] as List?) ?? [])
+          .map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList(),
+    );
   }
 }
 
@@ -587,6 +672,17 @@ class AgentRecallService {
       'collection_context': response.collectionContext,
       'creative_context': response.creativeContext,
       'memory_graph_context': response.memoryGraphContext,
+      'session_state': response.sessionState?.toJson(),
+      'conversation_summary': response.conversationSummary,
+      'follow_up': response.followUp == null
+          ? null
+          : {
+              'status': response.followUp!.status,
+              'kind': response.followUp!.kind,
+              'message': response.followUp!.message,
+              'input_placeholder': response.followUp!.inputPlaceholder,
+              'suggested_replies': response.followUp!.suggestedReplies,
+            },
     };
   }
 

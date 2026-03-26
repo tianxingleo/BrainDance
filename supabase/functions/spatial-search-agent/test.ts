@@ -8,8 +8,8 @@ import {
   normalizeExplicitTimeRange,
   parseDeterministicAssetRenameIntent,
   scoreSceneCandidate,
-  shouldPreferHeuristicSpatialRoute,
   shouldForceAnotherToolRound,
+  shouldPreferHeuristicSpatialRoute,
   summarizeCandidateEvidence,
 } from "../_shared/agent-core/spatialAgent.ts";
 
@@ -22,7 +22,10 @@ Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {
   assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), true);
   assertEquals(shouldPreferHeuristicSpatialRoute("看一下桌上的杯子"), true);
-  assertEquals(shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"), false);
+  assertEquals(
+    shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"),
+    false,
+  );
   assertEquals(shouldPreferHeuristicSpatialRoute("谢谢"), false);
 });
 
@@ -52,6 +55,22 @@ Deno.test("parseDeterministicAssetRenameIntent 会在单选模型时走定向改
   assertExists(intent);
   assertEquals(intent?.target.kind, "selected_single");
   assertEquals(intent?.newName, "书桌近景");
+});
+
+Deno.test("parseDeterministicAssetRenameIntent 会利用上一轮会话中的单模型上下文", () => {
+  const intent = parseDeterministicAssetRenameIntent(
+    "把它改名为宿舍书桌-最终版",
+    {
+      sessionState: {
+        lastMode: "asset_metadata",
+        lastSelectedModelIds: ["550e8400-e29b-41d4-a716-446655440000"],
+      },
+    },
+  );
+
+  assertExists(intent);
+  assertEquals(intent?.target.kind, "session_single");
+  assertEquals(intent?.newName, "宿舍书桌-最终版");
 });
 
 Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
