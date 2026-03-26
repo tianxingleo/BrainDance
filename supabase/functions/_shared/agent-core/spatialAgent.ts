@@ -857,6 +857,30 @@ function computeKeywordScore(query: string, chunks: string[]): number {
   return hits / tokens.length;
 }
 
+export function isDirectReplyQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return false;
+
+  return /^(你好|您好|hello|hi|thanks|thank you|谢谢|多谢|辛苦了|再见|拜拜)[！!,.，。？?]*$/
+    .test(normalized);
+}
+
+export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return false;
+  if (isDirectReplyQuery(normalized)) return false;
+  if (
+    /比较|对比|变化|前后|两个月前|现在|导览|旁白|脚本|大纲|故事|创作|趋势|缺失|时间线|长期记忆|关系摘要|改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|模型.*对比/
+      .test(normalized)
+  ) {
+    return false;
+  }
+
+  return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
+      .test(normalized) ||
+    /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
+}
+
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
   if (!Array.isArray(input)) return null;
 
@@ -941,6 +965,10 @@ async function classifyAgentMode(
   const normalized = query.trim().toLowerCase();
   const currentMode = options.currentMode ?? null;
 
+  if (isDirectReplyQuery(query)) {
+    return "spatial_search";
+  }
+
   if (
     currentMode === "compare" ||
     /比较|对比|变化|前后|两个月前|现在/.test(query)
@@ -964,7 +992,7 @@ async function classifyAgentMode(
     return "asset_metadata";
   }
   if (
-    normalized.includes("找") ||
+    shouldPreferHeuristicSpatialRoute(query) ||
     normalized.includes("在哪") ||
     normalized.includes("有没有") ||
     normalized.includes("空间") ||
@@ -1576,6 +1604,105 @@ async function selectBestResult(
   ]);
 }
 
+function buildDeterministicSpatialSelection(input: {
+  rankedCandidates: Array<SceneCandidate & { score: number }>;
+}): SelectionResult {
+  const best = input.rankedCandidates[0] ?? null;
+  if (!best) {
+    return {
+      selectedSceneId: null,
+      selectedModelId: null,
+      selectedPoseImageId: null,
+      selectionReason: "没有检索到可信候选",
+      confidence: 0,
+      answer: "当前没有找到可信的空间检索结果。",
+      actions: [],
+    };
+  }
+
+  const poseLabel = best.bestPose?.tag ?? best.bestPose?.image_name ?? "最佳视角";
+  const objectSummary = best.objects.slice(0, 3).join("、");
+  const description = best.description.trim();
+  const answerSegments = [
+    `我先定位到场景 ${best.sceneId}。`,
+    description.length > 0 ? description : null,
+    objectSummary.length > 0 ? `该场景里识别到的相关内容包括 ${objectSummary}。` : null,
+    best.bestPose ? `可以直接飞到 ${poseLabel}。` : "当前先打开场景，再继续手动查看。",
+  ].filter((segment): segment is string => Boolean(segment && segment.trim()));
+
+  return {
+    selectedSceneId: best.sceneId,
+    selectedModelId: best.modelId,
+    selectedPoseImageId: best.bestPose?.image_name ?? null,
+    selectionReason: "已按确定性检索得分选择当前最可信候选，避免因上游模型抖动阻塞简单空间查询",
+    confidence: best.score,
+    answer: answerSegments.join(" "),
+    actions: [],
+  };
+}
+
+async function executeDeterministicSpatialToolLoop(input: {
+  intent: SpatialIntent;
+  tools: DynamicStructuredTool[];
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<
+  { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
+> {
+  const { intent, tools, callbacks } = input;
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const candidates = new Map<string, SceneCandidate>();
+  const trace: ToolTraceEntry[] = [];
+  const preferredTools = getPreferredToolOrder(intent);
+
+  for (let index = 0; index < preferredTools.length; index += 1) {
+    const toolName = preferredTools[index]!;
+    const tool = toolsByName.get(toolName);
+    if (!tool) continue;
+
+    const args = buildToolArgs(toolName, intent);
+    await emitProgress(callbacks, {
+      event: "tool_call",
+      data: {
+        name: toolName,
+        args,
+        summary: `进入确定性兜底路径，执行 ${toolName}`,
+        round: index + 1,
+      },
+    });
+
+    const toolResult = await tool.invoke(args);
+    const resultText = typeof toolResult === "string"
+      ? toolResult
+      : JSON.stringify(toolResult);
+    const count = collectSceneCandidates(toolName, resultText, candidates);
+    const resultSummary = summarizeToolResult(toolName, count);
+    trace.push({
+      toolName,
+      args,
+      resultSummary,
+    });
+    await emitProgress(callbacks, {
+      event: "tool_result",
+      data: {
+        name: toolName,
+        summary: `${resultSummary}，当前累计 ${candidates.size} 个候选场景`,
+        count,
+        round: index + 1,
+      },
+    });
+
+    const evidence = summarizeCandidateEvidence(candidates, intent);
+    if (
+      evidence.candidateCount >= MIN_AGENT_CANDIDATES &&
+      evidence.topScore >= MIN_AGENT_TOP_SCORE
+    ) {
+      break;
+    }
+  }
+
+  return { candidates, trace };
+}
+
 async function executeAgentToolLoop(input: {
   model: ChatOpenAI;
   intent: SpatialIntent;
@@ -2149,7 +2276,62 @@ export async function runSpatialSearchAgent(
       detail: `执行模式：${options.executionMode ?? "preview"}`,
     },
   });
-  const mode = await classifyAgentMode(model, query, options);
+  if (isDirectReplyQuery(query)) {
+    const directReplyIntent: SpatialIntent = {
+      rewrittenQuery: query.trim(),
+      targetType: "scene",
+      objectHint: null,
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "当前输入属于闲聊问候，直接返回自然语言应答。",
+    };
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent: directReplyIntent,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 1,
+        reason: "当前输入属于闲聊问候，无需进入检索链路",
+      },
+      answer: /谢/.test(query) ? "不客气。" : "你好，我在。你可以直接告诉我想找的物体、位置或场景。",
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "已走闲聊直答兜底，避免误进空间检索链路",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
+
+  let mode: AgentMode;
+  try {
+    mode = await classifyAgentMode(model, query, options);
+  } catch (error) {
+    if (!shouldPreferHeuristicSpatialRoute(query)) {
+      throw error;
+    }
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "route_fallback",
+        summary: "模式分类依赖的上游模型暂时不可用，已回退到确定性空间检索",
+        detail: error instanceof Error ? error.message : String(error),
+      },
+    });
+    mode = "spatial_search";
+  }
   await emitProgress(callbacks, {
     event: "status",
     data: {
@@ -2293,13 +2475,51 @@ export async function runSpatialSearchAgent(
     await buildSceneTool(supabase),
     await buildRecentSceneTool(supabase),
   ];
-  const { candidates: candidateMap, trace } = await executeAgentToolLoop({
-    model,
-    intent,
-    tools,
-    options,
-    callbacks,
-  });
+  let candidateMap: Map<string, SceneCandidate>;
+  let trace: ToolTraceEntry[];
+  let usedDeterministicFallback = false;
+
+  try {
+    if (shouldPreferHeuristicSpatialRoute(query)) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "spatial_fast_path",
+          summary: "当前请求较简单，优先走确定性空间检索路径",
+          detail: "减少对上游模型路由和工具编排的依赖，避免简单查询被 503 阻塞",
+        },
+      });
+      ({ candidates: candidateMap, trace } = await executeDeterministicSpatialToolLoop({
+        intent,
+        tools,
+        callbacks,
+      }));
+      usedDeterministicFallback = true;
+    } else {
+      ({ candidates: candidateMap, trace } = await executeAgentToolLoop({
+        model,
+        intent,
+        tools,
+        options,
+        callbacks,
+      }));
+    }
+  } catch (error) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "spatial_fallback",
+        summary: "空间工具编排阶段出现异常，已回退到确定性检索路径",
+        detail: error instanceof Error ? error.message : String(error),
+      },
+    });
+    ({ candidates: candidateMap, trace } = await executeDeterministicSpatialToolLoop({
+      intent,
+      tools,
+      callbacks,
+    }));
+    usedDeterministicFallback = true;
+  }
 
   const rankedCandidates = [...candidateMap.values()]
     .map((candidate) => ({
@@ -2317,24 +2537,34 @@ export async function runSpatialSearchAgent(
     bucket: env.storageBucket,
   });
 
-  const selection = rankedCandidates.length > 0
-    ? await selectBestResult(
-      model,
-      intent,
-      rankedCandidates,
-      suggestedActions,
-      options,
-      callbacks,
-    )
-    : {
-      selectedSceneId: null,
-      selectedModelId: null,
-      selectedPoseImageId: null,
-      selectionReason: "没有检索到可信候选",
-      confidence: 0,
-      answer: "当前没有找到可信的空间检索结果。",
-      actions: [],
-    };
+  let selection: SelectionResult;
+  if (rankedCandidates.length === 0) {
+    selection = buildDeterministicSpatialSelection({ rankedCandidates });
+  } else if (usedDeterministicFallback) {
+    selection = buildDeterministicSpatialSelection({ rankedCandidates });
+  } else {
+    try {
+      selection = await selectBestResult(
+        model,
+        intent,
+        rankedCandidates,
+        suggestedActions,
+        options,
+        callbacks,
+      );
+    } catch (error) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "selection_fallback",
+          summary: "最终裁决阶段出现异常，已改用确定性候选排序结果",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      });
+      selection = buildDeterministicSpatialSelection({ rankedCandidates });
+      usedDeterministicFallback = true;
+    }
+  }
 
   await emitProgress(callbacks, {
     event: "status",
@@ -2423,7 +2653,16 @@ export async function runSpatialSearchAgent(
       pose_image_id: candidate.bestPose?.image_name ?? null,
     })),
     selected_candidate_reason: selection.selectionReason,
-    tool_trace: trace,
+    tool_trace: usedDeterministicFallback
+      ? [
+        ...trace,
+        {
+          toolName: "deterministic_spatial_fallback",
+          args: { query },
+          resultSummary: "已使用确定性空间检索兜底，避免简单查询依赖上游模型",
+        },
+      ]
+      : trace,
     asset_context: serializeAssetContext(createEmptyAssetToolState()),
     compare_context: null,
     collection_context: null,

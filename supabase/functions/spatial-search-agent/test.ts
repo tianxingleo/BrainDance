@@ -7,6 +7,7 @@ import {
   isDirectReplyQuery,
   normalizeExplicitTimeRange,
   scoreSceneCandidate,
+  shouldPreferHeuristicSpatialRoute,
   shouldForceAnotherToolRound,
   summarizeCandidateEvidence,
 } from "../_shared/agent-core/spatialAgent.ts";
@@ -15,6 +16,13 @@ Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
   assertEquals(isDirectReplyQuery("你好"), true);
   assertEquals(isDirectReplyQuery("谢谢！"), true);
   assertEquals(isDirectReplyQuery("你好，帮我找一下红色杯子"), false);
+});
+
+Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {
+  assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("看一下桌上的杯子"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"), false);
+  assertEquals(shouldPreferHeuristicSpatialRoute("谢谢"), false);
 });
 
 Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {

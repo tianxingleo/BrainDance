@@ -607,7 +607,35 @@ class AgentRecallService {
     return data;
   }
 
+  String _normalizeDioError(DioException error) {
+    final status = error.response?.statusCode;
+    final data = _decodeInvokeData(error.response?.data);
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    if (data is Map && data['message'] != null) {
+      return data['message'].toString();
+    }
+    if (data is String && data.trim().isNotEmpty) {
+      return data.trim();
+    }
+    if (status == 503) {
+      return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
+    }
+    if (status == 502 || status == 504) {
+      return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
+    }
+    if (status != null) {
+      return 'agent-recall 调用失败（HTTP $status）';
+    }
+    return error.message ?? error.toString();
+  }
+
   String _normalizeInvokeError(Object error) {
+    if (error is DioException) {
+      return _normalizeDioError(error);
+    }
+
     if (error is FunctionException) {
       final detail = _decodeInvokeData(error.details);
       if (detail is Map && detail['error'] != null) {
@@ -621,6 +649,9 @@ class AgentRecallService {
       }
       if (error.reasonPhrase != null && error.reasonPhrase!.isNotEmpty) {
         return error.reasonPhrase!;
+      }
+      if (error.status == 503) {
+        return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
       }
       if (error.status == 502 || error.status == 504) {
         return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
