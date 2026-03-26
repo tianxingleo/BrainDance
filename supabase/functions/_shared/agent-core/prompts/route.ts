@@ -24,6 +24,9 @@ Assistant: mode -> asset_metadata, reasoning -> "用户询问模型本身的列�
 User: "找上周拍的红色杯子"
 Assistant: mode -> spatial_search, reasoning -> "用户正在寻找特定时间和特定物体，属于空间检索。"
 
+User: "找初音未来相关的"
+Assistant: mode -> asset_metadata, reasoning -> "用户是在按主题/内容相关性找模型资产，不是在问场景内某个物体的位置，应进入资产元数据模式。"
+
 User: "把这三个模型统一加上宿舍标签"
 Assistant: mode -> asset_metadata, reasoning -> "用户要求修改选中模型的元数据（加上宿舍标签），这属于资产元数据操作。"
 

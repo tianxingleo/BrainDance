@@ -983,9 +983,14 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
     return false;
   }
 
-  return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
-    .test(normalized) ||
-    /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
+  const hasSpatialCue =
+    /在哪|在哪里|位置|地点|门口|角落|桌上|桌面|旁边|附近|场景里|房间里|画面里|镜头|视角|飞到|定位|有没有|是否存在|看得到|能不能看到/
+      .test(normalized);
+  const hasTimeBoundObjectSearch =
+    /最近|最新|今天|昨天|上周|本周|这个月|上个月|去年/.test(normalized) &&
+    /(找|查|看|搜|检索)/.test(normalized);
+
+  return hasSpatialCue || hasTimeBoundObjectSearch;
 }
 
 export function isAssetDiscoveryQuery(query: string): boolean {
@@ -1003,6 +1008,13 @@ export function isAssetDiscoveryQuery(query: string): boolean {
 
   if (
     /改名|重命名|批量|标签|描述|摘要|推荐|对比|比较|专题|归档|集合|版本链|线程/
+      .test(normalized)
+  ) {
+    return true;
+  }
+
+  if (
+    /相关|类似|同类|风格|主题|同风格|像.*一样|关于|有关|周边|系列/
       .test(normalized)
   ) {
     return true;

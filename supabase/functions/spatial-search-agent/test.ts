@@ -22,9 +22,11 @@ Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
 });
 
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {
-  assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), false);
   assertEquals(shouldPreferHeuristicSpatialRoute("看一下桌上的杯子"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找上周拍的红色杯子"), true);
   assertEquals(shouldPreferHeuristicSpatialRoute("找一个会议室资产"), false);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找初音未来相关的"), false);
   assertEquals(
     shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"),
     false,
@@ -35,6 +37,7 @@ Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 
 Deno.test("isAssetDiscoveryQuery 会识别模型资产级查找请求", () => {
   assertEquals(isAssetDiscoveryQuery("找一个会议室资产"), true);
   assertEquals(isAssetDiscoveryQuery("帮我找个办公室模型"), true);
+  assertEquals(isAssetDiscoveryQuery("找初音未来相关的"), true);
   assertEquals(isAssetDiscoveryQuery("会议室里的投影仪在哪"), false);
 });
 
