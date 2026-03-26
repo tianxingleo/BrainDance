@@ -216,6 +216,8 @@ LangChain 相关文档不能只写规划口径，必须明确区分：已实现�
 - 直接按 Flutter 当前请求体字段调用正式 `agent-recall`
 - 在电脑端模拟 Flutter 对线上真库的实际请求
 - 打印完整流式过程、最终回答、候选结果与工具轨迹
+- 可额外打印请求摘要、HTTP 响应元信息、事件时间线、耗时统计、`evidence` 摘要与完整 `done` payload
+- 可把完整调试结果落盘为 JSON，并把事件时间线单独落盘为 JSONL
 - 对后端 LangChain / Agent 编排而言，与 Flutter 真库联调看到的是同一条正式链路
 - 应作为 LangChain / Agent 编排问题的第一现场复现工具
 
@@ -227,6 +229,20 @@ python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
   --execution-mode preview
 ```
 
+推荐分析模式：
+
+```bash
+python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
+  --query "请你找一下洛天依相关的模型" \
+  --execution-mode preview \
+  --show-request \
+  --show-response-meta \
+  --show-event-timeline \
+  --show-full-result \
+  --log-file ai_engine/finetune_qwen3/logs/agent_recall_debug \
+  --event-log-file ai_engine/finetune_qwen3/logs/agent_recall_debug
+```
+
 如需调试多轮续聊，可继续传入：
 
 - `--conversation-summary`
@@ -236,5 +252,8 @@ python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
 执行要求：
 
 - 需要记录 LangChain / Agent 问题时，优先附上该 CLI 的实际输入、关键流式事件、最终回答和候选结果。
+- 需要做问题归因时，优先使用 `--show-request --show-response-meta --show-event-timeline`，不要只贴最终回答。
+- 需要沉淀可复盘材料时，优先同时使用 `--log-file` 与 `--event-log-file` 落盘，便于后续对照请求、事件时间线和最终结果。
 - 在排查后端路由、工具调用、流式事件、候选生成、会话续聊时，可直接把该 CLI 结果视为线上 Flutter 真库联调结果；除非问题明确发生在 Flutter 端渲染、状态管理或事件消费阶段。
 - 如果 CLI 结果与 Flutter 页面表现不一致，必须进一步说明差异发生在“后端事件生成”还是“Flutter 事件消费 / 展示”阶段。
+- 如果最终回答、`tool_trace`、`top_candidates`、`follow_up` 之间存在不一致，必须在记录中明确指出是哪一层返回结构不一致，而不是笼统写成“Agent 异常”。
