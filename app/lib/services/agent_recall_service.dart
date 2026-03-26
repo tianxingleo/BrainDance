@@ -32,6 +32,27 @@ class AgentStep extends ChangeNotifier {
     content = newContent;
     notifyListeners();
   }
+
+  String get compactTitle {
+    final trimmed = content.trim();
+    if (type == 'tool_call') {
+      return toolName?.trim().isNotEmpty == true ? toolName!.trim() : '未命名工具';
+    }
+    if (trimmed.isEmpty) {
+      switch (type) {
+        case 'status':
+          return '状态更新';
+        case 'thought':
+          return '思考';
+        case 'error':
+          return '执行异常';
+        default:
+          return '步骤';
+      }
+    }
+    final firstLine = trimmed.split('\n').first.trim();
+    return firstLine.isEmpty ? trimmed : firstLine;
+  }
 }
 
 class ChatMessage extends ChangeNotifier {
@@ -236,7 +257,9 @@ class AgentSessionState {
       if (lastSelectedModelIds != null)
         'lastSelectedModelIds': lastSelectedModelIds,
       if (lastCandidateRefs != null)
-        'lastCandidateRefs': lastCandidateRefs!.map((item) => item.toJson()).toList(),
+        'lastCandidateRefs': lastCandidateRefs!
+            .map((item) => item.toJson())
+            .toList(),
       if (lastOperationPreview != null)
         'lastOperationPreview': lastOperationPreview!.toJson(),
     };
@@ -581,7 +604,9 @@ class AgentRecallService {
       }
 
       final eventBuffer = StringBuffer();
-      await for (final chunk in stream.cast<List<int>>().transform(utf8.decoder)) {
+      await for (final chunk in stream.cast<List<int>>().transform(
+        utf8.decoder,
+      )) {
         if (chunk.isEmpty) {
           continue;
         }
@@ -794,10 +819,9 @@ class AgentRecallService {
       return textLocalize('agent_error_upstream');
     }
     if (status != null) {
-      return textLocalize('agent_error_http').replaceAll(
-        '{status}',
-        status.toString(),
-      );
+      return textLocalize(
+        'agent_error_http',
+      ).replaceAll('{status}', status.toString());
     }
     return error.message ?? error.toString();
   }
@@ -827,10 +851,9 @@ class AgentRecallService {
       if (error.status == 502 || error.status == 504) {
         return textLocalize('agent_error_upstream');
       }
-      return textLocalize('agent_error_http').replaceAll(
-        '{status}',
-        error.status.toString(),
-      );
+      return textLocalize(
+        'agent_error_http',
+      ).replaceAll('{status}', error.status.toString());
     }
 
     return error.toString();
@@ -909,17 +932,11 @@ class AgentRecallService {
     try {
       final decoded = jsonDecode(dataText);
       return [
-        jsonEncode({
-          'event': eventName,
-          'data': decoded,
-        }),
+        jsonEncode({'event': eventName, 'data': decoded}),
       ];
     } catch (_) {
       return [
-        jsonEncode({
-          'event': eventName,
-          'data': dataText,
-        }),
+        jsonEncode({'event': eventName, 'data': dataText}),
       ];
     }
   }
@@ -929,8 +946,5 @@ class _ParsedStreamEvents {
   final List<String> events;
   final int remaining;
 
-  const _ParsedStreamEvents({
-    required this.events,
-    required this.remaining,
-  });
+  const _ParsedStreamEvents({required this.events, required this.remaining});
 }
