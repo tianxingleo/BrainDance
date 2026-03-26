@@ -257,3 +257,37 @@ Core，避免能力散落在独立函数和旧文档描述里。
 - `supabase/functions/_shared/agent-core/spatialAgent.ts`
 - `app/lib/services/agent_recall_service.dart`
 - `app/lib/pages/recall.dart`
+
+## 2026-03-26 第三次补充：`worker failed to boot` 故障归因
+
+### 背景
+
+- 前端 Recall/Agent 输入后，Flutter 日志里出现的是 `DioException [bad response]` 且 HTTP 状态码为 503。
+- 这类现象容易被误判成前端请求体错误、流式协议不兼容，或者 Supabase Flutter SDK 解析异常。
+
+### 本次结论
+
+- 这次故障的更直接根因在后端启动阶段，而不是 Flutter 输入链路。
+- 当 `agent-recall` 依赖的共享 Core
+  [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)
+  残留 `<<<<<<< / ======= / >>>>>>>` 这类 Git 合并冲突标记时，Deno 会在模块解析阶段失败。
+- 一旦共享模块无法解析，Supabase Edge Function worker 就会启动失败，前端最终只会看到 503 和
+  `worker failed to boot`。
+
+### 验证方式
+
+- 已使用 `deno check supabase/functions/_shared/agent-core/spatialAgent.ts`
+  验证共享 Core 当前可被 Deno 正常解析。
+- 已使用 `deno check supabase/functions/agent-recall/index.ts`
+  验证入口函数当前可通过静态检查。
+- 已使用 `deno test supabase/functions/agent-recall/test.ts`
+  验证 `agent-recall` 请求 schema 相关单测通过。
+
+### 排查建议
+
+- 若再次出现相同现象，先查 Edge Function 代码能否启动，再查业务逻辑。
+- 第一优先级检查：
+  - 共享 Core 是否残留冲突标记。
+  - 入口文件和共享依赖是否存在语法错误。
+  - 本地是否能先跑过 `deno check`。
+- 只有在 `deno check` 明确通过后，才继续排查 DashScope、Supabase 权限、数据库查询或外部 5xx。
