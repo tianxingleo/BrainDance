@@ -196,3 +196,43 @@ LangChain 相关的实现现状、阶段总结、联调记录、未完成事项�
 ### 8.5. 文档内容必须以代码现状为准
 
 LangChain 相关文档不能只写规划口径，必须明确区分：已实现、部分实现、实验中、未实现。如果代码和旧文档不一致，应先修正文档口径，避免继续漂移。
+
+### 8.6. LangChain / agent-recall 联调优先使用桌面调试 CLI
+
+凡是需要调试以下问题时，优先使用仓库内现成的桌面调试脚本，而不是只靠 Flutter 页面人工点击排查：
+
+- `agent-recall` 路由是否正确
+- 流式事件顺序是否正确
+- `tool_call / tool_result / message / done` 是否完整
+- `top_candidates`、`tool_trace`、`follow_up`、`session_state` 是否符合预期
+- 多轮续聊、候选确认、预览 / 执行切换是否符合 Flutter 协议
+
+统一使用脚本：
+
+- `ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py`
+
+这个脚本的定位是：
+
+- 直接按 Flutter 当前请求体字段调用正式 `agent-recall`
+- 在电脑端模拟用户输入问题
+- 打印完整流式过程、最终回答、候选结果与工具轨迹
+- 适合作为 LangChain / Agent 编排问题的第一现场复现工具
+
+常用示例：
+
+```bash
+python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
+  --query "请你找一下洛天依相关的模型" \
+  --execution-mode preview
+```
+
+如需调试多轮续聊，可继续传入：
+
+- `--conversation-summary`
+- `--session-state-file`
+- `--execution-mode execute`
+
+执行要求：
+
+- 需要记录 LangChain / Agent 问题时，优先附上该 CLI 的实际输入、关键流式事件、最终回答和候选结果。
+- 如果 CLI 结果与 Flutter 页面表现不一致，必须进一步说明差异发生在“后端事件生成”还是“Flutter 事件消费 / 展示”阶段。
