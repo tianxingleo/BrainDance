@@ -165,6 +165,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
     return _formatAgentElapsed(duration);
   }
+  String? _agentSessionId;
+  String? _agentConversationSummary;
+  AgentSessionState? _agentSessionState;
+  String? _agentLatestSubmittedQuery;
 
   void _stopAgentSearch() {
     if (_isAgentSearching) {
@@ -216,9 +220,53 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
     _finishAgentRunTracking();
     _agentChatMessage!.isProcessCollapsed = collapseProcess;
-    if (_agentChatMessage!.finalAnswer.isNotEmpty) {
+    final followUp = _agentResult?.followUp;
+    if (followUp != null && followUp.message.trim().isNotEmpty) {
+      _agentChatMessage!.liveStatus = followUp.message.trim();
+    } else if (_agentChatMessage!.finalAnswer.isNotEmpty) {
       _agentChatMessage!.liveStatus = '最终回答已生成';
     }
+  }
+
+  void _ensureAgentSessionId() {
+    _agentSessionId ??=
+        'recall-agent-${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  void _rememberAgentResponse(String query, AgentRecallResponse response) {
+    _agentSessionState = response.sessionState;
+    _agentConversationSummary = _mergeAgentConversationSummary(
+      previous: _agentConversationSummary,
+      query: query,
+      response: response,
+    );
+    _ensureAgentSessionId();
+  }
+
+  String _mergeAgentConversationSummary({
+    required String? previous,
+    required String query,
+    required AgentRecallResponse response,
+  }) {
+    final currentSummary = response.conversationSummary?.trim();
+    final merged = <String>[
+      if (previous != null && previous.trim().isNotEmpty) previous.trim(),
+      if (currentSummary != null && currentSummary.isNotEmpty)
+        currentSummary
+      else
+        '用户：${query.trim()} | Agent：${response.answer.trim()}',
+    ];
+    return merged
+        .where((item) => item.trim().isNotEmpty)
+        .join('\n')
+        .split('\n')
+        .where((item) => item.trim().isNotEmpty)
+        .toList()
+        .reversed
+        .take(4)
+        .toList()
+        .reversed
+        .join('\n');
   }
 
   void _consumeAgentEvent(Map<String, dynamic> data) {
@@ -327,6 +375,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
             Map<String, dynamic>.from(payload),
           );
         });
+        if (_agentResult != null) {
+          _rememberAgentResponse(
+            _agentLatestSubmittedQuery ?? _searchController.text.trim(),
+            _agentResult!,
+          );
+        }
         final answer = _agentResult?.answer ?? '';
         if (answer.isNotEmpty &&
             _agentChatMessage!.finalAnswer.trim().isEmpty) {
@@ -1900,6 +1954,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Future<void> _askAgentRecall(String query) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) return;
+    _ensureAgentSessionId();
+    _agentLatestSubmittedQuery = trimmedQuery;
 
     setState(() {
       _isAgentSearching = true;
@@ -1920,7 +1976,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       });
       _ensureAgentRunTrackingTimer();
       try {
-        final result = await AgentRecallService().query(trimmedQuery);
+        final result = await AgentRecallService().query(
+          trimmedQuery,
+          sessionId: _agentSessionId,
+          conversationSummary: _agentConversationSummary,
+          sessionState: _agentSessionState,
+        );
         if (!mounted) return;
         setState(() {
           _agentResult = result;
@@ -1928,6 +1989,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
+        _rememberAgentResponse(trimmedQuery, result);
         _agentChatMessage!.addSummary('当前环境不支持流式事件，已回退到一次性回答');
         _completeAgentRun();
       } catch (ex) {
@@ -1942,7 +2004,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     try {
       _updateAgentLiveStatus('正在发起 Agent 流式请求');
-      final stream = AgentRecallService().queryStream(trimmedQuery);
+      final stream = AgentRecallService().queryStream(
+        trimmedQuery,
+        sessionId: _agentSessionId,
+        conversationSummary: _agentConversationSummary,
+        sessionState: _agentSessionState,
+      );
       _agentStreamSubscription = stream.listen(
         (chunk) {
           if (!mounted) return;
@@ -2097,6 +2164,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return textLocalize('recall_local_ai_hint');
     }
     if (_searchMode == RecallSearchMode.agent) {
+      final followUp = _agentResult?.followUp;
+      if (followUp != null &&
+          followUp.isWaitingUserInput &&
+          (followUp.inputPlaceholder?.trim().isNotEmpty ?? false)) {
+        return followUp.inputPlaceholder!.trim();
+      }
       return '输入空间问题，例如"厨房在哪里"';
     }
     return textLocalize('recall_search_hint');
@@ -2116,6 +2189,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       if (mode != RecallSearchMode.agent) {
         _agentResult = null;
         _agentChatMessage = null;
+        _agentSessionId = null;
+        _agentConversationSummary = null;
+        _agentSessionState = null;
       }
     });
     final keyword = _searchController.text.trim();
@@ -2167,6 +2243,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _agentResult != null &&
         _agentResult!.actions.any((a) => a.type == 'open_scene');
     final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
+    final followUp = _agentResult?.followUp;
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -2443,6 +2520,74 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                         ),
                       ),
                     ),
+                  ),
+                ),
+              ],
+
+              if (followUp != null &&
+                  (followUp.message.trim().isNotEmpty ||
+                      followUp.suggestedReplies.isNotEmpty)) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF161D28)
+                        : const Color(0xFFF6F9FD),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white12
+                          : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        followUp.isWaitingUserInput ? '继续对话' : '下一步建议',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (followUp.message.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          followUp.message.trim(),
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                      if (followUp.suggestedReplies.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: followUp.suggestedReplies.map((reply) {
+                            return ActionChip(
+                              label: Text(
+                                reply,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              onPressed: () {
+                                _searchController.text = reply;
+                                _searchController.selection =
+                                    TextSelection.collapsed(
+                                      offset: reply.length,
+                                    );
+                                unawaited(_askAgentRecall(reply));
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],

@@ -103,6 +103,11 @@ class AgentRecallResponse {
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
   final Map<String, dynamic>? collectionContext;
+  final Map<String, dynamic>? creativeContext;
+  final Map<String, dynamic>? memoryGraphContext;
+  final AgentSessionState? sessionState;
+  final AgentFollowUp? followUp;
+  final String? conversationSummary;
 
   AgentRecallResponse({
     required this.mode,
@@ -114,6 +119,11 @@ class AgentRecallResponse {
     this.assetContext,
     this.compareContext,
     this.collectionContext,
+    this.creativeContext,
+    this.memoryGraphContext,
+    this.sessionState,
+    this.followUp,
+    this.conversationSummary,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -156,6 +166,157 @@ class AgentRecallResponse {
       collectionContext: json['collection_context'] is Map
           ? Map<String, dynamic>.from(json['collection_context'] as Map)
           : null,
+      creativeContext: json['creative_context'] is Map
+          ? Map<String, dynamic>.from(json['creative_context'] as Map)
+          : null,
+      memoryGraphContext: json['memory_graph_context'] is Map
+          ? Map<String, dynamic>.from(json['memory_graph_context'] as Map)
+          : null,
+      sessionState: json['session_state'] is Map
+          ? AgentSessionState.fromJson(
+              Map<String, dynamic>.from(json['session_state'] as Map),
+            )
+          : null,
+      followUp: json['follow_up'] is Map
+          ? AgentFollowUp.fromJson(
+              Map<String, dynamic>.from(json['follow_up'] as Map),
+            )
+          : null,
+      conversationSummary: json['conversation_summary']?.toString(),
+    );
+  }
+}
+
+class AgentSessionState {
+  final String? lastMode;
+  final List<String>? lastSelectedModelIds;
+  final List<AgentCandidateRef>? lastCandidateRefs;
+  final AgentOperationPreview? lastOperationPreview;
+
+  AgentSessionState({
+    this.lastMode,
+    this.lastSelectedModelIds,
+    this.lastCandidateRefs,
+    this.lastOperationPreview,
+  });
+
+  factory AgentSessionState.fromJson(Map<String, dynamic> json) {
+    return AgentSessionState(
+      lastMode: json['lastMode']?.toString(),
+      lastSelectedModelIds: (json['lastSelectedModelIds'] as List?)
+          ?.map((item) => item.toString())
+          .toList(),
+      lastCandidateRefs: (json['lastCandidateRefs'] as List?)
+          ?.map(
+            (item) => AgentCandidateRef.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList(),
+      lastOperationPreview: json['lastOperationPreview'] is Map
+          ? AgentOperationPreview.fromJson(
+              Map<String, dynamic>.from(json['lastOperationPreview'] as Map),
+            )
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (lastMode != null) 'lastMode': lastMode,
+      if (lastSelectedModelIds != null)
+        'lastSelectedModelIds': lastSelectedModelIds,
+      if (lastCandidateRefs != null)
+        'lastCandidateRefs': lastCandidateRefs!.map((item) => item.toJson()).toList(),
+      if (lastOperationPreview != null)
+        'lastOperationPreview': lastOperationPreview!.toJson(),
+    };
+  }
+}
+
+class AgentCandidateRef {
+  final int index;
+  final String sceneId;
+  final String modelId;
+  final String description;
+
+  AgentCandidateRef({
+    required this.index,
+    required this.sceneId,
+    required this.modelId,
+    required this.description,
+  });
+
+  factory AgentCandidateRef.fromJson(Map<String, dynamic> json) {
+    return AgentCandidateRef(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      sceneId: json['sceneId']?.toString() ?? '',
+      modelId: json['modelId']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'index': index,
+      'sceneId': sceneId,
+      'modelId': modelId,
+      'description': description,
+    };
+  }
+}
+
+class AgentOperationPreview {
+  final String toolName;
+  final int affectedCount;
+
+  AgentOperationPreview({
+    required this.toolName,
+    required this.affectedCount,
+  });
+
+  factory AgentOperationPreview.fromJson(Map<String, dynamic> json) {
+    return AgentOperationPreview(
+      toolName: json['toolName']?.toString() ?? '',
+      affectedCount: (json['affectedCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'toolName': toolName,
+      'affectedCount': affectedCount,
+    };
+  }
+}
+
+class AgentFollowUp {
+  final String status;
+  final String kind;
+  final String message;
+  final String? inputPlaceholder;
+  final List<String> suggestedReplies;
+
+  AgentFollowUp({
+    required this.status,
+    required this.kind,
+    required this.message,
+    this.inputPlaceholder,
+    this.suggestedReplies = const [],
+  });
+
+  bool get isWaitingUserInput => status == 'waiting_user_input';
+
+  factory AgentFollowUp.fromJson(Map<String, dynamic> json) {
+    return AgentFollowUp(
+      status: json['status']?.toString() ?? 'idle',
+      kind: json['kind']?.toString() ?? 'general',
+      message: json['message']?.toString() ?? '',
+      inputPlaceholder: json['input_placeholder']?.toString(),
+      suggestedReplies: ((json['suggested_replies'] as List?) ?? [])
+          .map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList(),
     );
   }
 }
@@ -311,6 +472,7 @@ class AgentRecallService {
     List<String>? candidateSceneIds,
     String? sessionId,
     String? conversationSummary,
+    AgentSessionState? sessionState,
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -360,6 +522,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
@@ -394,6 +557,7 @@ class AgentRecallService {
           candidateSceneIds: candidateSceneIds,
           sessionId: sessionId,
           conversationSummary: conversationSummary,
+          sessionState: sessionState,
         );
         yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
       } catch (fallbackError) {
@@ -417,6 +581,7 @@ class AgentRecallService {
     List<String>? candidateSceneIds,
     String? sessionId,
     String? conversationSummary,
+    AgentSessionState? sessionState,
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -437,6 +602,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
@@ -504,6 +670,19 @@ class AgentRecallService {
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,
       'collection_context': response.collectionContext,
+      'creative_context': response.creativeContext,
+      'memory_graph_context': response.memoryGraphContext,
+      'session_state': response.sessionState?.toJson(),
+      'conversation_summary': response.conversationSummary,
+      'follow_up': response.followUp == null
+          ? null
+          : {
+              'status': response.followUp!.status,
+              'kind': response.followUp!.kind,
+              'message': response.followUp!.message,
+              'input_placeholder': response.followUp!.inputPlaceholder,
+              'suggested_replies': response.followUp!.suggestedReplies,
+            },
     };
   }
 
@@ -524,7 +703,35 @@ class AgentRecallService {
     return data;
   }
 
+  String _normalizeDioError(DioException error) {
+    final status = error.response?.statusCode;
+    final data = _decodeInvokeData(error.response?.data);
+    if (data is Map && data['error'] != null) {
+      return data['error'].toString();
+    }
+    if (data is Map && data['message'] != null) {
+      return data['message'].toString();
+    }
+    if (data is String && data.trim().isNotEmpty) {
+      return data.trim();
+    }
+    if (status == 503) {
+      return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
+    }
+    if (status == 502 || status == 504) {
+      return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
+    }
+    if (status != null) {
+      return 'agent-recall 调用失败（HTTP $status）';
+    }
+    return error.message ?? error.toString();
+  }
+
   String _normalizeInvokeError(Object error) {
+    if (error is DioException) {
+      return _normalizeDioError(error);
+    }
+
     if (error is FunctionException) {
       final detail = _decodeInvokeData(error.details);
       if (detail is Map && detail['error'] != null) {
@@ -538,6 +745,9 @@ class AgentRecallService {
       }
       if (error.reasonPhrase != null && error.reasonPhrase!.isNotEmpty) {
         return error.reasonPhrase!;
+      }
+      if (error.status == 503) {
+        return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
       }
       if (error.status == 502 || error.status == 504) {
         return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';

@@ -75,6 +75,7 @@ serve(async (req: Request) => {
       candidateSceneIds: parsed.data.candidateSceneIds,
       sessionId: parsed.data.sessionId,
       conversationSummary: parsed.data.conversationSummary,
+      sessionState: parsed.data.sessionState,
     };
 
     if (isStreamingRequest(req)) {
