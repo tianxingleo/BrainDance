@@ -4,6 +4,7 @@ import {
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
   buildVisualizationActions,
+  isAssetDiscoveryQuery,
   isDirectReplyQuery,
   normalizeExplicitTimeRange,
   parseSpatialIntentHeuristically,
@@ -23,11 +24,18 @@ Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {
   assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), true);
   assertEquals(shouldPreferHeuristicSpatialRoute("看一下桌上的杯子"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找一个会议室资产"), false);
   assertEquals(
     shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"),
     false,
   );
   assertEquals(shouldPreferHeuristicSpatialRoute("谢谢"), false);
+});
+
+Deno.test("isAssetDiscoveryQuery 会识别模型资产级查找请求", () => {
+  assertEquals(isAssetDiscoveryQuery("找一个会议室资产"), true);
+  assertEquals(isAssetDiscoveryQuery("帮我找个办公室模型"), true);
+  assertEquals(isAssetDiscoveryQuery("会议室里的投影仪在哪"), false);
 });
 
 Deno.test("parseDeterministicAssetRenameIntent 会识别最新模型改名但缺少新名字", () => {
@@ -127,7 +135,7 @@ Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
   assertEquals(result.startTime! < result.endTime!, true);
 });
 
-Deno.test("parseSpatialIntentHeuristically 会把会议室资产识别为场景检索", () => {
+Deno.test("parseSpatialIntentHeuristically 虽可识别会议室资产为场景目标，但不应直接触发空间快路径", () => {
   const intent = parseSpatialIntentHeuristically("找一个会议室资产");
 
   assertEquals(intent.targetType, "scene");

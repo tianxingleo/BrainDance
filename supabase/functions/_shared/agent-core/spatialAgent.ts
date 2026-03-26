@@ -975,6 +975,7 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return false;
   if (isDirectReplyQuery(normalized)) return false;
+  if (isAssetDiscoveryQuery(normalized)) return false;
   if (
     /比较|对比|变化|前后|两个月前|现在|导览|旁白|脚本|大纲|故事|创作|趋势|缺失|时间线|长期记忆|关系摘要|改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|模型.*对比/
       .test(normalized)
@@ -985,6 +986,38 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
   return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
     .test(normalized) ||
     /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
+}
+
+export function isAssetDiscoveryQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    /在哪|在哪里|位置|地点|角落|门口|旁边|附近|桌上|桌面|里面|里边|视角|镜头|飞到|定位/
+      .test(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    /改名|重命名|批量|标签|描述|摘要|推荐|对比|比较|专题|归档|集合|版本链|线程/
+      .test(normalized)
+  ) {
+    return true;
+  }
+
+  if (/模型资产|资产|模型|扫描|重建结果|场景模型/.test(normalized)) {
+    return true;
+  }
+
+  return (
+    /(会议室|客厅|卧室|教室|办公室|房间|区域|空间|展台|scene[_-]?[\w-]+)/.test(
+      normalized,
+    ) &&
+    /(找|查|搜|看|来个|给我找|有没有|想找)/.test(normalized)
+  );
 }
 
 
@@ -1156,6 +1189,14 @@ async function classifyAgentMode(
     };
   }
 
+  if (isAssetDiscoveryQuery(query)) {
+    return {
+      mode: "asset_metadata",
+      reasoning:
+        "当前输入是在找某类模型/场景资产本身，而不是问场景内物体的位置，应进入资产元数据模式。",
+    };
+  }
+
   if (shouldPreferHeuristicSpatialRoute(query)) {
     return {
       mode: "spatial_search",
@@ -1186,6 +1227,45 @@ type DeterministicAssetRenameIntent = {
     | { kind: "session"; modelIds: string[] };
   newName: string | null;
 };
+
+type DeterministicAssetLookupIntent = {
+  query: string;
+  startTime: string | null;
+  endTime: string | null;
+  limit: number;
+};
+
+function parseDeterministicAssetLookupIntent(
+  query: string,
+): DeterministicAssetLookupIntent | null {
+  if (!isAssetDiscoveryQuery(query)) {
+    return null;
+  }
+
+  const compact = query.trim();
+  if (!compact) {
+    return null;
+  }
+
+  const timeRange = normalizeExplicitTimeRange({
+    timeHint: compact,
+  });
+  const normalizedQuery = compact
+    .replace(/帮我|请|麻烦|想要|我想|给我/g, " ")
+    .replace(/查一下|查下|看一下|看下|搜一下|搜下|找一下|找个|找一个|来个/g, " ")
+    .replace(/有没有|有无/g, " ")
+    .replace(/模型资产|资产|模型|扫描结果|重建结果/g, " ")
+    .replace(/[，。！？!?,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    query: normalizedQuery || compact,
+    startTime: timeRange.startTime,
+    endTime: timeRange.endTime,
+    limit: 5,
+  };
+}
 
 function parseChineseCountToken(token: string): number | null {
   const trimmed = token.trim();
@@ -1757,6 +1837,107 @@ async function runDeterministicAssetRenameFlow(input: {
       isBatchRename
         ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
         : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
+    tool_trace: trace,
+    asset_context: serializeAssetContext(state),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
+}
+
+async function runDeterministicAssetLookupFlow(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<SpatialSearchResponse | null> {
+  const intent = parseDeterministicAssetLookupIntent(input.query);
+  if (!intent) {
+    return null;
+  }
+
+  const { supabase, options, callbacks } = input;
+  const trace: ToolTraceEntry[] = [];
+  const state = createEmptyAssetToolState();
+  const listTool = buildListModelAssetsTool(supabase, {
+    selectedModelIds: options.selectedModelIds,
+  });
+  const listArgs = {
+    modelIds: [],
+    sceneIds: [],
+    tags: [],
+    query: intent.query,
+    startTime: intent.startTime,
+    endTime: intent.endTime,
+    limit: intent.limit,
+  };
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "asset_lookup_fast_path",
+      summary: "检测到资产查找请求，优先走模型资产列表工具",
+      detail: intent.query,
+    },
+  });
+  await emitProgress(callbacks, {
+    event: "tool_call",
+    data: {
+      name: listTool.name,
+      args: listArgs,
+      summary: "直接筛选匹配的模型资产候选",
+      round: 1,
+    },
+  });
+
+  const listResult = await listTool.invoke(listArgs);
+  const listText = typeof listResult === "string"
+    ? listResult
+    : JSON.stringify(listResult);
+  const count = collectAssetToolResult(listTool.name, listText, state);
+  const resultSummary = summarizeToolResult(listTool.name, count);
+  trace.push({
+    toolName: listTool.name,
+    args: listArgs,
+    resultSummary,
+  });
+  await emitProgress(callbacks, {
+    event: "tool_result",
+    data: {
+      name: listTool.name,
+      summary: resultSummary,
+      count,
+      round: 1,
+    },
+  });
+
+  const topModel = state.list?.[0] ?? null;
+  const hasRows = (state.list?.length ?? 0) > 0;
+
+  return finalizeResponse({
+    success: true,
+    mode: "asset_metadata",
+    intent: null,
+    selection: {
+      scene_id: topModel?.scene_id ?? null,
+      model_id: topModel?.id ?? null,
+      pose_image_id: null,
+      confidence: hasRows ? 0.92 : 0,
+      reason: hasRows
+        ? "已走确定性资产查找路径，并基于 list_model_assets 结果返回最匹配候选"
+        : "已走确定性资产查找路径，但当前没有筛到匹配的模型资产",
+    },
+    answer: buildAssetAnswer(state, { query: input.query }) ??
+      "当前没有找到匹配的模型资产。",
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: hasRows
+      ? "已绕过空间检索链路，直接使用模型资产工具筛选候选"
+      : "已绕过空间检索链路，但模型资产工具未返回有效候选",
     tool_trace: trace,
     asset_context: serializeAssetContext(state),
     compare_context: null,
@@ -3518,6 +3699,17 @@ export async function runSpatialSearchAgent(
     });
     if (replayedWriteResponse) {
       return replayedWriteResponse;
+    }
+
+    const deterministicAssetLookupResponse =
+      await runDeterministicAssetLookupFlow({
+        supabase,
+        query,
+        options,
+        callbacks,
+      });
+    if (deterministicAssetLookupResponse) {
+      return deterministicAssetLookupResponse;
     }
 
     const assetTools = [
