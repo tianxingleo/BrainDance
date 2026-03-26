@@ -890,21 +890,7 @@ function computeKeywordScore(query: string, chunks: string[]): number {
   return hits / tokens.length;
 }
 
-export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return false;
-  if (isDirectReplyQuery(normalized)) return false;
-  if (
-    /比较|对比|变化|前后|两个月前|现在|导览|旁白|脚本|大纲|故事|创作|趋势|缺失|时间线|长期记忆|关系摘要|改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|模型.*对比/
-      .test(normalized)
-  ) {
-    return false;
-  }
 
-  return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
-    .test(normalized) ||
-    /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
-}
 
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
   if (!Array.isArray(input)) return null;
@@ -1012,48 +998,23 @@ function buildDirectReplyAnswer(query: string): string {
 }
 
 async function classifyAgentMode(
-  model: ChatOpenAI,
+  model: BaseChatModel,
   query: string,
   options: SpatialSearchAgentOptions = {},
 ): Promise<AgentMode> {
-  const normalized = query.trim().toLowerCase();
   const currentMode = options.currentMode ?? null;
 
   if (isDirectReplyQuery(query)) {
     return "spatial_search";
   }
 
-  if (
-    currentMode === "compare" ||
-    /比较|对比|变化|前后|两个月前|现在/.test(query)
-  ) {
+  if (currentMode === "compare") {
     return "time_compare";
   }
-  if (/导览|旁白|脚本|大纲|故事|创作|生成一个.*记忆集/.test(query)) {
-    return "creative";
-  }
-  if (/越来越|趋势|缺失|时间线|最近三次|长期记忆|关系摘要/.test(query)) {
-    return "memory_graph";
-  }
-  if (
-    currentMode === "batch_edit" ||
-    currentMode === "collection" ||
-    /改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|对比.*模型|模型.*对比/
-      .test(query) ||
-    ((options.selectedModelIds?.length ?? 0) > 0 &&
-      /这些模型|这几个模型|选中的模型|这三个模型/.test(query))
-  ) {
+  if (currentMode === "batch_edit" || currentMode === "collection") {
     return "asset_metadata";
   }
-  if (
-    shouldPreferHeuristicSpatialRoute(query) ||
-    normalized.includes("在哪") ||
-    normalized.includes("有没有") ||
-    normalized.includes("空间") ||
-    normalized.includes("场景")
-  ) {
-    return "spatial_search";
-  }
+
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getRoutePrompt } = await import("./prompts/route.ts");
   const contextBlock = buildAgentContextBlock(options);
@@ -1119,24 +1080,7 @@ function parseChineseCountToken(token: string): number | null {
   return null;
 }
 
-function extractLatestModelCount(query: string): number {
-  const patterns = [
-    /最新(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
-    /最近(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
-    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最新模型/,
-    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最近模型/,
-  ];
 
-  for (const pattern of patterns) {
-    const matched = query.match(pattern)?.[1];
-    const count = matched ? parseChineseCountToken(matched) : null;
-    if (count) {
-      return Math.max(1, Math.min(20, count));
-    }
-  }
-
-  return 1;
-}
 
 function isConfirmWriteQuery(query: string): boolean {
   return /^(请)?(确认|执行|正式执行|继续执行)/.test(query.trim()) ||
@@ -1150,26 +1094,9 @@ function referencesMultipleModels(query: string): boolean {
     );
 }
 
-function extractRenameTargetName(query: string): string | null {
-  const trimmed = query.trim();
-  const patterns = [
-    /(?:改名为|重命名为|名字改成|名称改成|改成|叫做|命名为)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
-    /(?:新名字|新名称)(?:是|叫)\s*[“"「『]?([^”"」』。！？?,，\n]+)[”"」』]?/i,
-  ];
 
-  for (const pattern of patterns) {
-    const matched = trimmed.match(pattern)?.[1]?.trim();
-    if (matched) {
-      return matched.replace(/[。！？!,，]+$/g, "").trim() || null;
-    }
-  }
 
-  return null;
-}
-
-export function parseDeterministicAssetRenameIntent(
-  query: string,
-  options: SpatialSearchAgentOptions = {},
+,
 ): DeterministicAssetRenameIntent | null {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -1261,156 +1188,9 @@ async function replayPendingAssetWriteIfNeeded(input: {
   query: string;
   options: SpatialSearchAgentOptions;
   callbacks?: AgentRuntimeCallbacks;
-}): Promise<SpatialSearchResponse | null> {
-  const { query, options, supabase, callbacks } = input;
-  if (!isConfirmWriteQuery(query)) {
-    return null;
-  }
-
-  const pending = options.sessionState?.lastOperationPreview;
-  if (!pending?.toolName || !pending.args) {
-    return null;
-  }
-
-  if (options.executionMode !== "execute") {
-    return finalizeResponse({
-      success: true,
-      mode: "asset_metadata",
-      intent: null,
-      selection: {
-        scene_id: null,
-        model_id: pending.modelIds?.[0] ?? null,
-        pose_image_id: null,
-        confidence: 0.82,
-        reason: "检测到用户希望确认写入，但当前请求仍处于预览模式",
-      },
-      answer:
-        "我已识别到你要确认执行，但当前请求还是 preview 模式。请切换到 execute 后再确认一次。",
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason: "缺少 execute 模式，已阻止正式写入",
-      tool_trace: [],
-      asset_context: serializeAssetContext(createEmptyAssetToolState()),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    });
-  }
-
-  const toolsByName = new Map<string, DynamicStructuredTool>([
-    [
-      "rename_model_asset",
-      buildRenameModelAssetTool(supabase, {
-        selectedModelIds: options.selectedModelIds,
-        allowWrite: true,
-      }),
-    ],
-    [
-      "batch_patch_model_metadata",
-      buildBatchPatchModelMetadataTool(supabase, {
-        selectedModelIds: options.selectedModelIds,
-        allowWrite: true,
-      }),
-    ],
-  ]);
-  const tool = toolsByName.get(pending.toolName);
-  if (!tool) {
-    return null;
-  }
-
-  const executionArgs = {
-    ...pending.args,
-    dryRun: false,
-  };
-  const state = createEmptyAssetToolState();
-  const trace: ToolTraceEntry[] = [];
-
-  await emitProgress(callbacks, {
-    event: "status",
-    data: {
-      phase: "asset_write_replay",
-      summary: "已识别到确认执行请求，准备重放上一轮预览操作",
-    },
-  });
-  await emitProgress(callbacks, {
-    event: "tool_call",
-    data: {
-      name: tool.name,
-      args: executionArgs,
-      summary: "开始正式执行上一轮已确认的资产写操作",
-      round: 1,
-    },
-  });
-
-  const toolResult = await tool.invoke(executionArgs);
-  const resultText = typeof toolResult === "string"
-    ? toolResult
-    : JSON.stringify(toolResult);
-  const count = collectAssetToolResult(tool.name, resultText, state);
-  const resultSummary = summarizeToolResult(tool.name, count);
-  trace.push({
-    toolName: tool.name,
-    args: executionArgs,
-    resultSummary,
-  });
-  await emitProgress(callbacks, {
-    event: "tool_result",
-    data: {
-      name: tool.name,
-      summary: resultSummary,
-      count,
-      round: 1,
-    },
-  });
-
-  const selectionModelId = state.operation?.preview[0]?.model_id ??
-    pending.modelIds?.[0] ?? null;
-  const selectionSceneId = state.operation?.preview[0]?.scene_id ?? null;
-
-  return finalizeResponse({
-    success: true,
-    mode: "asset_metadata",
-    intent: null,
-    selection: {
-      scene_id: selectionSceneId,
-      model_id: selectionModelId,
-      pose_image_id: null,
-      confidence: 0.97,
-      reason: "已按上一轮预览参数正式执行资产写操作",
-    },
-    answer: tool.name === "rename_model_asset"
-      ? `已正式执行改名：${
-        state.operation?.preview[0]?.old_display_name ??
-          selectionSceneId ?? "该模型"
-      } -> ${state.operation?.preview[0]?.new_display_name ?? "新名称"}。`
-      : `已正式执行批量元数据修改，影响 ${
-        state.operation?.affected_count ?? count
-      } 个模型。`,
-    actions: [],
-    viewer_payload: emptyViewerPayload(),
-    evidence: null,
-    candidates: [],
-    top_candidates: [],
-    selected_candidate_reason: "已根据会话中的预览参数完成正式写入",
-    tool_trace: trace,
-    asset_context: serializeAssetContext(state),
-    compare_context: null,
-    collection_context: null,
-    creative_context: null,
-    memory_graph_context: null,
-  });
 }
 
-async function runDeterministicAssetRenameFlow(input: {
-  supabase: SupabaseClient;
-  query: string;
-  options: SpatialSearchAgentOptions;
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<SpatialSearchResponse | null> {
+): Promise<SpatialSearchResponse | null> {
   const intent = parseDeterministicAssetRenameIntent(
     input.query,
     input.options,
@@ -1659,49 +1439,26 @@ async function runDeterministicAssetRenameFlow(input: {
   });
 }
 async function parseSpatialIntent(
-  model: ChatOpenAI,
+  model: BaseChatModel,
   query: string,
   options: SpatialSearchAgentOptions = {},
 ): Promise<SpatialIntent> {
-  const trimmed = query.trim();
-  const rewrittenQuery = trimmed
-    .replace(/^(帮我|给我|请你|麻烦你|找一下|帮我找|请帮我找|最像)/, "")
-    .replace(
-      /(在哪|在哪里|还在吗|有没有|给我看看|帮我找出来|的空间|的场景)$/g,
-      "",
-    )
-    .replace(/^(上周拍的|去年那次扫描里|最近拍的|最新拍的)/, "")
-    .trim() || trimmed;
-  const heuristicTimeHint = (
-    trimmed.match(/今天|昨天|最近|最新|刚才|上周|去年/g) ?? []
-  ).join(" ");
-  const heuristicTargetType: SearchTargetType =
-    /最近|最新|今天|昨天|上周|去年/.test(trimmed)
-      ? "time"
-      : /角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/.test(trimmed)
-      ? "location"
-      : /场景|空间|房间/.test(trimmed)
-      ? "scene"
-      : "object";
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const { getSpatialIntentPrompt } = await import("./prompts/spatial_intent.ts");
+  const contextBlock = buildAgentContextBlock(options);
+  const today = new Date().toISOString().slice(0, 10);
 
-  const heuristic: SpatialIntent = {
-    rewrittenQuery,
-    targetType: heuristicTargetType,
-    objectHint: heuristicTargetType === "object" ? rewrittenQuery : null,
-    locationHint:
-      trimmed.match(/角落|窗边|书桌|桌面|厨房|客厅|卧室|门口|沙发旁/)?.[0] ??
-        null,
-    sceneHint: null,
-    timeHint: heuristicTimeHint || null,
-    startTime: null,
-    endTime: null,
-    reasoning: "优先使用规则解析，减少同步路径上的 LLM 延迟。",
-  };
-  const heuristicRange = normalizeExplicitTimeRange(heuristic);
+  const structuredModel = model.withStructuredOutput(spatialIntentSchema);
+  const result = await structuredModel.invoke([
+    new SystemMessage(getSpatialIntentPrompt(today, contextBlock)),
+    new HumanMessage(query),
+  ]);
+
+  const timeRange = normalizeExplicitTimeRange(result);
   return {
-    ...heuristic,
-    startTime: heuristicRange.startTime,
-    endTime: heuristicRange.endTime,
+    ...result,
+    startTime: timeRange.startTime,
+    endTime: timeRange.endTime,
   };
 }
 
@@ -2250,9 +2007,7 @@ async function selectBestResult(
   ]);
 }
 
-function buildDeterministicSpatialSelection(input: {
-  rankedCandidates: Array<SceneCandidate & { score: number }>;
-}): SelectionResult {
+): SelectionResult {
   const best = input.rankedCandidates[0] ?? null;
   if (!best) {
     return {
@@ -2293,11 +2048,7 @@ function buildDeterministicSpatialSelection(input: {
   };
 }
 
-async function executeDeterministicSpatialToolLoop(input: {
-  intent: SpatialIntent;
-  tools: DynamicStructuredTool[];
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<
+): Promise<
   { candidates: Map<string, SceneCandidate>; trace: ToolTraceEntry[] }
 > {
   const { intent, tools, callbacks } = input;
@@ -3097,9 +2848,7 @@ export async function runSpatialSearchAgent(
   try {
     mode = await classifyAgentMode(model, query, options);
   } catch (error) {
-    if (!shouldPreferHeuristicSpatialRoute(query)) {
-      throw error;
-    }
+    throw error;
     await emitProgress(callbacks, {
       event: "status",
       data: {
@@ -3149,16 +2898,6 @@ export async function runSpatialSearchAgent(
     });
     if (replayedWriteResponse) {
       return replayedWriteResponse;
-    }
-
-    const deterministicAssetResponse = await runDeterministicAssetRenameFlow({
-      supabase,
-      query,
-      options,
-      callbacks,
-    });
-    if (deterministicAssetResponse) {
-      return deterministicAssetResponse;
     }
 
     const assetTools = [
@@ -3278,31 +3017,13 @@ export async function runSpatialSearchAgent(
   let usedDeterministicFallback = false;
 
   try {
-    if (shouldPreferHeuristicSpatialRoute(query)) {
-      await emitProgress(callbacks, {
-        event: "status",
-        data: {
-          phase: "spatial_fast_path",
-          summary: "当前请求较简单，优先走确定性空间检索路径",
-          detail: "减少对上游模型路由和工具编排的依赖，避免简单查询被 503 阻塞",
-        },
-      });
-      ({ candidates: candidateMap, trace } =
-        await executeDeterministicSpatialToolLoop({
-          intent,
-          tools,
-          callbacks,
-        }));
-      usedDeterministicFallback = true;
-    } else {
-      ({ candidates: candidateMap, trace } = await executeAgentToolLoop({
-        model,
-        intent,
-        tools,
-        options,
-        callbacks,
-      }));
-    }
+    ({ candidates: candidateMap, trace } = await executeAgentToolLoop({
+      model,
+      intent,
+      tools,
+      options,
+      callbacks,
+    }));
   } catch (error) {
     await emitProgress(callbacks, {
       event: "status",
@@ -3339,9 +3060,7 @@ export async function runSpatialSearchAgent(
 
   let selection: SelectionResult;
   if (rankedCandidates.length === 0) {
-    selection = buildDeterministicSpatialSelection({ rankedCandidates });
-  } else if (usedDeterministicFallback) {
-    selection = buildDeterministicSpatialSelection({ rankedCandidates });
+    throw new Error("No candidates found");
   } else {
     try {
       selection = await selectBestResult(
@@ -3357,12 +3076,11 @@ export async function runSpatialSearchAgent(
         event: "status",
         data: {
           phase: "selection_fallback",
-          summary: "最终裁决阶段出现异常，已改用确定性候选排序结果",
+          summary: "最终裁决阶段出现异常",
           detail: error instanceof Error ? error.message : String(error),
         },
       });
-      selection = buildDeterministicSpatialSelection({ rankedCandidates });
-      usedDeterministicFallback = true;
+      throw error;
     }
   }
 
