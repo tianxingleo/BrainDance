@@ -107,12 +107,71 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   ChatMessage? _agentChatMessage;
   final ScrollController _recallScrollController = ScrollController();
   StreamSubscription<String>? _agentStreamSubscription;
+  Timer? _agentElapsedTimer;
+  DateTime? _agentRunStartedAt;
+  DateTime? _agentRunFinishedAt;
+
+  void _startAgentRunTracking() {
+    _agentRunStartedAt = DateTime.now();
+    _agentRunFinishedAt = null;
+    _ensureAgentRunTrackingTimer();
+  }
+
+  void _ensureAgentRunTrackingTimer() {
+    _agentElapsedTimer?.cancel();
+    _agentElapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_isAgentSearching) {
+        return;
+      }
+      setState(() {});
+    });
+  }
+
+  void _finishAgentRunTracking() {
+    _agentElapsedTimer?.cancel();
+    _agentElapsedTimer = null;
+    if (_agentRunStartedAt != null && _agentRunFinishedAt == null) {
+      _agentRunFinishedAt = DateTime.now();
+    }
+  }
+
+  Duration? get _agentElapsedDuration {
+    final startedAt = _agentRunStartedAt;
+    if (startedAt == null) {
+      return null;
+    }
+    final endedAt =
+        (_isAgentSearching ? null : _agentRunFinishedAt) ?? DateTime.now();
+    return endedAt.difference(startedAt);
+  }
+
+  String _formatAgentElapsed(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '$hours小时${minutes.toString().padLeft(2, '0')}分${seconds.toString().padLeft(2, '0')}秒';
+    }
+    if (duration.inMinutes > 0) {
+      return '${duration.inMinutes}分${seconds.toString().padLeft(2, '0')}秒';
+    }
+    return '${duration.inSeconds}秒';
+  }
+
+  String? get _agentElapsedLabel {
+    final duration = _agentElapsedDuration;
+    if (duration == null) {
+      return null;
+    }
+    return _formatAgentElapsed(duration);
+  }
 
   void _stopAgentSearch() {
     if (_isAgentSearching) {
       _agentStreamSubscription?.cancel();
       setState(() {
         _isAgentSearching = false;
+        _finishAgentRunTracking();
         _agentChatMessage?.isProcessCollapsed = false;
         _agentChatMessage?.liveStatus = '已停止 Agent 执行';
         _agentChatMessage?.addSummary('用户手动停止了本次 Agent 执行');
@@ -155,6 +214,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (_agentChatMessage == null) {
       return;
     }
+    _finishAgentRunTracking();
     _agentChatMessage!.isProcessCollapsed = collapseProcess;
     if (_agentChatMessage!.finalAnswer.isNotEmpty) {
       _agentChatMessage!.liveStatus = '最终回答已生成';
@@ -300,6 +360,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   @override
   void dispose() {
     _modelPollingTimer?.cancel();
+    _agentElapsedTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
     _localModelUrlController.removeListener(_handleLocalModelUrlChanged);
@@ -1848,6 +1909,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         liveStatus: '正在连接 Agent...',
       );
     });
+    _startAgentRunTracking();
 
     _agentStreamSubscription?.cancel();
 
@@ -1856,6 +1918,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isAgentSearching = true;
       });
+      _ensureAgentRunTrackingTimer();
       try {
         final result = await AgentRecallService().query(trimmedQuery);
         if (!mounted) return;
@@ -1863,6 +1926,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _agentResult = result;
           _agentChatMessage!.finalAnswer = result.answer;
           _isAgentSearching = false;
+          _finishAgentRunTracking();
         });
         _agentChatMessage!.addSummary('当前环境不支持流式事件，已回退到一次性回答');
         _completeAgentRun();
@@ -1870,6 +1934,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         if (!mounted) return;
         setState(() {
           _isAgentSearching = false;
+          _finishAgentRunTracking();
         });
         TDToast.showText('Agent 检索失败：$ex', context: context);
       }
@@ -1891,6 +1956,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
               if (eventData['event']?.toString() == 'done') {
                 setState(() {
                   _isAgentSearching = false;
+                  _finishAgentRunTracking();
                 });
               }
             }
@@ -1911,6 +1977,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           if (mounted) {
             setState(() {
               _isAgentSearching = false;
+              _finishAgentRunTracking();
             });
             if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
               _completeAgentRun();
@@ -2082,6 +2149,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+    final elapsedLabel = _agentElapsedLabel;
 
     if (_agentChatMessage == null &&
         _agentResult == null &&
@@ -2099,8 +2167,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _agentResult != null &&
         _agentResult!.actions.any((a) => a.type == 'open_scene');
     final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
-    final processRecordCount =
-        _agentChatMessage!.steps.length + _agentChatMessage!.summaries.length;
 
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
@@ -2126,6 +2192,36 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (elapsedLabel != null) ...[
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : BDDesign.colorMutedBlue.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Text(
+                        _isAgentSearching
+                            ? '已运行 $elapsedLabel'
+                            : '耗时 $elapsedLabel',
+                        style: TextStyle(
+                          color: hintColor,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (_isAgentSearching) ...[
                     const SizedBox(width: 12),
                     const SizedBox(
@@ -2179,167 +2275,175 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          _agentChatMessage!.liveStatus,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 13,
-                            height: 1.45,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _agentChatMessage!.liveStatus,
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 13,
+                                height: 1.45,
+                              ),
+                            ),
+                            if (elapsedLabel != null) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                _isAgentSearching
+                                    ? 'Agent 已运行 $elapsedLabel'
+                                    : '本次 Agent 总耗时 $elapsedLabel',
+                                style: TextStyle(
+                                  color: hintColor,
+                                  fontSize: 11.5,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
               ],
 
-              if (processRecordCount > 0) ...[
-                Row(
-                  children: [
-                    Text(
-                      '执行过程',
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '$processRecordCount 条记录',
-                      style: TextStyle(color: hintColor, fontSize: 12),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () {
-                        _agentChatMessage!.isProcessCollapsed =
-                            !_agentChatMessage!.isProcessCollapsed;
-                      },
-                      icon: Icon(
-                        _agentChatMessage!.isProcessCollapsed
-                            ? Icons.unfold_more_rounded
-                            : Icons.unfold_less_rounded,
-                        size: 16,
-                      ),
-                      label: Text(
-                        _agentChatMessage!.isProcessCollapsed ? '展开' : '折叠',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_agentChatMessage!.isProcessCollapsed)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '过程已自动折叠，默认只突出最终回复；展开后可查看阶段总结与工具调用。',
-                      style: TextStyle(
-                        color: hintColor,
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
-                    ),
-                  )
-                else ...[
-                  if (_agentChatMessage!.summaries.isNotEmpty) ...[
-                    for (final summary in _agentChatMessage!.summaries)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
+              ..._agentChatMessage!.steps.map((step) {
+                return ListenableBuilder(
+                  listenable: step,
+                  builder: (context, _) {
+                    if (step.type == 'tool_call') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6.0),
+                        child: Theme(
+                          data: Theme.of(
+                            context,
+                          ).copyWith(dividerColor: Colors.transparent),
+                          child: _AgentStepTile(
+                            step: step,
+                            isDark: isDark,
+                            textColor: textColor,
+                          ),
+                        ),
+                      );
+                    } else if (step.type == 'thought') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: MarkdownBody(
+                          data: step.content,
+                          styleSheet: MarkdownStyleSheet(
+                            p: TextStyle(
+                              color: textColor,
+                              fontSize: 14,
+                              height: 1.6,
+                            ),
+                            h1: TextStyle(
+                              color: textColor,
+                              fontSize: 18,
+                              height: 1.3,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            h2: TextStyle(
+                              color: textColor,
+                              fontSize: 16,
+                              height: 1.3,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            blockquote: TextStyle(
+                              color: hintColor,
+                              fontSize: 13,
+                              height: 1.5,
+                            ),
+                            code: TextStyle(
+                              color: textColor,
+                              fontSize: 12.5,
+                              fontFamily: 'monospace',
+                            ),
+                            codeblockDecoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF131813)
+                                  : const Color(0xFFF1F4EA),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: BDDesign.colorFadedOlive.withValues(
+                                  alpha: isDark ? 0.28 : 0.18,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    } else if (step.type == 'error') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Container(
-                                width: 5,
-                                height: 5,
-                                decoration: BoxDecoration(
-                                  color: BDDesign.colorMutedBlue,
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
-                              ),
+                            const Icon(
+                              Icons.error_outline,
+                              color: Colors.red,
+                              size: 16,
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                summary,
-                                style: TextStyle(
-                                  color: hintColor,
-                                  fontSize: 12,
+                                step.content,
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 14,
                                   height: 1.4,
                                 ),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    const SizedBox(height: 4),
-                  ],
-                  ..._agentChatMessage!.steps.map((step) {
-                    return ListenableBuilder(
-                      listenable: step,
-                      builder: (context, _) {
-                        if (step.type == 'tool_call') {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8.0),
-                            child: Theme(
-                              data: Theme.of(
-                                context,
-                              ).copyWith(dividerColor: Colors.transparent),
-                              child: _AgentStepTile(
-                                step: step,
-                                isDark: isDark,
-                                textColor: textColor,
-                              ),
-                            ),
-                          );
-                        } else if (step.type == 'thought') {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4.0),
-                            child: Text(
-                              '思考摘要：${step.content}',
-                              style: TextStyle(color: hintColor, fontSize: 13),
-                            ),
-                          );
-                        } else if (step.type == 'error') {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4.0),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.error_outline,
-                                  color: Colors.red,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    step.content,
-                                    style: const TextStyle(
-                                      color: Colors.red,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    );
-                  }),
-                ],
-              ],
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                );
+              }),
 
               if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _AgentAnswerCard(
-                  markdown: _agentChatMessage!.finalAnswer,
-                  isDark: isDark,
-                  textColor: textColor,
-                  hintColor: hintColor,
+                const SizedBox(height: 6),
+                MarkdownBody(
+                  data: _agentChatMessage!.finalAnswer,
+                  styleSheet: MarkdownStyleSheet(
+                    p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
+                    h1: TextStyle(
+                      color: textColor,
+                      fontSize: 18,
+                      height: 1.3,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    h2: TextStyle(
+                      color: textColor,
+                      fontSize: 16,
+                      height: 1.3,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    blockquote: TextStyle(
+                      color: hintColor,
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
+                    code: TextStyle(
+                      color: textColor,
+                      fontSize: 12.5,
+                      fontFamily: 'monospace',
+                    ),
+                    codeblockDecoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF131813)
+                          : const Color(0xFFF1F4EA),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: BDDesign.colorFadedOlive.withValues(
+                          alpha: isDark ? 0.28 : 0.18,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ],
 
@@ -3214,234 +3318,122 @@ class _AgentStepTileState extends State<_AgentStepTile>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final toolName = widget.step.toolName;
-    final accentColor = widget.step.isCompleted
-        ? const Color(0xFF3FA66C)
-        : BDDesign.colorMutedBlue;
-    final panelColor = widget.isDark
-        ? const Color(0xFF171D24)
-        : const Color(0xFFF4F8FB);
-    final borderColor = accentColor.withValues(
-      alpha: widget.isDark ? 0.42 : 0.28,
-    );
+    final toolName = widget.step.toolName ?? '未命名工具';
+    final isDone = widget.step.isCompleted;
 
-    return ExpansionTile(
-      controller: _controller,
-      tilePadding: EdgeInsets.zero,
-      minTileHeight: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      collapsedShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-      ),
-      leading: widget.step.isCompleted
-          ? const Icon(
-              Icons.task_alt_rounded,
-              color: Color(0xFF3FA66C),
-              size: 20,
-            )
-          : const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-      title: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: panelColor,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: borderColor),
+    final panelColor = widget.isDark
+        ? const Color(0xFF1C2128)
+        : const Color(0xFFF4F8FB);
+    final iconBgColor = widget.isDark
+        ? const Color(0xFF2B3A4A) // 暗色背景的图标底色
+        : const Color(0xFFDFE8F6); // 亮色背景的图标底色
+    final textColor = widget.textColor;
+    final hintColor = widget.isDark ? Colors.white60 : Colors.black54;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: widget.isDark
+              ? Colors.white10
+              : Colors.black.withOpacity(0.06),
         ),
-        child: Row(
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          controller: _controller,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          iconColor: hintColor,
+          collapsedIconColor: hintColor,
+          title: Row(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  Icons.build_circle_rounded,
+                  size: 16,
+                  color: widget.isDark
+                      ? const Color(0xFF81A2C6)
+                      : BDDesign.colorMutedBlue,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '调用工具：$toolName',
+                  style: TextStyle(
+                    fontSize: 14, // 与回答文字大小差不多
+                    color: textColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (!isDone)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                Icon(
+                  Icons.check_circle_rounded,
+                  size: 16,
+                  color: const Color(0xFF4CAF50).withOpacity(0.8),
+                ),
+            ],
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           children: [
-            Expanded(
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: widget.isDark ? const Color(0xFF12171D) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: widget.isDark
+                      ? Colors.white12
+                      : Colors.black.withOpacity(0.04),
+                ),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '工具调用',
+                    '调用参数',
                     style: TextStyle(
-                      fontSize: 11,
-                      color: accentColor,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
+                      color: hintColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    toolName == null || toolName.isEmpty ? '执行未命名工具' : toolName,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      color: widget.textColor,
-                      fontWeight: FontWeight.w700,
+                  const SizedBox(height: 6),
+                  HighlightView(
+                    widget.step.content.isEmpty ? '{}' : widget.step.content,
+                    language: 'json',
+                    theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
+                    padding: EdgeInsets.zero,
+                    textStyle: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      height: 1.45,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            Text(
-              widget.step.isCompleted ? '已完成' : '运行中',
-              style: TextStyle(
-                fontSize: 11.5,
-                color: accentColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
           ],
         ),
-      ),
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-          margin: const EdgeInsets.only(top: 6, left: 2, right: 2, bottom: 8),
-          decoration: BoxDecoration(
-            color: widget.isDark ? const Color(0xFF12171D) : Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor.withValues(alpha: 0.85)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '调用参数',
-                style: TextStyle(
-                  color: accentColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              HighlightView(
-                widget.step.content.isEmpty ? '{}' : widget.step.content,
-                language: 'json',
-                theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
-                padding: const EdgeInsets.all(6),
-                textStyle: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  height: 1.45,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _AgentAnswerCard extends StatelessWidget {
-  final String markdown;
-  final bool isDark;
-  final Color textColor;
-  final Color hintColor;
-
-  const _AgentAnswerCard({
-    required this.markdown,
-    required this.isDark,
-    required this.textColor,
-    required this.hintColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final borderColor = BDDesign.colorFadedOlive.withValues(
-      alpha: isDark ? 0.42 : 0.28,
-    );
-    final backgroundColor = isDark
-        ? const Color(0xFF1A1F1A)
-        : const Color(0xFFFBFCF7);
-
-    // 最终回答与工具调用分层，避免“过程日志”和“正式回复”视觉上混在一起。
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: BDDesign.colorFadedOlive.withValues(
-              alpha: isDark ? 0.10 : 0.08,
-            ),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.auto_awesome_rounded,
-                size: 16,
-                color: BDDesign.colorFadedOlive,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Agent 回复',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '最终输出',
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          MarkdownBody(
-            data: markdown,
-            styleSheet: MarkdownStyleSheet(
-              p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
-              h1: TextStyle(
-                color: textColor,
-                fontSize: 18,
-                height: 1.3,
-                fontWeight: FontWeight.w700,
-              ),
-              h2: TextStyle(
-                color: textColor,
-                fontSize: 16,
-                height: 1.3,
-                fontWeight: FontWeight.w700,
-              ),
-              blockquote: TextStyle(
-                color: hintColor,
-                fontSize: 13,
-                height: 1.5,
-              ),
-              code: TextStyle(
-                color: textColor,
-                fontSize: 12.5,
-                fontFamily: 'monospace',
-              ),
-              codeblockDecoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF131813)
-                    : const Color(0xFFF1F4EA),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: BDDesign.colorFadedOlive.withValues(
-                    alpha: isDark ? 0.28 : 0.18,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
