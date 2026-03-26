@@ -18,6 +18,7 @@ import {
   buildGetModelAssetBundleTool,
   buildReadModelAssetsTool,
   buildRenameModelAssetTool,
+  buildWriteModelAssetsTool,
   collectAssetToolResult,
   type CompareModelAssetsResult,
   createEmptyAssetToolState,
@@ -1240,61 +1241,6 @@ type DeterministicAssetRenameIntent = {
   newName: string | null;
 };
 
-type DeterministicAssetLookupIntent = {
-  query: string;
-  startTime: string | null;
-  endTime: string | null;
-  limit: number;
-};
-
-export function shouldUseDeterministicAssetLookup(query: string): boolean {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  if (
-    /重名|同名|重复|冲突|统计|多少个|哪些|推荐|比较|对比|分析|盘点|汇总/
-      .test(normalized)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function parseDeterministicAssetLookupIntent(
-  query: string,
-): DeterministicAssetLookupIntent | null {
-  if (!isAssetDiscoveryQuery(query) || !shouldUseDeterministicAssetLookup(query)) {
-    return null;
-  }
-
-  const compact = query.trim();
-  if (!compact) {
-    return null;
-  }
-
-  const timeRange = normalizeExplicitTimeRange({
-    timeHint: compact,
-  });
-  const normalizedQuery = compact
-    .replace(/帮我|请|麻烦|想要|我想|给我/g, " ")
-    .replace(/查一下|查下|看一下|看下|搜一下|搜下|找一下|找个|找一个|来个/g, " ")
-    .replace(/有没有|有无/g, " ")
-    .replace(/模型资产|资产|模型|扫描结果|重建结果/g, " ")
-    .replace(/[，。！？!?,]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return {
-    query: normalizedQuery || compact,
-    startTime: timeRange.startTime,
-    endTime: timeRange.endTime,
-    limit: 5,
-  };
-}
-
 function parseChineseCountToken(token: string): number | null {
   const trimmed = token.trim();
   if (!trimmed) {
@@ -1521,6 +1467,13 @@ async function replayPendingAssetWriteIfNeeded(input: {
 
   const toolsByName = new Map<string, DynamicStructuredTool>([
     [
+      "write_model_assets",
+      buildWriteModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+    [
       "rename_model_asset",
       buildRenameModelAssetTool(supabase, {
         selectedModelIds: options.selectedModelIds,
@@ -1600,7 +1553,13 @@ async function replayPendingAssetWriteIfNeeded(input: {
       confidence: 0.97,
       reason: "已按上一轮预览参数正式执行资产写操作",
     },
-    answer: tool.name === "rename_model_asset"
+    answer: tool.name === "rename_model_asset" ||
+        (
+          tool.name === "write_model_assets" &&
+          (state.operation?.preview.length ?? 0) === 1 &&
+          state.operation?.preview[0]?.old_display_name !==
+            state.operation?.preview[0]?.new_display_name
+        )
       ? `已正式执行改名：${
         state.operation?.preview[0]?.old_display_name ??
           selectionSceneId ?? "该模型"
@@ -1623,359 +1582,6 @@ async function replayPendingAssetWriteIfNeeded(input: {
   });
 }
 
-async function runDeterministicAssetRenameFlow(input: {
-  supabase: SupabaseClient;
-  query: string;
-  options: SpatialSearchAgentOptions;
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<SpatialSearchResponse | null> {
-  const intent = parseDeterministicAssetRenameIntent(
-    input.query,
-    input.options,
-  );
-  if (!intent) {
-    return null;
-  }
-
-  const { supabase, options, callbacks } = input;
-  const trace: ToolTraceEntry[] = [];
-  const state = createEmptyAssetToolState();
-  const listTool = buildReadModelAssetsTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-  });
-  const renameTool = buildRenameModelAssetTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-    allowWrite: options.executionMode === "execute",
-  });
-  const batchPatchTool = buildBatchPatchModelMetadataTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-    allowWrite: options.executionMode === "execute",
-  });
-
-  await emitProgress(callbacks, {
-    event: "status",
-    data: {
-      phase: "asset_rename_fast_path",
-      summary: "检测到确定性的模型改名请求，优先走改名专用兜底路径",
-    },
-  });
-
-  let targetModelIds: string[] = [];
-  let targetSceneId: string | null = null;
-  let currentDisplayName: string | null = null;
-
-  if (intent.target.kind === "latest") {
-    const listArgs = {
-      mode: "list",
-      modelIds: [],
-      sceneIds: [],
-      tags: [],
-      query: "",
-      startTime: null,
-      endTime: null,
-      limit: intent.target.count,
-    };
-    await emitProgress(callbacks, {
-      event: "tool_call",
-      data: {
-        name: listTool.name,
-        args: listArgs,
-        summary: "先定位最新模型资产",
-        round: 1,
-      },
-    });
-    const listResult = await listTool.invoke(listArgs);
-    const listText = typeof listResult === "string"
-      ? listResult
-      : JSON.stringify(listResult);
-    const listCount = collectAssetToolResult(listTool.name, listText, state);
-    const listSummary = summarizeToolResult(listTool.name, listCount);
-    trace.push({
-      toolName: listTool.name,
-      args: listArgs,
-      resultSummary: listSummary,
-    });
-    await emitProgress(callbacks, {
-      event: "tool_result",
-      data: {
-        name: listTool.name,
-        summary: listSummary,
-        count: listCount,
-        round: 1,
-      },
-    });
-
-    const listedRows = state.list ?? [];
-    targetModelIds = listedRows.map((item) => item.id);
-    const latest = listedRows[0] ?? null;
-    targetSceneId = latest?.scene_id ?? null;
-    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id || null;
-  } else {
-    targetModelIds = intent.target.kind === "current"
-      ? [intent.target.modelId]
-      : intent.target.modelIds;
-  }
-
-  if (targetModelIds.length === 0) {
-    return finalizeResponse({
-      success: true,
-      mode: "asset_metadata",
-      intent: null,
-      selection: {
-        scene_id: null,
-        model_id: null,
-        pose_image_id: null,
-        confidence: 0,
-        reason: "当前请求属于模型资产元数据操作，但没有找到可改名的目标模型",
-      },
-      answer:
-        "我没定位到可改名的目标模型。请先选中模型，或直接指定要改名的模型。",
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason: "确定性改名兜底未找到目标模型",
-      tool_trace: trace,
-      asset_context: serializeAssetContext(state),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    });
-  }
-
-  if (!intent.newName) {
-    return finalizeResponse({
-      success: true,
-      mode: "asset_metadata",
-      intent: null,
-      selection: {
-        scene_id: targetSceneId,
-        model_id: targetModelIds[0] ?? null,
-        pose_image_id: null,
-        confidence: 0.88,
-        reason: "已锁定改名目标，但用户尚未提供新名字",
-      },
-      answer: currentDisplayName
-        ? `已定位到要改名的模型“${currentDisplayName}”，但你还没告诉我新名字。请直接说“把它改名为xxx”或“把最新模型改名为xxx”。`
-        : "已定位到要改名的模型，但你还没告诉我新名字。请直接说“把它改名为xxx”。",
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason:
-        "已通过确定性规则锁定改名目标，等待用户补充新名字",
-      tool_trace: trace,
-      asset_context: serializeAssetContext(state),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    });
-  }
-
-  const isBatchRename = targetModelIds.length > 1;
-  const tool = isBatchRename ? batchPatchTool : renameTool;
-  const toolArgs = isBatchRename
-    ? {
-      modelIds: targetModelIds,
-      patch: {
-        displayNameTemplate: intent.newName,
-        tagsAdd: [],
-        tagsRemove: [],
-      },
-      dryRun: options.executionMode !== "execute",
-    }
-    : {
-      modelId: targetModelIds[0]!,
-      newName: intent.newName,
-      dryRun: options.executionMode !== "execute",
-    };
-  await emitProgress(callbacks, {
-    event: "tool_call",
-    data: {
-      name: tool.name,
-      args: toolArgs,
-      summary: isBatchRename
-        ? "已锁定多模型目标，开始生成批量改名结果"
-        : "已锁定目标模型，开始生成改名结果",
-      round: trace.length + 1,
-    },
-  });
-  const toolResult = await tool.invoke(toolArgs);
-  const resultText = typeof toolResult === "string"
-    ? toolResult
-    : JSON.stringify(toolResult);
-  const resultCount = collectAssetToolResult(tool.name, resultText, state);
-  const resultSummary = summarizeToolResult(tool.name, resultCount);
-  trace.push({
-    toolName: tool.name,
-    args: toolArgs,
-    resultSummary,
-  });
-  await emitProgress(callbacks, {
-    event: "tool_result",
-    data: {
-      name: tool.name,
-      summary: resultSummary,
-      count: resultCount,
-      round: trace.length,
-    },
-  });
-
-  const operationPreview = state.operation?.preview[0] ?? null;
-  const beforeName = operationPreview?.old_display_name || currentDisplayName || targetSceneId;
-  const afterName = operationPreview?.new_display_name || intent.newName;
-  const actionText = state.operation?.dry_run
-    ? (isBatchRename ? "已生成批量改名预览" : "已生成改名预览")
-    : (isBatchRename ? "已完成批量改名" : "已完成改名");
-  const answer = isBatchRename
-    ? `${actionText}：共 ${state.operation?.affected_count ?? targetModelIds.length} 个模型将改为“${intent.newName}”。${
-      state.operation?.dry_run
-        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
-        : ""
-    }`
-    : `${actionText}：${beforeName ?? "该模型"} -> ${afterName}。${
-      state.operation?.dry_run
-        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
-        : ""
-    }`;
-
-  return finalizeResponse({
-    success: true,
-    mode: "asset_metadata",
-    intent: null,
-    selection: {
-        scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
-      model_id: targetModelIds[0] ?? null,
-      pose_image_id: null,
-      confidence: 0.96,
-      reason: isBatchRename
-        ? "已通过确定性规则锁定多模型目标并执行批量改名工具"
-        : "已通过确定性规则锁定目标模型并执行改名工具",
-    },
-    answer,
-    actions: [],
-    viewer_payload: emptyViewerPayload(),
-    evidence: null,
-    candidates: [],
-    top_candidates: [],
-    selected_candidate_reason:
-      isBatchRename
-        ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
-        : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
-    tool_trace: trace,
-    asset_context: serializeAssetContext(state),
-    compare_context: null,
-    collection_context: null,
-    creative_context: null,
-    memory_graph_context: null,
-  });
-}
-
-async function runDeterministicAssetLookupFlow(input: {
-  supabase: SupabaseClient;
-  query: string;
-  options: SpatialSearchAgentOptions;
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<SpatialSearchResponse | null> {
-  const intent = parseDeterministicAssetLookupIntent(input.query);
-  if (!intent) {
-    return null;
-  }
-
-  const { supabase, options, callbacks } = input;
-  const trace: ToolTraceEntry[] = [];
-  const state = createEmptyAssetToolState();
-  const listTool = buildReadModelAssetsTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-  });
-  const listArgs = {
-    mode: "list",
-    modelIds: [],
-    sceneIds: [],
-    tags: [],
-    query: intent.query,
-    startTime: intent.startTime,
-    endTime: intent.endTime,
-    limit: intent.limit,
-  };
-
-  await emitProgress(callbacks, {
-    event: "status",
-    data: {
-      phase: "asset_lookup_fast_path",
-      summary: "检测到资产查找请求，优先走模型资产列表工具",
-      detail: intent.query,
-    },
-  });
-  await emitProgress(callbacks, {
-    event: "tool_call",
-    data: {
-      name: listTool.name,
-      args: listArgs,
-      summary: "直接筛选匹配的模型资产候选",
-      round: 1,
-    },
-  });
-
-  const listResult = await listTool.invoke(listArgs);
-  const listText = typeof listResult === "string"
-    ? listResult
-    : JSON.stringify(listResult);
-  const count = collectAssetToolResult(listTool.name, listText, state);
-  const resultSummary = summarizeToolResult(listTool.name, count);
-  trace.push({
-    toolName: listTool.name,
-    args: listArgs,
-    resultSummary,
-  });
-  await emitProgress(callbacks, {
-    event: "tool_result",
-    data: {
-      name: listTool.name,
-      summary: resultSummary,
-      count,
-      round: 1,
-    },
-  });
-
-  const topModel = state.list?.[0] ?? null;
-  const hasRows = (state.list?.length ?? 0) > 0;
-
-  return finalizeResponse({
-    success: true,
-    mode: "asset_metadata",
-    intent: null,
-    selection: {
-      scene_id: topModel?.scene_id ?? null,
-      model_id: topModel?.id ?? null,
-      pose_image_id: null,
-      confidence: hasRows ? 0.92 : 0,
-      reason: hasRows
-        ? "已走确定性资产查找路径，并基于 list_model_assets 结果返回最匹配候选"
-        : "已走确定性资产查找路径，但当前没有筛到匹配的模型资产",
-    },
-    answer: buildAssetAnswer(state, { query: input.query }) ??
-      "当前没有找到匹配的模型资产。",
-    actions: [],
-    viewer_payload: emptyViewerPayload(),
-    evidence: null,
-    candidates: [],
-    top_candidates: [],
-    selected_candidate_reason: hasRows
-      ? "已绕过空间检索链路，直接使用模型资产工具筛选候选"
-      : "已绕过空间检索链路，但模型资产工具未返回有效候选",
-    tool_trace: trace,
-    asset_context: serializeAssetContext(state),
-    compare_context: null,
-    collection_context: null,
-    creative_context: null,
-    memory_graph_context: null,
-  });
-}
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
@@ -3731,20 +3337,15 @@ export async function runSpatialSearchAgent(
       return replayedWriteResponse;
     }
 
-    const deterministicAssetLookupResponse =
-      await runDeterministicAssetLookupFlow({
-        supabase,
-        query,
-        options,
-        callbacks,
-      });
-    if (deterministicAssetLookupResponse) {
-      return deterministicAssetLookupResponse;
-    }
-
+    const assetEmbeddings = createEmbeddingsModel(env);
     const assetTools = [
       buildReadModelAssetsTool(supabase, {
         selectedModelIds: options.selectedModelIds,
+        embeddings: assetEmbeddings,
+      }),
+      buildWriteModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: options.executionMode === "execute",
       }),
       buildRenameModelAssetTool(supabase, {
         selectedModelIds: options.selectedModelIds,

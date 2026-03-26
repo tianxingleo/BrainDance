@@ -104,6 +104,9 @@ export type AssetToolState = {
 type AssetToolRuntimeOptions = {
   selectedModelIds?: string[];
   allowWrite?: boolean;
+  embeddings?: {
+    embedQuery(text: string): Promise<number[]>;
+  };
 };
 
 const readModelAssetsSchema = z.object({
@@ -145,6 +148,19 @@ const batchPatchSchema = z.object({
     ), {
     message: "patch 至少要包含一个可修改字段",
   }),
+  dryRun: z.boolean().default(true),
+});
+
+const writeModelAssetsSchema = z.object({
+  updates: z.array(z.object({
+    modelId: z.string().uuid(),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    description: z.string().trim().max(2000).optional(),
+    tags: z.array(z.string().trim().min(1)).optional(),
+  }).refine((item) =>
+    Boolean(item.displayName || item.description !== undefined || item.tags), {
+    message: "每条更新至少包含一个可写字段",
+  })).min(1).max(20),
   dryRun: z.boolean().default(true),
 });
 
@@ -358,57 +374,6 @@ function escapeIlike(value: string): string {
   return value.replace(/[%_,]/g, " ").trim();
 }
 
-export function normalizeAssetSearchKeywords(query: string): string[] {
-  const normalized = escapeIlike(query)
-    .toLowerCase()
-    .replace(/帮我|请|麻烦|我想|想找|给我|来个|找一下|找个|找一个|查一下|查下|搜一下|搜下|看一下|看下|找/g, " ")
-    .replace(/相关的|相关|类似的|类似|同类的|同类|风格的|风格|主题的|主题|有关的|有关|关于/g, " ")
-    .replace(/模型资产|资产|模型/g, " ")
-    .replace(/[，。！？!?,]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!normalized) {
-    return [];
-  }
-
-  const coarseTokens = normalized
-    .split(" ")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  const compact = normalized.replace(/\s+/g, "");
-  const fineTokens = compact.length >= 2
-    ? compact.split(/的+/).map((item) => item.trim()).filter((item) =>
-      item.length >= 2
-    )
-    : [];
-
-  return dedupeStrings([...coarseTokens, ...fineTokens]).filter((item) =>
-    item.length >= 2
-  );
-}
-
-export function matchesAssetSearchQuery(
-  query: string,
-  row: Pick<ModelAssetRow, "scene_id" | "display_name" | "description" | "tags" | "objects">,
-): boolean {
-  const keywords = normalizeAssetSearchKeywords(query);
-  if (keywords.length === 0) {
-    return true;
-  }
-
-  const haystack = [
-    row.scene_id,
-    row.display_name ?? "",
-    row.description ?? "",
-    ...safeArray(row.tags),
-    ...safeArray(row.objects),
-  ].join(" ").toLowerCase();
-
-  return keywords.every((keyword) => haystack.includes(keyword));
-}
-
 function normalizeMetaInfo(value: unknown): Record<string, unknown> {
   return value && typeof value === "object"
     ? value as Record<string, unknown>
@@ -476,6 +441,60 @@ async function fetchModelAssets(
   }
 
   return (data ?? []) as ModelAssetRow[];
+}
+
+async function fetchSemanticMatchedAssets(input: {
+  supabase: SupabaseClient;
+  embeddings: { embedQuery(text: string): Promise<number[]> };
+  query: string;
+  startTime: string | null;
+  endTime: string | null;
+  limit: number;
+  selectedModelIds?: string[];
+}): Promise<ModelAssetRow[]> {
+  const {
+    supabase,
+    embeddings,
+    query,
+    startTime,
+    endTime,
+    limit,
+    selectedModelIds,
+  } = input;
+  const queryEmbedding = await embeddings.embedQuery(query);
+  const { data, error } = await supabase.rpc("match_model_assets", {
+    query_embedding: queryEmbedding,
+    match_threshold: 0.35,
+    match_count: Math.max(limit * 3, 12),
+    filter_start: startTime,
+    filter_end: endTime,
+  } as never) as { data: unknown; error: { message: string } | null };
+
+  if (error) {
+    throw new Error(`read_model_assets 语义召回失败: ${error.message}`);
+  }
+
+  const rows = Array.isArray(data) ? data as Array<{ id: string }> : [];
+  const modelIds = dedupeStrings(rows.map((row) => row.id)).filter(Boolean);
+  const allowedIds = selectedModelIds && selectedModelIds.length > 0
+    ? new Set(selectedModelIds)
+    : null;
+  const filteredIds = allowedIds
+    ? modelIds.filter((id) => allowedIds.has(id))
+    : modelIds;
+
+  if (filteredIds.length === 0) {
+    return [];
+  }
+
+  const assets = await fetchModelAssets(supabase, filteredIds);
+  const order = new Map(filteredIds.map((id, index) => [id, index]));
+  return assets
+    .sort((left, right) =>
+      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    )
+    .slice(0, limit);
 }
 
 async function fetchPoseCounts(
@@ -845,34 +864,6 @@ function buildListAnswer(rows: ListedModelAsset[]): string {
   return `${intro}\n${details}\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`;
 }
 
-function buildDuplicateNameGroups(
-  rows: ModelAssetRow[],
-  limit: number,
-): DuplicateModelNameGroup[] {
-  const grouped = new Map<string, ModelAssetRow[]>();
-  for (const row of rows) {
-    const displayName = row.display_name?.trim();
-    if (!displayName) continue;
-    const bucket = grouped.get(displayName) ?? [];
-    bucket.push(row);
-    grouped.set(displayName, bucket);
-  }
-
-  return [...grouped.entries()]
-    .map(([displayName, bucket]) => ({
-      display_name: displayName,
-      count: bucket.length,
-      rows: summarizeListRows(
-        bucket.sort((left, right) =>
-          right.created_at.localeCompare(left.created_at)
-        ),
-      ),
-    }))
-    .filter((group) => group.count >= 2)
-    .sort((left, right) => right.count - left.count)
-    .slice(0, limit);
-}
-
 export function buildReadModelAssetsTool(
   supabase: SupabaseClient,
   options: AssetToolRuntimeOptions = {},
@@ -920,13 +911,45 @@ export function buildReadModelAssetsTool(
         );
       }
       if (input.query.trim()) {
-        rows = rows.filter((row) => matchesAssetSearchQuery(input.query, row));
+        if (options.embeddings) {
+          rows = await fetchSemanticMatchedAssets({
+            supabase,
+            embeddings: options.embeddings,
+            query: input.query,
+            startTime: input.startTime,
+            endTime: input.endTime,
+            limit: input.limit,
+            selectedModelIds: options.selectedModelIds,
+          });
+        } else {
+          rows = [];
+        }
       }
 
       if (input.mode === "duplicate_display_name") {
+        const grouped = new Map<string, ModelAssetRow[]>();
+        for (const row of rows) {
+          const displayName = row.display_name?.trim();
+          if (!displayName) continue;
+          const bucket = grouped.get(displayName) ?? [];
+          bucket.push(row);
+          grouped.set(displayName, bucket);
+        }
         return JSON.stringify({
           kind: "duplicate_model_names",
-          groups: buildDuplicateNameGroups(rows, input.limit),
+          groups: [...grouped.entries()]
+            .map(([displayName, bucket]) => ({
+              display_name: displayName,
+              count: bucket.length,
+              rows: summarizeListRows(
+                bucket.sort((left, right) =>
+                  right.created_at.localeCompare(left.created_at)
+                ),
+              ),
+            }))
+            .filter((group) => group.count >= 2)
+            .sort((left, right) => right.count - left.count)
+            .slice(0, input.limit),
         });
       }
 
@@ -1026,6 +1049,76 @@ export function buildBatchPatchModelMetadataTool(
       return JSON.stringify({
         kind: "asset_operation",
         operation,
+      });
+    },
+  });
+}
+
+export function buildWriteModelAssetsTool(
+  supabase: SupabaseClient,
+  options: AssetToolRuntimeOptions = {},
+): DynamicStructuredTool {
+  return new DynamicStructuredTool({
+    name: "write_model_assets",
+    description:
+      "通用模型资产写库工具。支持一次更新多个模型的 display_name、description、tags；适合“分别改名”“逐条修改”这类请求。",
+    schema: writeModelAssetsSchema,
+    func: async (input) => {
+      const targetIds = restrictModelIds(
+        input.updates.map((item: z.infer<typeof writeModelAssetsSchema>["updates"][number]) => item.modelId),
+        options.selectedModelIds,
+      );
+      const rows = await fetchModelAssets(supabase, targetIds);
+      if (rows.length === 0) {
+        throw new Error("未找到可修改的模型资产");
+      }
+
+      const rowById = new Map(rows.map((row) => [row.id, row]));
+      const dryRun = options.allowWrite === false ? true : input.dryRun;
+      const preview = input.updates.map((
+        update: z.infer<typeof writeModelAssetsSchema>["updates"][number],
+      ) => {
+        const row = rowById.get(update.modelId);
+        if (!row) {
+          throw new Error(`未找到模型资产 ${update.modelId}`);
+        }
+        return {
+          model_id: row.id,
+          scene_id: row.scene_id,
+          old_display_name: row.display_name?.trim() || null,
+          new_display_name: update.displayName ?? row.display_name?.trim() ?? null,
+          old_description: row.description,
+          new_description: update.description ?? row.description,
+          old_tags: safeArray(row.tags),
+          new_tags: update.tags ? dedupeStrings(update.tags) : safeArray(row.tags),
+        };
+      });
+
+      if (!dryRun) {
+        for (const item of preview) {
+          const { error } = await supabase
+            .from("model_assets")
+            .update({
+              display_name: item.new_display_name,
+              description: item.new_description,
+              tags: item.new_tags,
+            })
+            .eq("id", item.model_id);
+          if (error) {
+            throw new Error(`write_model_assets 执行失败: ${error.message}`);
+          }
+        }
+      }
+
+      return JSON.stringify({
+        kind: "asset_operation",
+        operation: {
+          tool_name: "write_model_assets",
+          dry_run: dryRun,
+          requires_confirmation: dryRun,
+          affected_count: preview.length,
+          preview,
+        },
       });
     },
   });

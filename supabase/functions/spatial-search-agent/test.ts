@@ -10,7 +10,6 @@ import {
   parseSpatialIntentHeuristically,
   parseDeterministicAssetRenameIntent,
   scoreSceneCandidate,
-  shouldUseDeterministicAssetLookup,
   shouldForceAnotherToolRound,
   shouldPreferHeuristicSpatialRoute,
   summarizeCandidateEvidence,
@@ -40,11 +39,6 @@ Deno.test("isAssetDiscoveryQuery 会识别模型资产级查找请求", () => {
   assertEquals(isAssetDiscoveryQuery("帮我找个办公室模型"), true);
   assertEquals(isAssetDiscoveryQuery("找初音未来相关的"), true);
   assertEquals(isAssetDiscoveryQuery("会议室里的投影仪在哪"), false);
-});
-
-Deno.test("shouldUseDeterministicAssetLookup 只保留简单检索给快路径", () => {
-  assertEquals(shouldUseDeterministicAssetLookup("找一下手办相关的"), true);
-  assertEquals(shouldUseDeterministicAssetLookup("请你找一下有没有重名的模型"), false);
 });
 
 Deno.test("parseDeterministicAssetRenameIntent 会识别最新模型改名但缺少新名字", () => {

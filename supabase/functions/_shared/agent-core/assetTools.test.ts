@@ -1,35 +1,85 @@
 import { assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
-  matchesAssetSearchQuery,
-  normalizeAssetSearchKeywords,
+  buildAssetAnswer,
+  collectAssetToolResult,
+  createEmptyAssetToolState,
 } from "./assetTools.ts";
 
-Deno.test("normalizeAssetSearchKeywords 会去掉主题检索尾词并保留核心中文关键词", () => {
-  assertEquals(normalizeAssetSearchKeywords("找一下手办相关的"), ["手办"]);
-  assertEquals(normalizeAssetSearchKeywords("请找初音未来相关的模型"), [
-    "初音未来",
-  ]);
+Deno.test("collectAssetToolResult 会记录 write_model_assets 的预览结果", () => {
+  const state = createEmptyAssetToolState();
+  const count = collectAssetToolResult(
+    "write_model_assets",
+    JSON.stringify({
+      kind: "asset_operation",
+      operation: {
+        tool_name: "write_model_assets",
+        dry_run: true,
+        requires_confirmation: true,
+        affected_count: 2,
+        preview: [
+          {
+            model_id: "550e8400-e29b-41d4-a716-446655440000",
+            scene_id: "scene_a",
+            old_display_name: "旧名字1",
+            new_display_name: "test1",
+            old_description: null,
+            new_description: null,
+            old_tags: ["原标签"],
+            new_tags: ["原标签"],
+          },
+          {
+            model_id: "550e8400-e29b-41d4-a716-446655440001",
+            scene_id: "scene_b",
+            old_display_name: "旧名字2",
+            new_display_name: "test2",
+            old_description: null,
+            new_description: null,
+            old_tags: [],
+            new_tags: [],
+          },
+        ],
+      },
+    }),
+    state,
+  );
+
+  assertEquals(count, 2);
+  assertEquals(state.operation?.tool_name, "write_model_assets");
+  assertEquals(state.operation?.preview[0]?.new_display_name, "test1");
+  assertEquals(state.operation?.preview[1]?.new_display_name, "test2");
 });
 
-Deno.test("matchesAssetSearchQuery 会用核心关键词匹配资产文本", () => {
+Deno.test("buildAssetAnswer 会输出重名模型摘要", () => {
+  const answer = buildAssetAnswer({
+    ...createEmptyAssetToolState(),
+    duplicateNames: [
+      {
+        display_name: "客厅扫描",
+        count: 2,
+        rows: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            scene_id: "scene_1",
+            display_name: "客厅扫描",
+            description: null,
+            tags: [],
+            created_at: "2026-03-27T10:00:00Z",
+          },
+          {
+            id: "550e8400-e29b-41d4-a716-446655440001",
+            scene_id: "scene_2",
+            display_name: "客厅扫描",
+            description: null,
+            tags: [],
+            created_at: "2026-03-27T11:00:00Z",
+          },
+        ],
+      },
+    ],
+  });
+
   assertEquals(
-    matchesAssetSearchQuery("找一下手办相关的", {
-      scene_id: "scene_demo",
-      display_name: "展示柜手办合集",
-      description: "书桌旁边的动漫手办模型",
-      tags: ["手办", "动漫"],
-      objects: ["摆件"],
-    }),
-    true,
-  );
-  assertEquals(
-    matchesAssetSearchQuery("找一下手办相关的", {
-      scene_id: "scene_room",
-      display_name: "办公室扫描",
-      description: "会议桌和白板",
-      tags: ["会议室"],
-      objects: ["桌子"],
-    }),
-    false,
+    answer,
+    "当前发现 1 组重名模型：\n1. 客厅扫描：重复 2 次（scene: scene_1、scene_2）\n如果你需要，我可以继续展开这些重名模型的详细摘要。",
   );
 });
