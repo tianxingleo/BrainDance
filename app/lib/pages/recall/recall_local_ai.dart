@@ -4,7 +4,6 @@ extension _RecallPageLocalAi on _RecallPageState {
   String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
   void _initRecallPageState() {
-    super.initState();
     _localModelUrlController = TextEditingController(
       text: _defaultModelDownloadUrl,
     );
@@ -23,11 +22,9 @@ extension _RecallPageLocalAi on _RecallPageState {
     _localModelUrlController.dispose();
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
-    super.dispose();
   }
 
   void _handleRecallPageDependenciesChanged() {
-    super.didChangeDependencies();
     // ignore: deprecated_member_use
     final isTabActive = TickerMode.of(context);
     if (_isTabActive == isTabActive) {
@@ -180,8 +177,10 @@ extension _RecallPageLocalAi on _RecallPageState {
 
   Future<void> _restoreLocalModelPath() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedPath = prefs.getString(_localModelPathPrefKey)?.trim();
-    final savedUrl = prefs.getString(_localModelUrlPrefKey)?.trim();
+    final savedPath =
+        prefs.getString(_RecallPageState._localModelPathPrefKey)?.trim();
+    final savedUrl =
+        prefs.getString(_RecallPageState._localModelUrlPrefKey)?.trim();
     final effectiveUrl = (savedUrl == null || savedUrl.isEmpty)
         ? _defaultModelDownloadUrl
         : savedUrl;
@@ -237,17 +236,17 @@ extension _RecallPageLocalAi on _RecallPageState {
 
   Future<void> _persistLocalModelPath(String modelPath) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_localModelPathPrefKey, modelPath);
+    await prefs.setString(_RecallPageState._localModelPathPrefKey, modelPath);
   }
 
   Future<void> _persistLocalModelUrl(String modelUrl) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_localModelUrlPrefKey, modelUrl);
+    await prefs.setString(_RecallPageState._localModelUrlPrefKey, modelUrl);
   }
 
   Future<String> _getPrivateModelPathForUrl(String? modelUrl) async {
     final dir = await getApplicationDocumentsDirectory();
-    var fileName = _defaultModelFileName;
+    var fileName = _RecallPageState._defaultModelFileName;
     final trimmedUrl = modelUrl?.trim() ?? '';
     if (trimmedUrl.isNotEmpty) {
       final uri = Uri.tryParse(trimmedUrl);
@@ -409,7 +408,9 @@ extension _RecallPageLocalAi on _RecallPageState {
     final selectedCatalogItem = _findCatalogItemByUrl(modelUrl);
     final modelLabel =
         selectedCatalogItem?.name ??
-        path.basename(modelPath.isEmpty ? _defaultModelFileName : modelPath);
+        path.basename(
+          modelPath.isEmpty ? _RecallPageState._defaultModelFileName : modelPath,
+        );
     if (modelPath.isEmpty) {
       TDToast.showText(context: context, '请先填写 GGUF 模型路径');
       return;
