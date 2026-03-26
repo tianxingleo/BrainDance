@@ -44,7 +44,23 @@ Deno.test("parseDeterministicAssetRenameIntent 会提取最新模型的新名字
 
   assertExists(intent);
   assertEquals(intent?.target.kind, "latest");
+  if (intent?.target.kind === "latest") {
+    assertEquals(intent.target.count, 1);
+  }
   assertEquals(intent?.newName, "宿舍-午后版本");
+});
+
+Deno.test("parseDeterministicAssetRenameIntent 会提取最新三个模型的批量改名意图", () => {
+  const intent = parseDeterministicAssetRenameIntent(
+    "把最新三个模型改名为宿舍-归档版",
+  );
+
+  assertExists(intent);
+  assertEquals(intent?.target.kind, "latest");
+  if (intent?.target.kind === "latest") {
+    assertEquals(intent.target.count, 3);
+  }
+  assertEquals(intent?.newName, "宿舍-归档版");
 });
 
 Deno.test("parseDeterministicAssetRenameIntent 会在单选模型时走定向改名", () => {
@@ -53,8 +69,30 @@ Deno.test("parseDeterministicAssetRenameIntent 会在单选模型时走定向改
   });
 
   assertExists(intent);
-  assertEquals(intent?.target.kind, "selected_single");
+  assertEquals(intent?.target.kind, "selected");
+  if (intent?.target.kind === "selected") {
+    assertEquals(intent.target.modelIds.length, 1);
+  }
   assertEquals(intent?.newName, "书桌近景");
+});
+
+Deno.test("parseDeterministicAssetRenameIntent 会在多选模型时走批量改名", () => {
+  const intent = parseDeterministicAssetRenameIntent(
+    "把这几个模型改名为宿舍批次",
+    {
+      selectedModelIds: [
+        "550e8400-e29b-41d4-a716-446655440000",
+        "550e8400-e29b-41d4-a716-446655440001",
+      ],
+    },
+  );
+
+  assertExists(intent);
+  assertEquals(intent?.target.kind, "selected");
+  if (intent?.target.kind === "selected") {
+    assertEquals(intent.target.modelIds.length, 2);
+  }
+  assertEquals(intent?.newName, "宿舍批次");
 });
 
 Deno.test("parseDeterministicAssetRenameIntent 会利用上一轮会话中的单模型上下文", () => {
@@ -69,7 +107,10 @@ Deno.test("parseDeterministicAssetRenameIntent 会利用上一轮会话中的单
   );
 
   assertExists(intent);
-  assertEquals(intent?.target.kind, "session_single");
+  assertEquals(intent?.target.kind, "session");
+  if (intent?.target.kind === "session") {
+    assertEquals(intent.target.modelIds.length, 1);
+  }
   assertEquals(intent?.newName, "宿舍书桌-最终版");
 });
 

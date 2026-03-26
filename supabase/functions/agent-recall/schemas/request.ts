@@ -20,6 +20,8 @@ const sessionStateSchema = z.object({
   lastOperationPreview: z.object({
     toolName: z.string(),
     affectedCount: z.number().int().min(0),
+    modelIds: z.array(z.string()).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
   }).nullable().optional(),
 }).nullable().optional();
 

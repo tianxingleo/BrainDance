@@ -24,6 +24,16 @@ Deno.test("agentRecallRequestSchema 可以正确解析包含上下文字段的�
       lastOperationPreview: {
         toolName: "batch_patch_model_metadata",
         affectedCount: 2,
+        modelIds: ["uuid1", "uuid2"],
+        args: {
+          modelIds: ["uuid1", "uuid2"],
+          patch: {
+            displayNameTemplate: "宿舍-归档版",
+            tagsAdd: [],
+            tagsRemove: [],
+          },
+          dryRun: true,
+        },
       },
     },
   });
@@ -35,6 +45,10 @@ Deno.test("agentRecallRequestSchema 可以正确解析包含上下文字段的�
     assertEquals(result.data.executionMode, "preview");
     assertEquals(result.data.currentMode, "batch_edit");
     assertEquals(result.data.sessionState?.lastMode, "spatial_search");
+    assertEquals(
+      result.data.sessionState?.lastOperationPreview?.modelIds,
+      ["uuid1", "uuid2"],
+    );
   }
 });
 

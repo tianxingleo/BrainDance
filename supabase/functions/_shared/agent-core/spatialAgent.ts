@@ -362,6 +362,8 @@ const candidateSceneRefSchema = z.object({
 const sessionOperationPreviewSchema = z.object({
   toolName: z.string(),
   affectedCount: z.number().int().min(0),
+  modelIds: z.array(z.string()).optional(),
+  args: z.record(z.string(), z.unknown()).optional(),
 }).nullable();
 
 const sessionStateSchema = z.object({
@@ -1030,12 +1032,87 @@ async function classifyAgentMode(
 
 type DeterministicAssetRenameIntent = {
   target:
-    | { kind: "latest" }
+    | { kind: "latest"; count: number }
     | { kind: "current"; modelId: string }
-    | { kind: "selected_single"; modelId: string }
-    | { kind: "session_single"; modelId: string };
+    | { kind: "selected"; modelIds: string[] }
+    | { kind: "session"; modelIds: string[] };
   newName: string | null;
 };
+
+function parseChineseCountToken(token: string): number | null {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const value = Number(trimmed);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  const normalized = trimmed
+    .replace(/两/g, "二")
+    .replace(/俩/g, "二");
+  const directMap: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+  if (directMap[normalized] != null) {
+    return directMap[normalized];
+  }
+
+  if (/^十[一二三四五六七八九]$/.test(normalized)) {
+    return 10 + (directMap[normalized.slice(1)] ?? 0);
+  }
+  if (/^[一二三四五六七八九]十$/.test(normalized)) {
+    return (directMap[normalized[0]!] ?? 0) * 10;
+  }
+  if (/^[一二三四五六七八九]十[一二三四五六七八九]$/.test(normalized)) {
+    return (directMap[normalized[0]!] ?? 0) * 10 +
+      (directMap[normalized[2]!] ?? 0);
+  }
+
+  return null;
+}
+
+function extractLatestModelCount(query: string): number {
+  const patterns = [
+    /最新(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
+    /最近(?:的)?([0-9一二三四五六七八九十两俩]+)(?:个|条)?模型/,
+    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最新模型/,
+    /([0-9一二三四五六七八九十两俩]+)(?:个|条)最近模型/,
+  ];
+
+  for (const pattern of patterns) {
+    const matched = query.match(pattern)?.[1];
+    const count = matched ? parseChineseCountToken(matched) : null;
+    if (count) {
+      return Math.max(1, Math.min(20, count));
+    }
+  }
+
+  return 1;
+}
+
+function isConfirmWriteQuery(query: string): boolean {
+  return /^(请)?(确认|执行|正式执行|继续执行)/.test(query.trim()) ||
+    /确认执行|正式写入|开始执行|执行刚才|执行上一次|确认写入/.test(query);
+}
+
+function referencesMultipleModels(query: string): boolean {
+  return /这些模型|这几个模型|这批模型|这三?个模型|这\d+个模型|它们|这几个/
+    .test(
+      query,
+    );
+}
 
 function extractRenameTargetName(query: string): string | null {
   const trimmed = query.trim();
@@ -1072,10 +1149,11 @@ export function parseDeterministicAssetRenameIntent(
   }
 
   const newName = extractRenameTargetName(trimmed);
+  const latestCount = extractLatestModelCount(trimmed);
 
   if (/最新|最近|刚拍|刚刚|最后一个/.test(trimmed)) {
     return {
-      target: { kind: "latest" },
+      target: { kind: "latest", count: latestCount },
       newName,
     };
   }
@@ -1093,8 +1171,21 @@ export function parseDeterministicAssetRenameIntent(
   if ((options.selectedModelIds?.length ?? 0) === 1) {
     return {
       target: {
-        kind: "selected_single",
-        modelId: options.selectedModelIds![0]!,
+        kind: "selected",
+        modelIds: options.selectedModelIds!,
+      },
+      newName,
+    };
+  }
+
+  if (
+    (options.selectedModelIds?.length ?? 0) > 1 &&
+    referencesMultipleModels(trimmed)
+  ) {
+    return {
+      target: {
+        kind: "selected",
+        modelIds: options.selectedModelIds!,
       },
       newName,
     };
@@ -1106,14 +1197,176 @@ export function parseDeterministicAssetRenameIntent(
   ) {
     return {
       target: {
-        kind: "session_single",
-        modelId: options.sessionState!.lastSelectedModelIds![0]!,
+        kind: "session",
+        modelIds: options.sessionState!.lastSelectedModelIds!,
+      },
+      newName,
+    };
+  }
+
+  if (
+    (options.sessionState?.lastSelectedModelIds?.length ?? 0) > 1 &&
+    referencesMultipleModels(trimmed)
+  ) {
+    return {
+      target: {
+        kind: "session",
+        modelIds: options.sessionState!.lastSelectedModelIds!,
       },
       newName,
     };
   }
 
   return null;
+}
+
+async function replayPendingAssetWriteIfNeeded(input: {
+  supabase: SupabaseClient;
+  query: string;
+  options: SpatialSearchAgentOptions;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<SpatialSearchResponse | null> {
+  const { query, options, supabase, callbacks } = input;
+  if (!isConfirmWriteQuery(query)) {
+    return null;
+  }
+
+  const pending = options.sessionState?.lastOperationPreview;
+  if (!pending?.toolName || !pending.args) {
+    return null;
+  }
+
+  if (options.executionMode !== "execute") {
+    return finalizeResponse({
+      success: true,
+      mode: "asset_metadata",
+      intent: null,
+      selection: {
+        scene_id: null,
+        model_id: pending.modelIds?.[0] ?? null,
+        pose_image_id: null,
+        confidence: 0.82,
+        reason: "检测到用户希望确认写入，但当前请求仍处于预览模式",
+      },
+      answer:
+        "我已识别到你要确认执行，但当前请求还是 preview 模式。请切换到 execute 后再确认一次。",
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "缺少 execute 模式，已阻止正式写入",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
+
+  const toolsByName = new Map<string, DynamicStructuredTool>([
+    [
+      "rename_model_asset",
+      buildRenameModelAssetTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+    [
+      "batch_patch_model_metadata",
+      buildBatchPatchModelMetadataTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+  ]);
+  const tool = toolsByName.get(pending.toolName);
+  if (!tool) {
+    return null;
+  }
+
+  const executionArgs = {
+    ...pending.args,
+    dryRun: false,
+  };
+  const state = createEmptyAssetToolState();
+  const trace: ToolTraceEntry[] = [];
+
+  await emitProgress(callbacks, {
+    event: "status",
+    data: {
+      phase: "asset_write_replay",
+      summary: "已识别到确认执行请求，准备重放上一轮预览操作",
+    },
+  });
+  await emitProgress(callbacks, {
+    event: "tool_call",
+    data: {
+      name: tool.name,
+      args: executionArgs,
+      summary: "开始正式执行上一轮已确认的资产写操作",
+      round: 1,
+    },
+  });
+
+  const toolResult = await tool.invoke(executionArgs);
+  const resultText = typeof toolResult === "string"
+    ? toolResult
+    : JSON.stringify(toolResult);
+  const count = collectAssetToolResult(tool.name, resultText, state);
+  const resultSummary = summarizeToolResult(tool.name, count);
+  trace.push({
+    toolName: tool.name,
+    args: executionArgs,
+    resultSummary,
+  });
+  await emitProgress(callbacks, {
+    event: "tool_result",
+    data: {
+      name: tool.name,
+      summary: resultSummary,
+      count,
+      round: 1,
+    },
+  });
+
+  const selectionModelId = state.operation?.preview[0]?.model_id ??
+    pending.modelIds?.[0] ?? null;
+  const selectionSceneId = state.operation?.preview[0]?.scene_id ?? null;
+
+  return finalizeResponse({
+    success: true,
+    mode: "asset_metadata",
+    intent: null,
+    selection: {
+      scene_id: selectionSceneId,
+      model_id: selectionModelId,
+      pose_image_id: null,
+      confidence: 0.97,
+      reason: "已按上一轮预览参数正式执行资产写操作",
+    },
+    answer: tool.name === "rename_model_asset"
+      ? `已正式执行改名：${
+        state.operation?.preview[0]?.old_display_name ??
+          selectionSceneId ?? "该模型"
+      } -> ${state.operation?.preview[0]?.new_display_name ?? "新名称"}。`
+      : `已正式执行批量元数据修改，影响 ${
+        state.operation?.affected_count ?? count
+      } 个模型。`,
+    actions: [],
+    viewer_payload: emptyViewerPayload(),
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "已根据会话中的预览参数完成正式写入",
+    tool_trace: trace,
+    asset_context: serializeAssetContext(state),
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
 }
 
 async function runDeterministicAssetRenameFlow(input: {
@@ -1140,6 +1393,10 @@ async function runDeterministicAssetRenameFlow(input: {
     selectedModelIds: options.selectedModelIds,
     allowWrite: options.executionMode === "execute",
   });
+  const batchPatchTool = buildBatchPatchModelMetadataTool(supabase, {
+    selectedModelIds: options.selectedModelIds,
+    allowWrite: options.executionMode === "execute",
+  });
 
   await emitProgress(callbacks, {
     event: "status",
@@ -1149,7 +1406,7 @@ async function runDeterministicAssetRenameFlow(input: {
     },
   });
 
-  let targetModelId: string | null = null;
+  let targetModelIds: string[] = [];
   let targetSceneId: string | null = null;
   let currentDisplayName: string | null = null;
 
@@ -1161,7 +1418,7 @@ async function runDeterministicAssetRenameFlow(input: {
       query: "",
       startTime: null,
       endTime: null,
-      limit: 1,
+      limit: intent.target.count,
     };
     await emitProgress(callbacks, {
       event: "tool_call",
@@ -1193,16 +1450,19 @@ async function runDeterministicAssetRenameFlow(input: {
       },
     });
 
-    const latest = state.list?.[0] ?? null;
-    targetModelId = latest?.id ?? null;
+    const listedRows = state.list ?? [];
+    targetModelIds = listedRows.map((item) => item.id);
+    const latest = listedRows[0] ?? null;
     targetSceneId = latest?.scene_id ?? null;
     currentDisplayName = latest?.display_name?.trim() || latest?.scene_id ||
       null;
   } else {
-    targetModelId = intent.target.modelId;
+    targetModelIds = intent.target.kind === "current"
+      ? [intent.target.modelId]
+      : intent.target.modelIds;
   }
 
-  if (!targetModelId) {
+  if (targetModelIds.length === 0) {
     return finalizeResponse({
       success: true,
       mode: "asset_metadata",
@@ -1238,7 +1498,7 @@ async function runDeterministicAssetRenameFlow(input: {
       intent: null,
       selection: {
         scene_id: targetSceneId,
-        model_id: targetModelId,
+        model_id: targetModelIds[0] ?? null,
         pose_image_id: null,
         confidence: 0.88,
         reason: "已锁定改名目标，但用户尚未提供新名字",
@@ -1262,41 +1522,51 @@ async function runDeterministicAssetRenameFlow(input: {
     });
   }
 
-  const renameArgs = {
-    modelId: targetModelId,
-    newName: intent.newName,
-    dryRun: options.executionMode !== "execute",
-  };
+  const isBatchRename = targetModelIds.length > 1;
+  const tool = isBatchRename ? batchPatchTool : renameTool;
+  const toolArgs = isBatchRename
+    ? {
+      modelIds: targetModelIds,
+      patch: {
+        displayNameTemplate: intent.newName,
+        tagsAdd: [],
+        tagsRemove: [],
+      },
+      dryRun: options.executionMode !== "execute",
+    }
+    : {
+      modelId: targetModelIds[0]!,
+      newName: intent.newName,
+      dryRun: options.executionMode !== "execute",
+    };
   await emitProgress(callbacks, {
     event: "tool_call",
     data: {
-      name: renameTool.name,
-      args: renameArgs,
-      summary: "已锁定目标模型，开始生成改名结果",
+      name: tool.name,
+      args: toolArgs,
+      summary: isBatchRename
+        ? "已锁定多模型目标，开始生成批量改名结果"
+        : "已锁定目标模型，开始生成改名结果",
       round: trace.length + 1,
     },
   });
-  const renameResult = await renameTool.invoke(renameArgs);
-  const renameText = typeof renameResult === "string"
-    ? renameResult
-    : JSON.stringify(renameResult);
-  const renameCount = collectAssetToolResult(
-    renameTool.name,
-    renameText,
-    state,
-  );
-  const renameSummary = summarizeToolResult(renameTool.name, renameCount);
+  const toolResult = await tool.invoke(toolArgs);
+  const resultText = typeof toolResult === "string"
+    ? toolResult
+    : JSON.stringify(toolResult);
+  const resultCount = collectAssetToolResult(tool.name, resultText, state);
+  const resultSummary = summarizeToolResult(tool.name, resultCount);
   trace.push({
-    toolName: renameTool.name,
-    args: renameArgs,
-    resultSummary: renameSummary,
+    toolName: tool.name,
+    args: toolArgs,
+    resultSummary,
   });
   await emitProgress(callbacks, {
     event: "tool_result",
     data: {
-      name: renameTool.name,
-      summary: renameSummary,
-      count: renameCount,
+      name: tool.name,
+      summary: resultSummary,
+      count: resultCount,
       round: trace.length,
     },
   });
@@ -1305,7 +1575,22 @@ async function runDeterministicAssetRenameFlow(input: {
   const beforeName = operationPreview?.old_display_name || currentDisplayName ||
     targetSceneId;
   const afterName = operationPreview?.new_display_name || intent.newName;
-  const actionText = state.operation?.dry_run ? "已生成改名预览" : "已完成改名";
+  const actionText = state.operation?.dry_run
+    ? (isBatchRename ? "已生成批量改名预览" : "已生成改名预览")
+    : (isBatchRename ? "已完成批量改名" : "已完成改名");
+  const answer = isBatchRename
+    ? `${actionText}：共 ${
+      state.operation?.affected_count ?? targetModelIds.length
+    } 个模型将改为“${intent.newName}”。${
+      state.operation?.dry_run
+        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
+        : ""
+    }`
+    : `${actionText}：${beforeName ?? "该模型"} -> ${afterName}。${
+      state.operation?.dry_run
+        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
+        : ""
+    }`;
 
   return finalizeResponse({
     success: true,
@@ -1313,23 +1598,22 @@ async function runDeterministicAssetRenameFlow(input: {
     intent: null,
     selection: {
       scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
-      model_id: targetModelId,
+      model_id: targetModelIds[0] ?? null,
       pose_image_id: null,
       confidence: 0.96,
-      reason: "已通过确定性规则锁定目标模型并执行改名工具",
+      reason: isBatchRename
+        ? "已通过确定性规则锁定多模型目标并执行批量改名工具"
+        : "已通过确定性规则锁定目标模型并执行改名工具",
     },
-    answer: `${actionText}：${beforeName ?? "该模型"} -> ${afterName}。${
-      state.operation?.dry_run
-        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
-        : ""
-    }`,
+    answer,
     actions: [],
     viewer_payload: emptyViewerPayload(),
     evidence: null,
     candidates: [],
     top_candidates: [],
-    selected_candidate_reason:
-      "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
+    selected_candidate_reason: isBatchRename
+      ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
+      : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
     tool_trace: trace,
     asset_context: serializeAssetContext(state),
     compare_context: null,
@@ -2292,6 +2576,7 @@ function buildSessionStateFromResponse(
   }
 
   const operationPreview = response.asset_context.operation;
+  const latestToolTrace = response.tool_trace[response.tool_trace.length - 1];
   if (operationPreview) {
     for (const item of operationPreview.preview) {
       if (item.model_id) {
@@ -2320,6 +2605,12 @@ function buildSessionStateFromResponse(
       ? {
         toolName: operationPreview.tool_name,
         affectedCount: operationPreview.affected_count,
+        modelIds: operationPreview.preview
+          .map((item) => item.model_id)
+          .filter((id): id is string => Boolean(id)),
+        args: latestToolTrace?.toolName === operationPreview.tool_name
+          ? latestToolTrace.args
+          : undefined,
       }
       : undefined,
   };
@@ -2815,6 +3106,16 @@ export async function runSpatialSearchAgent(
   }
 
   if (mode === "asset_metadata") {
+    const replayedWriteResponse = await replayPendingAssetWriteIfNeeded({
+      supabase,
+      query,
+      options,
+      callbacks,
+    });
+    if (replayedWriteResponse) {
+      return replayedWriteResponse;
+    }
+
     const deterministicAssetResponse = await runDeterministicAssetRenameFlow({
       supabase,
       query,

@@ -1891,8 +1891,40 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   }
 
   Future<void> _askAgentRecall(String query) async {
+    await _askAgentRecallWithMode(query);
+  }
+
+  bool _isExecuteIntent(String query) {
+    final normalized = query.trim();
+    return normalized.startsWith('确认执行') ||
+        normalized.startsWith('正式执行') ||
+        normalized.startsWith('继续执行') ||
+        normalized.startsWith('执行刚才') ||
+        normalized.contains('确认写入') ||
+        normalized.contains('正式写入');
+  }
+
+  String _resolveAgentExecutionMode(String query) {
+    final followUp = _agentResult?.followUp;
+    if (_isExecuteIntent(query)) {
+      return 'execute';
+    }
+    if (followUp != null &&
+        followUp.kind == 'confirm_write' &&
+        _isExecuteIntent(query)) {
+      return 'execute';
+    }
+    return 'preview';
+  }
+
+  Future<void> _askAgentRecallWithMode(
+    String query, {
+    String? executionMode,
+  }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) return;
+    final resolvedExecutionMode =
+        executionMode ?? _resolveAgentExecutionMode(trimmedQuery);
     _ensureAgentSessionId();
     _agentLatestSubmittedQuery = trimmedQuery;
 
@@ -1915,6 +1947,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       try {
         final result = await AgentRecallService().query(
           trimmedQuery,
+          executionMode: resolvedExecutionMode,
           sessionId: _agentSessionId,
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
@@ -1941,6 +1974,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _updateAgentLiveStatus('正在发起 Agent 流式请求');
       final stream = AgentRecallService().queryStream(
         trimmedQuery,
+        executionMode: resolvedExecutionMode,
         sessionId: _agentSessionId,
         conversationSummary: _agentConversationSummary,
         sessionState: _agentSessionState,
@@ -2477,7 +2511,17 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                                     TextSelection.collapsed(
                                       offset: reply.length,
                                     );
-                                unawaited(_askAgentRecall(reply));
+                                final executionMode =
+                                    followUp.kind == 'confirm_write' &&
+                                        _isExecuteIntent(reply)
+                                    ? 'execute'
+                                    : null;
+                                unawaited(
+                                  _askAgentRecallWithMode(
+                                    reply,
+                                    executionMode: executionMode,
+                                  ),
+                                );
                               },
                             );
                           }).toList(),

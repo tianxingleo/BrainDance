@@ -75,6 +75,25 @@ export function buildAgentContextBlock(
     parts.push(
       `- 上一轮操作预览: ${options.sessionState.lastOperationPreview.toolName}，影响 ${options.sessionState.lastOperationPreview.affectedCount} 个对象`,
     );
+    if (
+      options.sessionState.lastOperationPreview.modelIds &&
+      options.sessionState.lastOperationPreview.modelIds.length > 0
+    ) {
+      parts.push(
+        `- 上一轮操作目标模型 IDs: [${
+          options.sessionState.lastOperationPreview.modelIds.map((id) =>
+            `"${id}"`
+          ).join(", ")
+        }]`,
+      );
+    }
+    if (options.sessionState.lastOperationPreview.args) {
+      parts.push(
+        `- 上一轮操作参数: ${
+          JSON.stringify(options.sessionState.lastOperationPreview.args)
+        }`,
+      );
+    }
   }
 
   if (options.conversationSummary) {

@@ -269,16 +269,27 @@ class AgentCandidateRef {
 class AgentOperationPreview {
   final String toolName;
   final int affectedCount;
+  final List<String>? modelIds;
+  final Map<String, dynamic>? args;
 
   AgentOperationPreview({
     required this.toolName,
     required this.affectedCount,
+    this.modelIds,
+    this.args,
   });
 
   factory AgentOperationPreview.fromJson(Map<String, dynamic> json) {
     return AgentOperationPreview(
       toolName: json['toolName']?.toString() ?? '',
       affectedCount: (json['affectedCount'] as num?)?.toInt() ?? 0,
+      modelIds: (json['modelIds'] as List?)
+          ?.map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList(),
+      args: json['args'] is Map
+          ? Map<String, dynamic>.from(json['args'] as Map)
+          : null,
     );
   }
 
@@ -286,6 +297,8 @@ class AgentOperationPreview {
     return {
       'toolName': toolName,
       'affectedCount': affectedCount,
+      if (modelIds != null) 'modelIds': modelIds,
+      if (args != null) 'args': args,
     };
   }
 }

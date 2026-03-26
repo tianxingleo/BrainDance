@@ -35,6 +35,8 @@ Core，避免能力散落在独立函数和旧文档描述里。
 - `asset_metadata`
   - 在原有资产工具基础上，新增专题归档、线程归组、pose 摘要、相关模型查找。
   - 已补充“最新模型改名”确定性兜底：这类请求不再只依赖 LLM 自主多轮工具编排，而是会先锁定最新模型，再根据是否给出新名字返回缺参提示或调用 `rename_model_asset`。
+  - 已补充“最新 N 个模型批量改名”确定性兜底：像“把最新三个模型改名为 xxx”会先按 `created_at` 倒序锁定最近 N 个模型，再调用 `batch_patch_model_metadata` 做 dry run / execute。
+  - 已补充预览写操作重放：当上一轮已经生成改名或批量修改预览后，`session_state.lastOperationPreview` 会保存目标模型与工具参数；用户再次说“确认执行”时，共享 Core 会优先重放上一轮参数，而不是让 LLM 重新猜范围。
 - `time_compare`
   - 复用
     [time-compare-agent/agent.ts](/home/ltx/projects/BrainDance/supabase/functions/time-compare-agent/agent.ts)
@@ -77,6 +79,7 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - `lastSelectedModelIds`
   - `lastCandidateRefs`
   - `lastOperationPreview`
+- `lastOperationPreview` 不再只记录工具名和影响数量，还会带上目标模型 IDs 与上一次预览的工具参数，供确认执行时直接重放。
 - `buildAgentContextBlock()`
   现在会把候选引用列表按编号展开，便于模型理解“上一个”“第二个”这类指代。
 - 当前正式响应还新增：
@@ -84,6 +87,7 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - `conversation_summary`
   - `follow_up`
 - `follow_up` 用于把“当前还缺什么输入”“推荐继续说什么”结构化返回给前端，而不是只把追问塞进自然语言答案里。
+- Flutter Recall 页在 follow-up 快捷回复命中“确认执行 / 正式写入”时，会显式把 `executionMode` 切到 `execute` 后再请求 `agent-recall`，不再永远停在 `preview`。
 
 兼容性处理：
 
