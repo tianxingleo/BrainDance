@@ -100,6 +100,7 @@ class AgentRecallResponse {
   final AgentEvidence? evidence;
   final List<AgentAction> actions;
   final List<AgentCandidate> candidates;
+  final List<AgentToolTrace> toolTrace;
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
@@ -116,6 +117,7 @@ class AgentRecallResponse {
     required this.evidence,
     required this.actions,
     this.candidates = const [],
+    this.toolTrace = const [],
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
@@ -155,6 +157,12 @@ class AgentRecallResponse {
           .map(
             (item) =>
                 AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
+          )
+          .toList(),
+      toolTrace: ((json['tool_trace'] as List?) ?? [])
+          .map(
+            (item) =>
+                AgentToolTrace.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
       selectedCandidateReason: json['selected_candidate_reason']?.toString(),
@@ -361,6 +369,32 @@ class AgentCandidate {
   }
 }
 
+class AgentToolTrace {
+  final String toolName;
+  final Map<String, dynamic> args;
+  final String resultSummary;
+
+  AgentToolTrace({
+    required this.toolName,
+    required this.args,
+    required this.resultSummary,
+  });
+
+  factory AgentToolTrace.fromJson(Map<String, dynamic> json) {
+    return AgentToolTrace(
+      toolName:
+          json['toolName']?.toString() ?? json['tool_name']?.toString() ?? '',
+      args: json['args'] is Map
+          ? Map<String, dynamic>.from(json['args'] as Map)
+          : const <String, dynamic>{},
+      resultSummary:
+          json['resultSummary']?.toString() ??
+          json['result_summary']?.toString() ??
+          '',
+    );
+  }
+}
+
 class AgentEvidence {
   final String sceneId;
   final double similarity;
@@ -521,7 +555,8 @@ class AgentRecallService {
           headers: {
             'Authorization': token != null ? 'Bearer $token' : null,
             'apikey': apiKey,
-            'Accept': 'application/x-ndjson',
+            'Accept': 'text/event-stream, application/x-ndjson',
+            'Cache-Control': 'no-cache',
             'Content-Type': 'application/json',
           },
         ),
@@ -545,14 +580,28 @@ class AgentRecallService {
         throw Exception('Response stream is null');
       }
 
-      await for (final line
-          in stream
-              .cast<List<int>>()
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-        final trimmed = line.trim();
-        if (trimmed.isNotEmpty) {
-          yield trimmed;
+      final eventBuffer = StringBuffer();
+      await for (final chunk in stream.cast<List<int>>().transform(utf8.decoder)) {
+        if (chunk.isEmpty) {
+          continue;
+        }
+        eventBuffer.write(chunk);
+        final rawBuffer = eventBuffer.toString();
+        final parsed = _drainStreamingEvents(rawBuffer);
+        if (parsed.remaining != rawBuffer.length) {
+          eventBuffer
+            ..clear()
+            ..write(rawBuffer.substring(parsed.remaining));
+        }
+        for (final event in parsed.events) {
+          yield event;
+        }
+      }
+
+      final tail = eventBuffer.toString().trim();
+      if (tail.isNotEmpty) {
+        for (final event in _parseEventChunk(tail)) {
+          yield event;
         }
       }
     } catch (e) {
@@ -680,6 +729,15 @@ class AgentRecallService {
             },
           )
           .toList(),
+      'tool_trace': response.toolTrace
+          .map(
+            (trace) => {
+              'tool_name': trace.toolName,
+              'args': trace.args,
+              'result_summary': trace.resultSummary,
+            },
+          )
+          .toList(),
       'selected_candidate_reason': response.selectedCandidateReason,
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,
@@ -777,4 +835,102 @@ class AgentRecallService {
 
     return error.toString();
   }
+
+  _ParsedStreamEvents _drainStreamingEvents(String raw) {
+    final events = <String>[];
+    var cursor = 0;
+
+    while (cursor < raw.length) {
+      final sseBoundary = raw.indexOf('\n\n', cursor);
+      final lineBoundary = raw.indexOf('\n', cursor);
+      final looksLikeSse =
+          raw.startsWith('event:', cursor) || raw.startsWith('data:', cursor);
+
+      if (looksLikeSse) {
+        if (sseBoundary == -1) {
+          break;
+        }
+        final chunk = raw.substring(cursor, sseBoundary).trim();
+        cursor = sseBoundary + 2;
+        events.addAll(_parseEventChunk(chunk));
+        continue;
+      }
+
+      if (lineBoundary == -1) {
+        break;
+      }
+
+      final chunk = raw.substring(cursor, lineBoundary).trim();
+      cursor = lineBoundary + 1;
+      if (chunk.isEmpty) {
+        continue;
+      }
+      events.addAll(_parseEventChunk(chunk));
+    }
+
+    return _ParsedStreamEvents(events: events, remaining: cursor);
+  }
+
+  List<String> _parseEventChunk(String chunk) {
+    final trimmed = chunk.trim();
+    if (trimmed.isEmpty) {
+      return const [];
+    }
+
+    if (trimmed.startsWith('{')) {
+      return [trimmed];
+    }
+
+    String eventName = 'message';
+    final dataLines = <String>[];
+    for (final line in const LineSplitter().convert(trimmed)) {
+      final normalized = line.trimRight();
+      if (normalized.isEmpty || normalized.startsWith(':')) {
+        continue;
+      }
+      if (normalized.startsWith('event:')) {
+        eventName = normalized.substring(6).trim();
+        continue;
+      }
+      if (normalized.startsWith('data:')) {
+        dataLines.add(normalized.substring(5).trimLeft());
+      }
+    }
+
+    if (dataLines.isEmpty) {
+      return const [];
+    }
+
+    final dataText = dataLines.join('\n').trim();
+    if (dataText.isEmpty) {
+      return const [];
+    }
+
+    try {
+      final decoded = jsonDecode(dataText);
+      return [
+        jsonEncode({
+          'event': eventName,
+          'data': decoded,
+        }),
+      ];
+    } catch (_) {
+      return [
+        jsonEncode({
+          'event': eventName,
+          'data': dataText,
+        }),
+      ];
+    }
+  }
+}
+
+class _ParsedStreamEvents {
+  final List<String> events;
+  final int remaining;
+
+  const _ParsedStreamEvents({
+    required this.events,
+    required this.remaining,
+  });
 }

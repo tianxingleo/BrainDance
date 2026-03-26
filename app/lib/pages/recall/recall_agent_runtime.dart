@@ -95,6 +95,43 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     }
   }
 
+  void _pushAgentStatusStep(
+    String summary, {
+    String? detail,
+    bool isCompleted = true,
+  }) {
+    if (_agentChatMessage == null) {
+      return;
+    }
+    final normalizedSummary = summary.trim();
+    final normalizedDetail = detail?.trim();
+    final content = [
+      normalizedSummary,
+      if (normalizedDetail != null && normalizedDetail.isNotEmpty)
+        normalizedDetail,
+    ].join('\n');
+    if (content.isEmpty) {
+      return;
+    }
+
+    final steps = _agentChatMessage!.steps;
+    if (steps.isNotEmpty) {
+      final last = steps.last;
+      if (last.type == 'status' && last.content.trim() == content.trim()) {
+        last.isCompleted = isCompleted;
+        return;
+      }
+    }
+
+    _agentChatMessage!.addStep(
+      AgentStep(
+        type: 'status',
+        content: content,
+        isCompleted: isCompleted,
+      ),
+    );
+  }
+
   AgentStep? _findLastToolStep(String name) {
     for (var index = _agentChatMessage!.steps.length - 1; index >= 0; index--) {
       final step = _agentChatMessage!.steps[index];
@@ -103,6 +140,46 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       }
     }
     return null;
+  }
+
+  String _formatToolStepContent({
+    required Map<String, dynamic> args,
+    String? resultSummary,
+  }) {
+    final sections = <String>[
+      const JsonEncoder.withIndent('  ').convert(args.isEmpty ? {} : args),
+    ];
+    final normalizedSummary = resultSummary?.trim();
+    if (normalizedSummary != null && normalizedSummary.isNotEmpty) {
+      sections.add('结果摘要:\n$normalizedSummary');
+    }
+    return sections.join('\n\n');
+  }
+
+  void _syncToolTraceSteps(List<AgentToolTrace> traces) {
+    if (_agentChatMessage == null || traces.isEmpty) {
+      return;
+    }
+    for (final trace in traces) {
+      final content = _formatToolStepContent(
+        args: trace.args,
+        resultSummary: trace.resultSummary,
+      );
+      final existing = _findLastToolStep(trace.toolName);
+      if (existing != null) {
+        existing.updateContent(content);
+        existing.isCompleted = true;
+        continue;
+      }
+      _agentChatMessage!.addStep(
+        AgentStep(
+          type: 'tool_call',
+          toolName: trace.toolName,
+          content: content,
+          isCompleted: true,
+        ),
+      );
+    }
   }
 
   void _completeAgentRun({bool collapseProcess = true}) {
@@ -172,6 +249,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       final summary = payload['summary']?.toString() ?? '';
       final detail = payload['detail']?.toString();
       _updateAgentLiveStatus(summary, detail: detail);
+      _pushAgentStatusStep(summary, detail: detail);
       return;
     }
 
@@ -181,6 +259,10 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       final content = 'Plan: $title\n$stepsStr'.trim();
       _updateAgentLiveStatus(
         title.isEmpty ? textLocalize('agent_status_plan_ready') : title,
+      );
+      _pushAgentStatusStep(
+        title.isEmpty ? textLocalize('agent_status_plan_ready') : title,
+        detail: stepsStr.isEmpty ? null : stepsStr,
       );
       _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
       return;
@@ -200,9 +282,9 @@ extension _RecallPageAgentRuntime on _RecallPageState {
 
     if (event == 'tool_call' && payload is Map) {
       final toolName = payload['name']?.toString() ?? '';
-      final argsStr = payload['args'] is Map
-          ? const JsonEncoder.withIndent('  ').convert(payload['args'])
-          : payload['args']?.toString() ?? '';
+      final args = payload['args'] is Map
+          ? Map<String, dynamic>.from(payload['args'] as Map)
+          : const <String, dynamic>{};
       final summary =
           payload['summary']?.toString() ??
           '${textLocalize('agent_status_tool_start')} ${toolName.isEmpty ? textLocalize('agent_status_tool_unnamed') : toolName}';
@@ -210,8 +292,16 @@ extension _RecallPageAgentRuntime on _RecallPageState {
         summary,
         detail: textLocalize('agent_status_waiting_tool_result'),
       );
+      _pushAgentStatusStep(
+        summary,
+        detail: textLocalize('agent_status_waiting_tool_result'),
+      );
       _agentChatMessage!.addStep(
-        AgentStep(type: 'tool_call', toolName: toolName, content: argsStr),
+        AgentStep(
+          type: 'tool_call',
+          toolName: toolName,
+          content: _formatToolStepContent(args: args),
+        ),
       );
       return;
     }
@@ -225,7 +315,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       if (lastTool != null) {
         final existing = lastTool.content.trim();
         lastTool.updateContent(
-          existing.isEmpty ? summary : '$existing\n\n结果摘要:\n$summary',
+          existing.isEmpty ? '结果摘要:\n$summary' : '$existing\n\n结果摘要:\n$summary',
         );
         lastTool.isCompleted = true;
       } else {
@@ -233,12 +323,16 @@ extension _RecallPageAgentRuntime on _RecallPageState {
           AgentStep(
             type: 'tool_call',
             toolName: name,
-            content: summary,
+            content: _formatToolStepContent(
+              args: const <String, dynamic>{},
+              resultSummary: summary,
+            ),
             isCompleted: true,
           ),
         );
       }
       _updateAgentLiveStatus(summary);
+      _pushAgentStatusStep(summary);
       return;
     }
 
@@ -268,6 +362,10 @@ extension _RecallPageAgentRuntime on _RecallPageState {
         textLocalize('agent_status_execution_failed'),
         detail: errorMsg,
       );
+      _pushAgentStatusStep(
+        textLocalize('agent_status_execution_failed'),
+        detail: errorMsg,
+      );
       _agentChatMessage!.addStep(AgentStep(type: 'error', content: errorMsg));
       return;
     }
@@ -284,6 +382,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
             _agentLatestSubmittedQuery ?? _searchController.text.trim(),
             _agentResult!,
           );
+          _syncToolTraceSteps(_agentResult!.toolTrace);
         }
         final answer = _agentResult?.answer ?? '';
         if (answer.isNotEmpty &&
@@ -296,6 +395,9 @@ extension _RecallPageAgentRuntime on _RecallPageState {
             Map<String, dynamic>.from(data['result']),
           );
         });
+        if (_agentResult != null) {
+          _syncToolTraceSteps(_agentResult!.toolTrace);
+        }
       }
       _completeAgentRun();
     }

@@ -23,6 +23,7 @@
 - 2026-03-26 已补充“最新 N 个模型批量改名”确定性兜底：像“把最新三个模型改名为 xxx”这类请求会先按 `created_at` 倒序锁定最近 N 个模型，再走 `batch_patch_model_metadata` 生成预览或正式执行。
 - 2026-03-26 已补充 Agent 多轮续聊协议：共享 Core 现在会返回 `session_state / conversation_summary / follow_up`，Flutter Recall 页会保留最近一轮 Agent 会话，并把“继续输入什么”或快捷回复显式展示出来。
 - 2026-03-26 已补充简单空间问句的确定性兜底：像 `查一下电脑`、`看一下桌上的杯子` 这类短句会优先走规则路由与固定工具顺序，避免因为上游模型 503 导致整个 Agent 看起来像“超时”。
+- 2026-03-26 已补充 Flutter Agent 流式可视化修复：`agent-recall` 现支持 `text/event-stream` 与 `application/x-ndjson` 双协议，Flutter Recall 页会把 `status / tool_call / tool_result` 固化成步骤时间线，并在 `done` 事件用 `tool_trace` 补齐最终工具轨迹，避免用户只看到最后一句回答。
 
 ## 2026-03-26 修复记录
 
@@ -31,6 +32,8 @@
 - 影响范围是 `agent-recall` 与 `spatial-search-agent` 两个依赖 `runSpatialSearchAgent` 的 Supabase Edge Function。
 - 已在本地执行 `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts`，当前 17 个测试全部通过。
 - Flutter / Dart 工具链在当前环境中仍不可用，Recall 页相关改动尚未完成端侧 `analyze` 或真机联调；合并后应在具备 Flutter 环境的机器补跑最小页面验证。
+- 本轮另外补充了 `agent-recall` 流式协议兼容层：后端会在进入编排和整理最终回答时显式发送 `status`，Flutter 优先走 `SSE` 并兼容旧 `NDJSON` 解析。
+- 本轮另外补充了 Recall 页运行态展示：工具调用中间步骤不再只停留在顶部状态文案，而会落成可见时间线；如果中途漏掉部分事件，也会在最终 `done` 阶段依据 `tool_trace` 自动补齐。
 
 ## 维护规则
 

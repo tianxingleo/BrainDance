@@ -639,7 +639,57 @@ extension _RecallPageSearch on _RecallPageState {
                 return ListenableBuilder(
                   listenable: step,
                   builder: (context, _) {
-                    if (step.type == 'tool_call') {
+                    if (step.type == 'status') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF111824)
+                                : const Color(0xFFF5F8FC),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.white12
+                                  : BDDesign.colorMutedBlue.withValues(
+                                      alpha: 0.14,
+                                    ),
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Icon(
+                                  step.isCompleted
+                                      ? Icons.turned_in_not_rounded
+                                      : Icons.timelapse_rounded,
+                                  size: 16,
+                                  color: BDDesign.colorMutedBlue,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  step.content,
+                                  style: TextStyle(
+                                    color: hintColor,
+                                    fontSize: 12.5,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    } else if (step.type == 'tool_call') {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6.0),
                         child: Theme(
