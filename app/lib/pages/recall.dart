@@ -92,6 +92,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   StreamSubscription<String>? _agentStreamSubscription;
   Timer? _modelPollingTimer;
   Timer? _agentElapsedTimer;
+  Timer? _agentBootstrapTimer;
   String? _selectedLocalModelUrl;
   String? _activeLocalModelUrl;
   RealtimeChannel? _realtimeChannel;
@@ -107,8 +108,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   AgentSessionState? _agentSessionState;
   AgentRecallResponse? _agentResult;
   ChatMessage? _agentChatMessage;
+  AgentStep? _agentBootstrapStep;
   DateTime? _agentRunStartedAt;
   DateTime? _agentRunFinishedAt;
+  DateTime? _agentFirstRemoteEventAt;
   bool _isLoading = true;
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = false;

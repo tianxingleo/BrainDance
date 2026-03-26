@@ -6,11 +6,15 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     _agentStreamSubscription = null;
     _agentElapsedTimer?.cancel();
     _agentElapsedTimer = null;
+    _agentBootstrapTimer?.cancel();
+    _agentBootstrapTimer = null;
     _agentRunStartedAt = null;
     _agentRunFinishedAt = null;
+    _agentFirstRemoteEventAt = null;
     _agentLatestSubmittedQuery = null;
     _isAgentSearching = false;
     _agentResult = null;
+    _agentBootstrapStep = null;
     _agentChatMessage = null;
 
     if (!preserveSession) {
@@ -78,6 +82,8 @@ extension _RecallPageAgentRuntime on _RecallPageState {
   void _stopAgentSearch() {
     if (_isAgentSearching) {
       _agentStreamSubscription?.cancel();
+      _agentBootstrapTimer?.cancel();
+      _agentBootstrapTimer = null;
       setState(() {
         _isAgentSearching = false;
         _finishAgentRunTracking();
@@ -114,6 +120,116 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     }
   }
 
+  void _upsertAgentBootstrapStatus(
+    String summary, {
+    String? detail,
+    bool isCompleted = false,
+    bool persistSummary = true,
+  }) {
+    final normalizedSummary = summary.trim();
+    final normalizedDetail = detail?.trim();
+    final content = [
+      normalizedSummary,
+      if (normalizedDetail != null && normalizedDetail.isNotEmpty)
+        normalizedDetail,
+    ].join('\n');
+    if (_agentChatMessage == null || content.isEmpty) {
+      return;
+    }
+
+    if (_agentBootstrapStep == null ||
+        !_agentChatMessage!.steps.contains(_agentBootstrapStep)) {
+      final step = AgentStep(
+        type: 'status',
+        content: content,
+        isCompleted: isCompleted,
+      );
+      _agentBootstrapStep = step;
+      _agentChatMessage!.addStep(step);
+    } else {
+      _agentBootstrapStep!.updateContent(content);
+      _agentBootstrapStep!.isCompleted = isCompleted;
+    }
+
+    _updateAgentLiveStatus(
+      normalizedSummary,
+      detail: normalizedDetail,
+      persistSummary: persistSummary,
+    );
+  }
+
+  void _startAgentBootstrapStatusUpdates() {
+    _agentBootstrapTimer?.cancel();
+    _agentFirstRemoteEventAt = null;
+    _upsertAgentBootstrapStatus(
+      '已提交请求，正在连接 Agent 服务',
+      detail: '前端已发出流式请求，等待服务端建立返回通道',
+      isCompleted: false,
+    );
+
+    const stages = <Map<String, String>>[
+      {
+        'summary': '已建立请求，等待首个流式事件',
+        'detail': '如果网络正常，马上会看到 Agent 的阶段反馈',
+      },
+      {
+        'summary': '正在等待 Agent 返回编排进度',
+        'detail': '服务端可能正在装载上下文、分类意图或准备工具调用',
+      },
+      {
+        'summary': 'Agent 仍在处理中',
+        'detail': '首个详细阶段事件还没到达，先保持连接并持续等待',
+      },
+    ];
+
+    var stageIndex = 0;
+    _agentBootstrapTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted || !_isAgentSearching) {
+        _agentBootstrapTimer?.cancel();
+        _agentBootstrapTimer = null;
+        return;
+      }
+      if (_agentFirstRemoteEventAt != null) {
+        _agentBootstrapTimer?.cancel();
+        _agentBootstrapTimer = null;
+        return;
+      }
+      final stage = stages[stageIndex < stages.length
+          ? stageIndex
+          : stages.length - 1];
+      _upsertAgentBootstrapStatus(
+        stage['summary'] ?? '',
+        detail: stage['detail'],
+        isCompleted: false,
+        persistSummary: false,
+      );
+      if (stageIndex < stages.length - 1) {
+        stageIndex += 1;
+      }
+    });
+  }
+
+  void _markAgentRemoteEventReceived({
+    String? summary,
+    String? detail,
+  }) {
+    if (_agentFirstRemoteEventAt == null) {
+      _agentFirstRemoteEventAt = DateTime.now();
+    }
+    _agentBootstrapTimer?.cancel();
+    _agentBootstrapTimer = null;
+
+    if (_agentBootstrapStep != null) {
+      if (summary != null && summary.trim().isNotEmpty) {
+        _agentBootstrapStep!.updateContent([
+          summary.trim(),
+          if (detail != null && detail.trim().isNotEmpty) detail.trim(),
+        ].join('\n'));
+      }
+      _agentBootstrapStep!.isCompleted = true;
+    }
+  }
+
   void _pushAgentStatusStep(
     String summary, {
     String? detail,
@@ -130,6 +246,12 @@ extension _RecallPageAgentRuntime on _RecallPageState {
         normalizedDetail,
     ].join('\n');
     if (content.isEmpty) {
+      return;
+    }
+
+    if (_agentBootstrapStep != null &&
+        _agentBootstrapStep!.content.trim() == content.trim()) {
+      _agentBootstrapStep!.isCompleted = isCompleted;
       return;
     }
 
@@ -258,6 +380,26 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     final payload = data['data'];
     if (_agentChatMessage == null) {
       return;
+    }
+
+    if (event == 'ping') {
+      _upsertAgentBootstrapStatus(
+        '已建立流式连接',
+        detail: '服务端已开始回传数据，等待 Agent 返回首个阶段状态',
+        isCompleted: false,
+        persistSummary: false,
+      );
+      return;
+    }
+
+    if (event.isNotEmpty) {
+      String? summary;
+      String? detail;
+      if (payload is Map) {
+        summary = payload['summary']?.toString();
+        detail = payload['detail']?.toString();
+      }
+      _markAgentRemoteEventReceived(summary: summary, detail: detail);
     }
 
     if (event == 'status' && payload is Map) {

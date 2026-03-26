@@ -119,15 +119,18 @@ extension _RecallPageSearch on _RecallPageState {
       _agentResult = null;
       _agentChatMessage = ChatMessage(
         isUser: false,
-        liveStatus: textLocalize('agent_status_connecting'),
+        liveStatus: '已提交请求，正在连接 Agent 服务',
       );
     });
     _startAgentRunTracking();
+    _startAgentBootstrapStatusUpdates();
 
     _agentStreamSubscription?.cancel();
 
     void fallback() async {
       if (!mounted) return;
+      _agentBootstrapTimer?.cancel();
+      _agentBootstrapTimer = null;
       setState(() {
         _isAgentSearching = true;
       });
@@ -166,7 +169,10 @@ extension _RecallPageSearch on _RecallPageState {
     }
 
     try {
-      _updateAgentLiveStatus(textLocalize('agent_status_request_started'));
+      _updateAgentLiveStatus(
+        '已发起 Agent 请求',
+        detail: '正在等待服务端建立流式返回通道',
+      );
       final stream = AgentRecallService().queryStream(
         trimmedQuery,
         executionMode: executionMode,
@@ -201,6 +207,8 @@ extension _RecallPageSearch on _RecallPageState {
           setState(() {
             _isAgentSearching = false;
           });
+          _agentBootstrapTimer?.cancel();
+          _agentBootstrapTimer = null;
           _updateAgentLiveStatus(
             textLocalize('agent_status_stream_fallback'),
             detail: '$e',
@@ -217,6 +225,8 @@ extension _RecallPageSearch on _RecallPageState {
               _isAgentSearching = false;
               _finishAgentRunTracking();
             });
+            _agentBootstrapTimer?.cancel();
+            _agentBootstrapTimer = null;
             if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
               _completeAgentRun();
             }
@@ -228,6 +238,8 @@ extension _RecallPageSearch on _RecallPageState {
       setState(() {
         _isAgentSearching = false;
       });
+      _agentBootstrapTimer?.cancel();
+      _agentBootstrapTimer = null;
       _updateAgentLiveStatus(
         textLocalize('agent_status_stream_start_fallback'),
         detail: '$e',

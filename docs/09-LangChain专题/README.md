@@ -24,6 +24,7 @@
 - 2026-03-26 已补充 Agent 多轮续聊协议：共享 Core 现在会返回 `session_state / conversation_summary / follow_up`，Flutter Recall 页会保留最近一轮 Agent 会话，并把“继续输入什么”或快捷回复显式展示出来。
 - 2026-03-26 已补充简单空间问句的确定性兜底：像 `查一下电脑`、`看一下桌上的杯子` 这类短句会优先走规则路由与固定工具顺序，避免因为上游模型 503 导致整个 Agent 看起来像“超时”。
 - 2026-03-26 已补充 Flutter Agent 流式可视化修复：`agent-recall` 现支持 `text/event-stream` 与 `application/x-ndjson` 双协议，Flutter Recall 页会把 `status / tool_call / tool_result` 固化成步骤时间线，并在 `done` 事件用 `tool_trace` 补齐最终工具轨迹，避免用户只看到最后一句回答。
+- 2026-03-26 已补充 Flutter 首包等待态修复：Recall 页现在会在请求发出后立即展示本地引导状态，消费后端 `ping` 事件把“流式连接已建立”显式展示出来，并在首个远端阶段事件到达前持续更新等待态，避免用户在第一次刷新阶段长时间只看到静止的“连接中”。
 
 ## 2026-03-26 修复记录
 
@@ -34,6 +35,7 @@
 - Flutter / Dart 工具链在当前环境中仍不可用，Recall 页相关改动尚未完成端侧 `analyze` 或真机联调；合并后应在具备 Flutter 环境的机器补跑最小页面验证。
 - 本轮另外补充了 `agent-recall` 流式协议兼容层：后端会在进入编排和整理最终回答时显式发送 `status`，Flutter 优先走 `SSE` 并兼容旧 `NDJSON` 解析。
 - 本轮另外补充了 Recall 页运行态展示：工具调用中间步骤不再只停留在顶部状态文案，而会落成可见时间线；如果中途漏掉部分事件，也会在最终 `done` 阶段依据 `tool_trace` 自动补齐。
+- 本轮另外补充了 Recall 页首包等待可视化：前端会先插入“请求已提交”的本地状态步骤，收到 `ping` 后立即切到“流式连接已建立”，若远端阶段事件仍未到达则用本地定时阶段文案兜底，直到真正收到 `status / tool_call / tool_result / done` 为止。
 
 ## 维护规则
 
