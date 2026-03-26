@@ -6,6 +6,7 @@ import {
   buildVisualizationActions,
   isDirectReplyQuery,
   normalizeExplicitTimeRange,
+  parseSpatialIntentHeuristically,
   parseDeterministicAssetRenameIntent,
   scoreSceneCandidate,
   shouldForceAnotherToolRound,
@@ -124,6 +125,22 @@ Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
   assertExists(result.startTime);
   assertExists(result.endTime);
   assertEquals(result.startTime! < result.endTime!, true);
+});
+
+Deno.test("parseSpatialIntentHeuristically 会把会议室资产识别为场景检索", () => {
+  const intent = parseSpatialIntentHeuristically("找一个会议室资产");
+
+  assertEquals(intent.targetType, "scene");
+  assertEquals(intent.rewrittenQuery, "找一个会议室资产");
+  assertEquals(intent.sceneHint, "找一个会议室资产");
+});
+
+Deno.test("parseSpatialIntentHeuristically 会处理相对时间并生成时间范围", () => {
+  const intent = parseSpatialIntentHeuristically("找最近拍的会议室");
+
+  assertEquals(intent.targetType, "time");
+  assertExists(intent.startTime);
+  assertExists(intent.endTime);
 });
 
 Deno.test("scoreSceneCandidate 在物体检索下优先 pose 分数", () => {

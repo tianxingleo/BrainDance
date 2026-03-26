@@ -53,6 +53,7 @@ const DEFAULT_DASHSCOPE_BASE_URL =
 const DEFAULT_CHAT_MODEL = "qwen3.5-plus";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-v2";
 const DEFAULT_BUCKET = "braindance-assets";
+const SPATIAL_INTENT_TIMEOUT_MS = 8000;
 const MAX_AGENT_TOOL_ROUNDS = 3;
 const MIN_AGENT_CANDIDATES = 3;
 const MIN_AGENT_TOP_SCORE = 0.62;
@@ -903,6 +904,73 @@ function computeKeywordScore(query: string, chunks: string[]): number {
   return hits / tokens.length;
 }
 
+function withTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    task.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function inferSpatialTargetType(query: string): SearchTargetType {
+  if (/最近|最新|今天|昨天|刚才|上周|本周|这个月|上个月|去年/.test(query)) {
+    return "time";
+  }
+  if (/哪里|在哪|位置|地点|门口|角落|桌上|桌面|旁边|附近/.test(query)) {
+    return "location";
+  }
+  if (/场景|房间|会议室|客厅|卧室|教室|办公室|展台|区域|空间|资产/.test(query)) {
+    return "scene";
+  }
+  return "object";
+}
+
+export function parseSpatialIntentHeuristically(
+  query: string,
+  options: SpatialSearchAgentOptions = {},
+): SpatialIntent {
+  const normalizedQuery = query.trim();
+  const compactQuery = normalizedQuery.replace(/[，。！？!?,]/g, " ").trim();
+  const targetType = inferSpatialTargetType(compactQuery);
+  const timeRange = normalizeExplicitTimeRange({
+    timeHint: compactQuery,
+  });
+  const referencesCurrentScene =
+    /这个场景|当前场景|这个模型|当前模型|它|这个/.test(compactQuery);
+
+  return {
+    rewrittenQuery: compactQuery || normalizedQuery,
+    targetType,
+    objectHint: targetType === "object" ? compactQuery : null,
+    locationHint: targetType === "location" ? compactQuery : null,
+    sceneHint: referencesCurrentScene
+      ? options.currentSceneId ?? null
+      : targetType === "scene"
+      ? compactQuery
+      : null,
+    timeHint: timeRange.startTime || timeRange.endTime ? compactQuery : null,
+    startTime: timeRange.startTime,
+    endTime: timeRange.endTime,
+    reasoning:
+      "结构化意图解析超时或不可用，已回退到规则版空间意图解析，以保证检索链路继续执行。",
+  };
+}
+
 export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return false;
@@ -1707,19 +1775,27 @@ async function parseSpatialIntent(
   const contextBlock = buildAgentContextBlock(options);
   const today = new Date().toISOString().slice(0, 10);
 
-  const structuredModel = model.withStructuredOutput(spatialIntentSchema);
-  const rawResult = await structuredModel.invoke([
-    new SystemMessage(getSpatialIntentPrompt(today, contextBlock)),
-    new HumanMessage(query),
-  ]);
-  const result = spatialIntentSchema.parse(rawResult);
+  try {
+    const structuredModel = model.withStructuredOutput(spatialIntentSchema);
+    const rawResult = await withTimeout(
+      structuredModel.invoke([
+        new SystemMessage(getSpatialIntentPrompt(today, contextBlock)),
+        new HumanMessage(query),
+      ]),
+      SPATIAL_INTENT_TIMEOUT_MS,
+      `spatial_intent_timeout_${SPATIAL_INTENT_TIMEOUT_MS}ms`,
+    );
+    const result = spatialIntentSchema.parse(rawResult);
 
-  const timeRange = normalizeExplicitTimeRange(result);
-  return {
-    ...result,
-    startTime: timeRange.startTime,
-    endTime: timeRange.endTime,
-  };
+    const timeRange = normalizeExplicitTimeRange(result);
+    return {
+      ...result,
+      startTime: timeRange.startTime,
+      endTime: timeRange.endTime,
+    };
+  } catch (_) {
+    return parseSpatialIntentHeuristically(query, options);
+  }
 }
 
 async function buildPoseTool(
@@ -3540,6 +3616,16 @@ export async function runSpatialSearchAgent(
     },
   });
   const intent = await parseSpatialIntent(model, query, options);
+  if (intent.reasoning.includes("规则版空间意图解析")) {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "intent_fallback",
+        summary: "空间意图解析超时，已切换到规则版解析继续执行",
+        detail: intent.rewrittenQuery,
+      },
+    });
+  }
   await emitProgress(callbacks, {
     event: "status",
     data: {

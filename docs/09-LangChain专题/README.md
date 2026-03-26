@@ -27,6 +27,7 @@
 - 2026-03-26 已补充 Flutter Agent 流式可视化修复：`agent-recall` 现支持 `text/event-stream` 与 `application/x-ndjson` 双协议，Flutter Recall 页会把 `status / tool_call / tool_result` 固化成步骤时间线，并在 `done` 事件用 `tool_trace` 补齐最终工具轨迹，避免用户只看到最后一句回答。
 - 2026-03-26 已补充 Flutter 首包等待态修复：Recall 页现在会在请求发出后立即展示本地引导状态，消费后端 `ping` 事件把“流式连接已建立”显式展示出来，并在首个远端阶段事件到达前持续更新等待态，避免用户在第一次刷新阶段长时间只看到静止的“连接中”。
 - 2026-03-26 已补充 `spatial_search` 链路级提速：空间检索不再依赖“多轮 LLM 工具调度 + 最终 LLM 裁决”的串行结构，改为“单次意图解析 + 并行检索工具 + 确定性评分选优”，同时去掉 `pose_semantic_search` 内部按行补标签的 N+1 查询。
+- 2026-03-26 已补充空间意图解析超时兜底：`parseSpatialIntent` 现在有 8 秒超时保护，若结构化解析超时或失败，会自动切到规则版意图解析并继续检索，不再长期卡在“正在解析空间意图和时间约束”。
 
 ## 2026-03-26 修复记录
 
@@ -40,6 +41,7 @@
 - 本轮另外补充了 Recall 页首包等待可视化：前端会先插入“请求已提交”的本地状态步骤，收到 `ping` 后立即切到“流式连接已建立”，若远端阶段事件仍未到达则用本地定时阶段文案兜底，直到真正收到 `status / tool_call / tool_result / done` 为止。
 - 本轮另外补充了 `spatial_search` 执行链重构：保留一次意图解析，但移除了 LangChain 多轮 `bindTools` 调度和 `selectBestResult` 终裁调用，改为按意图选择必要工具并行执行，再使用现有 `scoreSceneCandidate` 与模板化回答直接产出结果。
 - 本轮另外补充了 `pose_semantic_search` 的数据库访问优化：原实现会按每个候选模型循环查询 `memory_poses` 补标签，现已改成一次批量读取 `model_id + image_name` 映射，显著减少 RPC 后的二次往返。
+- 本轮另外补充了空间意图解析超时 fallback：若上游结构化模型在意图解析阶段超时或返回异常，系统会明确发送 `intent_fallback` 状态，并用规则版 `scene/location/object/time` 解析继续下游检索。
 
 ## 维护规则
 
