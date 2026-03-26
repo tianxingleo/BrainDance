@@ -985,7 +985,11 @@ async function emitProgress(
   callbacks: AgentRuntimeCallbacks | undefined,
   event: AgentProgressEvent,
 ): Promise<void> {
-  await callbacks?.onEvent?.(event);
+  if (callbacks?.onEvent) {
+    await callbacks.onEvent(event);
+    // 在 Deno 环境下，通过一个小延时强制触发事件循环，确保数据被写入 Stream
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function normalizeDirectReplyQuery(query: string): string {

@@ -35,9 +35,9 @@ function writeNdjsonLine(
   event: string,
   data: unknown,
 ): void {
-  controller.enqueue(
-    encoder.encode(`${JSON.stringify({ event, data })}\n`),
-  );
+  const line = `${JSON.stringify({ event, data })}\n`;
+  controller.enqueue(encoder.encode(line));
+  console.log(`[AgentStream] Enqueued event: ${event}`);
 }
 
 function chunkText(text: string, chunkSize = 28): string[] {
