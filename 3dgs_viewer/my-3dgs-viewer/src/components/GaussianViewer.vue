@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
+import BottomSelector from './BottomSelector.vue';
 
 const containerRef = ref(null);
 const isVRMode = ref(false);
@@ -36,6 +37,11 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
+const modelList = ref([]);
+const activeModelId = ref('');
+const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
+const hasModelTab = computed(() => modelList.value.length > 1);
+const hasPoseTab = computed(() => !isOrbitMode.value && filteredPoses.value.length > 0);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 const DRAG_ROTATE_SENSITIVITY = 0.065;
 const DRAG_PAN_SENSITIVITY = 0.0022;
@@ -1620,17 +1626,34 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   isLoading.value = true;
   stopCinematicPlayback();
 
+  // 清除旧模型的视角数据和 UI 状态，防止切换模型时残留
+  cameraPoses.value = [];
+  activePoseId.value = '';
+  activeImage.value = '';
+  activeTag.value = '';
+  sceneMetadata.value = {};
+
   // 更新 URL（如果有新传入的值）
   if (plyUrl) currentPlyUrl = plyUrl;
   if (posesUrl) currentPosesUrl = posesUrl;
 
   try {
     if (viewer) {
-      viewer.renderer.setAnimationLoop(null);
-      if (viewer.dispose) await viewer.dispose();
+      try {
+        if (viewer.renderer) {
+          viewer.renderer.setAnimationLoop(null);
+        }
+      } catch (e) { console.warn('[Viewer] renderer cleanup:', e); }
+      try {
+        if (viewer.dispose) await viewer.dispose();
+      } catch (e) { console.warn('[Viewer] dispose:', e); }
       viewer = null;
     }
-    if (containerRef.value) containerRef.value.innerHTML = '';
+    if (containerRef.value) {
+      while (containerRef.value.firstChild) {
+        containerRef.value.removeChild(containerRef.value.firstChild);
+      }
+    }
 
     animationState.isLoaded = false;
     animationState.phase = PHASE.FLY_IN;
@@ -2203,9 +2226,40 @@ const onTouchEnd = (e) => {
   }
 };
 
+function onTimePeelingSelect(model) {
+  activeModelId.value = model.id;
+  // 通知 Flutter 切换模型（Flutter 负责下载后回调 loadModelFromFlutter）
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({
+      action: 'switchModel',
+      modelId: model.id,
+      ply: model.ply || '',
+      poses: model.poses || '',
+    }));
+  } else {
+    // 非 Flutter 环境，直接加载
+    isLoading.value = false;
+    stopCinematicPlayback();
+    initViewer(model.ply || null, model.poses || null, null);
+  }
+}
+
 onMounted(() => {
   if (containerRef.value) {
     checkProtocol();
+
+    // 注册供Flutter调用的模型列表设置函数
+    window.setModelListForTimePeeling = (list, currentId) => {
+      console.log('[Flutter->WebGL] 收到模型列表:', list, '当前模型:', currentId);
+      if (Array.isArray(list)) {
+        modelList.value = list;
+        if (currentId) {
+          activeModelId.value = currentId;
+        } else if (list.length > 0 && !activeModelId.value) {
+          activeModelId.value = list[0].id || '';
+        }
+      }
+    };
 
     // 注册供Flutter调用的全局函数
     // 支持两种调用方式：
@@ -2258,8 +2312,13 @@ onBeforeUnmount(async () => {
   stopCinematicPlayback();
 
   if (viewer) {
-    viewer.renderer.setAnimationLoop(null);
-    await viewer.dispose();
+    try {
+      if (viewer.renderer) viewer.renderer.setAnimationLoop(null);
+    } catch (_) {}
+    try {
+      await viewer.dispose();
+    } catch (_) {}
+    viewer = null;
   }
 });
 </script>
@@ -2271,6 +2330,20 @@ onBeforeUnmount(async () => {
     @touchcancel="onTouchEnd">
     <div ref="containerRef" class="viewer-container"></div>
     <div class="viewer-vignette"></div>
+
+    <BottomSelector
+      v-if="showBottomSelector"
+      :models="modelList"
+      :activeModelId="activeModelId"
+      :poses="filteredPoses"
+      :activePoseId="activePoseId"
+      :searchQuery="searchQuery"
+      :getPosePresentationId="getPosePresentationId"
+      :hasModels="hasModelTab"
+      :hasPoses="hasPoseTab"
+      @selectModel="onTimePeelingSelect"
+      @selectPose="flyToImage"
+    />
 
     <div class="top-hud">
       <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
@@ -2445,23 +2518,6 @@ onBeforeUnmount(async () => {
       <div style="font-size:9px; color:#666; margin-top:5px;">对齐后点击复制，发送给我</div>
     </div>
     -->
-
-    <!-- 镜头轨道小功能 -->
-    <div class="camera-track" v-if="!isOrbitMode && filteredPoses.length > 0" @mousedown.stop @touchstart.stop @touchmove.stop
-      @touchend.stop>
-      <div class="camera-track-header">
-        <div class="eyebrow">Shot Strip</div>
-        <div class="camera-track-copy">{{ searchQuery ? '按当前检索结果排序' : '优先显示已打标签镜头' }}</div>
-      </div>
-      <div v-for="(pose, index) in filteredPoses" :key="pose.id" class="camera-btn"
-        :class="{ active: activePoseId === getPosePresentationId(pose) }" @click.stop="flyToImage(pose)">
-        <img v-if="pose.image_url" :src="pose.image_url" class="btn-thumb" />
-        <div v-if="pose.tag" class="camera-tag-overlay">
-          <div class="camera-tag-text">{{ pose.tag }}</div>
-        </div>
-        <span v-else-if="!pose.image_url">未命名视角</span>
-      </div>
-    </div>
 
     <!-- 参考图对比悬浮窗 -->
     <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
@@ -2824,122 +2880,6 @@ button.active {
   border-color: #71838F;
 }
 
-/* 镜头轨道样式 */
-.camera-track {
-  position: absolute;
-  bottom: 18px;
-  left: 18px;
-  right: 18px;
-  display: flex;
-  align-items: stretch;
-  gap: 16px;
-  overflow-x: auto;
-  padding: 16px 18px;
-  background: rgba(249, 249, 248, 0.84);
-  backdrop-filter: blur(12px);
-  border-radius: 22px;
-  z-index: 100;
-  border: 1px solid rgba(107, 122, 143, 0.16);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.06);
-}
-
-.camera-track-header {
-  min-width: 144px;
-  padding-right: 4px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.camera-track-copy {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: rgba(30, 30, 32, 0.68);
-}
-
-.camera-btn {
-  width: 100px;
-  height: 70px;
-  background: rgba(255, 255, 255, 0.72);
-  border-radius: 16px;
-  cursor: pointer;
-  overflow: hidden;
-  border: 1px solid rgba(107, 122, 143, 0.12);
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #333;
-  position: relative;
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.04);
-  outline: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.camera-btn.active {
-  border-color: rgba(107, 122, 143, 0.12);
-  transform: translateY(-3px);
-  box-shadow: 0 10px 20px rgba(107, 122, 143, 0.12);
-}
-
-.camera-btn:focus,
-.camera-btn:focus-visible,
-.camera-btn:active {
-  outline: none;
-  box-shadow: 0 10px 20px rgba(107, 122, 143, 0.12);
-}
-
-.btn-thumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.88;
-  display: block;
-  user-select: none;
-  -webkit-user-drag: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.camera-btn:hover .btn-thumb {
-  opacity: 1;
-}
-
-.camera-btn.active .btn-thumb {
-  opacity: 1;
-}
-
-/* 悬浮标签文字 */
-.camera-tag-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  background: linear-gradient(180deg, transparent, rgba(30, 30, 32, 0.72));
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  padding: 10px 8px 8px;
-  align-items: center;
-  pointer-events: none;
-  border-radius: 0 0 16px 16px;
-  overflow: hidden;
-  clip-path: inset(0 round 0 0 16px 16px);
-}
-
-.camera-tag-text {
-  font-size: 12px;
-  font-weight: bold;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 90%;
-}
-
 /* 搜索栏样式 */
 .search-panel {
   position: static;
@@ -3215,19 +3155,6 @@ input[type='range'] {
     width: 112px;
     min-width: 112px;
     padding: 7px;
-  }
-
-  .camera-track {
-    padding-top: 14px;
-  }
-
-  .camera-track-header {
-    min-width: 116px;
-  }
-
-  .camera-btn {
-    width: 92px;
-    height: 66px;
   }
 }
 </style>

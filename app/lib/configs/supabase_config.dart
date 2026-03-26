@@ -1,6 +1,14 @@
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class SupabaseConfig {
+  static const String _defaultLocalModelBucket = 'braindance-models';
+  static const List<String> _defaultLocalModelDiscoveryBuckets = <String>[
+    'braindance-assets',
+    'braindance-models',
+  ];
+  static const String _defaultLocalModelObjectPath =
+      'releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf';
+
   /// Supabase project URL
   static String get url => dotenv.env['SUPABASE_URL'] ?? '';
 
@@ -43,4 +51,56 @@ class SupabaseConfig {
   }
 
   static String get modeLabel => isAdminMode ? 'admin' : 'rls';
+
+  static String get localModelBucket {
+    final bucket = dotenv.env['LOCAL_LLM_MODEL_BUCKET']?.trim();
+    if (bucket != null && bucket.isNotEmpty) {
+      return bucket;
+    }
+    return _defaultLocalModelBucket;
+  }
+
+  static List<String> get localModelDiscoveryBuckets {
+    final rawBuckets = dotenv.env['LOCAL_LLM_MODEL_BUCKETS']?.trim() ?? '';
+    final buckets = <String>[
+      if (rawBuckets.isNotEmpty)
+        ...rawBuckets
+            .split(',')
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty),
+      localModelBucket,
+      ..._defaultLocalModelDiscoveryBuckets,
+    ];
+
+    final deduplicated = <String>{};
+    for (final bucket in buckets) {
+      deduplicated.add(bucket);
+    }
+    return deduplicated.toList(growable: false);
+  }
+
+  static String get localModelObjectPath {
+    final objectPath = dotenv.env['LOCAL_LLM_MODEL_OBJECT_PATH']?.trim();
+    if (objectPath != null && objectPath.isNotEmpty) {
+      return objectPath;
+    }
+    return _defaultLocalModelObjectPath;
+  }
+
+  static String get localModelUrl {
+    final explicitUrl = dotenv.env['LOCAL_LLM_MODEL_URL']?.trim();
+    if (explicitUrl != null && explicitUrl.isNotEmpty) {
+      return explicitUrl;
+    }
+
+    final baseUrl = url.trim();
+    if (baseUrl.isEmpty) {
+      return '';
+    }
+
+    final normalizedBaseUrl = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$normalizedBaseUrl/storage/v1/object/public/$localModelBucket/$localModelObjectPath';
+  }
 }

@@ -14,26 +14,28 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.config import PipelineConfig
 from src.core.local_runner import (
     LOCAL_TASK_TYPE_CHOICES,
     SLOW_PIPELINE_CHOICES,
     run_local_mode,
 )
-from src.core.supervisor import WorkerSupervisor
-from src.core.worker import CloudWorker
 
 load_dotenv()
 
 
 def run_cloud_mode():
     """云端监听模式（Supervisor）"""
+    from src.core.supervisor import WorkerSupervisor
+
     supervisor = WorkerSupervisor()
     supervisor.start()
 
 
 def run_child_worker_mode():
     """Supervisor 拉起的子 Worker 模式"""
+    from src.config import PipelineConfig
+    from src.core.worker import CloudWorker
+
     worker = CloudWorker(PipelineConfig())
     worker.start()
 

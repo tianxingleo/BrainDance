@@ -49,6 +49,10 @@ dependencies:
   dio: ^5.9.2
   sqflite: ^2.2.5
   llamadart: ^0.6.6
+  flutter_markdown: ^0.7.7+1
+  flutter_markdown_plus: ^1.0.7
+  http: ^1.6.0
+  flutter_highlight: 0.7.0
 
 dev_dependencies:
   flutter_test:

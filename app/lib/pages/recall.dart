@@ -1,35 +1,45 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:llamadart/llamadart.dart';
+import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:flutter_highlight/themes/atom-one-dark.dart';
+import 'package:flutter_highlight/themes/atom-one-light.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../extra_func/dir_and_file.dart';
 import '../main.dart'
     show
         overviewStatsProvider,
         overviewLocalIndexingProvider,
         pageIndexProvider;
 import '../configs/motion_tokens.dart';
+import '../services/agent_recall_service.dart';
 import '../services/local_rag_index.dart';
+import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
+import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
-import 'community.dart';
-import 'recall/local_ai_panel.dart';
+import 'community/composer_sheet.dart';
+import 'community/models.dart';
+import 'community/repository.dart';
+import 'recall/empty_states.dart';
 import 'recall/model_grid.dart';
+import 'recall/model_detail_sheet.dart';
 import 'recall/processing_section.dart';
-import 'webgl_viewer.dart';
-import 'task_list.dart';
-import 'recall/top_summary_card.dart';
-import 'recall/model_card.dart';
-
-enum _RecallSearchMode { cloud, local, localAi }
+import 'recall/rename_model_dialog.dart';
+import 'recall/search_header_section.dart';
+import 'recall/search_mode.dart';
 
 class RecallPage extends ConsumerStatefulWidget {
   const RecallPage({super.key});
@@ -40,10 +50,10 @@ class RecallPage extends ConsumerStatefulWidget {
 
 class _RecallPageState extends ConsumerState<RecallPage> {
   static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
-  static const String _defaultModelDownloadUrl =
-      'https://hf-mirror.com/jc-builds/Qwen3-1.7B-Q4_K_M-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true';
   static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
   static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
+  final LocalModelCatalogService _localModelCatalogService =
+      const LocalModelCatalogService();
 
   List<Map<String, dynamic>> _models = [];
   List<Map<String, dynamic>> _allModels = [];
@@ -56,17 +66,20 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _localModelPathController =
       TextEditingController();
-  final TextEditingController _localModelUrlController = TextEditingController(
-    text: _defaultModelDownloadUrl,
-  );
+  late final TextEditingController _localModelUrlController;
   final LocalRagIndexService _localRagIndex = LocalRagIndexService();
+  List<LocalModelCatalogItem> _localModelCatalog = const [];
+  final Map<String, String> _downloadedLocalModelPathsByUrl = {};
+  String? _selectedLocalModelUrl;
+  String? _activeLocalModelUrl;
   RealtimeChannel? _realtimeChannel;
   Timer? _modelPollingTimer;
   LocalRagIndexStats? _indexStats;
-  _RecallSearchMode _searchMode = _RecallSearchMode.cloud;
+  RecallSearchMode _searchMode = RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   String _localAnswer = '';
+  String _localReasoning = '';
   String _localAnswerStatus = 'Qwen3-1.7B 端侧模型未加载';
   String _localContextPreview = '';
   bool _isLocalModelLoading = false;
@@ -78,6 +91,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final Map<String, GlobalKey> _modelCardKeys = {};
   final Map<String, _RecallSearchCacheEntry> _searchCache = {};
   final GlobalKey _actionOverlayStackKey = GlobalKey();
+  final GlobalKey<RecallModelActionOverlayState> _overlayKey = GlobalKey();
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   bool _didBootstrap = false;
@@ -88,10 +102,250 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   int _searchRequestId = 0;
   String? _lastSearchKey;
   String _lastOwnModelSignature = '';
+  bool _isAgentSearching = false;
+  AgentRecallResponse? _agentResult;
+  ChatMessage? _agentChatMessage;
+  final ScrollController _recallScrollController = ScrollController();
+  StreamSubscription<String>? _agentStreamSubscription;
+  String? _agentSessionId;
+  String? _agentConversationSummary;
+  AgentSessionState? _agentSessionState;
+  String? _agentLatestSubmittedQuery;
+
+  void _stopAgentSearch() {
+    if (_isAgentSearching) {
+      _agentStreamSubscription?.cancel();
+      setState(() {
+        _isAgentSearching = false;
+        _agentChatMessage?.isProcessCollapsed = false;
+        _agentChatMessage?.liveStatus = '已停止 Agent 执行';
+        _agentChatMessage?.addSummary('用户手动停止了本次 Agent 执行');
+        _agentChatMessage?.addStep(
+          AgentStep(type: 'error', content: '🚫 用户已强行中断 Agent'),
+        );
+      });
+    }
+  }
+
+  void _updateAgentLiveStatus(
+    String summary, {
+    String? detail,
+    bool persistSummary = true,
+  }) {
+    final message = [
+      summary.trim(),
+      if (detail != null && detail.trim().isNotEmpty) detail.trim(),
+    ].join(' · ');
+    if (_agentChatMessage == null || message.isEmpty) {
+      return;
+    }
+    _agentChatMessage!.liveStatus = message;
+    if (persistSummary) {
+      _agentChatMessage!.addSummary(message);
+    }
+  }
+
+  AgentStep? _findLastToolStep(String name) {
+    for (var index = _agentChatMessage!.steps.length - 1; index >= 0; index--) {
+      final step = _agentChatMessage!.steps[index];
+      if (step.type == 'tool_call' && step.toolName == name) {
+        return step;
+      }
+    }
+    return null;
+  }
+
+  void _completeAgentRun({bool collapseProcess = true}) {
+    if (_agentChatMessage == null) {
+      return;
+    }
+    _agentChatMessage!.isProcessCollapsed = collapseProcess;
+    final followUp = _agentResult?.followUp;
+    if (followUp != null && followUp.message.trim().isNotEmpty) {
+      _agentChatMessage!.liveStatus = followUp.message.trim();
+    } else if (_agentChatMessage!.finalAnswer.isNotEmpty) {
+      _agentChatMessage!.liveStatus = '最终回答已生成';
+    }
+  }
+
+  void _ensureAgentSessionId() {
+    _agentSessionId ??=
+        'recall-agent-${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  void _rememberAgentResponse(String query, AgentRecallResponse response) {
+    _agentSessionState = response.sessionState;
+    _agentConversationSummary = _mergeAgentConversationSummary(
+      previous: _agentConversationSummary,
+      query: query,
+      response: response,
+    );
+    _ensureAgentSessionId();
+  }
+
+  String _mergeAgentConversationSummary({
+    required String? previous,
+    required String query,
+    required AgentRecallResponse response,
+  }) {
+    final currentSummary = response.conversationSummary?.trim();
+    final merged = <String>[
+      if (previous != null && previous.trim().isNotEmpty) previous.trim(),
+      if (currentSummary != null && currentSummary.isNotEmpty)
+        currentSummary
+      else
+        '用户：${query.trim()} | Agent：${response.answer.trim()}',
+    ];
+    return merged
+        .where((item) => item.trim().isNotEmpty)
+        .join('\n')
+        .split('\n')
+        .where((item) => item.trim().isNotEmpty)
+        .toList()
+        .reversed
+        .take(4)
+        .toList()
+        .reversed
+        .join('\n');
+  }
+
+  void _consumeAgentEvent(Map<String, dynamic> data) {
+    final event = data['event']?.toString() ?? '';
+    final payload = data['data'];
+    if (_agentChatMessage == null) {
+      return;
+    }
+
+    if (event == 'status' && payload is Map) {
+      final summary = payload['summary']?.toString() ?? '';
+      final detail = payload['detail']?.toString();
+      _updateAgentLiveStatus(summary, detail: detail);
+      return;
+    }
+
+    if (event == 'plan' && payload is Map) {
+      final title = payload['title']?.toString() ?? '';
+      final stepsStr = (payload['steps'] as List?)?.join('\n') ?? '';
+      final content = 'Plan: $title\n$stepsStr'.trim();
+      _updateAgentLiveStatus(title.isEmpty ? '已生成执行计划' : title);
+      _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
+      return;
+    }
+
+    if (event == 'thinking' || event == 'thought') {
+      final content = payload is Map
+          ? payload['content']?.toString() ?? ''
+          : payload?.toString() ?? '';
+      if (content.isEmpty) {
+        return;
+      }
+      _updateAgentLiveStatus(content);
+      _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
+      return;
+    }
+
+    if (event == 'tool_call' && payload is Map) {
+      final toolName = payload['name']?.toString() ?? '';
+      final argsStr = payload['args'] is Map
+          ? const JsonEncoder.withIndent('  ').convert(payload['args'])
+          : payload['args']?.toString() ?? '';
+      final summary =
+          payload['summary']?.toString() ??
+          '开始执行 ${toolName.isEmpty ? '工具' : toolName}';
+      _updateAgentLiveStatus(summary, detail: '等待工具返回结果');
+      _agentChatMessage!.addStep(
+        AgentStep(type: 'tool_call', toolName: toolName, content: argsStr),
+      );
+      return;
+    }
+
+    if (event == 'tool_result' && payload is Map) {
+      final name = payload['name']?.toString() ?? '';
+      final summary = payload['summary']?.toString() ?? '工具已返回结果';
+      final lastTool = _findLastToolStep(name);
+      if (lastTool != null) {
+        final existing = lastTool.content.trim();
+        lastTool.updateContent(
+          existing.isEmpty ? summary : '$existing\n\n结果摘要:\n$summary',
+        );
+        lastTool.isCompleted = true;
+      } else {
+        _agentChatMessage!.addStep(
+          AgentStep(
+            type: 'tool_call',
+            toolName: name,
+            content: summary,
+            isCompleted: true,
+          ),
+        );
+      }
+      _updateAgentLiveStatus(summary);
+      return;
+    }
+
+    if (event == 'message' && payload is Map) {
+      final delta = payload['delta']?.toString() ?? '';
+      if (delta.isEmpty) {
+        return;
+      }
+      _agentChatMessage!.finalAnswer += delta;
+      _agentChatMessage!.liveStatus = '正在生成最终回答';
+      return;
+    }
+
+    if (event == 'error') {
+      String errorMsg = 'Unknown error';
+      if (payload is Map) {
+        errorMsg =
+            payload['message']?.toString() ??
+            payload['error']?.toString() ??
+            'Unknown error';
+      } else if (payload != null) {
+        errorMsg = payload.toString();
+      }
+      _updateAgentLiveStatus('Agent 执行失败', detail: errorMsg);
+      _agentChatMessage!.addStep(AgentStep(type: 'error', content: errorMsg));
+      return;
+    }
+
+    if (event == 'done') {
+      if (payload != null && payload is Map) {
+        setState(() {
+          _agentResult = AgentRecallResponse.fromJson(
+            Map<String, dynamic>.from(payload),
+          );
+        });
+        if (_agentResult != null) {
+          _rememberAgentResponse(
+            _agentLatestSubmittedQuery ?? _searchController.text.trim(),
+            _agentResult!,
+          );
+        }
+        final answer = _agentResult?.answer ?? '';
+        if (answer.isNotEmpty &&
+            _agentChatMessage!.finalAnswer.trim().isEmpty) {
+          _agentChatMessage!.finalAnswer = answer;
+        }
+      } else if (data['result'] != null && data['result'] is Map) {
+        setState(() {
+          _agentResult = AgentRecallResponse.fromJson(
+            Map<String, dynamic>.from(data['result']),
+          );
+        });
+      }
+      _completeAgentRun();
+    }
+  }
+
+  String get _defaultModelDownloadUrl => SupabaseConfig.localModelUrl;
 
   @override
   void initState() {
     super.initState();
+    _localModelUrlController = TextEditingController(
+      text: _defaultModelDownloadUrl,
+    );
+    _localModelUrlController.addListener(_handleLocalModelUrlChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bootstrapPage();
     });
@@ -102,6 +356,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     _modelPollingTimer?.cancel();
     _searchController.dispose();
     _localModelPathController.dispose();
+    _localModelUrlController.removeListener(_handleLocalModelUrlChanged);
     _localModelUrlController.dispose();
     _realtimeChannel?.unsubscribe();
     unawaited(_disposeLocalQnaModel());
@@ -111,6 +366,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // ignore: deprecated_member_use
     final isTabActive = TickerMode.of(context);
     if (_isTabActive == isTabActive) {
       return;
@@ -129,10 +385,32 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
     _didBootstrap = true;
     unawaited(_restoreLocalModelPath());
+    unawaited(_loadLocalModelCatalog());
     unawaited(_fetchModels());
     unawaited(_fetchProcessingTasks());
     _setupRealtimeListener();
     _syncModelPollingState();
+  }
+
+  void _handleLocalModelUrlChanged() {
+    final currentUrl = _localModelUrlController.text.trim();
+    final matchedItem = _findCatalogItemByUrl(currentUrl);
+    final nextSelectedUrl = matchedItem?.downloadUrl ?? currentUrl;
+    final downloadedPath = _downloadedLocalModelPathsByUrl[currentUrl];
+    if (_selectedLocalModelUrl == nextSelectedUrl &&
+        (downloadedPath == null ||
+            _localModelPathController.text.trim() == downloadedPath)) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
+      if (downloadedPath != null) {
+        _localModelPathController.text = downloadedPath;
+      }
+    });
   }
 
   void _syncModelPollingState() {
@@ -164,15 +442,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (models.isEmpty) {
       return '';
     }
-    final parts = models
-        .map((model) {
-          final id = model['id']?.toString() ?? '';
-          final sceneId = model['scene_id']?.toString() ?? '';
-          final createdAt = model['created_at']?.toString() ?? '';
-          return '$id|$sceneId|$createdAt';
-        })
-        .toList()
-      ..sort();
+    final parts = models.map((model) {
+      final id = model['id']?.toString() ?? '';
+      final sceneId = model['scene_id']?.toString() ?? '';
+      final createdAt = model['created_at']?.toString() ?? '';
+      return '$id|$sceneId|$createdAt';
+    }).toList()..sort();
     return parts.join('||');
   }
 
@@ -242,19 +517,60 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   }
 
   Future<void> _restoreLocalModelPath() async {
-    final defaultPath = await _getDefaultPrivateModelPath();
     final prefs = await SharedPreferences.getInstance();
     final savedPath = prefs.getString(_localModelPathPrefKey)?.trim();
     final savedUrl = prefs.getString(_localModelUrlPrefKey)?.trim();
+    final effectiveUrl = (savedUrl == null || savedUrl.isEmpty)
+        ? _defaultModelDownloadUrl
+        : savedUrl;
+    final defaultPath = await _getPrivateModelPathForUrl(effectiveUrl);
+    final effectivePath = (savedPath == null || savedPath.isEmpty)
+        ? defaultPath
+        : savedPath;
+    final hasLocalFile = await File(effectivePath).exists();
     if (!mounted) return;
     setState(() {
-      _localModelPathController.text = (savedPath == null || savedPath.isEmpty)
-          ? defaultPath
-          : savedPath;
-      if (savedUrl != null && savedUrl.isNotEmpty) {
-        _localModelUrlController.text = savedUrl;
+      _localModelPathController.text = effectivePath;
+      _localModelUrlController.text = effectiveUrl;
+      _selectedLocalModelUrl = effectiveUrl;
+      if (hasLocalFile) {
+        _downloadedLocalModelPathsByUrl[effectiveUrl] = effectivePath;
       }
     });
+  }
+
+  Future<void> _loadLocalModelCatalog() async {
+    final catalog = await _localModelCatalogService.fetchCatalog();
+    final downloadedPaths = await _collectDownloadedModelPaths(catalog);
+    final currentUrl = _localModelUrlController.text.trim();
+    final savedUrl = currentUrl.isEmpty ? _defaultModelDownloadUrl : currentUrl;
+    final matchedItem = _findCatalogItemByUrl(savedUrl, catalog);
+    final preferredItem =
+        matchedItem ??
+        catalog.cast<LocalModelCatalogItem?>().firstWhere(
+          (item) => item?.isRecommended == true,
+          orElse: () => catalog.isEmpty ? null : catalog.first,
+        );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _localModelCatalog = catalog;
+      _downloadedLocalModelPathsByUrl
+        ..clear()
+        ..addAll(downloadedPaths);
+      if (matchedItem != null) {
+        _selectedLocalModelUrl = matchedItem.downloadUrl;
+      } else if (_selectedLocalModelUrl == null && preferredItem != null) {
+        _selectedLocalModelUrl = preferredItem.downloadUrl;
+      }
+    });
+
+    if (currentUrl.isEmpty && preferredItem != null) {
+      await _selectCatalogModel(preferredItem.downloadUrl, persist: false);
+    }
   }
 
   Future<void> _persistLocalModelPath(String modelPath) async {
@@ -267,9 +583,80 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     await prefs.setString(_localModelUrlPrefKey, modelUrl);
   }
 
-  Future<String> _getDefaultPrivateModelPath() async {
+  Future<String> _getPrivateModelPathForUrl(String? modelUrl) async {
     final dir = await getApplicationDocumentsDirectory();
-    return '${dir.path}/$_defaultModelFileName';
+    var fileName = _defaultModelFileName;
+    final trimmedUrl = modelUrl?.trim() ?? '';
+    if (trimmedUrl.isNotEmpty) {
+      final uri = Uri.tryParse(trimmedUrl);
+      final segments = (uri?.pathSegments ?? const <String>[])
+          .where((segment) => segment.isNotEmpty)
+          .toList();
+      if (segments.isNotEmpty) {
+        fileName = segments.last;
+      }
+    }
+    return path.join(dir.path, fileName);
+  }
+
+  LocalModelCatalogItem? _findCatalogItemByUrl(
+    String? modelUrl, [
+    List<LocalModelCatalogItem>? source,
+  ]) {
+    if (modelUrl == null || modelUrl.isEmpty) {
+      return null;
+    }
+    final catalog = source ?? _localModelCatalog;
+    for (final item in catalog) {
+      if (item.downloadUrl == modelUrl) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, String>> _collectDownloadedModelPaths(
+    List<LocalModelCatalogItem> catalog,
+  ) async {
+    final downloaded = <String, String>{};
+    for (final item in catalog) {
+      final modelPath = await _getPrivateModelPathForUrl(item.downloadUrl);
+      if (await File(modelPath).exists()) {
+        downloaded[item.downloadUrl] = modelPath;
+      }
+    }
+    final currentUrl = _localModelUrlController.text.trim();
+    final currentPath = _localModelPathController.text.trim();
+    if (currentUrl.isNotEmpty &&
+        currentPath.isNotEmpty &&
+        await File(currentPath).exists()) {
+      downloaded[currentUrl] = currentPath;
+    }
+    return downloaded;
+  }
+
+  Future<void> _selectCatalogModel(
+    String? modelUrl, {
+    bool persist = true,
+  }) async {
+    if (modelUrl == null || modelUrl.isEmpty) {
+      return;
+    }
+    final modelPath =
+        _downloadedLocalModelPathsByUrl[modelUrl] ??
+        await _getPrivateModelPathForUrl(modelUrl);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedLocalModelUrl = modelUrl;
+      _localModelUrlController.text = modelUrl;
+      _localModelPathController.text = modelPath;
+    });
+    if (persist) {
+      await _persistLocalModelUrl(modelUrl);
+      await _persistLocalModelPath(modelPath);
+    }
   }
 
   Future<void> _downloadModelToPrivateDir() async {
@@ -279,7 +666,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return;
     }
 
-    final modelPath = await _getDefaultPrivateModelPath();
+    final modelPath = await _getPrivateModelPathForUrl(modelUrl);
     setState(() {
       _isModelDownloading = true;
       _modelDownloadProgress = 0;
@@ -320,6 +707,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
         _modelDownloadTotalBytes = fileSize;
+        _selectedLocalModelUrl = modelUrl;
+        _downloadedLocalModelPathsByUrl[modelUrl] = modelPath;
         _localAnswerStatus =
             '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
@@ -354,6 +743,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
   Future<void> _loadLocalQnaModel() async {
     final modelPath = _localModelPathController.text.trim();
+    final modelUrl = _localModelUrlController.text.trim();
+    final selectedCatalogItem = _findCatalogItemByUrl(modelUrl);
+    final modelLabel =
+        selectedCatalogItem?.name ??
+        path.basename(modelPath.isEmpty ? _defaultModelFileName : modelPath);
     if (modelPath.isEmpty) {
       TDToast.showText(context: context, '请先填写 GGUF 模型路径');
       return;
@@ -363,11 +757,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
       _localAnswer = '';
-      _localAnswerStatus = '正在加载 Qwen3-1.7B 端侧模型...';
+      _localAnswerStatus = '正在加载端侧模型：$modelLabel...';
     });
 
     try {
       await _disposeLocalQnaModel();
+      await _persistLocalModelUrl(modelUrl);
       await _persistLocalModelPath(modelPath);
 
       final modelFile = File(modelPath);
@@ -424,8 +819,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _localQnaModel = fallbackLlama;
           _isLocalModelLoading = false;
           _isLocalModelReady = true;
+          _activeLocalModelUrl = modelUrl.isEmpty ? null : modelUrl;
           _localAnswerStatus =
-              'Qwen3-1.7B 已加载，当前后端：$backendName（已从 GPU 回退到 CPU），模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+              '$modelLabel 已加载，当前后端：$backendName（已从 GPU 回退到 CPU），模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
         });
         return;
       }
@@ -440,8 +836,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _localQnaModel = llama;
         _isLocalModelLoading = false;
         _isLocalModelReady = true;
+        _activeLocalModelUrl = modelUrl.isEmpty ? null : modelUrl;
         _localAnswerStatus =
-            'Qwen3-1.7B 已加载，当前后端：$backendSummary，模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
+            '$modelLabel 已加载，当前后端：$backendSummary，模型大小：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
     } catch (e) {
       await _disposeLocalQnaModel();
@@ -451,11 +848,22 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
+        _activeLocalModelUrl = null;
         _localAnswerStatus = '模型加载失败：$e';
       });
       TDToast.showText(context: context, '端侧模型加载失败：$e');
     }
   }
+
+  static const String _kSystemPrompt =
+      '你是 BrainDance 的本地记忆问答助手。'
+      '你只能根据 retrieval 提供的证据回答，不要猜测。'
+      '规则：'
+      '1. hit_count > 0 时，必须回答具体内容，不能只说有记录。'
+      '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
+      '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
+      '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
+      '5. 不复述问题，不解释规则，不说‘根据给定证据’。';
 
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
@@ -468,43 +876,45 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return;
     }
 
-    final memoryContext = await _buildMemoryContext(userQuestion);
-    var streamedAnswer = '';
-    var lockedAnswer = false;
+    // 1. 构建符合 Qwen3-1.7B-Instruct 格式的 retrieval payload
+    final retrieval = await _buildRetrievalPayload(userQuestion);
+    final userPayload = jsonEncode({
+      'question': userQuestion,
+      'retrieval': retrieval,
+    });
+
+    // 2. 构建 ChatML 格式 Prompt
+    // 注意：微调后的模型对 System Prompt 和 JSON Payload 格式非常敏感
     final prompt =
-        '''
-请根据下面的记忆片段，直接回答问题。
-如果记忆片段没有明确答案，再简短回答不知道。
-不要解释规则，不要重复题目。
-
-记忆片段：
-$memoryContext
-
-问题：
-$userQuestion
-
-回答：
-''';
+        '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
+        '<|im_start|>user\n$userPayload<|im_end|>\n'
+        '<|im_start|>assistant\n'
+        '请直接给出最终回答；如果你仍然生成 <think> 思考链，系统会将其与正式回答分离，仅正式回答会作为最终结果展示。\n';
 
     setState(() {
       _localAnswer = '';
-      _localContextPreview = memoryContext;
+      _localReasoning = '';
+      // 预览上下文现在展示构建好的 JSON，方便调试
+      const encoder = JsonEncoder.withIndent('  ');
+      _localContextPreview = encoder.convert(retrieval);
       _localAnswerStatus = '正在根据本地记忆片段生成回答...';
     });
 
     try {
+      var streamedAnswer = '';
+      var lockedAnswer = false;
       _localQnaModel!.cancelGeneration();
       await _llamaStreamSubscription?.cancel();
       _llamaStreamSubscription = _localQnaModel!
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 64,
-              temp: 0.1,
+              maxTokens: 384, // 给 <think> + 正式回答留出更充足的联合预算，降低被截断概率
+              temp: 0.1, // 接近 Greedy Search，减少幻觉
               topK: 20,
-              topP: 0.85,
-              penalty: 1.12,
-              stopSequences: ['【说明】', '\n答案：', '\n问题：', '\n记忆片段：'],
+              topP: 0.1, // 进一步限制采样范围
+              penalty: 1.05, // 对齐 Python 脚本的 repetition_penalty=1.05
+              stopSequences: ['<|im_end|>', '<|endoftext|>'], // Qwen3 停止符
             ),
           )
           .listen(
@@ -515,22 +925,25 @@ $userQuestion
               if (token.isEmpty) {
                 return;
               }
-              final nextAnswer = _sanitizeLocalAnswer(streamedAnswer + token);
+              final nextRaw = streamedAnswer + token;
+              final parsedOutput = _parseLocalModelOutput(nextRaw);
+              final nextReasoning = parsedOutput.reasoning;
+              final nextAnswer = parsedOutput.answer;
               if (lockedAnswer) {
-                if (nextAnswer != streamedAnswer) {
+                if (nextAnswer != _localAnswer ||
+                    nextReasoning != _localReasoning) {
                   _localQnaModel!.cancelGeneration();
                 }
                 return;
               }
-              final shouldStop = nextAnswer == streamedAnswer;
-              if (nextAnswer.isNotEmpty) {
-                streamedAnswer = nextAnswer;
-              }
-              lockedAnswer = _shouldLockAnswer(streamedAnswer);
+              streamedAnswer = nextRaw;
+              lockedAnswer =
+                  nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
               setState(() {
-                _localAnswer = streamedAnswer;
+                _localReasoning = nextReasoning;
+                _localAnswer = nextAnswer;
               });
-              if (shouldStop || lockedAnswer) {
+              if (lockedAnswer) {
                 _localQnaModel!.cancelGeneration();
               }
             },
@@ -566,10 +979,16 @@ $userQuestion
     }
   }
 
-  Future<String> _buildMemoryContext(String question) async {
+  Future<Map<String, dynamic>> _buildRetrievalPayload(String question) async {
     List<Map<String, dynamic>> matches = [];
     try {
-      matches = await _localRagIndex.search(question, limit: 3, minScore: 0.08);
+      // 本地语义扩展，弥补 HashingEmbedder 的语义缺失
+      final expandedQuery = _expandQuery(question);
+      matches = await _localRagIndex.search(
+        expandedQuery,
+        limit: 3,
+        minScore: 0.08,
+      );
     } catch (_) {
       matches = const [];
     }
@@ -582,39 +1001,78 @@ $userQuestion
       matches = fallbackModels;
     }
 
-    if (matches.isEmpty) {
-      return '暂无可用记忆片段。';
-    }
+    // 转换为微调模型预期的 evidence 格式
+    final evidence = matches.map((item) {
+      final metaInfo = _toMap(item['meta_info']);
+      final tags = _joinList(item['tags']);
+      final objects = _joinList(item['objects']);
+      final summary = _collectStrings(
+        metaInfo,
+      ).take(6).map((t) => t.trim()).where((t) => t.isNotEmpty).join('；');
 
-    return matches
-        .asMap()
-        .entries
-        .map((entry) {
-          return _formatMemorySnippet(entry.key + 1, entry.value);
-        })
-        .join('\n\n');
+      return {
+        'id': item['id']?.toString() ?? '',
+        'created_at': item['created_at']?.toString() ?? '',
+        'description': item['description']?.toString() ?? '',
+        'tags': tags,
+        'objects': objects,
+        'summary': summary,
+        'scene_id': item['scene_id']?.toString() ?? '',
+      };
+    }).toList();
+
+    return {
+      'evidence': evidence,
+      'hit_count': evidence.length,
+      // 本地暂无 Intent 识别模型，先默认为 unknown 或根据是否有结果判断
+      'intent': evidence.isEmpty ? 'unknown' : 'object_lookup',
+    };
   }
 
-  String _formatMemorySnippet(int index, Map<String, dynamic> model) {
-    final metaInfo = _toMap(model['meta_info']);
-    final tags = _joinList(model['tags']);
-    final objects = _joinList(model['objects']);
-    final summary = _collectStrings(metaInfo)
-        .take(6)
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .join('；');
+  String _expandQuery(String query) {
+    if (query.trim().isEmpty) return query;
+    var expanded = query;
 
-    final parts = <String>[
-      '片段$index',
-      '场景：${_modelDisplayName(model, fallback: '未知场景')}',
-      '描述：${model['description']?.toString() ?? '暂无描述'}',
-      if (tags.isNotEmpty) '标签：$tags',
-      if (objects.isNotEmpty) '对象：$objects',
-      if (summary.isNotEmpty) '摘要：$summary',
-    ];
+    // 关键领域词汇扩展 - 对齐 ai_engine 的 SEMANTIC_QUERY_EXPANSIONS
+    const semanticExpansions = {
+      "理工": [
+        "算法",
+        "算法导论",
+        "数学",
+        "高等数学",
+        "教材",
+        "词典",
+        "电脑",
+        "笔记本电脑",
+        "显示器",
+        "白板",
+      ],
+      "计算机": ["电脑", "笔记本电脑", "显示器", "机械键盘", "办公桌", "白板"],
+      "学习": ["教材", "词典", "地球仪", "白板", "办公桌", "笔记本电脑"],
+      "书房": ["办公桌", "椅子", "书架", "电脑", "书"],
+    };
 
-    return parts.join('\n');
+    // 对象查找扩展 - 对齐 ai_engine 的 OBJECT_LOOKUP_PHRASE_EXPANSIONS
+    const objectExpansions = {
+      "洛天依": ["洛天依", "手办", "展台"],
+      "学习摆件": ["学习相关", "地球仪", "手办"],
+      "桌面设备": ["显示器", "笔记本电脑", "键盘", "办公桌"],
+    };
+
+    // 简单包含匹配
+    semanticExpansions.forEach((key, values) {
+      if (query.contains(key)) {
+        expanded += ' ${values.join(' ')}';
+      }
+    });
+
+    objectExpansions.forEach((key, values) {
+      if (query.contains(key)) {
+        expanded += ' ${values.join(' ')}';
+      }
+    });
+
+    return expanded;
   }
 
   String _sanitizeLocalAnswer(String raw) {
@@ -649,6 +1107,46 @@ $userQuestion
     }
 
     return cleaned;
+  }
+
+  _ParsedLocalModelOutput _parseLocalModelOutput(String raw) {
+    final normalized = raw.replaceAll('\r\n', '\n');
+    final thinkStart = normalized.indexOf('<think>');
+    if (thinkStart < 0) {
+      return _ParsedLocalModelOutput(
+        reasoning: '',
+        answer: _sanitizeLocalAnswer(_stripDanglingThinkTag(normalized)),
+      );
+    }
+
+    final reasoningStart = thinkStart + '<think>'.length;
+    final thinkEnd = normalized.indexOf('</think>', reasoningStart);
+    if (thinkEnd < 0) {
+      return _ParsedLocalModelOutput(
+        reasoning: normalized.substring(reasoningStart).trim(),
+        answer: '',
+      );
+    }
+
+    final reasoning = normalized.substring(reasoningStart, thinkEnd).trim();
+    final answer = normalized.substring(thinkEnd + '</think>'.length);
+    return _ParsedLocalModelOutput(
+      reasoning: reasoning,
+      answer: _sanitizeLocalAnswer(_stripDanglingThinkTag(answer)),
+    );
+  }
+
+  String _stripDanglingThinkTag(String value) {
+    var cleaned = value;
+    const danglingPrefixes = ['<think>', '<thin', '<thi', '<th', '<t', '<'];
+    for (final prefix in danglingPrefixes) {
+      if (cleaned.trimLeft().startsWith(prefix)) {
+        final index = cleaned.indexOf(prefix);
+        cleaned = index >= 0 ? cleaned.substring(0, index) : cleaned;
+        break;
+      }
+    }
+    return cleaned.replaceAll('</think>', '');
   }
 
   bool _shouldLockAnswer(String value) {
@@ -1076,6 +1574,7 @@ $userQuestion
           BDPageBackdrop(
             child: SafeArea(
               child: CustomScrollView(
+                controller: _recallScrollController,
                 cacheExtent: 1200,
                 slivers: [
                   SliverToBoxAdapter(
@@ -1108,129 +1607,53 @@ $userQuestion
                         ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(20, 2, 20, 8),
-                          child: Column(
-                            children: [
-                              BDPanelCard(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                child: TextField(
-                                  controller: _searchController,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 15,
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: _searchFieldHint(),
-                                    hintStyle: TextStyle(
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.45)
-                                          : BDDesign.colorMutedBlue.withValues(
-                                              alpha: 0.78,
-                                            ),
-                                      fontSize: 15,
-                                    ),
-                                    prefixIcon: Icon(
-                                      Icons.search_rounded,
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.5)
-                                          : BDDesign.colorMutedBlue,
-                                    ),
-                                    suffixIcon:
-                                        ValueListenableBuilder<
-                                          TextEditingValue
-                                        >(
-                                          valueListenable: _searchController,
-                                          builder: (context, value, _) {
-                                            final hasText = value.text
-                                                .trim()
-                                                .isNotEmpty;
-                                            return Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                _buildSearchModeMenuButton(
-                                                  isDark,
-                                                ),
-                                                if (hasText)
-                                                  IconButton(
-                                                    onPressed: () {
-                                                      _searchController.clear();
-                                                      _searchModels('');
-                                                    },
-                                                    icon: Icon(
-                                                      Icons.close_rounded,
-                                                      color: isDark
-                                                          ? Colors.white
-                                                                .withValues(
-                                                                  alpha: 0.5,
-                                                                )
-                                                          : BDDesign
-                                                                .colorMutedBlue,
-                                                    ),
-                                                  ),
-                                              ],
-                                            );
-                                          },
-                                        ),
-                                    filled: true,
-                                    fillColor: Colors.transparent,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 14,
-                                      horizontal: 16,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16.0),
-                                      borderSide: const BorderSide(
-                                        color: BDDesign.colorMutedBlue,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                  ),
-                                  onSubmitted: (value) {
-                                    unawaited(_handleSearchSubmitted(value));
-                                  },
-                                  onChanged: _searchModels,
-                                ),
-                              ),
-                              if (_searchMode == _RecallSearchMode.localAi) ...[
-                                const SizedBox(height: 10),
-                                RecallLocalAiPanel(
-                                  theme: theme,
-                                  isDark: isDark,
-                                  textColor: textColor,
-                                  darkInput: darkInput,
-                                  isLocalModelReady: _isLocalModelReady,
-                                  isModelDownloading: _isModelDownloading,
-                                  isLocalModelLoading: _isLocalModelLoading,
-                                  modelDownloadProgress: _modelDownloadProgress,
-                                  modelDownloadedBytes: _modelDownloadedBytes,
-                                  modelDownloadTotalBytes:
-                                      _modelDownloadTotalBytes,
-                                  localAnswer: _localAnswer,
-                                  localAnswerStatus: _localAnswerStatus,
-                                  localContextPreview: _localContextPreview,
-                                  defaultModelDownloadUrl:
-                                      _defaultModelDownloadUrl,
-                                  localModelUrlController:
-                                      _localModelUrlController,
-                                  localModelPathController:
-                                      _localModelPathController,
-                                  onDownloadModel: _downloadModelToPrivateDir,
-                                  onLoadModel: _loadLocalQnaModel,
-                                ),
-                              ],
-                            ],
+                          child: RecallSearchHeaderSection(
+                            theme: theme,
+                            isDark: isDark,
+                            textColor: textColor,
+                            darkInput: darkInput,
+                            searchController: _searchController,
+                            searchMode: _searchMode,
+                            searchModeTitleBuilder: _searchModeTitle,
+                            searchModeSubtitleBuilder: _searchModeSubtitle,
+                            searchFieldHint: _searchFieldHint(),
+                            onSubmit: _handleSearchSubmitted,
+                            onChanged: _searchModels,
+                            onClear: () {
+                              _searchController.clear();
+                              unawaited(_searchModels(''));
+                            },
+                            onTapSearchMode: _showSearchModeSheet,
+                            isLocalModelReady: _isLocalModelReady,
+                            isModelDownloading: _isModelDownloading,
+                            isLocalModelLoading: _isLocalModelLoading,
+                            modelDownloadProgress: _modelDownloadProgress,
+                            modelDownloadedBytes: _modelDownloadedBytes,
+                            modelDownloadTotalBytes: _modelDownloadTotalBytes,
+                            localAnswer: _localAnswer,
+                            localReasoning: _localReasoning,
+                            localAnswerStatus: _localAnswerStatus,
+                            localContextPreview: _localContextPreview,
+                            defaultModelDownloadUrl: _defaultModelDownloadUrl,
+                            localModelCatalog: _localModelCatalog,
+                            selectedLocalModelUrl: _selectedLocalModelUrl,
+                            activeLocalModelUrl: _activeLocalModelUrl,
+                            downloadedLocalModelUrls:
+                                _downloadedLocalModelPathsByUrl.keys.toSet(),
+                            localModelUrlController: _localModelUrlController,
+                            localModelPathController: _localModelPathController,
+                            onSelectCatalogModel: (value) {
+                              unawaited(_selectCatalogModel(value));
+                            },
+                            onDownloadModel: _downloadModelToPrivateDir,
+                            onLoadModel: _loadLocalQnaModel,
                           ),
                         ),
+                        if (_searchMode == RecallSearchMode.agent)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                            child: _buildAgentResultCard(isDark, textColor),
+                          ),
                         if (_processingTasks.isNotEmpty)
                           RepaintBoundary(
                             child: RecallProcessingSection(
@@ -1281,8 +1704,20 @@ $userQuestion
                       child: Padding(
                         padding: const EdgeInsets.only(top: 16.0),
                         child: _searchController.text.trim().isEmpty
-                            ? _buildEmptyState(theme, isDark)
-                            : _buildSearchEmptyState(theme, isDark),
+                            ? RecallEmptyState(
+                                theme: theme,
+                                isDark: isDark,
+                                darkCard: darkCard,
+                                darkBorder: darkBorder,
+                              )
+                            : RecallSearchEmptyState(
+                                theme: theme,
+                                isDark: isDark,
+                                darkCard: darkCard,
+                                darkBorder: darkBorder,
+                                searchMode: _searchMode,
+                                searchModeTitleBuilder: _searchModeTitle,
+                              ),
                       ),
                     )
                   else if (_models.isNotEmpty &&
@@ -1298,8 +1733,8 @@ $userQuestion
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
                       toPublicUrl: _toPublicUrl,
-                      onShowModelActions: (model) {
-                        _showModelActions(model);
+                      onShowModelActions: (model, {bool imageOnly = false}) {
+                        _showModelActions(model, imageOnly: imageOnly);
                       },
                     )
                   else
@@ -1313,8 +1748,8 @@ $userQuestion
                       modelCardKeyFor: _modelCardKeyFor,
                       isSameModel: _isSameModel,
                       onNavigateToViewer: _navigateToViewer,
-                      onShowModelActions: (model) {
-                        _showModelActions(model);
+                      onShowModelActions: (model, {bool imageOnly = false}) {
+                        _showModelActions(model, imageOnly: imageOnly);
                       },
                       onAddNewTask: (name) {
                         ref.read(pageIndexProvider.notifier).state = 1;
@@ -1327,6 +1762,7 @@ $userQuestion
           ),
           if (_activeModelAction != null && _activeModelActionRect != null)
             RecallModelActionOverlay(
+              key: _overlayKey,
               theme: theme,
               isDark: isDark,
               darkCard: darkCard,
@@ -1337,9 +1773,10 @@ $userQuestion
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
               onShowModelDetails: _showModelDetails,
+              onDownloadModel: _downloadRecallModel,
               onShareModelToCommunity: _shareModelToCommunity,
               onRenameModel: _renameModel,
-              onDeleteLocalModel: _deleteLocalModel,
+              onDeleteCloudModel: _deleteCloudModel,
             ),
         ],
       ),
@@ -1353,12 +1790,22 @@ $userQuestion
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
-        if (_searchMode == _RecallSearchMode.localAi) {
+        if (_searchMode == RecallSearchMode.localAi) {
           _localAnswer = '';
+          _localReasoning = '';
           _localContextPreview = '';
+        }
+        if (_searchMode == RecallSearchMode.agent) {
+          _agentResult = null;
+          _agentChatMessage = null;
         }
         _isLoading = false;
       });
+      return;
+    }
+
+    // Agent 模式不做即时列表检索，仅在 submit 时调用 _askAgentRecall
+    if (_searchMode == RecallSearchMode.agent) {
       return;
     }
 
@@ -1443,38 +1890,192 @@ $userQuestion
     throw Exception(errMsg);
   }
 
+  Future<void> _askAgentRecall(String query) async {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) return;
+    _ensureAgentSessionId();
+    _agentLatestSubmittedQuery = trimmedQuery;
+
+    setState(() {
+      _isAgentSearching = true;
+      _agentResult = null;
+      _agentChatMessage = ChatMessage(
+        isUser: false,
+        liveStatus: '正在连接 Agent...',
+      );
+    });
+
+    _agentStreamSubscription?.cancel();
+
+    void fallback() async {
+      if (!mounted) return;
+      setState(() {
+        _isAgentSearching = true;
+      });
+      try {
+        final result = await AgentRecallService().query(
+          trimmedQuery,
+          sessionId: _agentSessionId,
+          conversationSummary: _agentConversationSummary,
+          sessionState: _agentSessionState,
+        );
+        if (!mounted) return;
+        setState(() {
+          _agentResult = result;
+          _agentChatMessage!.finalAnswer = result.answer;
+          _isAgentSearching = false;
+        });
+        _rememberAgentResponse(trimmedQuery, result);
+        _agentChatMessage!.addSummary('当前环境不支持流式事件，已回退到一次性回答');
+        _completeAgentRun();
+      } catch (ex) {
+        if (!mounted) return;
+        setState(() {
+          _isAgentSearching = false;
+        });
+        TDToast.showText('Agent 检索失败：$ex', context: context);
+      }
+    }
+
+    try {
+      _updateAgentLiveStatus('正在发起 Agent 流式请求');
+      final stream = AgentRecallService().queryStream(
+        trimmedQuery,
+        sessionId: _agentSessionId,
+        conversationSummary: _agentConversationSummary,
+        sessionState: _agentSessionState,
+      );
+      _agentStreamSubscription = stream.listen(
+        (chunk) {
+          if (!mounted) return;
+          if (chunk.isEmpty) return;
+
+          try {
+            final data = jsonDecode(chunk);
+            if (data is Map) {
+              final eventData = Map<String, dynamic>.from(data);
+              _consumeAgentEvent(eventData);
+              if (eventData['event']?.toString() == 'done') {
+                setState(() {
+                  _isAgentSearching = false;
+                });
+              }
+            }
+          } catch (e) {
+            debugPrint('Error parsing chunk: $e');
+          }
+        },
+        onError: (e) {
+          if (!mounted) return;
+          setState(() {
+            _isAgentSearching = false;
+          });
+          _updateAgentLiveStatus('流式连接失败，准备回退到普通请求', detail: '$e');
+          TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
+          fallback();
+        },
+        onDone: () {
+          if (mounted) {
+            setState(() {
+              _isAgentSearching = false;
+            });
+            if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
+              _completeAgentRun();
+            }
+          }
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAgentSearching = false;
+      });
+      _updateAgentLiveStatus('流式启动失败，准备回退到普通请求', detail: '$e');
+      TDToast.showText('Agent 流启动失败 (尝试回退)：$e', context: context);
+      fallback();
+    }
+  }
+
+  void _openAgentRecallResult(AgentRecallResponse result) {
+    final openScene = result.actions
+        .where((a) => a.type == 'open_scene')
+        .cast<AgentAction?>()
+        .firstOrNull;
+    final flyToPose = result.actions
+        .where((a) => a.type == 'fly_to_pose')
+        .cast<AgentAction?>()
+        .firstOrNull;
+
+    if (openScene == null || openScene.ply == null || openScene.ply!.isEmpty) {
+      TDToast.showText('缺少 open_scene.ply，无法打开 Viewer', context: context);
+      return;
+    }
+
+    // ply 可能是 Storage 相对路径，需转为公开 URL 才能下载
+    final rawPly = openScene.ply!;
+    final modelUrl =
+        rawPly.startsWith('http://') || rawPly.startsWith('https://')
+        ? rawPly
+        : toPublicUrl(rawPly);
+    final posesUrlResolved =
+        openScene.poses != null &&
+            openScene.poses!.isNotEmpty &&
+            !openScene.poses!.startsWith('http')
+        ? toPublicUrl(openScene.poses!)
+        : openScene.poses ?? toPosesUrl(rawPly);
+
+    unawaited(
+      openViewer(
+        context,
+        initialModelUrl: modelUrl,
+        posesUrl: posesUrlResolved,
+        sceneId: openScene.sceneId,
+        initialPose: flyToPose?.matrix,
+        initialPoseId: flyToPose?.imageName,
+      ),
+    );
+  }
+
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
-    if (_searchMode == _RecallSearchMode.localAi) {
+    if (_searchMode == RecallSearchMode.localAi) {
       await _searchModels(query);
       if (query.isNotEmpty) {
         await _askLocalQuestion(question: query);
       }
       return;
     }
+    if (_searchMode == RecallSearchMode.agent) {
+      if (query.isNotEmpty) {
+        await _askAgentRecall(query);
+      }
+      return;
+    }
     await _searchModels(query);
   }
 
-  bool _usesLocalIndex(_RecallSearchMode mode) {
-    return mode == _RecallSearchMode.local || mode == _RecallSearchMode.localAi;
+  bool _usesLocalIndex(RecallSearchMode mode) {
+    return mode == RecallSearchMode.local || mode == RecallSearchMode.localAi;
   }
 
-  String _searchModeTitle(_RecallSearchMode mode) {
+  String _searchModeTitle(RecallSearchMode mode) {
     switch (mode) {
-      case _RecallSearchMode.cloud:
+      case RecallSearchMode.cloud:
         return textLocalize('recall_cloud_rag');
-      case _RecallSearchMode.local:
+      case RecallSearchMode.local:
         return textLocalize('recall_local_rag');
-      case _RecallSearchMode.localAi:
+      case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_rag');
+      case RecallSearchMode.agent:
+        return 'Agent 检索';
     }
   }
 
-  String _searchModeSubtitle(_RecallSearchMode mode) {
+  String _searchModeSubtitle(RecallSearchMode mode) {
     switch (mode) {
-      case _RecallSearchMode.cloud:
+      case RecallSearchMode.cloud:
         return textLocalize('recall_cloud_scope');
-      case _RecallSearchMode.local:
+      case RecallSearchMode.local:
         if (_isLocalIndexing) {
           return textLocalize('recall_local_indexing');
         }
@@ -1484,27 +2085,46 @@ $userQuestion
           return base;
         }
         return '$base · ${_indexStats!.rebuiltItems}/${_indexStats!.totalItems}';
-      case _RecallSearchMode.localAi:
+      case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_scope');
+      case RecallSearchMode.agent:
+        return '空间检索 Agent · 直接带你去看';
     }
   }
 
   String _searchFieldHint() {
-    if (_searchMode == _RecallSearchMode.localAi) {
+    if (_searchMode == RecallSearchMode.localAi) {
       return textLocalize('recall_local_ai_hint');
+    }
+    if (_searchMode == RecallSearchMode.agent) {
+      final followUp = _agentResult?.followUp;
+      if (followUp != null &&
+          followUp.isWaitingUserInput &&
+          (followUp.inputPlaceholder?.trim().isNotEmpty ?? false)) {
+        return followUp.inputPlaceholder!.trim();
+      }
+      return '输入空间问题，例如"厨房在哪里"';
     }
     return textLocalize('recall_search_hint');
   }
 
-  void _setSearchMode(_RecallSearchMode mode) {
+  void _setSearchMode(RecallSearchMode mode) {
     if (_searchMode == mode) {
       return;
     }
     setState(() {
       _searchMode = mode;
-      if (mode != _RecallSearchMode.localAi) {
+      if (mode != RecallSearchMode.localAi) {
         _localAnswer = '';
+        _localReasoning = '';
         _localContextPreview = '';
+      }
+      if (mode != RecallSearchMode.agent) {
+        _agentResult = null;
+        _agentChatMessage = null;
+        _agentSessionId = null;
+        _agentConversationSummary = null;
+        _agentSessionState = null;
       }
     });
     final keyword = _searchController.text.trim();
@@ -1513,210 +2133,18 @@ $userQuestion
     }
   }
 
-  Widget _buildSearchModeMenuButton(bool isDark) {
-    final icon = switch (_searchMode) {
-      _RecallSearchMode.cloud => Icons.cloud_rounded,
-      _RecallSearchMode.local => Icons.privacy_tip_rounded,
-      _RecallSearchMode.localAi => Icons.auto_awesome_rounded,
-    };
-    final foreground = isDark
-        ? Colors.white.withValues(alpha: 0.82)
-        : BDDesign.colorInkBlack;
-
-    return Tooltip(
-      message: textLocalize('recall_search_mode'),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _showSearchModeSheet,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 68),
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 16, color: foreground),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    _searchModeTitle(_searchMode),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Icon(Icons.expand_more_rounded, size: 16, color: foreground),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _showSearchModeSheet() async {
-    final selected = await showModalBottomSheet<_RecallSearchMode>(
+    final selected = await showModalBottomSheet<RecallSearchMode>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        final isDark = AppConfig.isNightMode;
-        final textColor = isDark
-            ? BDDesign.colorPaperWhite
-            : BDDesign.colorInkBlack;
-        final hintColor = isDark
-            ? Colors.white.withValues(alpha: 0.62)
-            : BDDesign.colorMutedBlue;
-
-        Widget modeTile({
-          required _RecallSearchMode mode,
-          required IconData icon,
-          required String title,
-          required String subtitle,
-        }) {
-          final selected = _searchMode == mode;
-          return InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () => Navigator.pop(context, mode),
-            child: AnimatedContainer(
-              duration: BDMotion.durationFast,
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: selected
-                    ? BDDesign.colorMutedBlue.withValues(
-                        alpha: isDark ? 0.22 : 0.10,
-                      )
-                    : (isDark ? darkInput : const Color(0xFFF6F8FC)),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: selected
-                      ? BDDesign.colorMutedBlue
-                      : (isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? BDDesign.colorMutedBlue.withValues(alpha: 0.18)
-                          : (isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.white),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(icon, color: textColor, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: hintColor,
-                            fontSize: 12.5,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (selected)
-                    const Icon(
-                      Icons.check_circle_rounded,
-                      color: BDDesign.colorMutedBlue,
-                    ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    textLocalize('recall_search_mode'),
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '选择当前搜索栏要优先使用的检索方式。',
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 12.5,
-                      height: 1.35,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  modeTile(
-                    mode: _RecallSearchMode.cloud,
-                    icon: Icons.cloud_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.cloud),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.cloud),
-                  ),
-                  const SizedBox(height: 10),
-                  modeTile(
-                    mode: _RecallSearchMode.local,
-                    icon: Icons.privacy_tip_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.local),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.local),
-                  ),
-                  const SizedBox(height: 10),
-                  modeTile(
-                    mode: _RecallSearchMode.localAi,
-                    icon: Icons.auto_awesome_rounded,
-                    title: _searchModeTitle(_RecallSearchMode.localAi),
-                    subtitle: _searchModeSubtitle(_RecallSearchMode.localAi),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        return RecallSearchModeSheet(
+          selectedMode: _searchMode,
+          titleBuilder: _searchModeTitle,
+          subtitleBuilder: _searchModeSubtitle,
+          darkInput: darkInput,
+          onSelect: (mode) => Navigator.pop(context, mode),
         );
       },
     );
@@ -1724,6 +2152,417 @@ $userQuestion
     if (selected != null) {
       _setSearchMode(selected);
     }
+  }
+
+  Widget _buildAgentResultCard(bool isDark, Color textColor) {
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+
+    if (_agentChatMessage == null &&
+        _agentResult == null &&
+        !_isAgentSearching) {
+      return BDPanelCard(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          '输入问题后按回车，Agent 将为你检索空间并定位视角。',
+          style: TextStyle(color: hintColor, fontSize: 13),
+        ),
+      );
+    }
+
+    final hasActions =
+        _agentResult != null &&
+        _agentResult!.actions.any((a) => a.type == 'open_scene');
+    final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
+    final followUp = _agentResult?.followUp;
+    final processRecordCount =
+        _agentChatMessage!.steps.length + _agentChatMessage!.summaries.length;
+
+    return BDPanelCard(
+      padding: const EdgeInsets.all(16),
+      child: ListenableBuilder(
+        listenable: _agentChatMessage!,
+        builder: (context, _) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.travel_explore_rounded,
+                    size: 18,
+                    color: BDDesign.colorMutedBlue,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Agent',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (_isAgentSearching) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const Spacer(),
+                    SizedBox(
+                      height: 24,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          side: const BorderSide(color: Colors.red, width: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: _stopAgentSearch,
+                        icon: const Icon(Icons.stop_circle_outlined, size: 14),
+                        label: const Text('停止', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              if (_agentChatMessage!.liveStatus.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF141A24)
+                        : const Color(0xFFF3F7FC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white10
+                          : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        _isAgentSearching
+                            ? Icons.auto_awesome_motion_rounded
+                            : Icons.done_all_rounded,
+                        size: 18,
+                        color: BDDesign.colorMutedBlue,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _agentChatMessage!.liveStatus,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 13,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+
+              if (processRecordCount > 0) ...[
+                Row(
+                  children: [
+                    Text(
+                      '执行过程',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$processRecordCount 条记录',
+                      style: TextStyle(color: hintColor, fontSize: 12),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () {
+                        _agentChatMessage!.isProcessCollapsed =
+                            !_agentChatMessage!.isProcessCollapsed;
+                      },
+                      icon: Icon(
+                        _agentChatMessage!.isProcessCollapsed
+                            ? Icons.unfold_more_rounded
+                            : Icons.unfold_less_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        _agentChatMessage!.isProcessCollapsed ? '展开' : '折叠',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_agentChatMessage!.isProcessCollapsed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '过程已自动折叠，默认只突出最终回复；展开后可查看阶段总结与工具调用。',
+                      style: TextStyle(
+                        color: hintColor,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  )
+                else ...[
+                  if (_agentChatMessage!.summaries.isNotEmpty) ...[
+                    for (final summary in _agentChatMessage!.summaries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: BDDesign.colorMutedBlue,
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                summary,
+                                style: TextStyle(
+                                  color: hintColor,
+                                  fontSize: 12,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 4),
+                  ],
+                  ..._agentChatMessage!.steps.map((step) {
+                    return ListenableBuilder(
+                      listenable: step,
+                      builder: (context, _) {
+                        if (step.type == 'tool_call') {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Theme(
+                              data: Theme.of(
+                                context,
+                              ).copyWith(dividerColor: Colors.transparent),
+                              child: _AgentStepTile(
+                                step: step,
+                                isDark: isDark,
+                                textColor: textColor,
+                              ),
+                            ),
+                          );
+                        } else if (step.type == 'thought') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Text(
+                              '思考摘要：${step.content}',
+                              style: TextStyle(color: hintColor, fontSize: 13),
+                            ),
+                          );
+                        } else if (step.type == 'error') {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline,
+                                  color: Colors.red,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    step.content,
+                                    style: const TextStyle(
+                                      color: Colors.red,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    );
+                  }),
+                ],
+              ],
+
+              if (_agentChatMessage!.finalAnswer.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _AgentAnswerCard(
+                  markdown: _agentChatMessage!.finalAnswer,
+                  isDark: isDark,
+                  textColor: textColor,
+                  hintColor: hintColor,
+                ),
+              ],
+
+              if (followUp != null &&
+                  (followUp.message.trim().isNotEmpty ||
+                      followUp.suggestedReplies.isNotEmpty)) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF161D28)
+                        : const Color(0xFFF6F9FD),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white12
+                          : BDDesign.colorMutedBlue.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        followUp.isWaitingUserInput ? '继续对话' : '下一步建议',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (followUp.message.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          followUp.message.trim(),
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                      if (followUp.suggestedReplies.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: followUp.suggestedReplies.map((reply) {
+                            return ActionChip(
+                              label: Text(
+                                reply,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              onPressed: () {
+                                _searchController.text = reply;
+                                _searchController.selection =
+                                    TextSelection.collapsed(
+                                      offset: reply.length,
+                                    );
+                                unawaited(_askAgentRecall(reply));
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+
+              if (_agentResult?.mode != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '模式：${_agentResult!.mode}',
+                  style: TextStyle(color: hintColor, fontSize: 12),
+                ),
+              ],
+
+              if (_agentResult?.selectedCandidateReason != null &&
+                  _agentResult!.selectedCandidateReason!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '选择理由：${_agentResult!.selectedCandidateReason!}',
+                  style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+                ),
+              ],
+
+              if (_agentResult?.evidence != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(color: hintColor, fontSize: 12),
+                ),
+              ],
+
+              if (topCandidates.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '候选结果',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final candidate in topCandidates)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
+                      style: TextStyle(
+                        color: hintColor,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+              ],
+
+              if (hasActions) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: BDDesign.colorMutedBlue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      elevation: 0,
+                    ),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('打开场景', style: TextStyle(fontSize: 14)),
+                    onPressed: () => _openAgentRecallResult(_agentResult!),
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildEmptyState(TDThemeData theme, bool isDark) {
@@ -1793,12 +2632,11 @@ $userQuestion
               shape: TDButtonShape.round,
               size: TDButtonSize.large,
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => WebGLViewerPage(
-                      sceneId: textLocalize("recall_demo_title"),
-                    ),
+                unawaited(
+                  openViewer(
+                    context,
+                    initialModelUrl: './models/scene_auto_sync_raw.ply',
+                    sceneId: textLocalize("recall_demo_title"),
                   ),
                 );
               },
@@ -1846,11 +2684,12 @@ $userQuestion
             const SizedBox(height: 8),
             TDText(
               switch (_searchMode) {
-                _RecallSearchMode.local => textLocalize('recall_local_empty'),
-                _RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
-                _RecallSearchMode.localAi => textLocalize(
+                RecallSearchMode.local => textLocalize('recall_local_empty'),
+                RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                RecallSearchMode.localAi => textLocalize(
                   'recall_local_ai_empty',
                 ),
+                RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
               },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
@@ -1882,11 +2721,10 @@ $userQuestion
   void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty
-        ? _toPublicUrl(plyPath)
+        ? toPublicUrl(plyPath)
         : './models/scene_auto_sync_raw.ply';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
-    final sceneId =
-        _modelDisplayName(model);
+    final sceneId = _modelDisplayName(model);
     String? initialPoseId;
 
     if (transformMatrix is Map) {
@@ -1908,16 +2746,14 @@ $userQuestion
       initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
     }
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => WebGLViewerPage(
-          initialModelUrl: modelUrl,
-          posesUrl: posesUrl,
-          sceneId: sceneId,
-          initialPose: initialPose,
-          initialPoseId: initialPoseId,
-        ),
+    unawaited(
+      openViewer(
+        context,
+        initialModelUrl: modelUrl,
+        posesUrl: posesUrl,
+        sceneId: sceneId,
+        initialPose: initialPose,
+        initialPoseId: initialPoseId,
       ),
     );
   }
@@ -1975,12 +2811,14 @@ $userQuestion
     }
   }
 
-  Future<void> _showModelActions(Map<String, dynamic> model) async {
+  Future<void> _showModelActions(
+    Map<String, dynamic> model, {
+    bool imageOnly = false,
+  }) async {
     final cardKey = _modelCardKeyFor(model);
     final renderBox = cardKey.currentContext?.findRenderObject() as RenderBox?;
     final overlayRenderBox =
-        _actionOverlayStackKey.currentContext?.findRenderObject()
-            as RenderBox?;
+        _actionOverlayStackKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null || overlayRenderBox == null) return;
     final offset = renderBox.localToGlobal(
       Offset.zero,
@@ -1995,6 +2833,7 @@ $userQuestion
       _activeModelAction = {
         ...model,
         if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+        '_imageOnly': imageOnly,
       };
       _activeModelActionRect = rect;
     });
@@ -2020,23 +2859,16 @@ $userQuestion
 
     if (!mounted) return;
 
-    final isDark = AppConfig.isNightMode;
-    final textColor = isDark
-        ? BDDesign.colorPaperWhite
-        : BDDesign.colorInkBlack;
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-    final displayName =
-        _modelDisplayName(
-          model,
-          fallback: textLocalize('recall_unnamed_model'),
-        );
+    final displayName = _modelDisplayName(
+      model,
+      fallback: textLocalize('recall_unnamed_model'),
+    );
 
     // 格式化日期
     String formatDate(String? raw) {
-      if (raw == null || raw.isEmpty)
+      if (raw == null || raw.isEmpty) {
         return textLocalize('recall_detail_unknown');
+      }
       final dt = DateTime.tryParse(raw);
       if (dt == null) return raw;
       final local = dt.toLocal();
@@ -2052,98 +2884,20 @@ $userQuestion
         textLocalize('recall_detail_unknown');
     final qualityScore = taskInfo?['quality_score'];
 
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-          child: BDPanelCard(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        size: 22,
-                        color: textColor,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          displayName,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  _DetailRow(
-                    icon: Icons.calendar_today_rounded,
-                    label: textLocalize('recall_detail_created_at'),
-                    value: createdAt,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.update_rounded,
-                    label: textLocalize('recall_detail_updated_at'),
-                    value: updatedAt,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.category_rounded,
-                    label: textLocalize('recall_detail_task_type'),
-                    value: taskType,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                  ),
-                  const SizedBox(height: 12),
-                  _DetailRow(
-                    icon: Icons.star_rounded,
-                    label: textLocalize('recall_detail_quality_score'),
-                    value: qualityScore != null
-                        ? '$qualityScore / 100'
-                        : textLocalize('recall_detail_unknown'),
-                    textColor: textColor,
-                    hintColor: hintColor,
-                    valueTrailing: qualityScore != null
-                        ? _buildScoreBar(
-                            (qualityScore as num).toDouble(),
-                            isDark,
-                          )
-                        : null,
-                  ),
-                  if (sizeLabel.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _DetailRow(
-                      icon: Icons.storage_rounded,
-                      label: textLocalize('recall_detail_local_size'),
-                      value: sizeLabel.replaceAll(RegExp(r'[()]'), ''),
-                      textColor: textColor,
-                      hintColor: hintColor,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    await showRecallModelDetailSheet(
+      context,
+      displayName: displayName,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      taskType: taskType,
+      qualityScore: qualityScore,
+      sizeLabel: sizeLabel,
+      qualityScoreTrailing: qualityScore != null
+          ? _buildScoreBar(
+              (qualityScore as num).toDouble(),
+              AppConfig.isNightMode,
+            )
+          : null,
     );
   }
 
@@ -2177,7 +2931,7 @@ $userQuestion
     final currentName = _modelDisplayName(model, fallback: sceneId);
     final newName = await showDialog<String>(
       context: context,
-      builder: (_) => _RenameModelDialog(initialName: currentName),
+      builder: (_) => RecallRenameModelDialog(initialName: currentName),
     );
 
     if (newName == null || newName.isEmpty || !mounted) return;
@@ -2226,12 +2980,23 @@ $userQuestion
     }
   }
 
-  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
-    final plyPath = model['ply_path'] as String? ?? '';
+  Future<void> _downloadRecallModel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path']?.toString() ?? '';
     if (plyPath.isEmpty) {
       if (mounted) {
         TDToast.showText(
-          textLocalize('recall_delete_local_none'),
+          textLocalize('recall_download_model_unavailable'),
+          context: context,
+        );
+      }
+      return;
+    }
+
+    final modelUrl = _toPublicUrl(plyPath);
+    if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_download_model_unavailable'),
           context: context,
         );
       }
@@ -2239,77 +3004,264 @@ $userQuestion
     }
 
     try {
-      final modelUrl = _toPublicUrl(plyPath);
-      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+      final targetPath = await _buildRecallDownloadTargetPath(modelUrl, model);
+      if (targetPath.isEmpty) {
         if (mounted) {
           TDToast.showText(
-            textLocalize('recall_delete_local_none'),
+            textLocalize('recall_download_model_fail'),
             context: context,
           );
         }
         return;
       }
 
-      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
-      final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName = uri.path
-          .replaceAll('/', '_')
-          .replaceAll('\\', '_');
-      final dir = await getApplicationDocumentsDirectory();
+      if (mounted) {
+        TDToast.showText(
+          textLocalize('recall_download_model_start'),
+          context: context,
+        );
+      }
 
-      final localFile = File('${dir.path}/$sanitizedFileName');
-      final tmpFile = File('${dir.path}/$sanitizedFileName.tmp');
-      final metaFile = File('${dir.path}/$sanitizedFileName.meta');
-
-      bool deleted = false;
-      if (await localFile.exists()) {
-        await localFile.delete();
-        deleted = true;
-      }
-      if (await tmpFile.exists()) {
-        await tmpFile.delete();
-        deleted = true;
-      }
-      if (await metaFile.exists()) {
-        await metaFile.delete();
-        deleted = true;
-      }
+      await Dio().download(
+        modelUrl,
+        targetPath,
+        deleteOnError: true,
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: true,
+          receiveTimeout: const Duration(minutes: 30),
+          sendTimeout: const Duration(minutes: 2),
+        ),
+      );
 
       if (mounted) {
-        if (deleted) {
-          // 通知下载状态徽章重置为"未下载"
-          downloadEventBus.add(
-            ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
-          );
-          TDToast.showText(
-            textLocalize('recall_delete_local_success'),
-            context: context,
-          );
-        } else {
-          TDToast.showText(
-            textLocalize('recall_delete_local_none'),
-            context: context,
-          );
-        }
+        TDToast.showText(
+          '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}',
+          context: context,
+        );
       }
     } catch (e) {
       if (mounted) {
         TDToast.showText(
-          '${textLocalize('recall_delete_local_fail')}: $e',
+          '${textLocalize('recall_download_model_fail')}: $e',
           context: context,
         );
       }
     }
   }
 
-  void _dismissModelActions() {
+  Future<String> _buildRecallDownloadTargetPath(
+    String modelUrl,
+    Map<String, dynamic> model,
+  ) async {
+    var baseDir = await DirFinder.downloadsDir();
+    if (baseDir.isEmpty) {
+      baseDir = await DirFinder.documentsDir();
+    }
+    if (baseDir.isEmpty) {
+      baseDir = (await getApplicationDocumentsDirectory()).path;
+    }
+    final ensured = await DirSystem.ensureDir(baseDir);
+    if (!ensured) {
+      return '';
+    }
+
+    final uri = Uri.tryParse(Uri.encodeFull(Uri.decodeFull(modelUrl)));
+    final urlFileName = uri == null ? '' : path.basename(uri.path);
+    final ext = path.extension(urlFileName).isNotEmpty
+        ? path.extension(urlFileName)
+        : '.ply';
+    final displayName = _sanitizeExportFileName(
+      _modelDisplayName(model, fallback: 'recall_model'),
+    );
+    final candidateName = displayName.isEmpty
+        ? (urlFileName.isNotEmpty ? urlFileName : 'recall_model$ext')
+        : '$displayName$ext';
+
+    return _dedupeExportPath(path.join(baseDir, candidateName));
+  }
+
+  Future<String> _dedupeExportPath(String targetPath) async {
+    if (!await File(targetPath).exists()) {
+      return targetPath;
+    }
+
+    final dir = path.dirname(targetPath);
+    final ext = path.extension(targetPath);
+    final name = path.basenameWithoutExtension(targetPath);
+    for (var index = 2; index <= 999; index++) {
+      final nextPath = path.join(dir, '$name($index)$ext');
+      if (!await File(nextPath).exists()) {
+        return nextPath;
+      }
+    }
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return path.join(dir, '${name}_$timestamp$ext');
+  }
+
+  String _sanitizeExportFileName(String raw) {
+    return raw
+        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  Future<List<String>> _listStorageFilesRecursively(
+    String bucket,
+    String folderPath,
+  ) async {
+    final normalizedFolder = folderPath.trim().replaceAll('\\', '/');
+    if (normalizedFolder.isEmpty) {
+      return const <String>[];
+    }
+
+    final files = <String>[];
+    final pendingFolders = <String>[normalizedFolder];
+    final storage = Supabase.instance.client.storage.from(bucket);
+
+    while (pendingFolders.isNotEmpty) {
+      final currentFolder = pendingFolders.removeLast();
+      final entries = await storage.list(path: currentFolder);
+      for (final entry in entries) {
+        final entryName = entry.name.trim();
+        if (entryName.isEmpty) {
+          continue;
+        }
+        final childPath = '$currentFolder/$entryName';
+        final entryId = entry.id?.trim() ?? '';
+        if (entryId.isNotEmpty) {
+          files.add(childPath);
+        } else {
+          pendingFolders.add(childPath);
+        }
+      }
+    }
+
+    return files;
+  }
+
+  String? _sceneFolderPathForModel(Map<String, dynamic> model) {
+    final plyPath = model['ply_path']?.toString().trim() ?? '';
+    if (plyPath.isNotEmpty) {
+      final normalizedPath = plyPath.replaceAll('\\', '/');
+      final marker = '/output/';
+      final markerIndex = normalizedPath.indexOf(marker);
+      if (markerIndex > 0) {
+        return normalizedPath.substring(0, markerIndex);
+      }
+      final lastSlash = normalizedPath.lastIndexOf('/');
+      if (lastSlash > 0) {
+        return normalizedPath.substring(0, lastSlash);
+      }
+    }
+
+    final userId = model['user_id']?.toString().trim() ?? '';
+    final sceneId = model['scene_id']?.toString().trim() ?? '';
+    if (userId.isEmpty || sceneId.isEmpty) {
+      return null;
+    }
+    return '$userId/$sceneId';
+  }
+
+  Future<void> _deleteCloudModel(Map<String, dynamic> model) async {
+    final modelId = model['id']?.toString().trim() ?? '';
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    final currentUserId = currentUser == null ? '' : currentUser.id.trim();
+    final modelUserId = model['user_id']?.toString().trim() ?? '';
+    if (modelId.isEmpty) {
+      if (mounted) {
+        TDToast.showText('云端模型缺少 id，无法删除', context: context);
+      }
+      return;
+    }
+    if (currentUserId.isEmpty || modelUserId != currentUserId) {
+      if (mounted) {
+        TDToast.showText('只能删除当前账号自己的云端模型', context: context);
+      }
+      return;
+    }
+
+    final targetKey = _modelKey(model);
+    final targetSceneFolder = _sceneFolderPathForModel(model);
+    final plyPath = model['ply_path']?.toString().trim() ?? '';
+
+    try {
+      if (targetSceneFolder != null && targetSceneFolder.isNotEmpty) {
+        final storageFiles = await _listStorageFilesRecursively(
+          'braindance-assets',
+          targetSceneFolder,
+        );
+        if (storageFiles.isNotEmpty) {
+          await Supabase.instance.client.storage
+              .from('braindance-assets')
+              .remove(storageFiles);
+        }
+      }
+
+      await Supabase.instance.client
+          .from('model_assets')
+          .delete()
+          .eq('id', modelId)
+          .eq('user_id', currentUserId);
+
+      await _localRagIndex.deleteByModelId(modelId);
+
+      if (plyPath.isNotEmpty) {
+        final modelUrl = _toPublicUrl(plyPath);
+        downloadEventBus.add(
+          ModelDownloadEvent(url: modelUrl, progress: 0.0, isDeleted: true),
+        );
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _allModels.removeWhere((item) => _modelKey(item) == targetKey);
+        _models.removeWhere((item) => _modelKey(item) == targetKey);
+        if (_activeModelAction != null &&
+            _modelKey(_activeModelAction!) == targetKey) {
+          _activeModelAction = null;
+          _activeModelActionRect = null;
+        }
+        if (_allModels.isEmpty) {
+          final demo = _buildDemoModel();
+          _allModels = [demo];
+          _models = [demo];
+        } else if (_models.isEmpty) {
+          _models = List<Map<String, dynamic>>.from(_allModels);
+        }
+        _lastOwnModelSignature = _buildModelSignature(
+          _extractOwnModels(_allModels),
+        );
+      });
+      _updateOverviewProvider();
+
+      TDToast.showText('云端模型删除成功', context: context);
+    } catch (e) {
+      if (mounted) {
+        TDToast.showText('云端模型删除失败：$e', context: context);
+      }
+    }
+  }
+
+  Future<void> _dismissModelActions() async {
     if (_activeModelAction == null && _activeModelActionRect == null) {
       return;
     }
-    setState(() {
-      _activeModelAction = null;
-      _activeModelActionRect = null;
-    });
+
+    final overlayState = _overlayKey.currentState;
+    if (overlayState != null) {
+      await overlayState.hide();
+    }
+
+    if (mounted) {
+      setState(() {
+        _activeModelAction = null;
+        _activeModelActionRect = null;
+      });
+    }
   }
 
   CommunityModelOption _modelToCommunityOption(Map<String, dynamic> model) {
@@ -2317,11 +3269,10 @@ $userQuestion
     final preview = model['preview_img_path']?.toString();
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
-      sceneId:
-          _modelDisplayName(
-            model,
-            fallback: textLocalize('recall_unnamed_model'),
-          ),
+      sceneId: _modelDisplayName(
+        model,
+        fallback: textLocalize('recall_unnamed_model'),
+      ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
           ? './models/scene_auto_sync_raw.ply'
@@ -2342,171 +3293,301 @@ class _RecallSearchCacheEntry {
   final List<Map<String, dynamic>> results;
 }
 
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color textColor;
-  final Color hintColor;
-  final Widget? trailing;
-  final Widget? valueTrailing;
+class _ParsedLocalModelOutput {
+  const _ParsedLocalModelOutput({
+    required this.reasoning,
+    required this.answer,
+  });
 
-  const _DetailRow({
-    required this.icon,
-    required this.label,
-    required this.value,
+  final String reasoning;
+  final String answer;
+}
+
+class _AgentStepTile extends StatefulWidget {
+  final AgentStep step;
+  final bool isDark;
+  final Color textColor;
+
+  const _AgentStepTile({
+    required this.step,
+    required this.isDark,
     required this.textColor,
-    required this.hintColor,
-    this.trailing,
-    this.valueTrailing,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: hintColor),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      value,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (valueTrailing != null) ...[
-                    const SizedBox(width: 10),
-                    valueTrailing!,
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-      ],
-    );
-  }
+  State<_AgentStepTile> createState() => _AgentStepTileState();
 }
 
-class _RecallMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? accent;
-
-  const _RecallMetric({required this.label, required this.value, this.accent});
+class _AgentStepTileState extends State<_AgentStepTile>
+    with AutomaticKeepAliveClientMixin {
+  final ExpansibleController _controller = ExpansibleController();
+  bool _wasCompleted = false;
 
   @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.58)
-                : BDDesign.colorMutedBlue,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color:
-                accent ??
-                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RenameModelDialog extends StatefulWidget {
-  final String initialName;
-  const _RenameModelDialog({required this.initialName});
-
-  @override
-  State<_RenameModelDialog> createState() => _RenameModelDialogState();
-}
-
-class _RenameModelDialogState extends State<_RenameModelDialog> {
-  static final _invalidChars = RegExp(r'[/\\:*?"<>|]');
-  late final TextEditingController _controller;
-  String? _errorText;
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialName);
+    _wasCompleted = widget.step.isCompleted;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!widget.step.isCompleted && mounted) {
+        _controller.expand();
+      }
+    });
+
+    widget.step.addListener(_handleStepChange);
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    widget.step.removeListener(_handleStepChange);
     super.dispose();
+  }
+
+  void _handleStepChange() {
+    if (widget.step.isCompleted && !_wasCompleted) {
+      _wasCompleted = true;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _controller.collapse();
+        }
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(textLocalize('recall_rename_model')),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: InputDecoration(
-          hintText: textLocalize('recall_rename_hint'),
-          errorText: _errorText,
-        ),
-        onChanged: (value) {
-          setState(() {
-            _errorText = _invalidChars.hasMatch(value)
-                ? textLocalize('recall_rename_invalid')
-                : null;
-          });
-        },
+    super.build(context);
+    final toolName = widget.step.toolName;
+    final accentColor = widget.step.isCompleted
+        ? const Color(0xFF3FA66C)
+        : BDDesign.colorMutedBlue;
+    final panelColor = widget.isDark
+        ? const Color(0xFF171D24)
+        : const Color(0xFFF4F8FB);
+    final borderColor = accentColor.withValues(
+      alpha: widget.isDark ? 0.42 : 0.28,
+    );
+
+    return ExpansionTile(
+      controller: _controller,
+      tilePadding: EdgeInsets.zero,
+      minTileHeight: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      collapsedShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(textLocalize('gen_cancel')),
+      leading: widget.step.isCompleted
+          ? const Icon(
+              Icons.task_alt_rounded,
+              color: Color(0xFF3FA66C),
+              size: 20,
+            )
+          : const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+      title: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: panelColor,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: borderColor),
         ),
-        TextButton(
-          onPressed: () {
-            final text = _controller.text.trim();
-            if (text.isEmpty || _invalidChars.hasMatch(text)) return;
-            Navigator.pop(context, text);
-          },
-          child: Text(textLocalize('gen_button')),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '工具调用',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: accentColor,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    toolName == null || toolName.isEmpty ? '执行未命名工具' : toolName,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: widget.textColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              widget.step.isCompleted ? '已完成' : '运行中',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: accentColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+          margin: const EdgeInsets.only(top: 6, left: 2, right: 2, bottom: 8),
+          decoration: BoxDecoration(
+            color: widget.isDark ? const Color(0xFF12171D) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor.withValues(alpha: 0.85)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '调用参数',
+                style: TextStyle(
+                  color: accentColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              HighlightView(
+                widget.step.content.isEmpty ? '{}' : widget.step.content,
+                language: 'json',
+                theme: widget.isDark ? atomOneDarkTheme : atomOneLightTheme,
+                padding: const EdgeInsets.all(6),
+                textStyle: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _AgentAnswerCard extends StatelessWidget {
+  final String markdown;
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+
+  const _AgentAnswerCard({
+    required this.markdown,
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = BDDesign.colorFadedOlive.withValues(
+      alpha: isDark ? 0.42 : 0.28,
+    );
+    final backgroundColor = isDark
+        ? const Color(0xFF1A1F1A)
+        : const Color(0xFFFBFCF7);
+
+    // 最终回答与工具调用分层，避免“过程日志”和“正式回复”视觉上混在一起。
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: BDDesign.colorFadedOlive.withValues(
+              alpha: isDark ? 0.10 : 0.08,
+            ),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.auto_awesome_rounded,
+                size: 16,
+                color: BDDesign.colorFadedOlive,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Agent 回复',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '最终输出',
+                style: TextStyle(
+                  color: hintColor,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          MarkdownBody(
+            data: markdown,
+            styleSheet: MarkdownStyleSheet(
+              p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
+              h1: TextStyle(
+                color: textColor,
+                fontSize: 18,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+              h2: TextStyle(
+                color: textColor,
+                fontSize: 16,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+              ),
+              blockquote: TextStyle(
+                color: hintColor,
+                fontSize: 13,
+                height: 1.5,
+              ),
+              code: TextStyle(
+                color: textColor,
+                fontSize: 12.5,
+                fontFamily: 'monospace',
+              ),
+              codeblockDecoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF131813)
+                    : const Color(0xFFF1F4EA),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: BDDesign.colorFadedOlive.withValues(
+                    alpha: isDark ? 0.28 : 0.18,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

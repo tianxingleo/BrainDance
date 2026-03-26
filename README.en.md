@@ -116,36 +116,15 @@ The system consists of four parts, decoupled through **Supabase**:
     - **Single Image**: Support SAM3D-based single-image 3DGS generation without video.
     - **Understanding**: Call multimodal large models (Qwen-VL) for scene understanding and auto-tagging.
 
-### 🧪 Qwen3 Local QA Fine-tuning (Experimental Track)
+### 🧪 On-Device QA and Edge LLM Fine-tuning
 
-`ai_engine/finetune_qwen3` contains the `Qwen3-1.7B + LoRA` local QA experiments (Part 16-19), including:
+To achieve faster and privacy-preserving spatial retrieval interactions on mobile and edge devices, we have built a local QA pipeline based on Qwen3, bypassing the need for cloud LLMs:
 
-- route-level observability and regression checks
-- `object_lookup` retrieval optimization
-- formatter-based answer stabilization
-- minimal local QA CLI: `local_qa_cli.py`
+- **Edge-Cloud Hybrid RAG**: Combines local quantized models (GGUF) with retrieval augmentation, supporting fast intent understanding and spatial anchor localization.
+- **Scenario-Specific Fine-tuning**: Parameter-Efficient Fine-Tuning (LoRA) for spatial queries, environment descriptions, and multi-turn dialogues, improving inference accuracy in proprietary scenarios while keeping computational costs lightweight.
+- **Local Deployment & Validation**: Implemented Q4/Q5 Importance Matrix (imatrix) quantization and strict zero-leakage evaluation, ensuring stable on-device inference.
 
-Current status:
-
-- experimental/debug track
-- not yet integrated into the production app workflow
-
-Quick commands:
-
-```bash
-# single-turn QA
-python ai_engine/finetune_qwen3/scripts/local_qa_cli.py --question "What did I capture recently?"
-
-# regression
-pytest -q tests/test_part17_object_lookup.py tests/test_part18_formatters.py tests/test_local_qa_cli.py
-```
-
-Docs:
-
-- `ai_engine/finetune_qwen3/README.md`
-- `docs/开发文档/本地问答微调文档补充说明.md`
-
-
+> For comprehensive documentation on model exploration, fine-tuning workflows, benchmarks, and technical evolution records extending from Part 1 to Part 30, please refer to the documentation in `docs/` and the `ai_engine/finetune_qwen3/` directory.
 
 ------
 
@@ -174,7 +153,7 @@ BrainDance/
 │   │   ├── requirements.txt  #   - Python Dependencies
 │   │   └── main.py           #   - Program Entry Point
 │   ├── demo/              #   - Demo Scripts and Test Data
-│   ├── finetune_qwen3/    #   - Qwen3 local QA fine-tuning experimental track (Part16-19)
+│   ├── finetune_qwen3/    #   - Qwen3 local QA fine-tuning track, evaluation & deployment pipeline
 │   ├── models/            #   - AI Model Cache Directory
 │   ├── rag/               #   - RAG Data Processing
 │   └── log/               #   - Log Files
@@ -191,6 +170,7 @@ BrainDance/
 │   └── README.md          #   - Local run and deployment guide
 │
 ├── docs/                  # [Doc] Project Documentation
+│   ├── 04-本地问答与微调/     #   - Local QA Fine-tuning Logs (Part 1-30)
 │   ├── API_DOC.md         #   - API Interface Documentation
 │   ├── BrainDance Project Collaboration Specification and Development Agreement (v1.0).md  #   - Development Specifications
 │   ├── 待办/               #   - TODO Items

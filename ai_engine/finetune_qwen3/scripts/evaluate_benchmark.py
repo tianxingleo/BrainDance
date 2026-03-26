@@ -13,6 +13,8 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from hf_load_utils import safe_from_pretrained
+
 
 NO_ANSWER_PATTERNS = ["暂无相关记录", "暂无", "未见相关记录", "没有相关记录", "不知道", "不清楚"]
 NEGATIVE_MARKERS = ["暂无", "未见", "没有", "未拍到", "没看到", "无", "不存在"]
@@ -257,8 +259,13 @@ def main() -> None:
     args = parse_args()
     benchmark_rows = load_jsonl(Path(args.benchmark_file))
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.model_name,
+        trust_remote_code=True,
+    )
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.model_name,
         dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         trust_remote_code=True,

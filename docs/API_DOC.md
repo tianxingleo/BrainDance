@@ -397,7 +397,11 @@ await supabase
 ## 4. 文件存储 (Storage)
 
 ### 4.1 存储桶配置
-- **Bucket**: `braindance-assets`
+- **Bucket 1**: `braindance-assets`
+- **用途**: 3D 任务素材、中间结果、输出模型
+- **权限**: Public (公开读取)
+- **Bucket 2**: `braindance-models`
+- **用途**: Flutter Recall 本地 AI 下载用的端侧模型发布仓
 - **权限**: Public (公开读取)
 
 ### 4.2 目录结构规范
@@ -428,8 +432,25 @@ braindance-assets/ (Bucket)
 
 > 注：`webgl_poses.json` 与 `output/images/*` 主要由视频流水线（含空间锚点提取）生成，单图任务可能只产出 `point_cloud.*`（后缀取决于 `delivery_format`）。
 
+`braindance-models` 当前目录约定：
+
+```text
+braindance-models/ (Bucket)
+├── catalog/
+│   └── model_catalog.json
+└── releases/
+    ├── qwen3-1.7b-braindance-q5-k-m-imatrix.gguf   # 当前 Flutter 默认模型
+    ├── qwen3-1.7b-braindance-q5-k-m.gguf
+    ├── qwen3-1.7b-braindance-q4-k-m.gguf
+    ├── qwen3-1.7b-braindance-merged/
+    └── qwen3-0.6b-braindance-round1/
+```
+
 ### 4.3 下载链接拼接
 `{Supabase_URL}/storage/v1/object/public/braindance-assets/{user_id}/{scene_id}/output/point_cloud.{ply|splat|ksplat}`
+
+Flutter Recall 本地 AI 当前默认模型下载链接：
+`{Supabase_URL}/storage/v1/object/public/braindance-models/releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf`
 
 ### 4.4 Worker 相关环境变量（压缩/交付）
 

@@ -22,15 +22,8 @@ from typing import Any
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, PeftModel, get_peft_model
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForSeq2Seq,
-    Trainer,
-    TrainingArguments,
-    set_seed,
-)
+
+from hf_load_utils import safe_from_pretrained
 
 
 DEFAULT_TARGET_MODULES = [
@@ -118,7 +111,7 @@ def parse_target_modules(raw: str) -> list[str]:
     return modules or list(DEFAULT_TARGET_MODULES)
 
 
-def apply_chat(tokenizer: AutoTokenizer, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
+def apply_chat(tokenizer: Any, messages: list[dict[str, str]], add_generation_prompt: bool) -> str:
     try:
         return tokenizer.apply_chat_template(
             messages,
@@ -135,7 +128,7 @@ def apply_chat(tokenizer: AutoTokenizer, messages: list[dict[str, str]], add_gen
         )
 
 
-def build_preprocess_fn(tokenizer: AutoTokenizer, cutoff_len: int):
+def build_preprocess_fn(tokenizer: Any, cutoff_len: int):
     def preprocess(example: dict[str, Any]) -> dict[str, Any]:
         messages = example["messages"]
         prompt_text = apply_chat(tokenizer, messages[:-1], add_generation_prompt=True)
@@ -214,6 +207,16 @@ def build_training_spec(args: argparse.Namespace, trainable: int, total: int, st
 
 
 def main() -> None:
+    from peft import LoraConfig, PeftModel, get_peft_model
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        DataCollatorForSeq2Seq,
+        Trainer,
+        TrainingArguments,
+        set_seed,
+    )
+
     args = parse_args()
     set_seed(args.seed)
     output_dir = Path(args.output_dir)
@@ -221,12 +224,17 @@ def main() -> None:
     torch_dtype = resolve_torch_dtype(args.torch_dtype)
     target_modules = parse_target_modules(args.target_modules)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name, trust_remote_code=True)
+    tokenizer = safe_from_pretrained(
+        AutoTokenizer.from_pretrained,
+        args.model_name,
+        trust_remote_code=True,
+    )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = safe_from_pretrained(
+        AutoModelForCausalLM.from_pretrained,
         args.model_name,
         torch_dtype=torch_dtype,
         trust_remote_code=True,

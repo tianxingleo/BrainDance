@@ -80,6 +80,9 @@
 为了让严格集报告也能覆盖当前所有本地可部署版本，补充加入：
 
 - `0.6B LoRA`
+- `0.6B full SFT` round1
+- `0.6B full SFT` round4 `partial_patch_v1`
+- `1.7B full SFT`
 - `1.7B merged`
 - `1.7B Q4_K_M GGUF`
 
@@ -89,21 +92,49 @@
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | 1.7B LoRA（当前主模型） | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.8889 | 0.8281 |
 | 0.6B LoRA | **0.0000** | 0.0556 | **1.0000** | 0.9474 | **0.0000** | 0.0556 | **1.0000** | 0.8281 |
+| 0.6B full SFT（round1） | **0.0000** | 0.0556 | **1.0000** | 0.9474 | **0.0000** | 0.0556 | **1.0000** | **0.9375** |
+| 0.6B full SFT（round4, partial_patch_v1） | 0.0182 | 0.1111 | 0.9818 | 0.8947 | 0.0556 | 0.1111 | **1.0000** | **0.9375** |
+| 1.7B full SFT（round1, lr=8e-6） | **0.0000** | 0.1111 | **1.0000** | 0.8889 | 0.1111 | 0.1111 | 0.8889 | 0.8438 |
 | 1.7B merged | **0.0000** | **0.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | 0.6667 | 0.7812 |
 | 1.7B Q4 GGUF | **0.0000** | 0.0556 | **1.0000** | 0.9474 | **0.0000** | 0.0556 | 0.6667 | 0.7188 |
 
 补充说明：
 
 - `0.6B LoRA` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_lora_gpu1.json`
+- `0.6B full round1` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_full_gpu1.json`
+- `0.6B full round4 patch` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_0p6b_full_round4_partial_patch_v1_gpu1.json`
+- `1.7B full` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_full_gpu1.json`
 - `1.7B merged` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_merged_gpu1.json`
 - `1.7B Q4 GGUF` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_q4_gguf_gpu1.json`
+
+另有一轮更保守的 `1.7B full` 复验：
+
+- `lr=5e-6` 严格集日志：`ai_engine/finetune_qwen3/logs/benchmark_strict_v3_qwen3_1p7b_full_round1_lr5e6_gpu1.json`
+
+该轮虽然把 `natural_style_rate` 提到 `0.9219`，但任务纪律明显退化：
+
+- `partial_hallucination_rate`: `0.1667`
+- `partial_precision`: `0.8333`
+- `partial_false_negative_rate`: `0.1667`
+- `partial_missing_negation_rate`: `0.3889`
+- `must_answer_focus_rate`: `0.6667`
+
+因此不作为主表候选，只保留为 full 支线的保守超参反例。
+
+补充判断：
+
+- `0.6B full round1` 仍然是当前 `0.6B full` 支线的最佳 strict 版本
+- `0.6B full round4 partial_patch_v1` 虽然保住了 `natural_style = 0.9375` 和 `must_answer_focus = 1.0000`，但 `false_no_answer / partial_hallucination / partial_false_negative / partial_missing_negation` 同时回退
+- 因而这轮定向补样不能视作 `0.6B full` 的新最佳点，更不能替代 `0.6B LoRA` 或 `0.6B full round1`
 
 这里最重要的补充观察是：
 
 1. `0.6B LoRA` 在严格集上并没有崩，反而维持了相当强的正确性
-2. `1.7B merged` 在严格集上与当前 `1.7B LoRA` 的任务指标几乎对齐，但体验侧更弱
-3. `1.7B Q4 GGUF` 在严格集上相比原始 benchmark 没有继续大幅恶化，但 `natural_style` 与 `must_answer_focus` 仍弱于非量化版本
-4. 因此从严格集口径看，`Q4` 更接近“正确性基本保住、体验侧回撤”的版本，而不是原始集里那种明显劣化的形态
+2. `0.6B full round1` 在严格集上没有拉高任务风险，且把 `natural_style` 从 `0.8281` 提到了 `0.9375`
+3. `1.7B full` 在严格集上比 `merged` 更自然、`must_answer_focus` 与 `LoRA` 持平，但 `partial_false_negative / partial_missing_negation / partial_precision` 明显落后于 `LoRA`
+4. `1.7B merged` 在严格集上与当前 `1.7B LoRA` 的任务指标几乎对齐，但体验侧更弱
+5. `1.7B Q4 GGUF` 在严格集上相比原始 benchmark 没有继续大幅恶化，但 `natural_style` 与 `must_answer_focus` 仍弱于非量化版本
+6. 因此从严格集口径看，`0.6B full` 更像“风格增强但任务正确性基本打平”的支线版本，`1.7B full` 更像“风格改善但纪律回退”的研究版本，`Q4` 则更接近“正确性基本保住、体验侧回撤”的版本
 
 ### 4.0.2 本地 4 版本图表（严格集新增）
 
@@ -408,6 +439,7 @@ xychart-beta
 
 - `1.7B LoRA`：仍是严格集上的质量上界
 - `0.6B LoRA`：严格集表现比预期更稳，是很强的轻量端侧候选
+- `0.6B full`：严格集任务正确性与 `0.6B LoRA` 基本打平，但自然度明显更高
 - `1.7B merged`：任务正确性和 `1.7B LoRA` 基本对齐，但聚焦度与自然度更弱
 - `1.7B Q4 GGUF`：严格集下正确性还能接受，但体验侧弱于未量化版本
 - `1.7B Q5 + imatrix GGUF`：在 strict 集关键任务指标上已追平 `Q4 GGUF`，自然度更好，是新的量化候选主线
@@ -415,7 +447,7 @@ xychart-beta
 因此当前可以拆成两类判断：
 
 1. 如果目标是**本地质量上界**，还是 `1.7B LoRA / 1.7B merged`
-2. 如果目标是**端侧可部署版本**，当前应优先比较 `0.6B LoRA` 与 `1.7B Q5 + imatrix GGUF`
+2. 如果目标是**端侧可部署版本**，当前应优先比较 `0.6B LoRA / 0.6B full` 与 `1.7B Q5 + imatrix GGUF`
 3. `1.7B Q4 + imatrix GGUF` 不建议继续推进
 
 ## 7. 产物清单
