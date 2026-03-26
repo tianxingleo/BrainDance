@@ -3575,7 +3575,7 @@ export async function runSpatialSearchAgent(
         confidence: 0,
         reason: "当前请求属于模型资产元数据操作",
       },
-      answer: buildAssetAnswer(state) ?? "当前没有生成有效的模型资产结果。",
+      answer: buildAssetAnswer(state, { query }) ?? "当前没有生成有效的模型资产结果。",
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: state.poseSummary

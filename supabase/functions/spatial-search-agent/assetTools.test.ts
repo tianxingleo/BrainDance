@@ -100,3 +100,30 @@ Deno.test("buildAssetAnswer 在 bundle 场景下返回可读的模型概览", ()
       "如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。",
   );
 });
+
+Deno.test("buildAssetAnswer 在推荐问句下只返回前五个推荐模型", () => {
+  const state = createEmptyAssetToolState();
+  state.list = Array.from({ length: 6 }, (_, index) => ({
+    id: `m${index + 1}`,
+    scene_id: `scene-${index + 1}`,
+    display_name: `模型-${index + 1}`,
+    description: null,
+    tags: index < 5 ? ["标签A", `标签${index + 1}`] : [],
+    created_at: `2026-03-${String(20 + index).padStart(2, "0")}T08:00:00Z`,
+  }));
+
+  const answer = buildAssetAnswer(state, {
+    query: "有什么推荐的模型？",
+  });
+
+  assertEquals(
+    answer,
+    "我先从当前候选里推荐这 5 个模型：\n" +
+      "1. 模型-5：标签较完整（标签A、标签5）\n" +
+      "2. 模型-4：标签较完整（标签A、标签4）\n" +
+      "3. 模型-3：标签较完整（标签A、标签3）\n" +
+      "4. 模型-2：标签较完整（标签A、标签2）\n" +
+      "5. 模型-1：标签较完整（标签A、标签1）\n" +
+      "如果你需要更精确的推荐，我可以继续读取其中几个模型的详细摘要再细分。",
+  );
+});

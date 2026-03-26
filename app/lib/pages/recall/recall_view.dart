@@ -142,7 +142,9 @@ extension _RecallPageView on _RecallPageState {
                       ],
                     ),
                   ),
-                  if (_isLoading)
+                  if (_searchMode == RecallSearchMode.agent)
+                    const SliverToBoxAdapter(child: SizedBox(height: 96))
+                  else if (_isLoading)
                     const SliverFillRemaining(
                       hasScrollBody: false,
                       child: Padding(

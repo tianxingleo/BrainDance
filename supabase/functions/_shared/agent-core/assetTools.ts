@@ -591,7 +591,12 @@ function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
   }));
 }
 
-export function buildAssetAnswer(state: AssetToolState): string | null {
+export function buildAssetAnswer(
+  state: AssetToolState,
+  options: { query?: string } = {},
+): string | null {
+  const isRecommendation = isRecommendationQuery(options.query);
+
   if (state.operation) {
     const actionText = state.operation.dry_run ? "预览" : "执行";
     return `已${actionText} ${state.operation.affected_count} 个模型资产的元数据修改。${
@@ -609,7 +614,9 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
     }`;
   }
   if (state.bundle) {
-    return buildBundleAnswer(state.bundle);
+    return isRecommendation
+      ? buildBundleRecommendationAnswer(state.bundle)
+      : buildBundleAnswer(state.bundle);
   }
   if (state.collectionSummary) {
     return `已整理专题“${state.collectionSummary.collection.title}”，当前包含 ${state.collectionSummary.model_count} 个模型。`;
@@ -627,9 +634,95 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
     return `已将 ${state.threadGrouping.model_ids.length} 个模型归入同一记忆线程。`;
   }
   if (state.list) {
-    return buildListAnswer(state.list);
+    return isRecommendation
+      ? buildListRecommendationAnswer(state.list)
+      : buildListAnswer(state.list);
   }
   return null;
+}
+
+function isRecommendationQuery(query?: string): boolean {
+  if (!query) {
+    return false;
+  }
+  const normalized = query.replace(/\s+/g, "");
+  return /推荐|建议|值得看|先看哪|哪些模型好|有什么模型/.test(normalized);
+}
+
+function summarizeRecommendationReason(input: {
+  description?: string | null;
+  tags: string[];
+  poseCount?: number;
+}): string {
+  if (typeof input.poseCount === "number" && input.poseCount >= 12) {
+    return `视角更完整（pose ${input.poseCount} 个）`;
+  }
+  if (input.tags.length >= 2) {
+    return `标签较完整（${input.tags.slice(0, 2).join("、")}）`;
+  }
+  if (input.description?.trim()) {
+    return input.description.trim();
+  }
+  if (typeof input.poseCount === "number" && input.poseCount > 0) {
+    return `已采集 ${input.poseCount} 个 pose`;
+  }
+  return "信息相对完整，适合优先查看";
+}
+
+function rankRecommendationRows<T extends {
+  description?: string | null;
+  tags: string[];
+  created_at: string;
+  pose_count?: number;
+}>(rows: T[]): T[] {
+  return [...rows].sort((left, right) => {
+    const leftScore = (left.pose_count ?? 0) * 10 +
+      left.tags.length * 3 +
+      (left.description?.trim() ? 5 : 0) +
+      Date.parse(left.created_at || "1970-01-01T00:00:00Z") / 1_000_000_000_000;
+    const rightScore = (right.pose_count ?? 0) * 10 +
+      right.tags.length * 3 +
+      (right.description?.trim() ? 5 : 0) +
+      Date.parse(right.created_at || "1970-01-01T00:00:00Z") / 1_000_000_000_000;
+    return rightScore - leftScore;
+  });
+}
+
+function buildBundleRecommendationAnswer(rows: ModelAssetBundle[]): string {
+  if (rows.length === 0) {
+    return "当前没有找到可推荐的模型。";
+  }
+
+  const recommended = rankRecommendationRows(rows).slice(0, 5);
+  const details = recommended.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const reason = summarizeRecommendationReason({
+      description: row.description,
+      tags: row.tags,
+      poseCount: row.pose_count,
+    });
+    return `${index + 1}. ${name}：${reason}`;
+  }).join("\n");
+
+  return `我先推荐这 ${recommended.length} 个模型：\n${details}\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你细分。`;
+}
+
+function buildListRecommendationAnswer(rows: ListedModelAsset[]): string {
+  if (rows.length === 0) {
+    return "当前没有找到可推荐的模型。";
+  }
+
+  const recommended = rankRecommendationRows(rows).slice(0, 5);
+  const details = recommended.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const reason = summarizeRecommendationReason({
+      description: row.description,
+      tags: row.tags,
+    });
+    return `${index + 1}. ${name}：${reason}`;
+  }).join("\n");
+
+  return `我先从当前候选里推荐这 ${recommended.length} 个模型：\n${details}\n如果你需要更精确的推荐，我可以继续读取其中几个模型的详细摘要再细分。`;
 }
 
 function buildBundleAnswer(rows: ModelAssetBundle[]): string {
