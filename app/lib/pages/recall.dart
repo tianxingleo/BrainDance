@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:llamadart/llamadart.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -1710,6 +1712,22 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                             onLoadModel: _loadLocalQnaModel,
                           ),
                         ),
+                        if (_searchMode == RecallSearchMode.agent && _agentChatMessage == null && !_isAgentSearching)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _buildQuickPromptChip('总结刚才的场景', isDark),
+                                  const SizedBox(width: 8),
+                                  _buildQuickPromptChip('找一个会议室资产', isDark),
+                                  const SizedBox(width: 8),
+                                  _buildQuickPromptChip('有什么推荐的模型？', isDark),
+                                ],
+                              ),
+                            ),
+                          ),
                         if (_searchMode == RecallSearchMode.agent)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
@@ -2221,6 +2239,19 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     }
   }
 
+  Widget _buildQuickPromptChip(String text, bool isDark) {
+    return ActionChip(
+      label: Text(text, style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black87)),
+      backgroundColor: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onPressed: () {
+        _searchController.text = text;
+        _handleSearchSubmitted(text);
+      },
+    );
+  }
+
   Widget _buildAgentResultCard(bool isDark, Color textColor) {
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
@@ -2262,7 +2293,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Agent',
+                    _isAgentSearching && _agentChatMessage?.finalAnswer.isEmpty == true && _agentElapsedDuration != null && _agentElapsedDuration!.inSeconds > 3
+                        ? ['正在唤醒神经引擎...', '正在查阅相关资料...', '正在深度思考...'][((_agentElapsedDuration!.inSeconds - 3) ~/ 3) % 3]
+                        : 'Agent',
                     style: TextStyle(
                       color: textColor,
                       fontSize: 14,
@@ -2408,6 +2441,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                         padding: const EdgeInsets.symmetric(vertical: 4.0),
                         child: MarkdownBody(
                           data: step.content,
+                          builders: {'code': _CodeElementBuilder(isDark, context)},
                           styleSheet: MarkdownStyleSheet(
                             p: TextStyle(
                               color: textColor,
@@ -2453,25 +2487,38 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                     } else if (step.type == 'error') {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4.0),
-                        child: Row(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
-                              Icons.error_outline,
-                              color: Colors.red,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                step.content,
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 14,
-                                  height: 1.4,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    step.content,
+                                    style: const TextStyle(color: Colors.red, fontSize: 14, height: 1.4),
+                                  ),
                                 ),
-                              ),
+                              ],
                             ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: const BorderSide(color: Colors.red, width: 1),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                              ),
+                              onPressed: () {
+                                final query = _searchController.text.trim();
+                                if (query.isNotEmpty) {
+                                  _handleSearchSubmitted(query);
+                                }
+                              },
+                              icon: const Icon(Icons.refresh, size: 14),
+                              label: const Text('重试', style: TextStyle(fontSize: 12)),
+                            )
                           ],
                         ),
                       );
@@ -2485,6 +2532,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 const SizedBox(height: 6),
                 MarkdownBody(
                   data: _agentChatMessage!.finalAnswer,
+                  builders: {'code': _CodeElementBuilder(isDark, context)},
                   styleSheet: MarkdownStyleSheet(
                     p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
                     h1: TextStyle(
@@ -3579,6 +3627,88 @@ class _AgentStepTileState extends State<_AgentStepTile>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+class _CodeElementBuilder extends MarkdownElementBuilder {
+  final bool isDark;
+  final BuildContext context;
+
+  _CodeElementBuilder(this.isDark, this.context);
+
+  @override
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    var language = 'plaintext';
+    if (element.attributes['class'] != null) {
+      String lg = element.attributes['class'] as String;
+      if (lg.startsWith('language-')) {
+        language = lg.substring(9);
+      }
+    }
+    final textContent = element.textContent.trim();
+    if (textContent.isEmpty) return null;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF13181E) : const Color(0xFFF1F4EA),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  language,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: textContent));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('代码已复制'), duration: Duration(seconds: 2)),
+                    );
+                  },
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy, size: 14, color: isDark ? Colors.white70 : Colors.black54),
+                      const SizedBox(width: 4),
+                      Text('复制', style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black54)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: HighlightView(
+              textContent,
+              language: language,
+              theme: isDark ? atomOneDarkTheme : atomOneLightTheme,
+              padding: EdgeInsets.zero,
+              textStyle: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            ),
+          ),
+        ],
       ),
     );
   }
