@@ -4,6 +4,9 @@
 
 ## 当前文档
 
+- [LangChain实现现状-2026-03-27.md](./LangChain实现现状-2026-03-27.md)
+  - 新增电脑端 `agent-recall` 调试 CLI 说明。
+  - 重点记录 Flutter 流式协议复现入口、事件打印和候选/工具轨迹调试方式。
 - [LangChain实现现状-2026-03-25.md](./LangChain实现现状-2026-03-25.md)
   - 说明当前仓库中已经落地的 LangChain 相关代码。
   - 区分稳定入口、实验链路、最小可用扩展和正在演进中的能力。
@@ -30,6 +33,7 @@
 - 2026-03-26 已补充 Flutter 首包等待态修复：Recall 页现在会在请求发出后立即展示本地引导状态，消费后端 `ping` 事件把“流式连接已建立”显式展示出来，并在首个远端阶段事件到达前持续更新等待态，避免用户在第一次刷新阶段长时间只看到静止的“连接中”。
 - 2026-03-26 已补充 `spatial_search` 链路级提速：空间检索不再依赖“多轮 LLM 工具调度 + 最终 LLM 裁决”的串行结构，改为“单次意图解析 + 并行检索工具 + 确定性评分选优”，同时去掉 `pose_semantic_search` 内部按行补标签的 N+1 查询。
 - 2026-03-26 已补充空间意图解析超时兜底：`parseSpatialIntent` 现在有 8 秒超时保护，若结构化解析超时或失败，会自动切到规则版意图解析并继续检索，不再长期卡在“正在解析空间意图和时间约束”。
+- 2026-03-27 已新增电脑端调试 CLI：`ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py` 可以直接按 Flutter 的请求体和流式协议调 `agent-recall`，并打印 `status / plan / thought / tool_call / tool_result / message / done`，最终再汇总 `top_candidates`、`tool_trace`、`follow_up` 与 `session_state`，用于不启动 Flutter 时的桌面联调。
 
 ## 2026-03-26 修复记录
 
