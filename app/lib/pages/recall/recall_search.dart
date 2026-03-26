@@ -544,6 +544,7 @@ extension _RecallPageSearch on _RecallPageState {
               MarkdownBody(
                 data: fallbackAnswer,
                 builders: {'code': _CodeElementBuilder(isDark, context)},
+                extensionSet: md.ExtensionSet.gitHubWeb,
               ),
             ],
             if (topCandidates.isNotEmpty) ...[

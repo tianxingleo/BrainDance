@@ -799,6 +799,15 @@ class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
   int _visibleLength = 0;
   String _animatedText = '';
 
+  String _prepareStreamingMarkdown(String text) {
+    if (text.isEmpty) return text;
+    final parts = text.split('```');
+    if (parts.length % 2 == 0) {
+      return '$text\n```';
+    }
+    return text;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -844,10 +853,13 @@ class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
 
   @override
   Widget build(BuildContext context) {
-    final visibleText = _animatedText.substring(0, _visibleLength);
+    final visibleText = _prepareStreamingMarkdown(
+      _animatedText.substring(0, _visibleLength),
+    );
     return MarkdownBody(
       data: visibleText,
       builders: {'code': _CodeElementBuilder(widget.isDark, context)},
+      extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(color: widget.textColor, fontSize: 14, height: 1.6),
         h1: TextStyle(
