@@ -3,6 +3,7 @@ import {
   assertExists,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
+  buildGeneralAssistantFallbackAnswer,
   buildVisualizationActions,
   isAssetDiscoveryQuery,
   isDirectReplyQuery,
@@ -18,7 +19,29 @@ import {
 Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
   assertEquals(isDirectReplyQuery("你好"), true);
   assertEquals(isDirectReplyQuery("谢谢！"), true);
+  assertEquals(isDirectReplyQuery("你是谁"), false);
   assertEquals(isDirectReplyQuery("你好，帮我找一下红色杯子"), false);
+});
+
+Deno.test("buildGeneralAssistantFallbackAnswer 会在无候选时输出通用 Agent 回答", async () => {
+  const fakeModel = {
+    async invoke() {
+      return {
+        content:
+          "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，也能整理模型资产。",
+      };
+    },
+  };
+
+  assertEquals(
+    (
+      await buildGeneralAssistantFallbackAnswer(
+        fakeModel,
+        "你是谁",
+      )
+    ).includes("空间记忆智能管理助手"),
+    true,
+  );
 });
 
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {

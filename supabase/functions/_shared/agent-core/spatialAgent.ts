@@ -1175,6 +1175,61 @@ function buildDirectReplyAnswer(query: string): string {
   return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
 }
 
+function extractModelTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  const textParts = content
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+      if (
+        item && typeof item === "object" && "text" in item &&
+        typeof item.text === "string"
+      ) {
+        return item.text.trim();
+      }
+      return "";
+    })
+    .filter((item) => item.length > 0);
+  return textParts.join("\n").trim();
+}
+
+export async function buildGeneralAssistantFallbackAnswer(
+  model: {
+    invoke(
+      messages: Array<SystemMessage | HumanMessage>,
+    ): Promise<{ content: unknown }>;
+  },
+  query: string,
+  options: SpatialSearchAgentOptions = {},
+): Promise<string> {
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const contextBlock = buildAgentContextBlock(options);
+  const result = await model.invoke([
+    new SystemMessage(
+      [
+        "你是 BrainDance 的空间记忆智能管理助手。",
+        "当用户的问题暂时不适合进入检索、工具调用或当前没有可信候选时，你也必须先以通用 Agent 身份直接回答。",
+        "如果用户在问你是谁、你能做什么、系统如何工作，请自然说明你的身份和能力。",
+        "如果用户问题过于模糊，请告诉用户你能提供的帮助，并引导他补充场景、时间、物体或模型范围。",
+        "不要伪造检索结果，不要假装已经找到了场景或执行了工具。",
+        "回答保持简洁、自然、中文。",
+      ].join("\n"),
+    ),
+    new HumanMessage(
+      `用户问题：${query}\n\n${contextBlock}\n请直接输出给用户的最终回答，不要输出 JSON。`,
+    ),
+  ]);
+  const answer = extractModelTextContent(result.content);
+  return answer || "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。";
+}
+
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
@@ -3255,9 +3310,7 @@ export async function runSpatialSearchAgent(
         confidence: 1,
         reason: "当前输入属于闲聊问候，无需进入检索链路",
       },
-      answer: /谢/.test(query)
-        ? "不客气。"
-        : "你好，我在。你可以直接告诉我想找的物体、位置或场景。",
+      answer: buildDirectReplyAnswer(query),
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: null,
@@ -3515,7 +3568,45 @@ export async function runSpatialSearchAgent(
 
   let selection: SelectionResult;
   if (rankedCandidates.length === 0) {
-    throw new Error("No candidates found");
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "no_candidate_fallback",
+        summary: "当前没有找到可信候选，正在回退为通用 Agent 自然语言回答",
+      },
+    });
+    const fallbackAnswer = await buildGeneralAssistantFallbackAnswer(
+      model,
+      query,
+      options,
+    ).catch(() =>
+      "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想找什么。"
+    );
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前没有可信检索候选，已回退为通用 Agent 自然语言回答。",
+      },
+      answer: fallbackAnswer,
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "未命中可信候选，已回退为通用 Agent 回答。",
+      tool_trace: trace,
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
   }
   selection = buildDeterministicSpatialSelection({
     rankedCandidates,
