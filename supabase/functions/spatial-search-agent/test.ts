@@ -401,3 +401,59 @@ Deno.test("shouldForceAnotherToolRound 在证据充分时返回 false", () => {
 
   assertEquals(shouldContinue, false);
 });
+
+Deno.test("shouldForceAnotherToolRound 在单个高分交叉证据候选时不再强制续轮", () => {
+  const candidates = new Map([
+    ["scene-strong", {
+      modelId: "m-strong",
+      sceneId: "scene-strong",
+      userId: "u1",
+      description: "宿舍书桌上的黑色耳机",
+      objects: ["耳机"],
+      tags: ["书桌", "黑色耳机"],
+      plyPath: "u1/scene-strong/output/point_cloud.ply",
+      previewImgPath: null,
+      createdAt: "2026-03-25T08:00:00Z",
+      metaInfo: {},
+      sourceScores: {
+        pose_semantic_search: 0.91,
+        scene_metadata_search: 0.79,
+      },
+      bestPose: {
+        image_name: "frame_0010.jpg",
+        transform_matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        similarity: 0.91,
+        tag: "黑色耳机近景",
+      },
+    }],
+  ]);
+
+  const shouldContinue = shouldForceAnotherToolRound({
+    intent: {
+      rewrittenQuery: "黑色耳机在哪",
+      targetType: "object",
+      objectHint: "黑色耳机",
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "已经拿到高分候选，只需要进入最终裁决。",
+    },
+    candidates,
+    trace: [
+      {
+        toolName: "pose_semantic_search",
+        args: { query: "黑色耳机在哪" },
+        resultSummary: "pose_semantic_search 返回 1 条候选",
+      },
+      {
+        toolName: "scene_metadata_search",
+        args: { query: "黑色耳机在哪" },
+        resultSummary: "scene_metadata_search 返回 1 条候选",
+      },
+    ],
+  });
+
+  assertEquals(shouldContinue, false);
+});

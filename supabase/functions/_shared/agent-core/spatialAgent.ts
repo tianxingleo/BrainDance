@@ -613,6 +613,19 @@ export type AgentProgressEvent =
     };
   }
   | {
+    event: "plan";
+    data: {
+      title: string;
+      steps: string[];
+    };
+  }
+  | {
+    event: "thought" | "thinking";
+    data: {
+      content: string;
+    };
+  }
+  | {
     event: "tool_call";
     data: {
       name: string;
@@ -987,6 +1000,42 @@ async function emitProgress(
   }
 }
 
+async function emitThought(
+  callbacks: AgentRuntimeCallbacks | undefined,
+  content: string,
+): Promise<void> {
+  const normalized = content.trim();
+  if (!normalized) {
+    return;
+  }
+  await emitProgress(callbacks, {
+    event: "thought",
+    data: {
+      content: normalized,
+    },
+  });
+}
+
+async function emitPlan(
+  callbacks: AgentRuntimeCallbacks | undefined,
+  title: string,
+  steps: string[],
+): Promise<void> {
+  const normalizedSteps = steps
+    .map((step) => step.trim())
+    .filter((step) => step.length > 0);
+  if (!title.trim() && normalizedSteps.length === 0) {
+    return;
+  }
+  await emitProgress(callbacks, {
+    event: "plan",
+    data: {
+      title: title.trim(),
+      steps: normalizedSteps,
+    },
+  });
+}
+
 function normalizeDirectReplyQuery(query: string): string {
   return query
     .trim()
@@ -1016,18 +1065,34 @@ async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
-): Promise<AgentMode> {
+): Promise<{ mode: AgentMode; reasoning: string }> {
   const currentMode = options.currentMode ?? null;
 
   if (isDirectReplyQuery(query)) {
-    return "spatial_search";
+    return {
+      mode: "spatial_search",
+      reasoning: "当前输入是闲聊问候或致谢，直接走空间链路里的自然语言兜底。",
+    };
   }
 
   if (currentMode === "compare") {
-    return "time_compare";
+    return {
+      mode: "time_compare",
+      reasoning: "前端当前模式已经是 compare，直接进入时间对比模式。",
+    };
   }
   if (currentMode === "batch_edit" || currentMode === "collection") {
-    return "asset_metadata";
+    return {
+      mode: "asset_metadata",
+      reasoning: "前端当前模式是批量编辑或集合操作，优先进入资产元数据模式。",
+    };
+  }
+
+  if (shouldPreferHeuristicSpatialRoute(query)) {
+    return {
+      mode: "spatial_search",
+      reasoning: "当前输入是简单空间检索语句，直接走确定性的空间检索路由，避免额外分类轮次。",
+    };
   }
 
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
@@ -1039,7 +1104,10 @@ async function classifyAgentMode(
     new SystemMessage(getRoutePrompt(contextBlock)),
     new HumanMessage(query),
   ]);
-  return result.mode;
+  return {
+    mode: result.mode,
+    reasoning: result.reasoning,
+  };
 }
 
 type DeterministicAssetRenameIntent = {
@@ -2108,12 +2176,21 @@ export function shouldForceAnotherToolRound(input: {
   if (
     intent.targetType === "time" &&
     usedTools.has("recent_scene_search") &&
-    evidence.candidateCount > 0
+    evidence.candidateCount > 0 &&
+    evidence.topScore >= 0.7
   ) {
     return false;
   }
 
-  if (evidence.candidateCount < MIN_AGENT_CANDIDATES) {
+  if (
+    evidence.candidateCount > 0 &&
+    evidence.topScore >= 0.82 &&
+    (evidence.hasMultiSourceEvidence || !hasUnusedPreferredTool)
+  ) {
+    return false;
+  }
+
+  if (evidence.candidateCount === 0) {
     return true;
   }
   if (evidence.topScore < MIN_AGENT_TOP_SCORE) {
@@ -2122,8 +2199,40 @@ export function shouldForceAnotherToolRound(input: {
   if (!evidence.hasMultiSourceEvidence && hasUnusedPreferredTool) {
     return true;
   }
+  if (evidence.candidateCount < MIN_AGENT_CANDIDATES) {
+    return false;
+  }
 
   return false;
+}
+
+function stringifyToolArgs(args: Record<string, unknown>): string {
+  const normalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(normalize);
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => [key, normalize(nested)]),
+      );
+    }
+    return value;
+  };
+
+  return JSON.stringify(normalize(args));
+}
+
+function summarizeEvidenceForHumans(
+  evidence: ReturnType<typeof summarizeCandidateEvidence>,
+): string {
+  const sourceSummary = evidence.hasMultiSourceEvidence
+    ? "已有交叉证据"
+    : "仍缺少交叉证据";
+  return `当前候选 ${evidence.candidateCount} 个，最高分 ${
+    (evidence.topScore * 100).toFixed(1)
+  }%，${sourceSummary}`;
 }
 
 function buildForcedToolCall(input: {
@@ -2317,6 +2426,7 @@ async function executeAgentToolLoop(input: {
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const candidates = new Map<string, SceneCandidate>();
   const trace: ToolTraceEntry[] = [];
+  const seenToolCallSignatures = new Set<string>();
   const agentModel = model.bindTools(tools);
   const { buildAgentContextBlock } = await import("./prompts/context.ts");
   const { getSpatialToolLoopPrompt } = await import(
@@ -2328,16 +2438,28 @@ async function executeAgentToolLoop(input: {
     new SystemMessage(getSpatialToolLoopPrompt(contextBlock)),
     new HumanMessage(JSON.stringify(intent)),
   ];
+  await emitPlan(callbacks, "空间检索计划已生成", [
+    `目标类型：${intent.targetType}；改写后的检索语句：${intent.rewrittenQuery}`,
+    `优先工具顺序：${getPreferredToolOrder(intent).join(" -> ")}`,
+    `停止条件：拿到可信候选，或已有高分证据且不再需要补充交叉来源`,
+  ]);
 
   for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
+    const evidenceBeforeRound = summarizeCandidateEvidence(candidates, intent);
     await emitProgress(callbacks, {
       event: "status",
       data: {
         phase: "spatial_tool_round",
         summary: `正在进行第 ${round + 1} 轮空间检索决策`,
-        detail: `当前已累计 ${candidates.size} 个候选场景`,
+        detail: summarizeEvidenceForHumans(evidenceBeforeRound),
       },
     });
+    await emitThought(
+      callbacks,
+      round === 0
+        ? `先按 ${getPreferredToolOrder(intent)[0] ?? "最相关工具"} 建立第一批候选，再看是否需要补交叉证据。`
+        : `第 ${round + 1} 轮前评估：${summarizeEvidenceForHumans(evidenceBeforeRound)}。`,
+    );
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
@@ -2364,9 +2486,13 @@ async function executeAgentToolLoop(input: {
         data: {
           phase: "spatial_tool_force_continue",
           summary: "当前证据不足，继续补充检索来源",
-          detail: `自动追加 ${forcedToolCall.name} 以补齐候选和交叉证据`,
+          detail: `自动追加 ${forcedToolCall.name}，因为 ${summarizeEvidenceForHumans(summarizeCandidateEvidence(candidates, intent))}`,
         },
       });
+      await emitThought(
+        callbacks,
+        `模型本轮没有继续调用工具，但当前证据还不足以稳定裁决，因此系统自动补一轮 ${forcedToolCall.name}。`,
+      );
 
       messages.push(
         new SystemMessage(
@@ -2378,16 +2504,32 @@ async function executeAgentToolLoop(input: {
       toolCalls = [forcedToolCall];
     }
 
+    let executedAnyTool = false;
     for (const toolCall of toolCalls) {
+      const toolArgs = toolCall.args ?? {};
+      const toolSignature = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
+      if (seenToolCallSignatures.has(toolSignature)) {
+        await emitThought(
+          callbacks,
+          `检测到 ${toolCall.name} 的参数与之前完全相同，继续执行只会重复取回同一批候选，因此本轮停止复读。`,
+        );
+        continue;
+      }
+      seenToolCallSignatures.add(toolSignature);
+      executedAnyTool = true;
       await emitProgress(callbacks, {
         event: "tool_call",
         data: {
           name: toolCall.name,
-          args: toolCall.args ?? {},
-          summary: `开始执行 ${toolCall.name}`,
+          args: toolArgs,
+          summary: `开始执行 ${toolCall.name}，用于验证当前假设`,
           round: round + 1,
         },
       });
+      await emitThought(
+        callbacks,
+        `决策：第 ${round + 1} 轮调用 ${toolCall.name}。判断依据是 ${intent.reasoning}`,
+      );
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
         messages.push(
@@ -2399,7 +2541,7 @@ async function executeAgentToolLoop(input: {
         continue;
       }
 
-      const toolResult = await tool.invoke(toolCall.args);
+      const toolResult = await tool.invoke(toolArgs);
       const resultText = typeof toolResult === "string"
         ? toolResult
         : JSON.stringify(toolResult);
@@ -2407,7 +2549,7 @@ async function executeAgentToolLoop(input: {
       const resultSummary = summarizeToolResult(tool.name, count);
       trace.push({
         toolName: tool.name,
-        args: toolCall.args ?? {},
+        args: toolArgs,
         resultSummary,
       });
       await emitProgress(callbacks, {
@@ -2419,12 +2561,44 @@ async function executeAgentToolLoop(input: {
           round: round + 1,
         },
       });
+      await emitThought(
+        callbacks,
+        `观察：${resultSummary}。${summarizeEvidenceForHumans(summarizeCandidateEvidence(candidates, intent))}。`,
+      );
       messages.push(
         new ToolMessage({
           tool_call_id: toolCall.id ?? toolCall.name,
           content: resultText,
         }),
       );
+    }
+
+    if (!executedAnyTool) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "spatial_tool_stop_duplicate",
+          summary: "本轮工具调用没有新增信息，提前停止空间检索循环",
+        },
+      });
+      break;
+    }
+
+    const evidenceAfterRound = summarizeCandidateEvidence(candidates, intent);
+    if (!shouldForceAnotherToolRound({ intent, candidates, trace })) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "spatial_tool_enough",
+          summary: "当前证据已足够，停止继续试探工具",
+          detail: summarizeEvidenceForHumans(evidenceAfterRound),
+        },
+      });
+      await emitThought(
+        callbacks,
+        `结论：${summarizeEvidenceForHumans(evidenceAfterRound)}，下一步进入最终候选裁决。`,
+      );
+      break;
     }
   }
 
@@ -2442,6 +2616,7 @@ async function executeAssetToolLoop(input: {
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
+  const seenToolCallSignatures = new Set<string>();
   const agentModel = model.bindTools(tools);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -2455,6 +2630,11 @@ async function executeAssetToolLoop(input: {
     new SystemMessage(getAssetToolLoopPrompt(today, contextBlock)),
     new HumanMessage(query),
   ];
+  await emitPlan(callbacks, "资产工具执行计划已生成", [
+    "先确定目标模型范围，再决定读取、预览还是正式写入",
+    `当前执行模式：${options.executionMode ?? "preview"}；preview 下优先 dry-run`,
+    "一旦结果足够支撑回答或预览，就停止追加无效工具轮次",
+  ]);
 
   for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
     await emitProgress(callbacks, {
@@ -2464,6 +2644,12 @@ async function executeAssetToolLoop(input: {
         summary: `正在进行第 ${round + 1} 轮资产工具分析`,
       },
     });
+    await emitThought(
+      callbacks,
+      round === 0
+        ? "先锁定目标模型范围，再决定是否需要执行批量写入预览。"
+        : `第 ${round + 1} 轮继续补齐资产上下文，当前最近有效工具是 ${state.lastToolName ?? "无"}。`,
+    );
     const response = await agentModel.invoke(messages);
     messages.push(response);
 
@@ -2474,16 +2660,32 @@ async function executeAssetToolLoop(input: {
       break;
     }
 
+    let executedAnyTool = false;
     for (const toolCall of toolCalls) {
+      const toolArgs = toolCall.args ?? {};
+      const toolSignature = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
+      if (seenToolCallSignatures.has(toolSignature)) {
+        await emitThought(
+          callbacks,
+          `检测到 ${toolCall.name} 的参数与之前一致，继续执行只会重复返回相同资产结果，因此直接停止续轮。`,
+        );
+        continue;
+      }
+      seenToolCallSignatures.add(toolSignature);
+      executedAnyTool = true;
       await emitProgress(callbacks, {
         event: "tool_call",
         data: {
           name: toolCall.name,
-          args: toolCall.args ?? {},
-          summary: `开始执行 ${toolCall.name}`,
+          args: toolArgs,
+          summary: `开始执行 ${toolCall.name}，用于推进资产分析`,
           round: round + 1,
         },
       });
+      await emitThought(
+        callbacks,
+        `决策：第 ${round + 1} 轮调用 ${toolCall.name}，优先把目标范围和操作预览跑通。`,
+      );
       const tool = toolsByName.get(toolCall.name);
       if (!tool) {
         messages.push(
@@ -2495,7 +2697,7 @@ async function executeAssetToolLoop(input: {
         continue;
       }
 
-      const toolResult = await tool.invoke(toolCall.args);
+      const toolResult = await tool.invoke(toolArgs);
       const resultText = typeof toolResult === "string"
         ? toolResult
         : JSON.stringify(toolResult);
@@ -2503,7 +2705,7 @@ async function executeAssetToolLoop(input: {
       const resultSummary = summarizeToolResult(tool.name, count);
       trace.push({
         toolName: tool.name,
-        args: toolCall.args ?? {},
+        args: toolArgs,
         resultSummary,
       });
       await emitProgress(callbacks, {
@@ -2515,12 +2717,27 @@ async function executeAssetToolLoop(input: {
           round: round + 1,
         },
       });
+      await emitThought(
+        callbacks,
+        `观察：${resultSummary}。当前最近有效工具为 ${tool.name}。`,
+      );
       messages.push(
         new ToolMessage({
           tool_call_id: toolCall.id ?? toolCall.name,
           content: resultText,
         }),
       );
+    }
+
+    if (!executedAnyTool) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "asset_tool_stop_duplicate",
+          summary: "本轮没有新增资产信息，提前停止工具循环",
+        },
+      });
+      break;
     }
   }
 
@@ -3043,10 +3260,12 @@ export async function runSpatialSearchAgent(
   }
 
   let mode: AgentMode;
+  let modeReasoning = "";
   try {
-    mode = await classifyAgentMode(model, query, options);
+    const routeDecision = await classifyAgentMode(model, query, options);
+    mode = routeDecision.mode;
+    modeReasoning = routeDecision.reasoning;
   } catch (error) {
-    throw error;
     await emitProgress(callbacks, {
       event: "status",
       data: {
@@ -3056,14 +3275,20 @@ export async function runSpatialSearchAgent(
       },
     });
     mode = "spatial_search";
+    modeReasoning = "路由模型不可用，因此回退到默认空间检索模式。";
   }
   await emitProgress(callbacks, {
     event: "status",
     data: {
       phase: "route",
       summary: `已完成模式判断：${mode}`,
+      detail: modeReasoning,
     },
   });
+  await emitThought(
+    callbacks,
+    `路由判断：选择 ${mode}，原因是 ${modeReasoning}`,
+  );
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options, callbacks);
@@ -3205,6 +3430,14 @@ export async function runSpatialSearchAgent(
       detail: intent.rewrittenQuery,
     },
   });
+  await emitThought(
+    callbacks,
+    `意图判断：${intent.reasoning}。时间约束：${
+      intent.startTime || intent.endTime
+        ? `${intent.startTime ?? "未设置"} 到 ${intent.endTime ?? "未设置"}`
+        : "未指定"
+    }。`,
+  );
   const tools = [
     await buildPoseTool(supabase, embeddings),
     await buildSceneTool(supabase),

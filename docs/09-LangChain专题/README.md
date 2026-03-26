@@ -23,6 +23,7 @@
 - 2026-03-26 已补充“最新 N 个模型批量改名”确定性兜底：像“把最新三个模型改名为 xxx”这类请求会先按 `created_at` 倒序锁定最近 N 个模型，再走 `batch_patch_model_metadata` 生成预览或正式执行。
 - 2026-03-26 已补充 Agent 多轮续聊协议：共享 Core 现在会返回 `session_state / conversation_summary / follow_up`，Flutter Recall 页会保留最近一轮 Agent 会话，并把“继续输入什么”或快捷回复显式展示出来。
 - 2026-03-26 已补充简单空间问句的确定性兜底：像 `查一下电脑`、`看一下桌上的杯子` 这类短句会优先走规则路由与固定工具顺序，避免因为上游模型 503 导致整个 Agent 看起来像“超时”。
+- 2026-03-26 已补充 Agent 编排可解释性与续轮收敛：共享 Core 现在会额外发送 `plan / thought` 事件，把模式判断、意图判断、每轮为什么继续/停止说清楚；同时会拦截重复工具参数，并在高分候选证据已经足够时提前停止，不再机械追求“至少 3 个候选”。
 - 2026-03-26 已补充 Flutter Agent 流式可视化修复：`agent-recall` 现支持 `text/event-stream` 与 `application/x-ndjson` 双协议，Flutter Recall 页会把 `status / tool_call / tool_result` 固化成步骤时间线，并在 `done` 事件用 `tool_trace` 补齐最终工具轨迹，避免用户只看到最后一句回答。
 - 2026-03-26 已补充 Flutter 首包等待态修复：Recall 页现在会在请求发出后立即展示本地引导状态，消费后端 `ping` 事件把“流式连接已建立”显式展示出来，并在首个远端阶段事件到达前持续更新等待态，避免用户在第一次刷新阶段长时间只看到静止的“连接中”。
 
