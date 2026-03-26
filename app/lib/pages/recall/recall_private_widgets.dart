@@ -43,6 +43,7 @@ class _AgentProcessPanel extends StatefulWidget {
 
 class _AgentProcessPanelState extends State<_AgentProcessPanel> {
   final ScrollController _scrollController = ScrollController();
+  static const int _maxStatusSteps = 8;
 
   @override
   void initState() {
@@ -87,12 +88,12 @@ class _AgentProcessPanelState extends State<_AgentProcessPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final steps = widget.chatMessage.steps;
+    final steps = _buildDisplaySteps(widget.chatMessage.steps);
     final shouldCollapse =
         widget.chatMessage.isProcessCollapsed &&
         !widget.isSearching &&
         steps.isNotEmpty;
-    final summaryLabel = steps.isEmpty ? '等待执行步骤' : '查看 ${steps.length} 个执行步骤';
+    final summaryLabel = steps.isEmpty ? '等待关键步骤' : '查看 ${steps.length} 个关键步骤';
     final panelColor = widget.isDark
         ? const Color(0xFF10161F)
         : const Color(0xFFF6F9FC);
@@ -179,6 +180,49 @@ class _AgentProcessPanelState extends State<_AgentProcessPanel> {
         ),
       ),
     );
+  }
+
+  List<AgentStep> _buildDisplaySteps(List<AgentStep> rawSteps) {
+    final filtered = <AgentStep>[];
+
+    for (final step in rawSteps) {
+      if (step.type == 'thought') {
+        continue;
+      }
+
+      if (step.type == 'status') {
+        final title = step.compactTitle.trim();
+        if (title.isEmpty) {
+          continue;
+        }
+        if (filtered.isNotEmpty) {
+          final last = filtered.last;
+          if (last.type == 'status' && last.compactTitle.trim() == title) {
+            filtered[filtered.length - 1] = step;
+            continue;
+          }
+        }
+      }
+
+      filtered.add(step);
+    }
+
+    var statusCount = filtered.where((step) => step.type == 'status').length;
+    if (statusCount <= _maxStatusSteps) {
+      return filtered;
+    }
+
+    final trimmed = <AgentStep>[];
+    for (final step in filtered.reversed) {
+      if (step.type == 'status') {
+        if (statusCount > _maxStatusSteps) {
+          statusCount -= 1;
+          continue;
+        }
+      }
+      trimmed.add(step);
+    }
+    return trimmed.reversed.toList(growable: false);
   }
 }
 
