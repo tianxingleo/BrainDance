@@ -152,12 +152,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
     if (hours > 0) {
-      return '$hours小时${minutes.toString().padLeft(2, '0')}分${seconds.toString().padLeft(2, '0')}秒';
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     if (duration.inMinutes > 0) {
-      return '${duration.inMinutes}分${seconds.toString().padLeft(2, '0')}秒';
+      return '${duration.inMinutes}:${seconds.toString().padLeft(2, '0')}';
     }
-    return '${duration.inSeconds}秒';
+    return '${duration.inSeconds}s';
   }
 
   String? get _agentElapsedLabel {
@@ -179,10 +179,15 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         _isAgentSearching = false;
         _finishAgentRunTracking();
         _agentChatMessage?.isProcessCollapsed = false;
-        _agentChatMessage?.liveStatus = '已停止 Agent 执行';
-        _agentChatMessage?.addSummary('用户手动停止了本次 Agent 执行');
+        _agentChatMessage?.liveStatus = textLocalize('agent_status_stopped');
+        _agentChatMessage?.addSummary(
+          textLocalize('agent_status_stopped_summary'),
+        );
         _agentChatMessage?.addStep(
-          AgentStep(type: 'error', content: '🚫 用户已强行中断 Agent'),
+          AgentStep(
+            type: 'error',
+            content: textLocalize('agent_status_force_interrupted'),
+          ),
         );
       });
     }
@@ -226,7 +231,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
     if (followUp != null && followUp.message.trim().isNotEmpty) {
       _agentChatMessage!.liveStatus = followUp.message.trim();
     } else if (_agentChatMessage!.finalAnswer.isNotEmpty) {
-      _agentChatMessage!.liveStatus = '最终回答已生成';
+      _agentChatMessage!.liveStatus = textLocalize(
+        'agent_status_final_answer_ready',
+      );
     }
   }
 
@@ -289,7 +296,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       final title = payload['title']?.toString() ?? '';
       final stepsStr = (payload['steps'] as List?)?.join('\n') ?? '';
       final content = 'Plan: $title\n$stepsStr'.trim();
-      _updateAgentLiveStatus(title.isEmpty ? '已生成执行计划' : title);
+      _updateAgentLiveStatus(
+        title.isEmpty ? textLocalize('agent_status_plan_ready') : title,
+      );
       _agentChatMessage!.addStep(AgentStep(type: 'thought', content: content));
       return;
     }
@@ -313,8 +322,11 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           : payload['args']?.toString() ?? '';
       final summary =
           payload['summary']?.toString() ??
-          '开始执行 ${toolName.isEmpty ? '工具' : toolName}';
-      _updateAgentLiveStatus(summary, detail: '等待工具返回结果');
+          '${textLocalize('agent_status_tool_start')} ${toolName.isEmpty ? textLocalize('agent_status_tool_unnamed') : toolName}';
+      _updateAgentLiveStatus(
+        summary,
+        detail: textLocalize('agent_status_waiting_tool_result'),
+      );
       _agentChatMessage!.addStep(
         AgentStep(type: 'tool_call', toolName: toolName, content: argsStr),
       );
@@ -323,7 +335,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
 
     if (event == 'tool_result' && payload is Map) {
       final name = payload['name']?.toString() ?? '';
-      final summary = payload['summary']?.toString() ?? '工具已返回结果';
+      final summary =
+          payload['summary']?.toString() ??
+          textLocalize('agent_status_tool_result_ready');
       final lastTool = _findLastToolStep(name);
       if (lastTool != null) {
         final existing = lastTool.content.trim();
@@ -351,7 +365,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
         return;
       }
       _agentChatMessage!.finalAnswer += delta;
-      _agentChatMessage!.liveStatus = '正在生成最终回答';
+      _agentChatMessage!.liveStatus = textLocalize(
+        'agent_status_generating_final_answer',
+      );
       return;
     }
 
@@ -365,7 +381,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       } else if (payload != null) {
         errorMsg = payload.toString();
       }
-      _updateAgentLiveStatus('Agent 执行失败', detail: errorMsg);
+      _updateAgentLiveStatus(
+        textLocalize('agent_status_execution_failed'),
+        detail: errorMsg,
+      );
       _agentChatMessage!.addStep(AgentStep(type: 'error', content: errorMsg));
       return;
     }
@@ -1980,7 +1999,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _agentResult = null;
       _agentChatMessage = ChatMessage(
         isUser: false,
-        liveStatus: '正在连接 Agent...',
+        liveStatus: textLocalize('agent_status_connecting'),
       );
     });
     _startAgentRunTracking();
@@ -2008,7 +2027,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _finishAgentRunTracking();
         });
         _rememberAgentResponse(trimmedQuery, result);
-        _agentChatMessage!.addSummary('当前环境不支持流式事件，已回退到一次性回答');
+        _agentChatMessage!.addSummary(
+          textLocalize('agent_status_single_response_fallback'),
+        );
         _completeAgentRun();
       } catch (ex) {
         if (!mounted) return;
@@ -2016,12 +2037,15 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
-        TDToast.showText('Agent 检索失败：$ex', context: context);
+        TDToast.showText(
+          '${textLocalize('agent_search_failed')}: $ex',
+          context: context,
+        );
       }
     }
 
     try {
-      _updateAgentLiveStatus('正在发起 Agent 流式请求');
+      _updateAgentLiveStatus(textLocalize('agent_status_request_started'));
       final stream = AgentRecallService().queryStream(
         trimmedQuery,
         sessionId: _agentSessionId,
@@ -2054,8 +2078,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           setState(() {
             _isAgentSearching = false;
           });
-          _updateAgentLiveStatus('流式连接失败，准备回退到普通请求', detail: '$e');
-          TDToast.showText('Agent 检索流式失败 (尝试回退)：$e', context: context);
+          _updateAgentLiveStatus(
+            textLocalize('agent_status_stream_fallback'),
+            detail: '$e',
+          );
+          TDToast.showText(
+            '${textLocalize('agent_stream_failed')}: $e',
+            context: context,
+          );
           fallback();
         },
         onDone: () {
@@ -2075,8 +2105,14 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       setState(() {
         _isAgentSearching = false;
       });
-      _updateAgentLiveStatus('流式启动失败，准备回退到普通请求', detail: '$e');
-      TDToast.showText('Agent 流启动失败 (尝试回退)：$e', context: context);
+      _updateAgentLiveStatus(
+        textLocalize('agent_status_stream_start_fallback'),
+        detail: '$e',
+      );
+      TDToast.showText(
+        '${textLocalize('agent_stream_start_failed')}: $e',
+        context: context,
+      );
       fallback();
     }
   }
@@ -2152,7 +2188,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_rag');
       case RecallSearchMode.agent:
-        return 'Agent 检索';
+        return textLocalize('recall_agent_rag');
     }
   }
 
@@ -2173,7 +2209,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       case RecallSearchMode.localAi:
         return textLocalize('recall_local_ai_scope');
       case RecallSearchMode.agent:
-        return '空间检索 Agent · 直接带你去看';
+        return textLocalize('recall_agent_scope');
     }
   }
 
@@ -2188,7 +2224,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
           (followUp.inputPlaceholder?.trim().isNotEmpty ?? false)) {
         return followUp.inputPlaceholder!.trim();
       }
-      return '输入空间问题，例如"厨房在哪里"';
+      return textLocalize('recall_agent_hint');
     }
     return textLocalize('recall_search_hint');
   }
@@ -2264,7 +2300,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       return BDPanelCard(
         padding: const EdgeInsets.all(16),
         child: Text(
-          '输入问题后按回车，Agent 将为你检索空间并定位视角。',
+          textLocalize('recall_agent_panel_hint'),
           style: TextStyle(color: hintColor, fontSize: 13),
         ),
       );
@@ -2294,8 +2330,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                   const SizedBox(width: 8),
                   Text(
                     _isAgentSearching && _agentChatMessage?.finalAnswer.isEmpty == true && _agentElapsedDuration != null && _agentElapsedDuration!.inSeconds > 3
-                        ? ['正在唤醒神经引擎...', '正在查阅相关资料...', '正在深度思考...'][((_agentElapsedDuration!.inSeconds - 3) ~/ 3) % 3]
-                        : 'Agent',
+                        ? [
+                            textLocalize('agent_status_warming_up'),
+                            textLocalize('agent_status_reviewing_context'),
+                            textLocalize('agent_status_deep_thinking'),
+                          ][((_agentElapsedDuration!.inSeconds - 3) ~/ 3) % 3]
+                        : textLocalize('recall_agent_rag'),
                     style: TextStyle(
                       color: textColor,
                       fontSize: 14,
@@ -2322,8 +2362,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                       ),
                       child: Text(
                         _isAgentSearching
-                            ? '已运行 $elapsedLabel'
-                            : '耗时 $elapsedLabel',
+                            ? textLocalize(
+                                'agent_elapsed_running',
+                              ).replaceAll('{duration}', elapsedLabel)
+                            : textLocalize(
+                                'agent_elapsed_finished',
+                              ).replaceAll('{duration}', elapsedLabel),
                         style: TextStyle(
                           color: hintColor,
                           fontSize: 11.5,
@@ -2350,7 +2394,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                         ),
                         onPressed: _stopAgentSearch,
                         icon: const Icon(Icons.stop_circle_outlined, size: 14),
-                        label: const Text('停止', style: TextStyle(fontSize: 12)),
+                        label: Text(
+                          textLocalize('agent_action_stop'),
+                          style: const TextStyle(fontSize: 12),
+                        ),
                       ),
                     ),
                   ],
@@ -2400,8 +2447,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                               const SizedBox(height: 4),
                               Text(
                                 _isAgentSearching
-                                    ? 'Agent 已运行 $elapsedLabel'
-                                    : '本次 Agent 总耗时 $elapsedLabel',
+                                    ? textLocalize(
+                                        'agent_elapsed_running',
+                                      ).replaceAll('{duration}', elapsedLabel)
+                                    : textLocalize(
+                                        'agent_elapsed_finished',
+                                      ).replaceAll('{duration}', elapsedLabel),
                                 style: TextStyle(
                                   color: hintColor,
                                   fontSize: 11.5,
@@ -2841,7 +2892,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
                 RecallSearchMode.localAi => textLocalize(
                   'recall_local_ai_empty',
                 ),
-                RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
+                RecallSearchMode.agent => textLocalize('recall_agent_empty'),
               },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,
@@ -3560,7 +3611,7 @@ class _AgentStepTileState extends State<_AgentStepTile>
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  '调用工具：$toolName',
+                  '${textLocalize('agent_status_tool_call')}: $toolName',
                   style: TextStyle(
                     fontSize: 14, // 与回答文字大小差不多
                     color: textColor,
@@ -3603,7 +3654,7 @@ class _AgentStepTileState extends State<_AgentStepTile>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '调用参数',
+                    textLocalize('agent_status_tool_args'),
                     style: TextStyle(
                       color: hintColor,
                       fontSize: 12,
@@ -3684,14 +3735,23 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: textContent));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('代码已复制'), duration: Duration(seconds: 2)),
+                      SnackBar(
+                        content: Text(textLocalize('agent_action_code_copied')),
+                        duration: const Duration(seconds: 2),
+                      ),
                     );
                   },
                   child: Row(
                     children: [
                       Icon(Icons.copy, size: 14, color: isDark ? Colors.white70 : Colors.black54),
                       const SizedBox(width: 4),
-                      Text('复制', style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black54)),
+                      Text(
+                        textLocalize('agent_action_copy'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
                     ],
                   ),
                 ),

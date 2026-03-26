@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
 
 // ── Data models ──────────────────────────────────────────────
@@ -476,12 +477,12 @@ class AgentRecallService {
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
-      throw Exception('查询语句不能为空');
+      throw Exception(textLocalize('agent_error_empty_query'));
     }
 
     final baseUrl = SupabaseConfig.url.trim();
     if (baseUrl.isEmpty) {
-      throw Exception('未配置 SUPABASE_URL，无法建立 Agent 流式连接');
+      throw Exception(textLocalize('agent_error_missing_supabase_url'));
     }
 
     // 构造 Edge Function URL
@@ -585,7 +586,7 @@ class AgentRecallService {
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
-      throw Exception('查询语句不能为空');
+      throw Exception(textLocalize('agent_error_empty_query'));
     }
 
     try {
@@ -608,7 +609,7 @@ class AgentRecallService {
 
       final data = _decodeInvokeData(response.data);
       if (data is! Map) {
-        throw Exception('agent-recall 返回格式错误');
+        throw Exception(textLocalize('agent_error_bad_response'));
       }
 
       if (data['error'] != null) {
@@ -716,13 +717,16 @@ class AgentRecallService {
       return data.trim();
     }
     if (status == 503) {
-      return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
+      return textLocalize('agent_error_unavailable');
     }
     if (status == 502 || status == 504) {
-      return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
+      return textLocalize('agent_error_upstream');
     }
     if (status != null) {
-      return 'agent-recall 调用失败（HTTP $status）';
+      return textLocalize('agent_error_http').replaceAll(
+        '{status}',
+        status.toString(),
+      );
     }
     return error.message ?? error.toString();
   }
@@ -747,12 +751,15 @@ class AgentRecallService {
         return error.reasonPhrase!;
       }
       if (error.status == 503) {
-        return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
+        return textLocalize('agent_error_unavailable');
       }
       if (error.status == 502 || error.status == 504) {
-        return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
+        return textLocalize('agent_error_upstream');
       }
-      return 'agent-recall 调用失败（HTTP ${error.status}）';
+      return textLocalize('agent_error_http').replaceAll(
+        '{status}',
+        error.status.toString(),
+      );
     }
 
     return error.toString();
