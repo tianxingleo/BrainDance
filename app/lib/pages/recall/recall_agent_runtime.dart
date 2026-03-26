@@ -56,11 +56,6 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     return _formatAgentElapsed(duration);
   }
 
-  String? _agentSessionId;
-  String? _agentConversationSummary;
-  AgentSessionState? _agentSessionState;
-  String? _agentLatestSubmittedQuery;
-
   void _stopAgentSearch() {
     if (_isAgentSearching) {
       _agentStreamSubscription?.cancel();
