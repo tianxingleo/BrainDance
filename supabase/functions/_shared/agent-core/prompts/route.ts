@@ -33,6 +33,9 @@ Assistant: mode -> asset_metadata, reasoning -> "用户要求修改选中模型�
 User: "对比一下这 4 个模型的标签和 pose 数量"
 Assistant: mode -> asset_metadata, reasoning -> "用户在进行多个模型元数据的对比和分析，这属于资产元数据操作。"
 
+User: "请你找一下有没有重名的模型"
+Assistant: mode -> asset_metadata, reasoning -> "用户在做模型资产盘点和重复命名分析，属于资产元数据模式。"
+
 User: "帮我比较这个房间两个月前和现在有什么变化"
 Assistant: mode -> time_compare, reasoning -> "用户在做跨时间窗口的变化比较，应进入时间对比模式。"
 

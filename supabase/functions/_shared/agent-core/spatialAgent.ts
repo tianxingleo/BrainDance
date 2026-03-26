@@ -16,7 +16,7 @@ import {
   buildBatchPatchModelMetadataTool,
   buildCompareModelAssetsTool,
   buildGetModelAssetBundleTool,
-  buildListModelAssetsTool,
+  buildReadModelAssetsTool,
   buildRenameModelAssetTool,
   collectAssetToolResult,
   type CompareModelAssetsResult,
@@ -1247,10 +1247,26 @@ type DeterministicAssetLookupIntent = {
   limit: number;
 };
 
+export function shouldUseDeterministicAssetLookup(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    /重名|同名|重复|冲突|统计|多少个|哪些|推荐|比较|对比|分析|盘点|汇总/
+      .test(normalized)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function parseDeterministicAssetLookupIntent(
   query: string,
 ): DeterministicAssetLookupIntent | null {
-  if (!isAssetDiscoveryQuery(query)) {
+  if (!isAssetDiscoveryQuery(query) || !shouldUseDeterministicAssetLookup(query)) {
     return null;
   }
 
@@ -1624,7 +1640,7 @@ async function runDeterministicAssetRenameFlow(input: {
   const { supabase, options, callbacks } = input;
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
-  const listTool = buildListModelAssetsTool(supabase, {
+  const listTool = buildReadModelAssetsTool(supabase, {
     selectedModelIds: options.selectedModelIds,
   });
   const renameTool = buildRenameModelAssetTool(supabase, {
@@ -1650,6 +1666,7 @@ async function runDeterministicAssetRenameFlow(input: {
 
   if (intent.target.kind === "latest") {
     const listArgs = {
+      mode: "list",
       modelIds: [],
       sceneIds: [],
       tags: [],
@@ -1872,10 +1889,11 @@ async function runDeterministicAssetLookupFlow(input: {
   const { supabase, options, callbacks } = input;
   const trace: ToolTraceEntry[] = [];
   const state = createEmptyAssetToolState();
-  const listTool = buildListModelAssetsTool(supabase, {
+  const listTool = buildReadModelAssetsTool(supabase, {
     selectedModelIds: options.selectedModelIds,
   });
   const listArgs = {
+    mode: "list",
     modelIds: [],
     sceneIds: [],
     tags: [],
@@ -3725,7 +3743,7 @@ export async function runSpatialSearchAgent(
     }
 
     const assetTools = [
-      buildListModelAssetsTool(supabase, {
+      buildReadModelAssetsTool(supabase, {
         selectedModelIds: options.selectedModelIds,
       }),
       buildRenameModelAssetTool(supabase, {

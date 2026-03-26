@@ -60,6 +60,12 @@ export type CompareModelAssetsResult = {
   };
 };
 
+export type DuplicateModelNameGroup = {
+  display_name: string;
+  count: number;
+  rows: ListedModelAsset[];
+};
+
 export type AssetOperationResult = {
   tool_name: string;
   dry_run: boolean;
@@ -82,6 +88,7 @@ export type AssetToolState = {
   list: ListedModelAsset[] | null;
   bundle: ModelAssetBundle[] | null;
   comparison: CompareModelAssetsResult | null;
+  duplicateNames: DuplicateModelNameGroup[] | null;
   operation: AssetOperationResult | null;
   poseSummary: PoseSummary | null;
   relatedModels: RelatedModelSummary[] | null;
@@ -99,7 +106,8 @@ type AssetToolRuntimeOptions = {
   allowWrite?: boolean;
 };
 
-const listModelAssetsSchema = z.object({
+const readModelAssetsSchema = z.object({
+  mode: z.enum(["list", "duplicate_display_name"]).default("list"),
   modelIds: z.array(z.string().uuid()).default([]),
   sceneIds: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
@@ -198,6 +206,12 @@ const compareModelAssetsResultSchema = z.object({
   }),
 });
 
+const duplicateModelNameGroupSchema = z.object({
+  display_name: z.string(),
+  count: z.number().int().min(2),
+  rows: z.array(listedModelAssetSchema),
+});
+
 const assetOperationSchema = z.object({
   tool_name: z.string(),
   dry_run: z.boolean(),
@@ -292,6 +306,10 @@ const assetToolResultSchema = z.discriminatedUnion("kind", [
     diff: compareModelAssetsResultSchema.shape.diff,
   }),
   z.object({
+    kind: z.literal("duplicate_model_names"),
+    groups: z.array(duplicateModelNameGroupSchema),
+  }),
+  z.object({
     kind: z.literal("asset_operation"),
     operation: assetOperationSchema,
   }),
@@ -338,6 +356,57 @@ function dedupeStrings(values: string[]): string[] {
 
 function escapeIlike(value: string): string {
   return value.replace(/[%_,]/g, " ").trim();
+}
+
+export function normalizeAssetSearchKeywords(query: string): string[] {
+  const normalized = escapeIlike(query)
+    .toLowerCase()
+    .replace(/帮我|请|麻烦|我想|想找|给我|来个|找一下|找个|找一个|查一下|查下|搜一下|搜下|看一下|看下|找/g, " ")
+    .replace(/相关的|相关|类似的|类似|同类的|同类|风格的|风格|主题的|主题|有关的|有关|关于/g, " ")
+    .replace(/模型资产|资产|模型/g, " ")
+    .replace(/[，。！？!?,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return [];
+  }
+
+  const coarseTokens = normalized
+    .split(" ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const compact = normalized.replace(/\s+/g, "");
+  const fineTokens = compact.length >= 2
+    ? compact.split(/的+/).map((item) => item.trim()).filter((item) =>
+      item.length >= 2
+    )
+    : [];
+
+  return dedupeStrings([...coarseTokens, ...fineTokens]).filter((item) =>
+    item.length >= 2
+  );
+}
+
+export function matchesAssetSearchQuery(
+  query: string,
+  row: Pick<ModelAssetRow, "scene_id" | "display_name" | "description" | "tags" | "objects">,
+): boolean {
+  const keywords = normalizeAssetSearchKeywords(query);
+  if (keywords.length === 0) {
+    return true;
+  }
+
+  const haystack = [
+    row.scene_id,
+    row.display_name ?? "",
+    row.description ?? "",
+    ...safeArray(row.tags),
+    ...safeArray(row.objects),
+  ].join(" ").toLowerCase();
+
+  return keywords.every((keyword) => haystack.includes(keyword));
 }
 
 function normalizeMetaInfo(value: unknown): Record<string, unknown> {
@@ -613,6 +682,16 @@ export function buildAssetAnswer(
         : "这些模型没有稳定的共同标签。"
     }`;
   }
+  if (state.duplicateNames) {
+    if (state.duplicateNames.length === 0) {
+      return "当前没有发现重名的模型。";
+    }
+    const details = state.duplicateNames.slice(0, 5).map((group, index) => {
+      const scenes = group.rows.slice(0, 3).map((row) => row.scene_id).join("、");
+      return `${index + 1}. ${group.display_name}：重复 ${group.count} 次${scenes ? `（scene: ${scenes}）` : ""}`;
+    }).join("\n");
+    return `当前发现 ${state.duplicateNames.length} 组重名模型：\n${details}\n如果你需要，我可以继续展开这些重名模型的详细摘要。`;
+  }
   if (state.bundle) {
     return isRecommendation
       ? buildBundleRecommendationAnswer(state.bundle)
@@ -766,15 +845,43 @@ function buildListAnswer(rows: ListedModelAsset[]): string {
   return `${intro}\n${details}\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`;
 }
 
-export function buildListModelAssetsTool(
+function buildDuplicateNameGroups(
+  rows: ModelAssetRow[],
+  limit: number,
+): DuplicateModelNameGroup[] {
+  const grouped = new Map<string, ModelAssetRow[]>();
+  for (const row of rows) {
+    const displayName = row.display_name?.trim();
+    if (!displayName) continue;
+    const bucket = grouped.get(displayName) ?? [];
+    bucket.push(row);
+    grouped.set(displayName, bucket);
+  }
+
+  return [...grouped.entries()]
+    .map(([displayName, bucket]) => ({
+      display_name: displayName,
+      count: bucket.length,
+      rows: summarizeListRows(
+        bucket.sort((left, right) =>
+          right.created_at.localeCompare(left.created_at)
+        ),
+      ),
+    }))
+    .filter((group) => group.count >= 2)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, limit);
+}
+
+export function buildReadModelAssetsTool(
   supabase: SupabaseClient,
   options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
-    name: "list_model_assets",
+    name: "read_model_assets",
     description:
-      "列出模型资产候选。适合在批量改名、批量打标签、按时间筛选前先确认候选集合。",
-    schema: listModelAssetsSchema,
+      "通用模型资产读库工具。可用于按关键词/时间/标签读取资产列表，也可用于重名模型这类只读分析。",
+    schema: readModelAssetsSchema,
     func: async (input) => {
       let builder = supabase
         .from("model_assets")
@@ -813,16 +920,14 @@ export function buildListModelAssetsTool(
         );
       }
       if (input.query.trim()) {
-        const keyword = escapeIlike(input.query).toLowerCase();
-        rows = rows.filter((row) =>
-          [
-            row.scene_id,
-            row.display_name ?? "",
-            row.description ?? "",
-            ...safeArray(row.tags),
-            ...safeArray(row.objects),
-          ].join(" ").toLowerCase().includes(keyword)
-        );
+        rows = rows.filter((row) => matchesAssetSearchQuery(input.query, row));
+      }
+
+      if (input.mode === "duplicate_display_name") {
+        return JSON.stringify({
+          kind: "duplicate_model_names",
+          groups: buildDuplicateNameGroups(rows, input.limit),
+        });
       }
 
       return JSON.stringify({
@@ -996,6 +1101,7 @@ export function createEmptyAssetToolState(): AssetToolState {
     list: null,
     bundle: null,
     comparison: null,
+    duplicateNames: null,
     operation: null,
     poseSummary: null,
     relatedModels: null,
@@ -1027,6 +1133,10 @@ export function collectAssetToolResult(
       diff: parsed.diff,
     };
     return state.comparison.rows.length;
+  }
+  if (parsed.kind === "duplicate_model_names") {
+    state.duplicateNames = parsed.groups;
+    return state.duplicateNames.length;
   }
   if (parsed.kind === "asset_operation" && parsed.operation) {
     state.operation = parsed.operation;
