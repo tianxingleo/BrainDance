@@ -1,6 +1,25 @@
 part of '../recall.dart';
 
 extension _RecallPageAgentRuntime on _RecallPageState {
+  void _resetAgentUiState({bool preserveSession = true}) {
+    _agentStreamSubscription?.cancel();
+    _agentStreamSubscription = null;
+    _agentElapsedTimer?.cancel();
+    _agentElapsedTimer = null;
+    _agentRunStartedAt = null;
+    _agentRunFinishedAt = null;
+    _agentLatestSubmittedQuery = null;
+    _isAgentSearching = false;
+    _agentResult = null;
+    _agentChatMessage = null;
+
+    if (!preserveSession) {
+      _agentSessionId = null;
+      _agentConversationSummary = null;
+      _agentSessionState = null;
+    }
+  }
+
   void _startAgentRunTracking() {
     _agentRunStartedAt = DateTime.now();
     _agentRunFinishedAt = null;
@@ -124,11 +143,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     }
 
     _agentChatMessage!.addStep(
-      AgentStep(
-        type: 'status',
-        content: content,
-        isCompleted: isCompleted,
-      ),
+      AgentStep(type: 'status', content: content, isCompleted: isCompleted),
     );
   }
 

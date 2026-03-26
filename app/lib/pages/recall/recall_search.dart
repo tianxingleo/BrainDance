@@ -5,6 +5,9 @@ extension _RecallPageSearch on _RecallPageState {
     final normalizedQuery = query.trim();
     if (normalizedQuery.isEmpty) {
       _lastSearchKey = null;
+      if (_searchMode == RecallSearchMode.agent) {
+        _resetAgentUiState();
+      }
       if (!mounted) return;
       setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
@@ -12,10 +15,6 @@ extension _RecallPageSearch on _RecallPageState {
           _localAnswer = '';
           _localReasoning = '';
           _localContextPreview = '';
-        }
-        if (_searchMode == RecallSearchMode.agent) {
-          _agentResult = null;
-          _agentChatMessage = null;
         }
         _isLoading = false;
       });
@@ -388,11 +387,7 @@ extension _RecallPageSearch on _RecallPageState {
         _localContextPreview = '';
       }
       if (mode != RecallSearchMode.agent) {
-        _agentResult = null;
-        _agentChatMessage = null;
-        _agentSessionId = null;
-        _agentConversationSummary = null;
-        _agentSessionState = null;
+        _resetAgentUiState(preserveSession: false);
       }
     });
     final keyword = _searchController.text.trim();
@@ -448,10 +443,9 @@ extension _RecallPageSearch on _RecallPageState {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
     final elapsedLabel = _agentElapsedLabel;
+    final chatMessage = _agentChatMessage;
 
-    if (_agentChatMessage == null &&
-        _agentResult == null &&
-        !_isAgentSearching) {
+    if (chatMessage == null && _agentResult == null && !_isAgentSearching) {
       return BDPanelCard(
         padding: const EdgeInsets.all(16),
         child: Text(
@@ -467,10 +461,80 @@ extension _RecallPageSearch on _RecallPageState {
     final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
     final followUp = _agentResult?.followUp;
 
+    if (chatMessage == null) {
+      final fallbackAnswer = _agentResult?.answer.trim() ?? '';
+      final fallbackStatus = followUp?.message.trim() ?? '';
+      return BDPanelCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              textLocalize('recall_agent_rag'),
+              style: TextStyle(
+                color: textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (fallbackStatus.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                fallbackStatus,
+                style: TextStyle(color: hintColor, fontSize: 12.5, height: 1.4),
+              ),
+            ],
+            if (fallbackAnswer.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              MarkdownBody(
+                data: fallbackAnswer,
+                builders: {'code': _CodeElementBuilder(isDark, context)},
+              ),
+            ],
+            if (topCandidates.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              for (final candidate in topCandidates)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
+                    style: TextStyle(
+                      color: hintColor,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+            ],
+            if (hasActions) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: BDDesign.colorMutedBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () => _openAgentRecallResult(_agentResult!),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                  label: const Text('打开场景', style: TextStyle(fontSize: 14)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
       child: ListenableBuilder(
-        listenable: _agentChatMessage!,
+        listenable: chatMessage,
         builder: (context, _) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
