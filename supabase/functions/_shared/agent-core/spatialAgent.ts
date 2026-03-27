@@ -2688,6 +2688,55 @@ async function executeAgentToolLoop(input: {
   return { candidates, trace };
 }
 
+export function shouldStopAssetToolLoop(input: {
+  state: AssetToolState;
+  trace: ToolTraceEntry[];
+}): { stop: boolean; reason: string } {
+  const { state, trace } = input;
+
+  if (state.operation) {
+    return {
+      stop: true,
+      reason: "已经拿到写入预览或执行结果，继续调工具不会比当前结果更关键。",
+    };
+  }
+  if (state.comparison) {
+    return {
+      stop: true,
+      reason: "已经拿到结构化对比结果，可以直接进入回答整理。",
+    };
+  }
+  if (state.collectionSummary || state.threadGrouping) {
+    return {
+      stop: true,
+      reason: "专题或线程整理结果已经生成，当前工具链目标已完成。",
+    };
+  }
+  if (state.poseSummary || state.relatedModels || state.placeVersions) {
+    return {
+      stop: true,
+      reason: "已经拿到补充摘要或关系结果，足以支撑当前回答。",
+    };
+  }
+  if (state.bundle) {
+    return {
+      stop: true,
+      reason: "模型详情 bundle 已经生成，可以直接整理回答，无需继续补工具。",
+    };
+  }
+  if (state.list && trace.length >= 2) {
+    return {
+      stop: true,
+      reason: "已经连续多轮停留在列表读取，没有形成新的操作或摘要，应停止循环改为直接回答或向用户澄清。",
+    };
+  }
+
+  return {
+    stop: false,
+    reason: "当前还没有形成足够稳定的资产结果，可继续尝试下一步工具。",
+  };
+}
+
 async function executeAssetToolLoop(input: {
   model: ChatOpenAI;
   query: string;
@@ -2820,6 +2869,23 @@ async function executeAssetToolLoop(input: {
           summary: "本轮没有新增资产信息，提前停止工具循环",
         },
       });
+      break;
+    }
+
+    const stopDecision = shouldStopAssetToolLoop({ state, trace });
+    if (stopDecision.stop) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "asset_tool_enough",
+          summary: "当前资产信息已足够，停止继续试探工具",
+          detail: stopDecision.reason,
+        },
+      });
+      await emitThought(
+        callbacks,
+        `结论：${stopDecision.reason}`,
+      );
       break;
     }
   }
