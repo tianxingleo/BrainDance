@@ -3,12 +3,16 @@ import {
   assertExists,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
+  buildGeneralAssistantFallbackAnswer,
+  buildResponseResolutionFromResponse,
   buildVisualizationActions,
+  isAssetDiscoveryQuery,
   isDirectReplyQuery,
   normalizeExplicitTimeRange,
   parseSpatialIntentHeuristically,
   parseDeterministicAssetRenameIntent,
   scoreSceneCandidate,
+  shouldStopAssetToolLoop,
   shouldForceAnotherToolRound,
   shouldPreferHeuristicSpatialRoute,
   summarizeCandidateEvidence,
@@ -17,17 +21,175 @@ import {
 Deno.test("isDirectReplyQuery 会识别纯问候与致谢", () => {
   assertEquals(isDirectReplyQuery("你好"), true);
   assertEquals(isDirectReplyQuery("谢谢！"), true);
+  assertEquals(isDirectReplyQuery("你是谁"), false);
   assertEquals(isDirectReplyQuery("你好，帮我找一下红色杯子"), false);
 });
 
+Deno.test("buildGeneralAssistantFallbackAnswer 会在无候选时输出通用 Agent 回答", async () => {
+  const fakeModel = {
+    async invoke() {
+      return {
+        content:
+          "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，也能整理模型资产。",
+      };
+    },
+  };
+
+  assertEquals(
+    (
+      await buildGeneralAssistantFallbackAnswer(
+        fakeModel,
+        "你是谁",
+      )
+    ).includes("空间记忆智能管理助手"),
+    true,
+  );
+});
+
+Deno.test("buildResponseResolutionFromResponse 会为通用 fallback 标注 general_fallback", () => {
+  const resolution = buildResponseResolutionFromResponse({
+    success: true,
+    mode: "spatial_search",
+    intent: {
+      rewrittenQuery: "你是谁",
+      targetType: "scene",
+      objectHint: null,
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "测试 fallback",
+    },
+    selection: {
+      scene_id: null,
+      model_id: null,
+      pose_image_id: null,
+      confidence: 0,
+      reason: "当前没有可信检索候选，已回退为通用 Agent 自然语言回答。",
+    },
+    answer: "我是 BrainDance 的空间记忆智能管理助手。",
+    actions: [],
+    viewer_payload: {
+      ply: null,
+      poses: null,
+      matrix: null,
+      imageId: null,
+    },
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "未命中可信候选，已回退为通用 Agent 回答。",
+    tool_trace: [],
+    asset_context: {
+      last_tool_name: null,
+      list: null,
+      bundle: null,
+      comparison: null,
+      operation: null,
+      pose_summary: null,
+      related_models: null,
+      place_versions: null,
+      collection_summary: null,
+      thread_grouping: null,
+    },
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
+
+  assertEquals(resolution.kind, "general_fallback");
+});
+
+Deno.test("shouldStopAssetToolLoop 会在生成写入预览后停止", () => {
+  const decision = shouldStopAssetToolLoop({
+    state: {
+      lastToolName: "batch_patch_model_metadata",
+      list: null,
+      bundle: null,
+      comparison: null,
+      duplicateNames: null,
+      operation: {
+        tool_name: "batch_patch_model_metadata",
+        dry_run: true,
+        requires_confirmation: true,
+        affected_count: 2,
+        preview: [],
+      },
+      poseSummary: null,
+      relatedModels: null,
+      placeVersions: null,
+      collectionSummary: null,
+      threadGrouping: null,
+    },
+    trace: [{
+      toolName: "batch_patch_model_metadata",
+      args: {},
+      resultSummary: "已生成预览",
+    }],
+  });
+
+  assertEquals(decision.stop, true);
+});
+
+Deno.test("shouldStopAssetToolLoop 会在多轮只剩列表读取时停止", () => {
+  const decision = shouldStopAssetToolLoop({
+    state: {
+      lastToolName: "read_model_assets",
+      list: [{
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        scene_id: "scene-1",
+        display_name: "宿舍书桌",
+        description: null,
+        tags: [],
+        created_at: "2026-03-27T10:00:00Z",
+      }],
+      bundle: null,
+      comparison: null,
+      duplicateNames: null,
+      operation: null,
+      poseSummary: null,
+      relatedModels: null,
+      placeVersions: null,
+      collectionSummary: null,
+      threadGrouping: null,
+    },
+    trace: [
+      {
+        toolName: "read_model_assets",
+        args: { query: "宿舍" },
+        resultSummary: "读取到 1 个模型资产",
+      },
+      {
+        toolName: "read_model_assets",
+        args: { query: "书桌" },
+        resultSummary: "读取到 1 个模型资产",
+      },
+    ],
+  });
+
+  assertEquals(decision.stop, true);
+});
+
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {
-  assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("查一下电脑"), false);
   assertEquals(shouldPreferHeuristicSpatialRoute("看一下桌上的杯子"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找上周拍的红色杯子"), true);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找一个会议室资产"), false);
+  assertEquals(shouldPreferHeuristicSpatialRoute("找初音未来相关的"), false);
   assertEquals(
     shouldPreferHeuristicSpatialRoute("比较上周和现在的客厅变化"),
     false,
   );
   assertEquals(shouldPreferHeuristicSpatialRoute("谢谢"), false);
+});
+
+Deno.test("isAssetDiscoveryQuery 会识别模型资产级查找请求", () => {
+  assertEquals(isAssetDiscoveryQuery("找一个会议室资产"), true);
+  assertEquals(isAssetDiscoveryQuery("帮我找个办公室模型"), true);
+  assertEquals(isAssetDiscoveryQuery("找初音未来相关的"), true);
+  assertEquals(isAssetDiscoveryQuery("会议室里的投影仪在哪"), false);
 });
 
 Deno.test("parseDeterministicAssetRenameIntent 会识别最新模型改名但缺少新名字", () => {
@@ -127,7 +289,7 @@ Deno.test("normalizeExplicitTimeRange 会处理最近时间语义", () => {
   assertEquals(result.startTime! < result.endTime!, true);
 });
 
-Deno.test("parseSpatialIntentHeuristically 会把会议室资产识别为场景检索", () => {
+Deno.test("parseSpatialIntentHeuristically 虽可识别会议室资产为场景目标，但不应直接触发空间快路径", () => {
   const intent = parseSpatialIntentHeuristically("找一个会议室资产");
 
   assertEquals(intent.targetType, "scene");

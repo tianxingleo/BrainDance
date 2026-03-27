@@ -16,8 +16,9 @@ import {
   buildBatchPatchModelMetadataTool,
   buildCompareModelAssetsTool,
   buildGetModelAssetBundleTool,
-  buildListModelAssetsTool,
+  buildReadModelAssetsTool,
   buildRenameModelAssetTool,
+  buildWriteModelAssetsTool,
   collectAssetToolResult,
   type CompareModelAssetsResult,
   createEmptyAssetToolState,
@@ -102,6 +103,7 @@ const agentModeSchema = z.enum([
 
 const agentRouteSchema = z.object({
   mode: agentModeSchema,
+  tool_policy: z.enum(["direct_answer", "tool_chain"]),
   reasoning: z.string(),
 });
 
@@ -147,6 +149,19 @@ const toolTraceEntrySchema = z.object({
   toolName: z.string(),
   args: z.record(z.string(), z.unknown()),
   resultSummary: z.string(),
+});
+
+const responseResolutionSchema = z.object({
+  kind: z.enum([
+    "direct_reply",
+    "general_fallback",
+    "retrieval_success",
+    "tool_success",
+    "compare_success",
+    "creative_success",
+    "memory_graph_success",
+  ]),
+  note: z.string(),
 });
 
 const selectionSummarySchema = z.object({
@@ -659,6 +674,7 @@ const responseBaseSchema = z.object({
   top_candidates: z.array(candidateSchema),
   selected_candidate_reason: z.string().nullable(),
   tool_trace: z.array(toolTraceEntrySchema),
+  response_resolution: responseResolutionSchema.optional(),
   asset_context: assetContextSchema,
   session_state: sessionStateSchema.nullable().optional(),
   conversation_summary: z.string().nullable().optional(),
@@ -975,6 +991,7 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return false;
   if (isDirectReplyQuery(normalized)) return false;
+  if (isAssetDiscoveryQuery(normalized)) return false;
   if (
     /比较|对比|变化|前后|两个月前|现在|导览|旁白|脚本|大纲|故事|创作|趋势|缺失|时间线|长期记忆|关系摘要|改名|重命名|批量|标签|描述|摘要|专题|归档|集合|collection|模型.*对比/
       .test(normalized)
@@ -982,9 +999,53 @@ export function shouldPreferHeuristicSpatialRoute(query: string): boolean {
     return false;
   }
 
-  return /^(查一下|查下|看一下|看下|搜一下|搜下|搜一搜|查一查|帮我查一下|帮我看一下|请查一下|请看一下|看看|查查)/
-    .test(normalized) ||
-    /找|查|看|搜|检索|在哪|在哪里|有没有|空间|场景/.test(normalized);
+  const hasSpatialCue =
+    /在哪|在哪里|位置|地点|门口|角落|桌上|桌面|旁边|附近|场景里|房间里|画面里|镜头|视角|飞到|定位|有没有|是否存在|看得到|能不能看到/
+      .test(normalized);
+  const hasTimeBoundObjectSearch =
+    /最近|最新|今天|昨天|上周|本周|这个月|上个月|去年/.test(normalized) &&
+    /(找|查|看|搜|检索)/.test(normalized);
+
+  return hasSpatialCue || hasTimeBoundObjectSearch;
+}
+
+export function isAssetDiscoveryQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    /在哪|在哪里|位置|地点|角落|门口|旁边|附近|桌上|桌面|里面|里边|视角|镜头|飞到|定位/
+      .test(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    /改名|重命名|批量|标签|描述|摘要|推荐|对比|比较|专题|归档|集合|版本链|线程/
+      .test(normalized)
+  ) {
+    return true;
+  }
+
+  if (
+    /相关|类似|同类|风格|主题|同风格|像.*一样|关于|有关|周边|系列/
+      .test(normalized)
+  ) {
+    return true;
+  }
+
+  if (/模型资产|资产|模型|扫描|重建结果|场景模型/.test(normalized)) {
+    return true;
+  }
+
+  return (
+    /(会议室|客厅|卧室|教室|办公室|房间|区域|空间|展台|scene[_-]?[\w-]+)/.test(
+      normalized,
+    ) &&
+    /(找|查|搜|看|来个|给我找|有没有|想找)/.test(normalized)
+  );
 }
 
 
@@ -1129,16 +1190,76 @@ function buildDirectReplyAnswer(query: string): string {
   return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
 }
 
+function extractModelTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  const textParts = content
+    .map((item) => {
+      if (typeof item === "string") {
+        return item.trim();
+      }
+      if (
+        item && typeof item === "object" && "text" in item &&
+        typeof item.text === "string"
+      ) {
+        return item.text.trim();
+      }
+      return "";
+    })
+    .filter((item) => item.length > 0);
+  return textParts.join("\n").trim();
+}
+
+export async function buildGeneralAssistantFallbackAnswer(
+  model: {
+    invoke(
+      messages: Array<SystemMessage | HumanMessage>,
+    ): Promise<{ content: unknown }>;
+  },
+  query: string,
+  options: SpatialSearchAgentOptions = {},
+): Promise<string> {
+  const { buildAgentContextBlock } = await import("./prompts/context.ts");
+  const contextBlock = buildAgentContextBlock(options);
+  const result = await model.invoke([
+    new SystemMessage(
+      [
+        "你是 BrainDance 的空间记忆智能管理助手。",
+        "当用户的问题暂时不适合进入检索、工具调用或当前没有可信候选时，你也必须先以通用 Agent 身份直接回答。",
+        "如果用户在问你是谁、你能做什么、系统如何工作，请自然说明你的身份和能力。",
+        "如果用户问题过于模糊，请告诉用户你能提供的帮助，并引导他补充场景、时间、物体或模型范围。",
+        "不要伪造检索结果，不要假装已经找到了场景或执行了工具。",
+        "回答保持简洁、自然、中文。",
+      ].join("\n"),
+    ),
+    new HumanMessage(
+      `用户问题：${query}\n\n${contextBlock}\n请直接输出给用户的最终回答，不要输出 JSON。`,
+    ),
+  ]);
+  const answer = extractModelTextContent(result.content);
+  return answer || "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。";
+}
+
 async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
-): Promise<{ mode: AgentMode; reasoning: string }> {
+): Promise<{
+  mode: AgentMode;
+  toolPolicy: "direct_answer" | "tool_chain";
+  reasoning: string;
+}> {
   const currentMode = options.currentMode ?? null;
 
   if (isDirectReplyQuery(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "direct_answer",
       reasoning: "当前输入是闲聊问候或致谢，直接走空间链路里的自然语言兜底。",
     };
   }
@@ -1146,19 +1267,31 @@ async function classifyAgentMode(
   if (currentMode === "compare") {
     return {
       mode: "time_compare",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式已经是 compare，直接进入时间对比模式。",
     };
   }
   if (currentMode === "batch_edit" || currentMode === "collection") {
     return {
       mode: "asset_metadata",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式是批量编辑或集合操作，优先进入资产元数据模式。",
+    };
+  }
+
+  if (isAssetDiscoveryQuery(query)) {
+    return {
+      mode: "asset_metadata",
+      toolPolicy: "tool_chain",
+      reasoning:
+        "当前输入是在找某类模型/场景资产本身，而不是问场景内物体的位置，应进入资产元数据模式。",
     };
   }
 
   if (shouldPreferHeuristicSpatialRoute(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "tool_chain",
       reasoning: "当前输入是简单空间检索语句，直接走确定性的空间检索路由，避免额外分类轮次。",
     };
   }
@@ -1174,6 +1307,7 @@ async function classifyAgentMode(
   ]);
   return {
     mode: result.mode,
+    toolPolicy: result.tool_policy,
     reasoning: result.reasoning,
   };
 }
@@ -1413,6 +1547,13 @@ async function replayPendingAssetWriteIfNeeded(input: {
 
   const toolsByName = new Map<string, DynamicStructuredTool>([
     [
+      "write_model_assets",
+      buildWriteModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: true,
+      }),
+    ],
+    [
       "rename_model_asset",
       buildRenameModelAssetTool(supabase, {
         selectedModelIds: options.selectedModelIds,
@@ -1492,7 +1633,13 @@ async function replayPendingAssetWriteIfNeeded(input: {
       confidence: 0.97,
       reason: "已按上一轮预览参数正式执行资产写操作",
     },
-    answer: tool.name === "rename_model_asset"
+    answer: tool.name === "rename_model_asset" ||
+        (
+          tool.name === "write_model_assets" &&
+          (state.operation?.preview.length ?? 0) === 1 &&
+          state.operation?.preview[0]?.old_display_name !==
+            state.operation?.preview[0]?.new_display_name
+        )
       ? `已正式执行改名：${
         state.operation?.preview[0]?.old_display_name ??
           selectionSceneId ?? "该模型"
@@ -1515,256 +1662,6 @@ async function replayPendingAssetWriteIfNeeded(input: {
   });
 }
 
-async function runDeterministicAssetRenameFlow(input: {
-  supabase: SupabaseClient;
-  query: string;
-  options: SpatialSearchAgentOptions;
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<SpatialSearchResponse | null> {
-  const intent = parseDeterministicAssetRenameIntent(
-    input.query,
-    input.options,
-  );
-  if (!intent) {
-    return null;
-  }
-
-  const { supabase, options, callbacks } = input;
-  const trace: ToolTraceEntry[] = [];
-  const state = createEmptyAssetToolState();
-  const listTool = buildListModelAssetsTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-  });
-  const renameTool = buildRenameModelAssetTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-    allowWrite: options.executionMode === "execute",
-  });
-  const batchPatchTool = buildBatchPatchModelMetadataTool(supabase, {
-    selectedModelIds: options.selectedModelIds,
-    allowWrite: options.executionMode === "execute",
-  });
-
-  await emitProgress(callbacks, {
-    event: "status",
-    data: {
-      phase: "asset_rename_fast_path",
-      summary: "检测到确定性的模型改名请求，优先走改名专用兜底路径",
-    },
-  });
-
-  let targetModelIds: string[] = [];
-  let targetSceneId: string | null = null;
-  let currentDisplayName: string | null = null;
-
-  if (intent.target.kind === "latest") {
-    const listArgs = {
-      modelIds: [],
-      sceneIds: [],
-      tags: [],
-      query: "",
-      startTime: null,
-      endTime: null,
-      limit: intent.target.count,
-    };
-    await emitProgress(callbacks, {
-      event: "tool_call",
-      data: {
-        name: listTool.name,
-        args: listArgs,
-        summary: "先定位最新模型资产",
-        round: 1,
-      },
-    });
-    const listResult = await listTool.invoke(listArgs);
-    const listText = typeof listResult === "string"
-      ? listResult
-      : JSON.stringify(listResult);
-    const listCount = collectAssetToolResult(listTool.name, listText, state);
-    const listSummary = summarizeToolResult(listTool.name, listCount);
-    trace.push({
-      toolName: listTool.name,
-      args: listArgs,
-      resultSummary: listSummary,
-    });
-    await emitProgress(callbacks, {
-      event: "tool_result",
-      data: {
-        name: listTool.name,
-        summary: listSummary,
-        count: listCount,
-        round: 1,
-      },
-    });
-
-    const listedRows = state.list ?? [];
-    targetModelIds = listedRows.map((item) => item.id);
-    const latest = listedRows[0] ?? null;
-    targetSceneId = latest?.scene_id ?? null;
-    currentDisplayName = latest?.display_name?.trim() || latest?.scene_id || null;
-  } else {
-    targetModelIds = intent.target.kind === "current"
-      ? [intent.target.modelId]
-      : intent.target.modelIds;
-  }
-
-  if (targetModelIds.length === 0) {
-    return finalizeResponse({
-      success: true,
-      mode: "asset_metadata",
-      intent: null,
-      selection: {
-        scene_id: null,
-        model_id: null,
-        pose_image_id: null,
-        confidence: 0,
-        reason: "当前请求属于模型资产元数据操作，但没有找到可改名的目标模型",
-      },
-      answer:
-        "我没定位到可改名的目标模型。请先选中模型，或直接指定要改名的模型。",
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason: "确定性改名兜底未找到目标模型",
-      tool_trace: trace,
-      asset_context: serializeAssetContext(state),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    });
-  }
-
-  if (!intent.newName) {
-    return finalizeResponse({
-      success: true,
-      mode: "asset_metadata",
-      intent: null,
-      selection: {
-        scene_id: targetSceneId,
-        model_id: targetModelIds[0] ?? null,
-        pose_image_id: null,
-        confidence: 0.88,
-        reason: "已锁定改名目标，但用户尚未提供新名字",
-      },
-      answer: currentDisplayName
-        ? `已定位到要改名的模型“${currentDisplayName}”，但你还没告诉我新名字。请直接说“把它改名为xxx”或“把最新模型改名为xxx”。`
-        : "已定位到要改名的模型，但你还没告诉我新名字。请直接说“把它改名为xxx”。",
-      actions: [],
-      viewer_payload: emptyViewerPayload(),
-      evidence: null,
-      candidates: [],
-      top_candidates: [],
-      selected_candidate_reason:
-        "已通过确定性规则锁定改名目标，等待用户补充新名字",
-      tool_trace: trace,
-      asset_context: serializeAssetContext(state),
-      compare_context: null,
-      collection_context: null,
-      creative_context: null,
-      memory_graph_context: null,
-    });
-  }
-
-  const isBatchRename = targetModelIds.length > 1;
-  const tool = isBatchRename ? batchPatchTool : renameTool;
-  const toolArgs = isBatchRename
-    ? {
-      modelIds: targetModelIds,
-      patch: {
-        displayNameTemplate: intent.newName,
-        tagsAdd: [],
-        tagsRemove: [],
-      },
-      dryRun: options.executionMode !== "execute",
-    }
-    : {
-      modelId: targetModelIds[0]!,
-      newName: intent.newName,
-      dryRun: options.executionMode !== "execute",
-    };
-  await emitProgress(callbacks, {
-    event: "tool_call",
-    data: {
-      name: tool.name,
-      args: toolArgs,
-      summary: isBatchRename
-        ? "已锁定多模型目标，开始生成批量改名结果"
-        : "已锁定目标模型，开始生成改名结果",
-      round: trace.length + 1,
-    },
-  });
-  const toolResult = await tool.invoke(toolArgs);
-  const resultText = typeof toolResult === "string"
-    ? toolResult
-    : JSON.stringify(toolResult);
-  const resultCount = collectAssetToolResult(tool.name, resultText, state);
-  const resultSummary = summarizeToolResult(tool.name, resultCount);
-  trace.push({
-    toolName: tool.name,
-    args: toolArgs,
-    resultSummary,
-  });
-  await emitProgress(callbacks, {
-    event: "tool_result",
-    data: {
-      name: tool.name,
-      summary: resultSummary,
-      count: resultCount,
-      round: trace.length,
-    },
-  });
-
-  const operationPreview = state.operation?.preview[0] ?? null;
-  const beforeName = operationPreview?.old_display_name || currentDisplayName || targetSceneId;
-  const afterName = operationPreview?.new_display_name || intent.newName;
-  const actionText = state.operation?.dry_run
-    ? (isBatchRename ? "已生成批量改名预览" : "已生成改名预览")
-    : (isBatchRename ? "已完成批量改名" : "已完成改名");
-  const answer = isBatchRename
-    ? `${actionText}：共 ${state.operation?.affected_count ?? targetModelIds.length} 个模型将改为“${intent.newName}”。${
-      state.operation?.dry_run
-        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
-        : ""
-    }`
-    : `${actionText}：${beforeName ?? "该模型"} -> ${afterName}。${
-      state.operation?.dry_run
-        ? "当前还是预览模式，如需正式写入，请用 execute 再确认一次。"
-        : ""
-    }`;
-
-  return finalizeResponse({
-    success: true,
-    mode: "asset_metadata",
-    intent: null,
-    selection: {
-        scene_id: targetSceneId ?? operationPreview?.scene_id ?? null,
-      model_id: targetModelIds[0] ?? null,
-      pose_image_id: null,
-      confidence: 0.96,
-      reason: isBatchRename
-        ? "已通过确定性规则锁定多模型目标并执行批量改名工具"
-        : "已通过确定性规则锁定目标模型并执行改名工具",
-    },
-    answer,
-    actions: [],
-    viewer_payload: emptyViewerPayload(),
-    evidence: null,
-    candidates: [],
-    top_candidates: [],
-    selected_candidate_reason:
-      isBatchRename
-        ? "已走确定性批量改名兜底，避免只依赖 LLM 自主编排范围和写入参数"
-        : "已走确定性改名兜底，避免只停留在 list_model_assets 候选列表",
-    tool_trace: trace,
-    asset_context: serializeAssetContext(state),
-    compare_context: null,
-    collection_context: null,
-    creative_context: null,
-    memory_graph_context: null,
-  });
-}
 async function parseSpatialIntent(
   model: ChatOpenAI,
   query: string,
@@ -2802,6 +2699,55 @@ async function executeAgentToolLoop(input: {
   return { candidates, trace };
 }
 
+export function shouldStopAssetToolLoop(input: {
+  state: AssetToolState;
+  trace: ToolTraceEntry[];
+}): { stop: boolean; reason: string } {
+  const { state, trace } = input;
+
+  if (state.operation) {
+    return {
+      stop: true,
+      reason: "已经拿到写入预览或执行结果，继续调工具不会比当前结果更关键。",
+    };
+  }
+  if (state.comparison) {
+    return {
+      stop: true,
+      reason: "已经拿到结构化对比结果，可以直接进入回答整理。",
+    };
+  }
+  if (state.collectionSummary || state.threadGrouping) {
+    return {
+      stop: true,
+      reason: "专题或线程整理结果已经生成，当前工具链目标已完成。",
+    };
+  }
+  if (state.poseSummary || state.relatedModels || state.placeVersions) {
+    return {
+      stop: true,
+      reason: "已经拿到补充摘要或关系结果，足以支撑当前回答。",
+    };
+  }
+  if (state.bundle) {
+    return {
+      stop: true,
+      reason: "模型详情 bundle 已经生成，可以直接整理回答，无需继续补工具。",
+    };
+  }
+  if (state.list && trace.length >= 2) {
+    return {
+      stop: true,
+      reason: "已经连续多轮停留在列表读取，没有形成新的操作或摘要，应停止循环改为直接回答或向用户澄清。",
+    };
+  }
+
+  return {
+    stop: false,
+    reason: "当前还没有形成足够稳定的资产结果，可继续尝试下一步工具。",
+  };
+}
+
 async function executeAssetToolLoop(input: {
   model: ChatOpenAI;
   query: string;
@@ -2936,6 +2882,23 @@ async function executeAssetToolLoop(input: {
       });
       break;
     }
+
+    const stopDecision = shouldStopAssetToolLoop({ state, trace });
+    if (stopDecision.stop) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "asset_tool_enough",
+          summary: "当前资产信息已足够，停止继续试探工具",
+          detail: stopDecision.reason,
+        },
+      });
+      await emitThought(
+        callbacks,
+        `结论：${stopDecision.reason}`,
+      );
+      break;
+    }
   }
 
   return { trace, state };
@@ -2955,6 +2918,8 @@ function finalizeResponse(
 ): SpatialSearchResponse {
   const normalized = {
     ...response,
+    response_resolution: response.response_resolution ??
+      buildResponseResolutionFromResponse(response),
     session_state: response.session_state ??
       buildSessionStateFromResponse(response),
     conversation_summary: response.conversation_summary ??
@@ -2962,6 +2927,65 @@ function finalizeResponse(
     follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
   };
   return spatialSearchResponseSchemaUnion.parse(normalized);
+}
+
+export function buildResponseResolutionFromResponse(
+  response: SpatialSearchResponse,
+): z.infer<typeof responseResolutionSchema> {
+  if (response.mode === "asset_metadata") {
+    return {
+      kind: "tool_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由资产工具链路整理得出。",
+    };
+  }
+  if (response.mode === "time_compare") {
+    return {
+      kind: "compare_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由时间对比链路整理得出。",
+    };
+  }
+  if (response.mode === "creative") {
+    return {
+      kind: "creative_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由创作链路整理得出。",
+    };
+  }
+  if (response.mode === "memory_graph") {
+    return {
+      kind: "memory_graph_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由记忆图谱链路整理得出。",
+    };
+  }
+
+  if (
+    response.top_candidates.length === 0 &&
+    response.selection.confidence >= 1 &&
+    response.tool_trace.length === 0
+  ) {
+    return {
+      kind: "direct_reply",
+      note: response.selected_candidate_reason ??
+        "当前回答直接由闲聊直答生成。",
+    };
+  }
+
+  if (response.top_candidates.length === 0) {
+    return {
+      kind: "general_fallback",
+      note: response.selected_candidate_reason ??
+        "当前回答由共享 Agent Core 的通用自然语言 fallback 生成。",
+    };
+  }
+
+  return {
+    kind: "retrieval_success",
+    note: response.selected_candidate_reason ??
+      "当前回答由检索候选与工具结果共同整理得出。",
+  };
 }
 
 function buildSessionStateFromResponse(
@@ -3438,9 +3462,7 @@ export async function runSpatialSearchAgent(
         confidence: 1,
         reason: "当前输入属于闲聊问候，无需进入检索链路",
       },
-      answer: /谢/.test(query)
-        ? "不客气。"
-        : "你好，我在。你可以直接告诉我想找的物体、位置或场景。",
+      answer: buildDirectReplyAnswer(query),
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: null,
@@ -3457,10 +3479,12 @@ export async function runSpatialSearchAgent(
   }
 
   let mode: AgentMode;
+  let toolPolicy: "direct_answer" | "tool_chain" = "tool_chain";
   let modeReasoning = "";
   try {
     const routeDecision = await classifyAgentMode(model, query, options);
     mode = routeDecision.mode;
+    toolPolicy = routeDecision.toolPolicy;
     modeReasoning = routeDecision.reasoning;
   } catch (error) {
     await emitProgress(callbacks, {
@@ -3472,6 +3496,7 @@ export async function runSpatialSearchAgent(
       },
     });
     mode = "spatial_search";
+    toolPolicy = "tool_chain";
     modeReasoning = "路由模型不可用，因此回退到默认空间检索模式。";
   }
   await emitProgress(callbacks, {
@@ -3484,8 +3509,61 @@ export async function runSpatialSearchAgent(
   });
   await emitThought(
     callbacks,
-    `路由判断：选择 ${mode}，原因是 ${modeReasoning}`,
+    `路由判断：选择 ${mode}，工具策略为 ${toolPolicy}，原因是 ${modeReasoning}`,
   );
+
+  if (mode === "spatial_search" && toolPolicy === "direct_answer") {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "general_answer",
+        summary: "当前问题更适合通用 Agent 直接回答，跳过空间检索工具链",
+        detail: modeReasoning,
+      },
+    });
+    const fallbackAnswer = await buildGeneralAssistantFallbackAnswer(
+      model,
+      query,
+      options,
+    ).catch(() =>
+      "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想做什么。"
+    );
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent: {
+        rewrittenQuery: query.trim(),
+        targetType: "scene",
+        objectHint: null,
+        locationHint: null,
+        sceneHint: null,
+        timeHint: null,
+        startTime: null,
+        endTime: null,
+        reasoning: modeReasoning,
+      },
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前问题更适合通用 Agent 直接回答，已主动跳过空间检索工具链。",
+      },
+      answer: fallbackAnswer,
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "路由已判定为 direct_answer，未进入空间检索工具链。",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options, callbacks);
@@ -3520,9 +3598,15 @@ export async function runSpatialSearchAgent(
       return replayedWriteResponse;
     }
 
+    const assetEmbeddings = createEmbeddingsModel(env);
     const assetTools = [
-      buildListModelAssetsTool(supabase, {
+      buildReadModelAssetsTool(supabase, {
         selectedModelIds: options.selectedModelIds,
+        embeddings: assetEmbeddings,
+      }),
+      buildWriteModelAssetsTool(supabase, {
+        selectedModelIds: options.selectedModelIds,
+        allowWrite: options.executionMode === "execute",
       }),
       buildRenameModelAssetTool(supabase, {
         selectedModelIds: options.selectedModelIds,
@@ -3692,7 +3776,45 @@ export async function runSpatialSearchAgent(
 
   let selection: SelectionResult;
   if (rankedCandidates.length === 0) {
-    throw new Error("No candidates found");
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "no_candidate_fallback",
+        summary: "当前没有找到可信候选，正在回退为通用 Agent 自然语言回答",
+      },
+    });
+    const fallbackAnswer = await buildGeneralAssistantFallbackAnswer(
+      model,
+      query,
+      options,
+    ).catch(() =>
+      "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想找什么。"
+    );
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent,
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前没有可信检索候选，已回退为通用 Agent 自然语言回答。",
+      },
+      answer: fallbackAnswer,
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "未命中可信候选，已回退为通用 Agent 回答。",
+      tool_trace: trace,
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
   }
   selection = buildDeterministicSpatialSelection({
     rankedCandidates,

@@ -122,6 +122,7 @@ class AgentRecallResponse {
   final List<AgentAction> actions;
   final List<AgentCandidate> candidates;
   final List<AgentToolTrace> toolTrace;
+  final Map<String, dynamic>? responseResolution;
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
@@ -139,6 +140,7 @@ class AgentRecallResponse {
     required this.actions,
     this.candidates = const [],
     this.toolTrace = const [],
+    this.responseResolution,
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
@@ -186,6 +188,9 @@ class AgentRecallResponse {
                 AgentToolTrace.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      responseResolution: json['response_resolution'] is Map
+          ? Map<String, dynamic>.from(json['response_resolution'] as Map)
+          : null,
       selectedCandidateReason: json['selected_candidate_reason']?.toString(),
       assetContext: json['asset_context'] is Map
           ? Map<String, dynamic>.from(json['asset_context'] as Map)
@@ -763,6 +768,7 @@ class AgentRecallService {
             },
           )
           .toList(),
+      'response_resolution': response.responseResolution,
       'selected_candidate_reason': response.selectedCandidateReason,
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,
@@ -804,13 +810,13 @@ class AgentRecallService {
     final status = error.response?.statusCode;
     final data = _decodeInvokeData(error.response?.data);
     if (data is Map && data['error'] != null) {
-      return data['error'].toString();
+      return _normalizeRawErrorText(data['error'].toString());
     }
     if (data is Map && data['message'] != null) {
-      return data['message'].toString();
+      return _normalizeRawErrorText(data['message'].toString());
     }
     if (data is String && data.trim().isNotEmpty) {
-      return data.trim();
+      return _normalizeRawErrorText(data.trim());
     }
     if (status == 503) {
       return textLocalize('agent_error_unavailable');
@@ -834,16 +840,16 @@ class AgentRecallService {
     if (error is FunctionException) {
       final detail = _decodeInvokeData(error.details);
       if (detail is Map && detail['error'] != null) {
-        return detail['error'].toString();
+        return _normalizeRawErrorText(detail['error'].toString());
       }
       if (detail is Map && detail['message'] != null) {
-        return detail['message'].toString();
+        return _normalizeRawErrorText(detail['message'].toString());
       }
       if (detail is String && detail.isNotEmpty) {
-        return detail;
+        return _normalizeRawErrorText(detail);
       }
       if (error.reasonPhrase != null && error.reasonPhrase!.isNotEmpty) {
-        return error.reasonPhrase!;
+        return _normalizeRawErrorText(error.reasonPhrase!);
       }
       if (error.status == 503) {
         return textLocalize('agent_error_unavailable');
@@ -856,7 +862,24 @@ class AgentRecallService {
       ).replaceAll('{status}', error.status.toString());
     }
 
-    return error.toString();
+    return _normalizeRawErrorText(error.toString());
+  }
+
+  String _normalizeRawErrorText(String message) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+
+    final normalized = trimmed.toLowerCase();
+    if (normalized.contains('an invalid response was received from the upstream server')) {
+      return textLocalize('agent_error_upstream');
+    }
+    if (normalized.contains('upstream connect error')) {
+      return textLocalize('agent_error_upstream');
+    }
+
+    return trimmed;
   }
 
   _ParsedStreamEvents _drainStreamingEvents(String raw) {

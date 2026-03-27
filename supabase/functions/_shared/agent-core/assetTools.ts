@@ -60,6 +60,12 @@ export type CompareModelAssetsResult = {
   };
 };
 
+export type DuplicateModelNameGroup = {
+  display_name: string;
+  count: number;
+  rows: ListedModelAsset[];
+};
+
 export type AssetOperationResult = {
   tool_name: string;
   dry_run: boolean;
@@ -82,6 +88,7 @@ export type AssetToolState = {
   list: ListedModelAsset[] | null;
   bundle: ModelAssetBundle[] | null;
   comparison: CompareModelAssetsResult | null;
+  duplicateNames: DuplicateModelNameGroup[] | null;
   operation: AssetOperationResult | null;
   poseSummary: PoseSummary | null;
   relatedModels: RelatedModelSummary[] | null;
@@ -97,9 +104,13 @@ export type AssetToolState = {
 type AssetToolRuntimeOptions = {
   selectedModelIds?: string[];
   allowWrite?: boolean;
+  embeddings?: {
+    embedQuery(text: string): Promise<number[]>;
+  };
 };
 
-const listModelAssetsSchema = z.object({
+const readModelAssetsSchema = z.object({
+  mode: z.enum(["list", "duplicate_display_name"]).default("list"),
   modelIds: z.array(z.string().uuid()).default([]),
   sceneIds: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
@@ -137,6 +148,19 @@ const batchPatchSchema = z.object({
     ), {
     message: "patch 至少要包含一个可修改字段",
   }),
+  dryRun: z.boolean().default(true),
+});
+
+const writeModelAssetsSchema = z.object({
+  updates: z.array(z.object({
+    modelId: z.string().uuid(),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    description: z.string().trim().max(2000).optional(),
+    tags: z.array(z.string().trim().min(1)).optional(),
+  }).refine((item) =>
+    Boolean(item.displayName || item.description !== undefined || item.tags), {
+    message: "每条更新至少包含一个可写字段",
+  })).min(1).max(20),
   dryRun: z.boolean().default(true),
 });
 
@@ -196,6 +220,12 @@ const compareModelAssetsResultSchema = z.object({
     time_order: z.array(z.string()),
     pose_count_by_model: z.record(z.string(), z.number()),
   }),
+});
+
+const duplicateModelNameGroupSchema = z.object({
+  display_name: z.string(),
+  count: z.number().int().min(2),
+  rows: z.array(listedModelAssetSchema),
 });
 
 const assetOperationSchema = z.object({
@@ -290,6 +320,10 @@ const assetToolResultSchema = z.discriminatedUnion("kind", [
     kind: z.literal("compare_model_assets"),
     rows: compareModelAssetsResultSchema.shape.rows,
     diff: compareModelAssetsResultSchema.shape.diff,
+  }),
+  z.object({
+    kind: z.literal("duplicate_model_names"),
+    groups: z.array(duplicateModelNameGroupSchema),
   }),
   z.object({
     kind: z.literal("asset_operation"),
@@ -407,6 +441,60 @@ async function fetchModelAssets(
   }
 
   return (data ?? []) as ModelAssetRow[];
+}
+
+async function fetchSemanticMatchedAssets(input: {
+  supabase: SupabaseClient;
+  embeddings: { embedQuery(text: string): Promise<number[]> };
+  query: string;
+  startTime: string | null;
+  endTime: string | null;
+  limit: number;
+  selectedModelIds?: string[];
+}): Promise<ModelAssetRow[]> {
+  const {
+    supabase,
+    embeddings,
+    query,
+    startTime,
+    endTime,
+    limit,
+    selectedModelIds,
+  } = input;
+  const queryEmbedding = await embeddings.embedQuery(query);
+  const { data, error } = await supabase.rpc("match_model_assets", {
+    query_embedding: queryEmbedding,
+    match_threshold: 0.35,
+    match_count: Math.max(limit * 3, 12),
+    filter_start: startTime,
+    filter_end: endTime,
+  } as never) as { data: unknown; error: { message: string } | null };
+
+  if (error) {
+    throw new Error(`read_model_assets 语义召回失败: ${error.message}`);
+  }
+
+  const rows = Array.isArray(data) ? data as Array<{ id: string }> : [];
+  const modelIds = dedupeStrings(rows.map((row) => row.id)).filter(Boolean);
+  const allowedIds = selectedModelIds && selectedModelIds.length > 0
+    ? new Set(selectedModelIds)
+    : null;
+  const filteredIds = allowedIds
+    ? modelIds.filter((id) => allowedIds.has(id))
+    : modelIds;
+
+  if (filteredIds.length === 0) {
+    return [];
+  }
+
+  const assets = await fetchModelAssets(supabase, filteredIds);
+  const order = new Map(filteredIds.map((id, index) => [id, index]));
+  return assets
+    .sort((left, right) =>
+      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    )
+    .slice(0, limit);
 }
 
 async function fetchPoseCounts(
@@ -613,6 +701,16 @@ export function buildAssetAnswer(
         : "这些模型没有稳定的共同标签。"
     }`;
   }
+  if (state.duplicateNames) {
+    if (state.duplicateNames.length === 0) {
+      return "当前没有发现重名的模型。";
+    }
+    const details = state.duplicateNames.slice(0, 5).map((group, index) => {
+      const scenes = group.rows.slice(0, 3).map((row) => row.scene_id).join("、");
+      return `${index + 1}. ${group.display_name}：重复 ${group.count} 次${scenes ? `（scene: ${scenes}）` : ""}`;
+    }).join("\n");
+    return `当前发现 ${state.duplicateNames.length} 组重名模型：\n${details}\n如果你需要，我可以继续展开这些重名模型的详细摘要。`;
+  }
   if (state.bundle) {
     return isRecommendation
       ? buildBundleRecommendationAnswer(state.bundle)
@@ -766,15 +864,15 @@ function buildListAnswer(rows: ListedModelAsset[]): string {
   return `${intro}\n${details}\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`;
 }
 
-export function buildListModelAssetsTool(
+export function buildReadModelAssetsTool(
   supabase: SupabaseClient,
   options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
-    name: "list_model_assets",
+    name: "read_model_assets",
     description:
-      "列出模型资产候选。适合在批量改名、批量打标签、按时间筛选前先确认候选集合。",
-    schema: listModelAssetsSchema,
+      "通用模型资产读库工具。可用于按关键词/时间/标签读取资产列表，也可用于重名模型这类只读分析。",
+    schema: readModelAssetsSchema,
     func: async (input) => {
       let builder = supabase
         .from("model_assets")
@@ -813,16 +911,46 @@ export function buildListModelAssetsTool(
         );
       }
       if (input.query.trim()) {
-        const keyword = escapeIlike(input.query).toLowerCase();
-        rows = rows.filter((row) =>
-          [
-            row.scene_id,
-            row.display_name ?? "",
-            row.description ?? "",
-            ...safeArray(row.tags),
-            ...safeArray(row.objects),
-          ].join(" ").toLowerCase().includes(keyword)
-        );
+        if (options.embeddings) {
+          rows = await fetchSemanticMatchedAssets({
+            supabase,
+            embeddings: options.embeddings,
+            query: input.query,
+            startTime: input.startTime,
+            endTime: input.endTime,
+            limit: input.limit,
+            selectedModelIds: options.selectedModelIds,
+          });
+        } else {
+          rows = [];
+        }
+      }
+
+      if (input.mode === "duplicate_display_name") {
+        const grouped = new Map<string, ModelAssetRow[]>();
+        for (const row of rows) {
+          const displayName = row.display_name?.trim();
+          if (!displayName) continue;
+          const bucket = grouped.get(displayName) ?? [];
+          bucket.push(row);
+          grouped.set(displayName, bucket);
+        }
+        return JSON.stringify({
+          kind: "duplicate_model_names",
+          groups: [...grouped.entries()]
+            .map(([displayName, bucket]) => ({
+              display_name: displayName,
+              count: bucket.length,
+              rows: summarizeListRows(
+                bucket.sort((left, right) =>
+                  right.created_at.localeCompare(left.created_at)
+                ),
+              ),
+            }))
+            .filter((group) => group.count >= 2)
+            .sort((left, right) => right.count - left.count)
+            .slice(0, input.limit),
+        });
       }
 
       return JSON.stringify({
@@ -926,6 +1054,76 @@ export function buildBatchPatchModelMetadataTool(
   });
 }
 
+export function buildWriteModelAssetsTool(
+  supabase: SupabaseClient,
+  options: AssetToolRuntimeOptions = {},
+): DynamicStructuredTool {
+  return new DynamicStructuredTool({
+    name: "write_model_assets",
+    description:
+      "通用模型资产写库工具。支持一次更新多个模型的 display_name、description、tags；适合“分别改名”“逐条修改”这类请求。",
+    schema: writeModelAssetsSchema,
+    func: async (input) => {
+      const targetIds = restrictModelIds(
+        input.updates.map((item: z.infer<typeof writeModelAssetsSchema>["updates"][number]) => item.modelId),
+        options.selectedModelIds,
+      );
+      const rows = await fetchModelAssets(supabase, targetIds);
+      if (rows.length === 0) {
+        throw new Error("未找到可修改的模型资产");
+      }
+
+      const rowById = new Map(rows.map((row) => [row.id, row]));
+      const dryRun = options.allowWrite === false ? true : input.dryRun;
+      const preview = input.updates.map((
+        update: z.infer<typeof writeModelAssetsSchema>["updates"][number],
+      ) => {
+        const row = rowById.get(update.modelId);
+        if (!row) {
+          throw new Error(`未找到模型资产 ${update.modelId}`);
+        }
+        return {
+          model_id: row.id,
+          scene_id: row.scene_id,
+          old_display_name: row.display_name?.trim() || null,
+          new_display_name: update.displayName ?? row.display_name?.trim() ?? null,
+          old_description: row.description,
+          new_description: update.description ?? row.description,
+          old_tags: safeArray(row.tags),
+          new_tags: update.tags ? dedupeStrings(update.tags) : safeArray(row.tags),
+        };
+      });
+
+      if (!dryRun) {
+        for (const item of preview) {
+          const { error } = await supabase
+            .from("model_assets")
+            .update({
+              display_name: item.new_display_name,
+              description: item.new_description,
+              tags: item.new_tags,
+            })
+            .eq("id", item.model_id);
+          if (error) {
+            throw new Error(`write_model_assets 执行失败: ${error.message}`);
+          }
+        }
+      }
+
+      return JSON.stringify({
+        kind: "asset_operation",
+        operation: {
+          tool_name: "write_model_assets",
+          dry_run: dryRun,
+          requires_confirmation: dryRun,
+          affected_count: preview.length,
+          preview,
+        },
+      });
+    },
+  });
+}
+
 export function buildGetModelAssetBundleTool(
   supabase: SupabaseClient,
   options: AssetToolRuntimeOptions = {},
@@ -996,6 +1194,7 @@ export function createEmptyAssetToolState(): AssetToolState {
     list: null,
     bundle: null,
     comparison: null,
+    duplicateNames: null,
     operation: null,
     poseSummary: null,
     relatedModels: null,
@@ -1027,6 +1226,10 @@ export function collectAssetToolResult(
       diff: parsed.diff,
     };
     return state.comparison.rows.length;
+  }
+  if (parsed.kind === "duplicate_model_names") {
+    state.duplicateNames = parsed.groups;
+    return state.duplicateNames.length;
   }
   if (parsed.kind === "asset_operation" && parsed.operation) {
     state.operation = parsed.operation;

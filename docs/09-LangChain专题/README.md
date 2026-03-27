@@ -4,6 +4,15 @@
 
 ## 当前文档
 
+- [LangChain实现现状-2026-03-27.md](./LangChain实现现状-2026-03-27.md)
+  - 新增电脑端 `agent-recall` 调试 CLI 说明。
+  - 重点记录 Flutter 流式协议复现入口、事件打印和候选/工具轨迹调试方式。
+- [LangChain联调记录-2026-03-27-agent-recall-非检索直答修复.md](./LangChain联调记录-2026-03-27-agent-recall-非检索直答修复.md)
+  - 记录 `你是谁` 等无候选对话场景直接上抛异常的根因与修复。
+  - 覆盖共享 Core 通用自然语言 fallback、Flutter 错误归一化与回归验证结果。
+- [LangChain联调记录-2026-03-27-agent-recall-批量测试脚本与数据集.md](./LangChain联调记录-2026-03-27-agent-recall-批量测试脚本与数据集.md)
+  - 记录 `agent-recall` 批量测试 runner、发散测试数据集和多轮续聊回放能力。
+  - 覆盖 `persona / spatial_search / time_compare / asset_metadata / multi_turn / protocol` 等批量联调场景。
 - [LangChain实现现状-2026-03-25.md](./LangChain实现现状-2026-03-25.md)
   - 说明当前仓库中已经落地的 LangChain 相关代码。
   - 区分稳定入口、实验链路、最小可用扩展和正在演进中的能力。
@@ -21,6 +30,7 @@
 - 2026-03-26 已补充“最新模型改名”确定性兜底：当用户表达“修改/重命名最新模型名字”时，共享 Core 会先锁定最新模型，再根据是否提供新名字返回缺参提示或直接生成改名预览/执行结果，避免只停在 `list_model_assets` 候选列表。
 - 2026-03-26 已补充资产写操作重放协议：`session_state.lastOperationPreview` 现在会保存目标模型与工具参数，前端在确认执行时会显式切到 `execute`，共享 Core 可直接重放上一轮预览，不再让 LLM 重新猜测写入范围。
 - 2026-03-26 已补充“最新 N 个模型批量改名”确定性兜底：像“把最新三个模型改名为 xxx”这类请求会先按 `created_at` 倒序锁定最近 N 个模型，再走 `batch_patch_model_metadata` 生成预览或正式执行。
+- 2026-03-27 已把资产主链路继续收口到“通用读写工具 + Agent 规划”：`asset_metadata` 模式不再依赖确定性资产查找快路径，`read_model_assets` 走 embedding 语义召回，`write_model_assets` 支持“分别改名/逐条修改”，确认执行时也可重放该通用写工具。
 - 2026-03-26 已补充 Agent 多轮续聊协议：共享 Core 现在会返回 `session_state / conversation_summary / follow_up`，Flutter Recall 页会保留最近一轮 Agent 会话，并把“继续输入什么”或快捷回复显式展示出来。
 - 2026-03-26 已补充简单空间问句的确定性兜底：像 `查一下电脑`、`看一下桌上的杯子` 这类短句会优先走规则路由与固定工具顺序，避免因为上游模型 503 导致整个 Agent 看起来像“超时”。
 - 2026-03-26 已补充 Agent 编排可解释性与续轮收敛：共享 Core 现在会额外发送 `plan / thought` 事件，把模式判断、意图判断、每轮为什么继续/停止说清楚；同时会拦截重复工具参数，并在高分候选证据已经足够时提前停止，不再机械追求“至少 3 个候选”。
@@ -30,6 +40,12 @@
 - 2026-03-26 已补充 Flutter 首包等待态修复：Recall 页现在会在请求发出后立即展示本地引导状态，消费后端 `ping` 事件把“流式连接已建立”显式展示出来，并在首个远端阶段事件到达前持续更新等待态，避免用户在第一次刷新阶段长时间只看到静止的“连接中”。
 - 2026-03-26 已补充 `spatial_search` 链路级提速：空间检索不再依赖“多轮 LLM 工具调度 + 最终 LLM 裁决”的串行结构，改为“单次意图解析 + 并行检索工具 + 确定性评分选优”，同时去掉 `pose_semantic_search` 内部按行补标签的 N+1 查询。
 - 2026-03-26 已补充空间意图解析超时兜底：`parseSpatialIntent` 现在有 8 秒超时保护，若结构化解析超时或失败，会自动切到规则版意图解析并继续检索，不再长期卡在“正在解析空间意图和时间约束”。
+- 2026-03-27 已新增电脑端调试 CLI：`ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py` 可以直接按 Flutter 的请求体和流式协议调 `agent-recall`，并打印 `status / plan / thought / tool_call / tool_result / message / done`，最终再汇总 `top_candidates`、`tool_trace`、`follow_up` 与 `session_state`，用于不启动 Flutter 时的桌面联调。
+- 2026-03-27 已补充调试 CLI 断流诊断：当 `agent-recall` 在 `done` 前提前断开连接，或只返回 `error` 事件未返回 `done` 时，CLI 不再直接抛 Python `ChunkedEncodingError` 栈，而会保留已收到的事件、时间线、响应元信息与中断原因，方便继续归因是“后端主动报错”还是“HTTP 流被中途截断”。
+- 2026-03-27 已补充共享 Core 的通用自然语言 fallback：当当前检索/工具链没有产出可信候选时，同一个 Agent 会退回自由回答，而不是把 `No candidates found` 继续上抛成前端的上游异常。
+- 2026-03-27 已补充 Flutter 上游异常归一化：若 Supabase SDK 返回固定英文报错 `An invalid response was received from the upstream server`，Recall 页会统一映射到现有本地化上游异常提示，避免把底层英文错误直接显示给用户。
+- 2026-03-27 已新增批量联调脚本与高发散测试集：`run_agent_recall_batch_suite.py` 可以批量调用 `agent-recall`，并基于 `agent_recall_batch_suite.json` 覆盖闲聊、检索、对比、写操作、多轮续聊和 `SSE / NDJSON` 协议兼容，输出逐 case 调试结果与汇总报告。
+- 2026-03-27 已补充 Flutter 最终回答去重兼容：Recall 页消费 `agent-recall` 的 `message.delta` 时，会同时兼容“真正增量片段”和“累计全文片段”两种上游流式正文格式，避免在“你是谁”这类 direct answer 场景里把同一段回答重复拼成两到三遍。
 
 ## 2026-03-26 修复记录
 

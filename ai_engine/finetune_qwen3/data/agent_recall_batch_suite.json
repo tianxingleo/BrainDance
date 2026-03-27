@@ -1,0 +1,277 @@
+{
+  "suite_name": "agent_recall_diversified_batch_suite",
+  "defaults": {
+    "accept": "sse",
+    "execution_mode": "preview",
+    "expect": {
+      "status_code": 200,
+      "require_answer": true,
+      "require_done": true,
+      "require_mode": true,
+      "require_session_state": true
+    }
+  },
+  "cases": [
+    {
+      "case_id": "persona_identity_001",
+      "title": "身份介绍",
+      "category": "persona",
+      "tags": ["chat", "non_retrieval", "baseline"],
+      "query": "你是谁"
+    },
+    {
+      "case_id": "persona_capability_001",
+      "title": "能力介绍",
+      "category": "persona",
+      "tags": ["chat", "capability", "baseline"],
+      "query": "你能帮我做什么"
+    },
+    {
+      "case_id": "greeting_001",
+      "title": "问候兜底",
+      "category": "chitchat",
+      "tags": ["chat", "greeting"],
+      "query": "你好，今天准备怎么帮我"
+    },
+    {
+      "case_id": "thanks_001",
+      "title": "致谢续聊",
+      "category": "chitchat",
+      "tags": ["chat", "thanks"],
+      "query": "谢谢，你先不用操作"
+    },
+    {
+      "case_id": "inventory_recent_cn_001",
+      "title": "最近模型盘点",
+      "category": "inventory",
+      "tags": ["inventory", "recent", "cn"],
+      "query": "最近生成了哪些模型"
+    },
+    {
+      "case_id": "inventory_recent_en_001",
+      "title": "英文库存问法",
+      "category": "inventory",
+      "tags": ["inventory", "english", "recent"],
+      "query": "What models do I have recently?"
+    },
+    {
+      "case_id": "recommend_showcase_001",
+      "title": "展示推荐",
+      "category": "recommendation",
+      "tags": ["recommendation", "curation"],
+      "query": "推荐几个适合做展示的模型"
+    },
+    {
+      "case_id": "recommend_learning_space_001",
+      "title": "学习氛围推荐",
+      "category": "recommendation",
+      "tags": ["recommendation", "semantic", "learning"],
+      "query": "我想做一个偏学习氛围的房间展示，你建议先看哪些模型"
+    },
+    {
+      "case_id": "spatial_headphone_001",
+      "title": "耳机定位",
+      "category": "spatial_search",
+      "tags": ["spatial", "object_lookup", "baseline"],
+      "query": "黑色耳机在哪"
+    },
+    {
+      "case_id": "spatial_window_lamp_001",
+      "title": "窗边台灯确认",
+      "category": "spatial_search",
+      "tags": ["spatial", "object_lookup", "status_check"],
+      "query": "窗边那个台灯还在吗"
+    },
+    {
+      "case_id": "spatial_luotianyi_001",
+      "title": "洛天依相关模型",
+      "category": "spatial_search",
+      "tags": ["spatial", "semantic", "anchor_object"],
+      "query": "帮我找一下洛天依相关的模型"
+    },
+    {
+      "case_id": "spatial_kitchen_carton_001",
+      "title": "厨房纸箱语义检索",
+      "category": "spatial_search",
+      "tags": ["spatial", "semantic", "scene_search"],
+      "query": "最像厨房角落堆着纸箱的空间"
+    },
+    {
+      "case_id": "spatial_learning_combo_001",
+      "title": "白板电脑组合检索",
+      "category": "spatial_search",
+      "tags": ["spatial", "semantic", "multi_object"],
+      "query": "我想看一下带白板和笔记本电脑的学习区"
+    },
+    {
+      "case_id": "spatial_mixed_language_001",
+      "title": "中英混合检索",
+      "category": "spatial_search",
+      "tags": ["spatial", "mixed_language", "robustness"],
+      "query": "find me scenes about desk and monitor, 最好靠窗"
+    },
+    {
+      "case_id": "spatial_noisy_query_001",
+      "title": "口语化错拼检索",
+      "category": "spatial_search",
+      "tags": ["spatial", "noise", "robustness"],
+      "query": "帮我找下 luotianyi 那个展台模型，差不多就行"
+    },
+    {
+      "case_id": "temporal_red_cup_001",
+      "title": "时间限定单对象检索",
+      "category": "temporal_search",
+      "tags": ["temporal", "object_lookup", "recent"],
+      "query": "上周拍的红色杯子"
+    },
+    {
+      "case_id": "compare_desk_week_001",
+      "title": "书桌周对比",
+      "category": "time_compare",
+      "tags": ["compare", "desk", "baseline"],
+      "query": "对比一下上周和这周书桌的变化"
+    },
+    {
+      "case_id": "compare_room_month_001",
+      "title": "房间跨窗口对比",
+      "category": "time_compare",
+      "tags": ["compare", "room", "window"],
+      "query": "最近三天和上个月同期相比，房间有什么变化"
+    },
+    {
+      "case_id": "metadata_latest_rename_001",
+      "title": "最新两个模型改名预览",
+      "category": "asset_metadata",
+      "tags": ["write", "rename", "preview"],
+      "query": "把最新两个模型都改名为宿舍精选"
+    },
+    {
+      "case_id": "metadata_latest_tag_001",
+      "title": "最新三个模型加标签预览",
+      "category": "asset_metadata",
+      "tags": ["write", "tag", "preview"],
+      "query": "给最近三个模型都加上夜景标签"
+    },
+    {
+      "case_id": "metadata_remove_tag_001",
+      "title": "批量去标签预览",
+      "category": "asset_metadata",
+      "tags": ["write", "tag", "cleanup"],
+      "query": "把最近两个带测试标签的模型移除测试标签"
+    },
+    {
+      "case_id": "collection_topic_001",
+      "title": "专题整理请求",
+      "category": "collection",
+      "tags": ["collection", "topic", "planning"],
+      "query": "帮我整理一个洛天依专题模型集合"
+    },
+    {
+      "case_id": "ambiguous_short_001",
+      "title": "极短查询鲁棒性",
+      "category": "ambiguous",
+      "tags": ["short_query", "robustness"],
+      "query": "电脑"
+    },
+    {
+      "case_id": "long_instruction_001",
+      "title": "长提示复合意图",
+      "category": "composite",
+      "tags": ["long_query", "composite", "robustness"],
+      "query": "我在准备一个演示，需要你先帮我找偏学习氛围、桌面比较整洁、最好还能看到白板或显示器的模型；如果候选太多，就优先挑最近的、信息更完整的那几个，并顺带告诉我为什么推荐。"
+    },
+    {
+      "case_id": "protocol_ndjson_001",
+      "title": "NDJSON 协议兼容",
+      "category": "protocol",
+      "tags": ["protocol", "ndjson", "streaming"],
+      "accept": "ndjson",
+      "query": "请你找一下洛天依相关的模型"
+    },
+    {
+      "case_id": "multi_turn_refine_search_001",
+      "title": "检索后二次追问",
+      "category": "multi_turn",
+      "tags": ["multi_turn", "search", "refine"],
+      "defaults": {
+        "session_id": "suite-multi-turn-refine-search-001"
+      },
+      "turns": [
+        {
+          "query": "帮我找一下洛天依相关的模型",
+          "expect": {
+            "require_follow_up": true
+          }
+        },
+        {
+          "query": "就按你刚才最像的那个，展开说说为什么匹配",
+          "inherit_previous_state": true
+        }
+      ]
+    },
+    {
+      "case_id": "multi_turn_compare_followup_001",
+      "title": "对比后继续追问新增项",
+      "category": "multi_turn",
+      "tags": ["multi_turn", "compare", "follow_up"],
+      "defaults": {
+        "session_id": "suite-multi-turn-compare-followup-001"
+      },
+      "turns": [
+        {
+          "query": "对比一下上周和这周书桌有什么变化",
+          "expect": {
+            "require_follow_up": true
+          }
+        },
+        {
+          "query": "那如果只看桌面新增的东西呢",
+          "inherit_previous_state": true
+        }
+      ]
+    },
+    {
+      "case_id": "multi_turn_write_confirm_001",
+      "title": "预览后确认执行",
+      "category": "multi_turn",
+      "tags": ["multi_turn", "write", "execute"],
+      "defaults": {
+        "session_id": "suite-multi-turn-write-confirm-001"
+      },
+      "turns": [
+        {
+          "query": "把最新两个模型都加上演示标签",
+          "expect": {
+            "require_follow_up": true
+          }
+        },
+        {
+          "query": "好，就按上一轮的范围执行",
+          "execution_mode": "execute",
+          "inherit_previous_state": true
+        }
+      ]
+    },
+    {
+      "case_id": "multi_turn_inventory_narrow_001",
+      "title": "盘点后收缩到前两个",
+      "category": "multi_turn",
+      "tags": ["multi_turn", "inventory", "ranking"],
+      "defaults": {
+        "session_id": "suite-multi-turn-inventory-narrow-001"
+      },
+      "turns": [
+        {
+          "query": "最近有哪些偏学习氛围的模型",
+          "expect": {
+            "require_follow_up": true
+          }
+        },
+        {
+          "query": "只保留你最推荐的前两个，分别说一句理由",
+          "inherit_previous_state": true
+        }
+      ]
+    }
+  ]
+}

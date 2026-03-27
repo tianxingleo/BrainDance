@@ -101,6 +101,11 @@ export function buildAgentContextBlock(
     parts.push(`${options.conversationSummary}`);
   }
 
+  parts.push("\n=== Agent 工作约束 ===");
+  parts.push("- 先判断是否真的需要工具；如果工具不适合当前问题，应直接回答、澄清或引导。");
+  parts.push("- 不要为了显得主动而重复调用相同工具或相同参数。");
+  parts.push("- 当已有结果足以支撑回答、预览或确认时，应主动停止工具循环。");
+
   parts.push("=========================\n");
 
   return parts.join("\n");

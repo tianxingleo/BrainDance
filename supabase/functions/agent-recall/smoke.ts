@@ -6,6 +6,7 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "http://127.0.0.1:54321";
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const AGENT_RECALL_CASES = [
+  "你是谁",
   "黑色耳机在哪",
   "窗边那个台灯还在吗",
   "上周拍的红色杯子",
