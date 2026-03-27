@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 12 条可跑测试，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 18 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -29,15 +29,21 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 10 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh unknown-target`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 返回非 0，并输出不支持的 target | 通过，脚本返回失败并输出 `unsupported target` | 验证 Edge smoke 非法 target 防御 |
 | 11 | 执行 `tests/scripts/seed_supabase_test_data.sh --profile invalid`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 返回非 0，并输出不支持的 profile | 通过，脚本返回失败并输出 `unsupported profile` | 验证种子数据脚本 profile 校验 |
 | 12 | 执行 `tests/scripts/seed_supabase_test_data.sh --profile agent`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 输出 agent 对应 fixture 路径，并在 dry-run 下安全退出 | 通过，输出包含 `supabase_seed_agent.sql` 与 `dry-run enabled` | 验证种子脚本已能按 profile 绑定 fixture |
+| 13 | 执行 `tests/scripts/cleanup_supabase_test_data.sh`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 输出清理 fixture 路径，并在 dry-run 下安全退出 | 通过，输出包含 `cleanup_integration.sql` 与 `dry-run enabled` | 验证清理脚本已绑定统一 fixture 入口 |
+| 14 | 执行 `tests/http/search_models_smoke.sh <临时输出文件>`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 成功写出 dry-run JSON 文件，内容标识 target 为 `search-models` | 通过，脚本写出输出文件且内容正确 | 验证 search-models HTTP 冒烟脚本可独立执行 |
+| 15 | 执行 `tests/http/confirm_text_image_smoke.sh <临时输出文件>`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 成功写出 dry-run JSON 文件，内容标识 target 为 `confirm-text-image` | 通过，脚本写出输出文件且内容正确 | 验证 confirm-text-image HTTP 冒烟脚本可独立执行 |
+| 16 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 成功写出 dry-run JSONL 文件，内容标识 target 为 `agent-recall` | 通过，脚本写出输出文件且内容正确 | 验证 agent-recall 流式冒烟脚本可独立执行 |
+| 17 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh confirm-text-image`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/confirm_text_image_smoke.sh` 并成功退出 | 通过，输出包含 `[http-confirm-text-image] dry-run wrote` | 验证 confirm-text-image 分发链路 |
+| 18 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/agent_recall_stream_smoke.sh` 并成功退出 | 通过，输出包含 `[http-agent-recall] dry-run wrote` | 验证 agent-recall 分发链路 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 12 |
-| 通过 | 12 |
+| 总测试数 | 18 |
+| 通过 | 18 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟入口与脚本 dry-run 的真实可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发与 dry-run 编排的真实可跑测试全部通过 |
 
 ## 限制
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import unittest
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -105,6 +106,20 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertIn("[edge-smoke] target=search-models", result.stdout)
         self.assertIn("[http-search-models] dry-run wrote", result.stdout)
 
+    def test_run_edge_function_smoke_tests_dispatches_confirm_text_image(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "confirm-text-image"], dry_run=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("[edge-smoke] target=confirm-text-image", result.stdout)
+        self.assertIn("[http-confirm-text-image] dry-run wrote", result.stdout)
+
+    def test_run_edge_function_smoke_tests_dispatches_agent_recall(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "agent-recall"], dry_run=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("[edge-smoke] target=agent-recall", result.stdout)
+        self.assertIn("[http-agent-recall] dry-run wrote", result.stdout)
+
     def test_run_edge_function_smoke_tests_rejects_unknown_target(self) -> None:
         script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
         result = run_command([str(script), "unknown-target"], dry_run=True)
@@ -123,6 +138,43 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("supabase_seed_agent.sql", result.stdout)
         self.assertIn("dry-run enabled", result.stdout)
+
+    def test_cleanup_script_reports_fixture_in_dry_run(self) -> None:
+        script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
+        result = run_command([str(script)], dry_run=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("cleanup_integration.sql", result.stdout)
+        self.assertIn("dry-run enabled", result.stdout)
+
+    def test_http_search_models_smoke_script_writes_output_file_in_dry_run(self) -> None:
+        script = HTTP_DIR / "search_models_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "search_models_response.json"
+          result = run_command([str(script), str(output_file)], dry_run=True)
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn('"target":"search-models"', payload)
+
+    def test_http_confirm_text_image_smoke_script_writes_output_file_in_dry_run(self) -> None:
+        script = HTTP_DIR / "confirm_text_image_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "confirm_text_image_response.json"
+          result = run_command([str(script), str(output_file)], dry_run=True)
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn('"target":"confirm-text-image"', payload)
+
+    def test_http_agent_recall_stream_smoke_script_writes_output_file_in_dry_run(self) -> None:
+        script = HTTP_DIR / "agent_recall_stream_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "agent_recall_stream.jsonl"
+          result = run_command([str(script), str(output_file)], dry_run=True)
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn('"target":"agent-recall"', payload)
 
     def test_run_full_integration_suite_dry_run_orchestrates_steps(self) -> None:
         script = SCRIPTS_DIR / "run_full_integration_suite.sh"
