@@ -41,6 +41,7 @@
 - 2026-03-27 已补充调试 CLI 断流诊断：当 `agent-recall` 在 `done` 前提前断开连接，或只返回 `error` 事件未返回 `done` 时，CLI 不再直接抛 Python `ChunkedEncodingError` 栈，而会保留已收到的事件、时间线、响应元信息与中断原因，方便继续归因是“后端主动报错”还是“HTTP 流被中途截断”。
 - 2026-03-27 已补充共享 Core 的通用自然语言 fallback：当当前检索/工具链没有产出可信候选时，同一个 Agent 会退回自由回答，而不是把 `No candidates found` 继续上抛成前端的上游异常。
 - 2026-03-27 已补充 Flutter 上游异常归一化：若 Supabase SDK 返回固定英文报错 `An invalid response was received from the upstream server`，Recall 页会统一映射到现有本地化上游异常提示，避免把底层英文错误直接显示给用户。
+- 2026-03-27 已补充 Flutter 最终回答去重兼容：Recall 页消费 `agent-recall` 的 `message.delta` 时，会同时兼容“真正增量片段”和“累计全文片段”两种上游流式正文格式，避免在“你是谁”这类 direct answer 场景里把同一段回答重复拼成两到三遍。
 
 ## 2026-03-26 修复记录
 
