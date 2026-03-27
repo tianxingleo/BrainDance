@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 27 条可跑测试，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 28 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -44,15 +44,16 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 25 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，不启用 dry-run | 通过分发入口调用真实 `agent-recall` 流式冒烟脚本并成功写出事件流 | 通过，输出包含 `[http-agent-recall] wrote`，响应文件中存在真实流式事件与最终 `done` 载荷 | 验证 Edge smoke 分发入口已能跑真实本地 agent-recall 流式链路 |
 | 26 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，设置 `BRAINDANCE_IT_AGENT_STREAM_FORMAT=sse` | 本地 `agent-recall` 以 SSE 事件格式返回 `event: ping/status/done`，并输出稳定通用回答 | 通过，输出文件中包含 `event: ping`、`event: status`、`event: done`，且回答包含“BrainDance 的空间记忆智能管理助手” | 验证 agent-recall 的 SSE 协议与 NDJSON 协议都已可真实执行 |
 | 27 | 直接请求 `agent-recall` JSON 接口，传入 `query=确认执行`、`executionMode=preview` 与 `sessionState.lastOperationPreview` | 命中“确认执行但仍处于 preview”保护分支，返回阻止正式写入的提示，不执行写操作 | 通过，响应中包含“当前请求还是 preview 模式”、`mode=asset_metadata`、`response_resolution.kind=tool_success` | 验证 agent-recall 对批量写入确认场景的防误写保护已可真实回归 |
+| 28 | 执行 `seed minimal -> agent-recall 改名预览 -> 带 conversationSummary/sessionState 发送 确认执行 -> 查库 -> cleanup` | 第一轮返回 `follow_up.confirm_write` 与 `session_state.lastOperationPreview`，第二轮在 `execute` 模式下正式完成改名，数据库 `display_name` 落为新名称 | 通过，预览响应返回 `rename_model_asset` 预览，执行响应返回“已正式执行改名”，`model_assets.display_name` 变为“宿舍-归档版” | 验证 agent-recall 多轮续聊、会话状态承接与正式写入闭环已经接通 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 27 |
-| 通过 | 27 |
+| 总测试数 | 28 |
+| 通过 | 28 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写/agent-recall NDJSON 与 SSE 流式链路、preview 防误写保护的可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写/agent-recall NDJSON 与 SSE 流式链路、preview 防误写保护、多轮续聊执行闭环的可跑测试全部通过 |
 
 ## 限制
 

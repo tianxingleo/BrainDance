@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import unittest
 import os
@@ -77,6 +78,34 @@ def run_psql_scalar(sql: str) -> str:
     if result.returncode != 0:
         raise RuntimeError(result.stderr)
     return result.stdout.strip()
+
+
+def post_agent_recall(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    result = subprocess.run(
+        [
+            "curl",
+            "-sS",
+            "-w",
+            "\n%{http_code}",
+            "-X",
+            "POST",
+            f"{read_supabase_status_value('API_URL')}/functions/v1/agent-recall",
+            "-H",
+            f"Authorization: Bearer {read_supabase_status_value('SERVICE_ROLE_KEY')}",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            json.dumps(payload, ensure_ascii=False),
+        ],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr)
+    body, status_code = result.stdout.rsplit("\n", 1)
+    return int(status_code), json.loads(body)
 
 
 class IntegrationSkeletonTests(unittest.TestCase):
@@ -316,34 +345,108 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
 
     def test_agent_recall_preview_mode_blocks_confirm_execution(self) -> None:
-        result = run_command(
-            [
-                "curl",
-                "-sS",
-                "-X",
-                "POST",
-                f"{read_supabase_status_value('API_URL')}/functions/v1/agent-recall",
-                "-H",
-                f"Authorization: Bearer {read_supabase_status_value('SERVICE_ROLE_KEY')}",
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                (
-                    '{"query":"确认执行","executionMode":"preview","currentMode":"batch_edit",'
-                    '"sessionState":{"lastMode":"asset_metadata","lastSelectedModelIds":'
-                    '["20000000-0000-0000-0000-000000000001"],"lastOperationPreview":'
-                    '{"toolName":"batch_patch_model_metadata","affectedCount":1,"modelIds":'
-                    '["20000000-0000-0000-0000-000000000001"],"args":{"modelIds":'
-                    '["20000000-0000-0000-0000-000000000001"],"patch":{"displayNameTemplate":"宿舍-归档版",'
-                    '"tagsAdd":[],"tagsRemove":[]},"dryRun":true}}}}'
-                ),
-            ]
+        status_code, payload = post_agent_recall(
+            {
+                "query": "确认执行",
+                "executionMode": "preview",
+                "currentMode": "batch_edit",
+                "sessionState": {
+                    "lastMode": "asset_metadata",
+                    "lastSelectedModelIds": ["20000000-0000-0000-0000-000000000001"],
+                    "lastOperationPreview": {
+                        "toolName": "batch_patch_model_metadata",
+                        "affectedCount": 1,
+                        "modelIds": ["20000000-0000-0000-0000-000000000001"],
+                        "args": {
+                            "modelIds": ["20000000-0000-0000-0000-000000000001"],
+                            "patch": {
+                                "displayNameTemplate": "宿舍-归档版",
+                                "tagsAdd": [],
+                                "tagsRemove": [],
+                            },
+                            "dryRun": True,
+                        },
+                    },
+                },
+            }
         )
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("当前请求还是 preview 模式", result.stdout)
-        self.assertIn('"mode":"asset_metadata"', result.stdout)
-        self.assertIn('"kind":"tool_success"', result.stdout)
-        self.assertIn('20000000-0000-0000-0000-000000000001', result.stdout)
+        self.assertEqual(status_code, 200)
+        self.assertIn("当前请求还是 preview 模式", str(payload["answer"]))
+        self.assertEqual(payload["mode"], "asset_metadata")
+        self.assertEqual(payload["response_resolution"]["kind"], "tool_success")
+        self.assertEqual(
+            payload["selection"]["model_id"],
+            "20000000-0000-0000-0000-000000000001",
+        )
+
+    def test_agent_recall_multi_turn_preview_then_execute_rename(self) -> None:
+        cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
+        seed_script = SCRIPTS_DIR / "seed_supabase_test_data.sh"
+
+        cleanup_before = run_command([str(cleanup_script)])
+        self.assertEqual(cleanup_before.returncode, 0, msg=cleanup_before.stderr)
+
+        try:
+            seed_result = run_command([str(seed_script), "--profile", "minimal"])
+            self.assertEqual(seed_result.returncode, 0, msg=seed_result.stderr)
+
+            preview_status, preview_payload = post_agent_recall(
+                {
+                    "query": "把这个模型改名为宿舍-归档版",
+                    "executionMode": "preview",
+                    "selectedModelIds": ["20000000-0000-0000-0000-000000000001"],
+                    "currentModelId": "20000000-0000-0000-0000-000000000001",
+                    "currentMode": "batch_edit",
+                }
+            )
+            self.assertEqual(preview_status, 200)
+            self.assertEqual(preview_payload["mode"], "asset_metadata")
+            self.assertEqual(preview_payload["follow_up"]["kind"], "confirm_write")
+            self.assertEqual(
+                preview_payload["session_state"]["lastOperationPreview"]["toolName"],
+                "rename_model_asset",
+            )
+            self.assertIn("dry run", preview_payload["answer"])
+            self.assertEqual(
+                preview_payload["session_state"]["lastSelectedModelIds"],
+                ["20000000-0000-0000-0000-000000000001"],
+            )
+
+            execute_status, execute_payload = post_agent_recall(
+                {
+                    "query": "确认执行",
+                    "executionMode": "execute",
+                    "selectedModelIds": ["20000000-0000-0000-0000-000000000001"],
+                    "currentModelId": "20000000-0000-0000-0000-000000000001",
+                    "currentMode": "batch_edit",
+                    "conversationSummary": preview_payload["conversation_summary"],
+                    "sessionState": preview_payload["session_state"],
+                }
+            )
+            self.assertEqual(execute_status, 200)
+            self.assertEqual(execute_payload["mode"], "asset_metadata")
+            self.assertIn("已正式执行改名", execute_payload["answer"])
+            self.assertEqual(
+                execute_payload["selection"]["model_id"],
+                "20000000-0000-0000-0000-000000000001",
+            )
+            self.assertEqual(
+                execute_payload["tool_trace"][0]["toolName"],
+                "rename_model_asset",
+            )
+            self.assertEqual(
+                execute_payload["tool_trace"][0]["args"]["dryRun"],
+                False,
+            )
+
+            display_name = run_psql_scalar(
+                "select coalesce(display_name, '') from public.model_assets "
+                "where id = '20000000-0000-0000-0000-000000000001';"
+            )
+            self.assertEqual(display_name, "宿舍-归档版")
+        finally:
+            cleanup_after = run_command([str(cleanup_script)])
+            self.assertEqual(cleanup_after.returncode, 0, msg=cleanup_after.stderr)
 
     def test_seed_and_cleanup_minimal_profile_against_local_supabase(self) -> None:
         cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
