@@ -231,6 +231,20 @@ class IntegrationSkeletonTests(unittest.TestCase):
           payload = output_file.read_text(encoding="utf-8")
           self.assertIn('"target":"agent-recall"', payload)
 
+    def test_http_agent_recall_stream_smoke_script_against_local_supabase(self) -> None:
+        script = HTTP_DIR / "agent_recall_stream_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "agent_recall_stream.jsonl"
+          result = run_command([str(script), str(output_file)])
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn('"event":"ping"', payload)
+          self.assertIn('"event":"status"', payload)
+          self.assertIn('"event":"done"', payload)
+          self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
+          self.assertIn("status=200", result.stdout)
+
     def test_run_full_integration_suite_dry_run_orchestrates_steps(self) -> None:
         script = SCRIPTS_DIR / "run_full_integration_suite.sh"
         result = run_command([str(script), "--mode", "local"], dry_run=True)
@@ -254,6 +268,17 @@ class IntegrationSkeletonTests(unittest.TestCase):
         payload = (OUTPUT_DIR / "edge" / "search_models_response.json").read_text(encoding="utf-8")
         self.assertIn('"success":false', payload)
         self.assertIn("query", payload)
+
+    def test_run_edge_function_smoke_tests_dispatches_agent_recall_against_local_supabase(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "agent-recall"])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("[edge-smoke] target=agent-recall", result.stdout)
+        self.assertIn("[http-agent-recall] wrote", result.stdout)
+        payload = (OUTPUT_DIR / "edge" / "agent_recall_stream.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"event":"ping"', payload)
+        self.assertIn('"event":"done"', payload)
+        self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
 
     def test_seed_and_cleanup_minimal_profile_against_local_supabase(self) -> None:
         cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"

@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
- - 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 23 条可跑测试，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 25 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -40,15 +40,17 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 21 | 执行 `tests/http/search_models_smoke.sh <临时输出文件>`，不启用 dry-run | 本地 `search-models` Edge Function 返回 400 校验错误，且响应写入输出文件 | 通过，输出文件中包含 `success=false` 与 `query` 校验错误，脚本输出 `status=400` | 验证 search-models 已接入真实本地 HTTP 冒烟 |
 | 22 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh search-models`，不启用 dry-run | 通过分发入口调用真实 `search-models` 冒烟脚本并成功写出响应 | 通过，输出包含 `[http-search-models] wrote`，响应文件中存在真实 400 错误体 | 验证 Edge smoke 分发入口已能跑真实本地函数 |
 | 23 | 执行 `cleanup -> seed realtime -> mutate_processing_task_status -> 查库 -> cleanup`，不启用 dry-run | 指定任务状态从 `pending` 更新为 `processing`，并向 `logs` 追加一条集成测试日志 | 通过，数据库中状态已更新且 `logs` 数量从 0 增至 1，包含 `integration test status updated` | 验证 Realtime 任务状态改写脚本已进入真实本地执行分支 |
+| 24 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，不启用 dry-run | 本地 `agent-recall` 以 NDJSON 流式返回 `ping/status/done` 事件，并输出稳定的通用回答 | 通过，输出文件中包含 `ping`、`status`、`done` 事件，且回答包含“BrainDance 的空间记忆智能管理助手” | 验证 agent-recall 已接入真实本地流式冒烟 |
+| 25 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，不启用 dry-run | 通过分发入口调用真实 `agent-recall` 流式冒烟脚本并成功写出事件流 | 通过，输出包含 `[http-agent-recall] wrote`，响应文件中存在真实流式事件与最终 `done` 载荷 | 验证 Edge smoke 分发入口已能跑真实本地 agent-recall 流式链路 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 23 |
-| 通过 | 23 |
+| 总测试数 | 25 |
+| 通过 | 25 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写闭环的可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写/agent-recall 流式链路的可跑测试全部通过 |
 
 ## 限制
 
