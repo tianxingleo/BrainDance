@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 12 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -24,15 +24,20 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 5 | 执行 `tests/scripts/mutate_processing_task_status.sh`，不传参数 | 返回非 0，并输出 usage 提示 | 通过，脚本返回失败并输出 `usage:` | 验证 Realtime 状态改写脚本的参数校验 |
 | 6 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh`，不传 target | 返回非 0，并输出 usage 提示 | 通过，脚本返回失败并输出 `usage:` | 验证函数冒烟脚本入口参数校验 |
 | 7 | 执行 `tests/scripts/run_full_integration_suite.sh --mode local`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 按编排顺序串起 cleanup、bootstrap、seed、Flutter 分组和 Edge smoke，并以 dry-run 成功退出 | 通过，输出包含 `[suite] dry-run enabled`、`[bootstrap] dry-run enabled`、`[seed] profile=minimal`、`[flutter-it] group=auth`、`[edge-smoke] target=search-models` | 验证全量编排入口已能在无真实后端变更条件下跑通流程 |
+| 8 | 检查 `tests/fixtures/`、`tests/http/`、`tests/output/.gitkeep`、`app/.env.test.example` 是否存在 | 预期 fixtures、HTTP 请求脚本、输出目录占位文件和测试环境示例文件全部存在 | 通过，相关资产文件均存在 | 验证第二批测试支撑资产已经补齐 |
+| 9 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh search-models`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/search_models_smoke.sh`，生成 dry-run 输出文件并成功退出 | 通过，输出包含 `[http-search-models] dry-run wrote` | 验证 Edge smoke 分发链路已打通 |
+| 10 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh unknown-target`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 返回非 0，并输出不支持的 target | 通过，脚本返回失败并输出 `unsupported target` | 验证 Edge smoke 非法 target 防御 |
+| 11 | 执行 `tests/scripts/seed_supabase_test_data.sh --profile invalid`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 返回非 0，并输出不支持的 profile | 通过，脚本返回失败并输出 `unsupported profile` | 验证种子数据脚本 profile 校验 |
+| 12 | 执行 `tests/scripts/seed_supabase_test_data.sh --profile agent`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 输出 agent 对应 fixture 路径，并在 dry-run 下安全退出 | 通过，输出包含 `supabase_seed_agent.sql` 与 `dry-run enabled` | 验证种子脚本已能按 profile 绑定 fixture |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 7 |
-| 通过 | 7 |
+| 总测试数 | 12 |
+| 通过 | 12 |
 | 失败 | 0 |
-| 结论 | 第一批基于骨架与脚本入口的真实可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟入口与脚本 dry-run 的真实可跑测试全部通过 |
 
 ## 限制
 

@@ -18,8 +18,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+OUTPUT_DIR="$ROOT_DIR/tests/output"
 
 echo "[suite] mode=$MODE root=$ROOT_DIR"
+mkdir -p "$OUTPUT_DIR/flutter" "$OUTPUT_DIR/edge" "$OUTPUT_DIR/sql" "$OUTPUT_DIR/storage"
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "[suite] dry-run enabled, downstream scripts will run in no-op mode"
 fi

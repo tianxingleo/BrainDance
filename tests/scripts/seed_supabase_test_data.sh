@@ -4,6 +4,8 @@ set -euo pipefail
 PROFILE="minimal"
 PHASE=""
 DRY_RUN="${BRAINDANCE_IT_DRY_RUN:-0}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,7 +24,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$PROFILE" in
+  minimal|realtime|agent)
+    ;;
+  *)
+    echo "[seed] unsupported profile: $PROFILE" >&2
+    exit 1
+    ;;
+esac
+
 echo "[seed] profile=$PROFILE phase=$PHASE"
+case "$PROFILE" in
+  minimal) FIXTURE_FILE="$FIXTURES_DIR/supabase_seed_minimal.sql" ;;
+  realtime) FIXTURE_FILE="$FIXTURES_DIR/supabase_seed_realtime.sql" ;;
+  agent) FIXTURE_FILE="$FIXTURES_DIR/supabase_seed_agent.sql" ;;
+esac
+echo "[seed] fixture=$FIXTURE_FILE"
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "[seed] dry-run enabled, skip data mutations"
   exit 0

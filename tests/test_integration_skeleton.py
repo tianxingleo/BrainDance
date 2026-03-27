@@ -9,6 +9,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = PROJECT_ROOT / "app"
 SCRIPTS_DIR = PROJECT_ROOT / "tests" / "scripts"
+HTTP_DIR = PROJECT_ROOT / "tests" / "http"
+FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
+OUTPUT_DIR = PROJECT_ROOT / "tests" / "output"
 
 
 def run_command(args: list[str], *, dry_run: bool = False) -> subprocess.CompletedProcess[str]:
@@ -47,6 +50,21 @@ class IntegrationSkeletonTests(unittest.TestCase):
         missing = [str(path.relative_to(PROJECT_ROOT)) for path in expected_files if not path.exists()]
         self.assertEqual(missing, [])
 
+    def test_expected_fixture_and_http_assets_exist(self) -> None:
+        expected_files = [
+            PROJECT_ROOT / "app" / ".env.test.example",
+            FIXTURES_DIR / "supabase_seed_minimal.sql",
+            FIXTURES_DIR / "supabase_seed_realtime.sql",
+            FIXTURES_DIR / "supabase_seed_agent.sql",
+            FIXTURES_DIR / "cleanup_integration.sql",
+            HTTP_DIR / "search_models_smoke.sh",
+            HTTP_DIR / "confirm_text_image_smoke.sh",
+            HTTP_DIR / "agent_recall_stream_smoke.sh",
+            OUTPUT_DIR / ".gitkeep",
+        ]
+        missing = [str(path.relative_to(PROJECT_ROOT)) for path in expected_files if not path.exists()]
+        self.assertEqual(missing, [])
+
     def test_run_flutter_integration_tests_maps_group_in_dry_run(self) -> None:
         script = SCRIPTS_DIR / "run_flutter_integration_tests.sh"
         result = run_command(
@@ -80,6 +98,32 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("usage:", result.stderr)
 
+    def test_run_edge_function_smoke_tests_dispatches_search_models(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "search-models"], dry_run=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("[edge-smoke] target=search-models", result.stdout)
+        self.assertIn("[http-search-models] dry-run wrote", result.stdout)
+
+    def test_run_edge_function_smoke_tests_rejects_unknown_target(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "unknown-target"], dry_run=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported target", result.stderr)
+
+    def test_seed_script_rejects_unknown_profile(self) -> None:
+        script = SCRIPTS_DIR / "seed_supabase_test_data.sh"
+        result = run_command([str(script), "--profile", "invalid"], dry_run=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported profile", result.stderr)
+
+    def test_seed_script_reports_fixture_in_dry_run(self) -> None:
+        script = SCRIPTS_DIR / "seed_supabase_test_data.sh"
+        result = run_command([str(script), "--profile", "agent"], dry_run=True)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("supabase_seed_agent.sql", result.stdout)
+        self.assertIn("dry-run enabled", result.stdout)
+
     def test_run_full_integration_suite_dry_run_orchestrates_steps(self) -> None:
         script = SCRIPTS_DIR / "run_full_integration_suite.sh"
         result = run_command([str(script), "--mode", "local"], dry_run=True)
@@ -89,6 +133,10 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertIn("[seed] profile=minimal", result.stdout)
         self.assertIn("[flutter-it] group=auth", result.stdout)
         self.assertIn("[edge-smoke] target=search-models", result.stdout)
+        self.assertTrue((OUTPUT_DIR / "flutter").exists())
+        self.assertTrue((OUTPUT_DIR / "edge").exists())
+        self.assertTrue((OUTPUT_DIR / "sql").exists())
+        self.assertTrue((OUTPUT_DIR / "storage").exists())
 
 
 if __name__ == "__main__":
