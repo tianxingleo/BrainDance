@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 18 条可跑测试，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 20 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -35,15 +35,17 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 16 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 成功写出 dry-run JSONL 文件，内容标识 target 为 `agent-recall` | 通过，脚本写出输出文件且内容正确 | 验证 agent-recall 流式冒烟脚本可独立执行 |
 | 17 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh confirm-text-image`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/confirm_text_image_smoke.sh` 并成功退出 | 通过，输出包含 `[http-confirm-text-image] dry-run wrote` | 验证 confirm-text-image 分发链路 |
 | 18 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/agent_recall_stream_smoke.sh` 并成功退出 | 通过，输出包含 `[http-agent-recall] dry-run wrote` | 验证 agent-recall 分发链路 |
+| 19 | 执行 `tests/scripts/bootstrap_supabase_test_env.sh`，不启用 dry-run | 本地 Supabase 可连接，且 `braindance-assets`、`braindance-models` bucket 被确保存在 | 通过，脚本真实执行并完成 bucket 确认 | 验证 bootstrap 已进入真实本地执行分支 |
+| 20 | 执行 `cleanup -> seed minimal -> 查库 -> cleanup`，不启用 dry-run | `processing_tasks`、`model_assets`、`community_posts` 与 `storage.objects` 在 seed 后存在，在 cleanup 后清空 | 通过，真实本地 DB/Storage 闭环执行成功 | 验证最小真实种子与清理链路已经打通 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 18 |
-| 通过 | 18 |
+| 总测试数 | 20 |
+| 通过 | 20 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发与 dry-run 编排的真实可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排以及最小真实本地 DB/Storage 闭环的可跑测试全部通过 |
 
 ## 限制
 

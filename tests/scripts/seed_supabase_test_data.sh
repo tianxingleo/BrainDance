@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_common.sh"
+
 PROFILE="minimal"
 PHASE=""
 DRY_RUN="${BRAINDANCE_IT_DRY_RUN:-0}"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURES_DIR="$ROOT_DIR/tests/fixtures"
 
 while [[ $# -gt 0 ]]; do
@@ -45,5 +47,26 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-echo "[seed] TODO: 创建测试用户、插入 processing_tasks/model_assets/community_posts/memory_poses"
-echo "[seed] TODO: 上传 braindance-assets / braindance-models 测试文件"
+bd_require_local_supabase
+bd_psql -f "$FIXTURE_FILE"
+
+if [[ "$PROFILE" == "minimal" || "$PROFILE" == "agent" ]]; then
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+  printf 'ply placeholder for %s\n' "$PROFILE" > "$temp_dir/point_cloud.ply"
+  printf '{"poses":[{"image":"it_frame_001.png"}]}\n' > "$temp_dir/webgl_poses.json"
+  printf 'preview placeholder for %s\n' "$PROFILE" > "$temp_dir/preview.txt"
+
+  if [[ "$PROFILE" == "minimal" ]]; then
+    base_prefix="it_user_a/it_minimal_scene_001/output"
+    bd_upload_storage_object "braindance-assets" "${base_prefix}/point_cloud.ply" "$temp_dir/point_cloud.ply" "application/octet-stream"
+    bd_upload_storage_object "braindance-assets" "${base_prefix}/webgl_poses.json" "$temp_dir/webgl_poses.json" "application/json"
+    bd_upload_storage_object "braindance-assets" "${base_prefix}/preview.txt" "$temp_dir/preview.txt" "text/plain"
+  else
+    base_prefix="it_user_a/it_agent_scene_001/output"
+    bd_upload_storage_object "braindance-assets" "${base_prefix}/point_cloud.ply" "$temp_dir/point_cloud.ply" "application/octet-stream"
+    bd_upload_storage_object "braindance-assets" "${base_prefix}/preview.txt" "$temp_dir/preview.txt" "text/plain"
+  fi
+fi
+
+echo "[seed] applied profile=$PROFILE"

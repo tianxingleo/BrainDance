@@ -13,6 +13,7 @@ SCRIPTS_DIR = PROJECT_ROOT / "tests" / "scripts"
 HTTP_DIR = PROJECT_ROOT / "tests" / "http"
 FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
 OUTPUT_DIR = PROJECT_ROOT / "tests" / "output"
+COMMON_SCRIPT = SCRIPTS_DIR / "_common.sh"
 
 
 def run_command(args: list[str], *, dry_run: bool = False) -> subprocess.CompletedProcess[str]:
@@ -27,6 +28,37 @@ def run_command(args: list[str], *, dry_run: bool = False) -> subprocess.Complet
         env=env,
         check=False,
     )
+
+
+def read_supabase_status_value(key: str) -> str:
+    result = subprocess.run(
+        ["supabase", "status", "-o", "env"],
+        cwd=PROJECT_ROOT / "supabase",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr)
+    prefix = f'{key}="'
+    for line in result.stdout.splitlines():
+        if line.startswith(prefix) and line.endswith('"'):
+            return line[len(prefix):-1]
+    return ""
+
+
+def run_psql_scalar(sql: str) -> str:
+    db_url = read_supabase_status_value("DB_URL")
+    result = subprocess.run(
+        ["psql", db_url, "-At", "-c", sql],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr)
+    return result.stdout.strip()
 
 
 class IntegrationSkeletonTests(unittest.TestCase):
@@ -62,9 +94,20 @@ class IntegrationSkeletonTests(unittest.TestCase):
             HTTP_DIR / "confirm_text_image_smoke.sh",
             HTTP_DIR / "agent_recall_stream_smoke.sh",
             OUTPUT_DIR / ".gitkeep",
+            COMMON_SCRIPT,
         ]
         missing = [str(path.relative_to(PROJECT_ROOT)) for path in expected_files if not path.exists()]
         self.assertEqual(missing, [])
+
+    def test_bootstrap_supabase_test_env_runs_against_local_stack(self) -> None:
+        script = SCRIPTS_DIR / "bootstrap_supabase_test_env.sh"
+        result = run_command([str(script)])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("ensured buckets", result.stdout)
+        bucket_count = run_psql_scalar(
+            "select count(*) from storage.buckets where id in ('braindance-assets', 'braindance-models');"
+        )
+        self.assertEqual(bucket_count, "2")
 
     def test_run_flutter_integration_tests_maps_group_in_dry_run(self) -> None:
         script = SCRIPTS_DIR / "run_flutter_integration_tests.sh"
@@ -189,6 +232,56 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertTrue((OUTPUT_DIR / "edge").exists())
         self.assertTrue((OUTPUT_DIR / "sql").exists())
         self.assertTrue((OUTPUT_DIR / "storage").exists())
+
+    def test_seed_and_cleanup_minimal_profile_against_local_supabase(self) -> None:
+        cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
+        seed_script = SCRIPTS_DIR / "seed_supabase_test_data.sh"
+
+        cleanup_before = run_command([str(cleanup_script)])
+        self.assertEqual(cleanup_before.returncode, 0, msg=cleanup_before.stderr)
+
+        seed_result = run_command([str(seed_script), "--profile", "minimal"])
+        self.assertEqual(seed_result.returncode, 0, msg=seed_result.stderr)
+        self.assertIn("applied profile=minimal", seed_result.stdout)
+
+        task_count = run_psql_scalar(
+            "select count(*) from public.processing_tasks where scene_id = 'it_minimal_scene_001';"
+        )
+        asset_count = run_psql_scalar(
+            "select count(*) from public.model_assets where scene_id = 'it_minimal_scene_001';"
+        )
+        post_count = run_psql_scalar(
+            "select count(*) from public.community_posts where model_name = 'it_minimal_scene_001';"
+        )
+        object_count = run_psql_scalar(
+            "select count(*) from storage.objects where bucket_id='braindance-assets' and name like 'it_user_a/it_minimal_scene_001/%';"
+        )
+
+        self.assertEqual(task_count, "1")
+        self.assertEqual(asset_count, "1")
+        self.assertEqual(post_count, "1")
+        self.assertEqual(object_count, "3")
+
+        cleanup_after = run_command([str(cleanup_script)])
+        self.assertEqual(cleanup_after.returncode, 0, msg=cleanup_after.stderr)
+
+        task_count_after = run_psql_scalar(
+            "select count(*) from public.processing_tasks where scene_id = 'it_minimal_scene_001';"
+        )
+        asset_count_after = run_psql_scalar(
+            "select count(*) from public.model_assets where scene_id = 'it_minimal_scene_001';"
+        )
+        post_count_after = run_psql_scalar(
+            "select count(*) from public.community_posts where model_name = 'it_minimal_scene_001';"
+        )
+        object_count_after = run_psql_scalar(
+            "select count(*) from storage.objects where bucket_id='braindance-assets' and name like 'it_user_a/it_minimal_scene_001/%';"
+        )
+
+        self.assertEqual(task_count_after, "0")
+        self.assertEqual(asset_count_after, "0")
+        self.assertEqual(post_count_after, "0")
+        self.assertEqual(object_count_after, "0")
 
 
 if __name__ == "__main__":
