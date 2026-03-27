@@ -375,6 +375,34 @@ extension _RecallPageAgentRuntime on _RecallPageState {
         .join('\n');
   }
 
+  String _mergeAgentAnswerDelta({
+    required String current,
+    required String incoming,
+  }) {
+    final normalizedIncoming = incoming.trimRight();
+    if (normalizedIncoming.isEmpty) {
+      return current;
+    }
+    if (current.isEmpty) {
+      return normalizedIncoming;
+    }
+
+    // 兼容两类上游流式正文：
+    // 1. 真正的增量片段，只包含这次新增内容。
+    // 2. 累计片段，包含“截至当前为止的完整回答”。
+    // 若直接统一 append，会把累计片段的前缀重复拼进最终回答。
+    if (normalizedIncoming.startsWith(current)) {
+      return normalizedIncoming;
+    }
+    if (current.endsWith(normalizedIncoming)) {
+      return current;
+    }
+    if (normalizedIncoming.contains(current)) {
+      return normalizedIncoming;
+    }
+    return '$current$normalizedIncoming';
+  }
+
   void _consumeAgentEvent(Map<String, dynamic> data) {
     final event = data['event']?.toString() ?? '';
     final payload = data['data'];
@@ -498,7 +526,10 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       if (delta.isEmpty) {
         return;
       }
-      _agentChatMessage!.finalAnswer += delta;
+      _agentChatMessage!.finalAnswer = _mergeAgentAnswerDelta(
+        current: _agentChatMessage!.finalAnswer,
+        incoming: delta,
+      );
       _agentChatMessage!.liveStatus = textLocalize(
         'agent_status_generating_final_answer',
       );

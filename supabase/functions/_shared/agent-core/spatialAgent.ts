@@ -103,6 +103,7 @@ const agentModeSchema = z.enum([
 
 const agentRouteSchema = z.object({
   mode: agentModeSchema,
+  tool_policy: z.enum(["direct_answer", "tool_chain"]),
   reasoning: z.string(),
 });
 
@@ -148,6 +149,19 @@ const toolTraceEntrySchema = z.object({
   toolName: z.string(),
   args: z.record(z.string(), z.unknown()),
   resultSummary: z.string(),
+});
+
+const responseResolutionSchema = z.object({
+  kind: z.enum([
+    "direct_reply",
+    "general_fallback",
+    "retrieval_success",
+    "tool_success",
+    "compare_success",
+    "creative_success",
+    "memory_graph_success",
+  ]),
+  note: z.string(),
 });
 
 const selectionSummarySchema = z.object({
@@ -660,6 +674,7 @@ const responseBaseSchema = z.object({
   top_candidates: z.array(candidateSchema),
   selected_candidate_reason: z.string().nullable(),
   tool_trace: z.array(toolTraceEntrySchema),
+  response_resolution: responseResolutionSchema.optional(),
   asset_context: assetContextSchema,
   session_state: sessionStateSchema.nullable().optional(),
   conversation_summary: z.string().nullable().optional(),
@@ -1234,12 +1249,17 @@ async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
-): Promise<{ mode: AgentMode; reasoning: string }> {
+): Promise<{
+  mode: AgentMode;
+  toolPolicy: "direct_answer" | "tool_chain";
+  reasoning: string;
+}> {
   const currentMode = options.currentMode ?? null;
 
   if (isDirectReplyQuery(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "direct_answer",
       reasoning: "当前输入是闲聊问候或致谢，直接走空间链路里的自然语言兜底。",
     };
   }
@@ -1247,12 +1267,14 @@ async function classifyAgentMode(
   if (currentMode === "compare") {
     return {
       mode: "time_compare",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式已经是 compare，直接进入时间对比模式。",
     };
   }
   if (currentMode === "batch_edit" || currentMode === "collection") {
     return {
       mode: "asset_metadata",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式是批量编辑或集合操作，优先进入资产元数据模式。",
     };
   }
@@ -1260,6 +1282,7 @@ async function classifyAgentMode(
   if (isAssetDiscoveryQuery(query)) {
     return {
       mode: "asset_metadata",
+      toolPolicy: "tool_chain",
       reasoning:
         "当前输入是在找某类模型/场景资产本身，而不是问场景内物体的位置，应进入资产元数据模式。",
     };
@@ -1268,6 +1291,7 @@ async function classifyAgentMode(
   if (shouldPreferHeuristicSpatialRoute(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "tool_chain",
       reasoning: "当前输入是简单空间检索语句，直接走确定性的空间检索路由，避免额外分类轮次。",
     };
   }
@@ -1283,6 +1307,7 @@ async function classifyAgentMode(
   ]);
   return {
     mode: result.mode,
+    toolPolicy: result.tool_policy,
     reasoning: result.reasoning,
   };
 }
@@ -2674,6 +2699,55 @@ async function executeAgentToolLoop(input: {
   return { candidates, trace };
 }
 
+export function shouldStopAssetToolLoop(input: {
+  state: AssetToolState;
+  trace: ToolTraceEntry[];
+}): { stop: boolean; reason: string } {
+  const { state, trace } = input;
+
+  if (state.operation) {
+    return {
+      stop: true,
+      reason: "已经拿到写入预览或执行结果，继续调工具不会比当前结果更关键。",
+    };
+  }
+  if (state.comparison) {
+    return {
+      stop: true,
+      reason: "已经拿到结构化对比结果，可以直接进入回答整理。",
+    };
+  }
+  if (state.collectionSummary || state.threadGrouping) {
+    return {
+      stop: true,
+      reason: "专题或线程整理结果已经生成，当前工具链目标已完成。",
+    };
+  }
+  if (state.poseSummary || state.relatedModels || state.placeVersions) {
+    return {
+      stop: true,
+      reason: "已经拿到补充摘要或关系结果，足以支撑当前回答。",
+    };
+  }
+  if (state.bundle) {
+    return {
+      stop: true,
+      reason: "模型详情 bundle 已经生成，可以直接整理回答，无需继续补工具。",
+    };
+  }
+  if (state.list && trace.length >= 2) {
+    return {
+      stop: true,
+      reason: "已经连续多轮停留在列表读取，没有形成新的操作或摘要，应停止循环改为直接回答或向用户澄清。",
+    };
+  }
+
+  return {
+    stop: false,
+    reason: "当前还没有形成足够稳定的资产结果，可继续尝试下一步工具。",
+  };
+}
+
 async function executeAssetToolLoop(input: {
   model: ChatOpenAI;
   query: string;
@@ -2808,6 +2882,23 @@ async function executeAssetToolLoop(input: {
       });
       break;
     }
+
+    const stopDecision = shouldStopAssetToolLoop({ state, trace });
+    if (stopDecision.stop) {
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "asset_tool_enough",
+          summary: "当前资产信息已足够，停止继续试探工具",
+          detail: stopDecision.reason,
+        },
+      });
+      await emitThought(
+        callbacks,
+        `结论：${stopDecision.reason}`,
+      );
+      break;
+    }
   }
 
   return { trace, state };
@@ -2827,6 +2918,8 @@ function finalizeResponse(
 ): SpatialSearchResponse {
   const normalized = {
     ...response,
+    response_resolution: response.response_resolution ??
+      buildResponseResolutionFromResponse(response),
     session_state: response.session_state ??
       buildSessionStateFromResponse(response),
     conversation_summary: response.conversation_summary ??
@@ -2834,6 +2927,65 @@ function finalizeResponse(
     follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
   };
   return spatialSearchResponseSchemaUnion.parse(normalized);
+}
+
+export function buildResponseResolutionFromResponse(
+  response: SpatialSearchResponse,
+): z.infer<typeof responseResolutionSchema> {
+  if (response.mode === "asset_metadata") {
+    return {
+      kind: "tool_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由资产工具链路整理得出。",
+    };
+  }
+  if (response.mode === "time_compare") {
+    return {
+      kind: "compare_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由时间对比链路整理得出。",
+    };
+  }
+  if (response.mode === "creative") {
+    return {
+      kind: "creative_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由创作链路整理得出。",
+    };
+  }
+  if (response.mode === "memory_graph") {
+    return {
+      kind: "memory_graph_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由记忆图谱链路整理得出。",
+    };
+  }
+
+  if (
+    response.top_candidates.length === 0 &&
+    response.selection.confidence >= 1 &&
+    response.tool_trace.length === 0
+  ) {
+    return {
+      kind: "direct_reply",
+      note: response.selected_candidate_reason ??
+        "当前回答直接由闲聊直答生成。",
+    };
+  }
+
+  if (response.top_candidates.length === 0) {
+    return {
+      kind: "general_fallback",
+      note: response.selected_candidate_reason ??
+        "当前回答由共享 Agent Core 的通用自然语言 fallback 生成。",
+    };
+  }
+
+  return {
+    kind: "retrieval_success",
+    note: response.selected_candidate_reason ??
+      "当前回答由检索候选与工具结果共同整理得出。",
+  };
 }
 
 function buildSessionStateFromResponse(
@@ -3327,10 +3479,12 @@ export async function runSpatialSearchAgent(
   }
 
   let mode: AgentMode;
+  let toolPolicy: "direct_answer" | "tool_chain" = "tool_chain";
   let modeReasoning = "";
   try {
     const routeDecision = await classifyAgentMode(model, query, options);
     mode = routeDecision.mode;
+    toolPolicy = routeDecision.toolPolicy;
     modeReasoning = routeDecision.reasoning;
   } catch (error) {
     await emitProgress(callbacks, {
@@ -3342,6 +3496,7 @@ export async function runSpatialSearchAgent(
       },
     });
     mode = "spatial_search";
+    toolPolicy = "tool_chain";
     modeReasoning = "路由模型不可用，因此回退到默认空间检索模式。";
   }
   await emitProgress(callbacks, {
@@ -3354,8 +3509,61 @@ export async function runSpatialSearchAgent(
   });
   await emitThought(
     callbacks,
-    `路由判断：选择 ${mode}，原因是 ${modeReasoning}`,
+    `路由判断：选择 ${mode}，工具策略为 ${toolPolicy}，原因是 ${modeReasoning}`,
   );
+
+  if (mode === "spatial_search" && toolPolicy === "direct_answer") {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "general_answer",
+        summary: "当前问题更适合通用 Agent 直接回答，跳过空间检索工具链",
+        detail: modeReasoning,
+      },
+    });
+    const fallbackAnswer = await buildGeneralAssistantFallbackAnswer(
+      model,
+      query,
+      options,
+    ).catch(() =>
+      "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想做什么。"
+    );
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent: {
+        rewrittenQuery: query.trim(),
+        targetType: "scene",
+        objectHint: null,
+        locationHint: null,
+        sceneHint: null,
+        timeHint: null,
+        startTime: null,
+        endTime: null,
+        reasoning: modeReasoning,
+      },
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前问题更适合通用 Agent 直接回答，已主动跳过空间检索工具链。",
+      },
+      answer: fallbackAnswer,
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "路由已判定为 direct_answer，未进入空间检索工具链。",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options, callbacks);
