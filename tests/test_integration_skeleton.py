@@ -30,6 +30,24 @@ def run_command(args: list[str], *, dry_run: bool = False) -> subprocess.Complet
     )
 
 
+def run_command_with_env(
+    args: list[str],
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        args,
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+
+
 def read_supabase_status_value(key: str) -> str:
     result = subprocess.run(
         ["supabase", "status", "-o", "env"],
@@ -245,6 +263,23 @@ class IntegrationSkeletonTests(unittest.TestCase):
           self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
           self.assertIn("status=200", result.stdout)
 
+    def test_http_agent_recall_stream_smoke_script_supports_sse(self) -> None:
+        script = HTTP_DIR / "agent_recall_stream_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "agent_recall_stream.sse"
+          result = run_command_with_env(
+              [str(script), str(output_file)],
+              extra_env={"BRAINDANCE_IT_AGENT_STREAM_FORMAT": "sse"},
+          )
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn("event: ping", payload)
+          self.assertIn("event: status", payload)
+          self.assertIn("event: done", payload)
+          self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
+          self.assertIn("format=sse", result.stdout)
+
     def test_run_full_integration_suite_dry_run_orchestrates_steps(self) -> None:
         script = SCRIPTS_DIR / "run_full_integration_suite.sh"
         result = run_command([str(script), "--mode", "local"], dry_run=True)
@@ -279,6 +314,36 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertIn('"event":"ping"', payload)
         self.assertIn('"event":"done"', payload)
         self.assertIn("BrainDance 的空间记忆智能管理助手", payload)
+
+    def test_agent_recall_preview_mode_blocks_confirm_execution(self) -> None:
+        result = run_command(
+            [
+                "curl",
+                "-sS",
+                "-X",
+                "POST",
+                f"{read_supabase_status_value('API_URL')}/functions/v1/agent-recall",
+                "-H",
+                f"Authorization: Bearer {read_supabase_status_value('SERVICE_ROLE_KEY')}",
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                (
+                    '{"query":"确认执行","executionMode":"preview","currentMode":"batch_edit",'
+                    '"sessionState":{"lastMode":"asset_metadata","lastSelectedModelIds":'
+                    '["20000000-0000-0000-0000-000000000001"],"lastOperationPreview":'
+                    '{"toolName":"batch_patch_model_metadata","affectedCount":1,"modelIds":'
+                    '["20000000-0000-0000-0000-000000000001"],"args":{"modelIds":'
+                    '["20000000-0000-0000-0000-000000000001"],"patch":{"displayNameTemplate":"宿舍-归档版",'
+                    '"tagsAdd":[],"tagsRemove":[]},"dryRun":true}}}}'
+                ),
+            ]
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("当前请求还是 preview 模式", result.stdout)
+        self.assertIn('"mode":"asset_metadata"', result.stdout)
+        self.assertIn('"kind":"tool_success"', result.stdout)
+        self.assertIn('20000000-0000-0000-0000-000000000001', result.stdout)
 
     def test_seed_and_cleanup_minimal_profile_against_local_supabase(self) -> None:
         cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"

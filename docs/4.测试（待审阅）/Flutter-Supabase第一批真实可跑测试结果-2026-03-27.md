@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 25 条可跑测试，结果如下。
+- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 27 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -42,15 +42,17 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 23 | 执行 `cleanup -> seed realtime -> mutate_processing_task_status -> 查库 -> cleanup`，不启用 dry-run | 指定任务状态从 `pending` 更新为 `processing`，并向 `logs` 追加一条集成测试日志 | 通过，数据库中状态已更新且 `logs` 数量从 0 增至 1，包含 `integration test status updated` | 验证 Realtime 任务状态改写脚本已进入真实本地执行分支 |
 | 24 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，不启用 dry-run | 本地 `agent-recall` 以 NDJSON 流式返回 `ping/status/done` 事件，并输出稳定的通用回答 | 通过，输出文件中包含 `ping`、`status`、`done` 事件，且回答包含“BrainDance 的空间记忆智能管理助手” | 验证 agent-recall 已接入真实本地流式冒烟 |
 | 25 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，不启用 dry-run | 通过分发入口调用真实 `agent-recall` 流式冒烟脚本并成功写出事件流 | 通过，输出包含 `[http-agent-recall] wrote`，响应文件中存在真实流式事件与最终 `done` 载荷 | 验证 Edge smoke 分发入口已能跑真实本地 agent-recall 流式链路 |
+| 26 | 执行 `tests/http/agent_recall_stream_smoke.sh <临时输出文件>`，设置 `BRAINDANCE_IT_AGENT_STREAM_FORMAT=sse` | 本地 `agent-recall` 以 SSE 事件格式返回 `event: ping/status/done`，并输出稳定通用回答 | 通过，输出文件中包含 `event: ping`、`event: status`、`event: done`，且回答包含“BrainDance 的空间记忆智能管理助手” | 验证 agent-recall 的 SSE 协议与 NDJSON 协议都已可真实执行 |
+| 27 | 直接请求 `agent-recall` JSON 接口，传入 `query=确认执行`、`executionMode=preview` 与 `sessionState.lastOperationPreview` | 命中“确认执行但仍处于 preview”保护分支，返回阻止正式写入的提示，不执行写操作 | 通过，响应中包含“当前请求还是 preview 模式”、`mode=asset_metadata`、`response_resolution.kind=tool_success` | 验证 agent-recall 对批量写入确认场景的防误写保护已可真实回归 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 25 |
-| 通过 | 25 |
+| 总测试数 | 27 |
+| 通过 | 27 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写/agent-recall 流式链路的可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写/agent-recall NDJSON 与 SSE 流式链路、preview 防误写保护的可跑测试全部通过 |
 
 ## 限制
 
