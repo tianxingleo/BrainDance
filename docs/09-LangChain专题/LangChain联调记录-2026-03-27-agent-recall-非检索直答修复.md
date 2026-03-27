@@ -10,6 +10,7 @@
 
 - 在 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts) 中补充通用 `buildGeneralAssistantFallbackAnswer()`，让共享 Core 在“没有可信候选/当前不适合进入检索工具链”时，回退成同一个 Agent 的自然语言回答，而不是直接抛错。
 - `runSpatialSearchAgent()` 不再在 `rankedCandidates.length === 0` 时直接 `throw new Error("No candidates found")`；现在会显式发送 `no_candidate_fallback` 状态，再调用通用自由回答 fallback 生成最终答复。
+- 参考 OpenCode 的可审计会话语义，本轮还新增了 `response_resolution` 元数据，用于显式标注当前回答是 `retrieval_success`、`direct_reply` 还是 `general_fallback`，便于 Flutter、调试 CLI 与后端日志统一判断“这次是怎么收口的”。
 - Flutter 侧 [agent_recall_service.dart](/home/ltx/projects/BrainDance/app/lib/services/agent_recall_service.dart) 补充上游异常归一化，若 SDK 返回固定文案 `An invalid response was received from the upstream server`，页面会统一展示既有本地化文案 `agent_error_upstream`，避免把英文底层报错直接暴露给用户。
 
 ## 为什么这不是“特殊路由优化”

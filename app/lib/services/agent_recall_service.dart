@@ -122,6 +122,7 @@ class AgentRecallResponse {
   final List<AgentAction> actions;
   final List<AgentCandidate> candidates;
   final List<AgentToolTrace> toolTrace;
+  final Map<String, dynamic>? responseResolution;
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
@@ -139,6 +140,7 @@ class AgentRecallResponse {
     required this.actions,
     this.candidates = const [],
     this.toolTrace = const [],
+    this.responseResolution,
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
@@ -186,6 +188,9 @@ class AgentRecallResponse {
                 AgentToolTrace.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
+      responseResolution: json['response_resolution'] is Map
+          ? Map<String, dynamic>.from(json['response_resolution'] as Map)
+          : null,
       selectedCandidateReason: json['selected_candidate_reason']?.toString(),
       assetContext: json['asset_context'] is Map
           ? Map<String, dynamic>.from(json['asset_context'] as Map)
@@ -763,6 +768,7 @@ class AgentRecallService {
             },
           )
           .toList(),
+      'response_resolution': response.responseResolution,
       'selected_candidate_reason': response.selectedCandidateReason,
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,

@@ -4,6 +4,7 @@ import {
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
   buildGeneralAssistantFallbackAnswer,
+  buildResponseResolutionFromResponse,
   buildVisualizationActions,
   isAssetDiscoveryQuery,
   isDirectReplyQuery,
@@ -42,6 +43,62 @@ Deno.test("buildGeneralAssistantFallbackAnswer 会在无候选时输出通用 Ag
     ).includes("空间记忆智能管理助手"),
     true,
   );
+});
+
+Deno.test("buildResponseResolutionFromResponse 会为通用 fallback 标注 general_fallback", () => {
+  const resolution = buildResponseResolutionFromResponse({
+    success: true,
+    mode: "spatial_search",
+    intent: {
+      rewrittenQuery: "你是谁",
+      targetType: "scene",
+      objectHint: null,
+      locationHint: null,
+      sceneHint: null,
+      timeHint: null,
+      startTime: null,
+      endTime: null,
+      reasoning: "测试 fallback",
+    },
+    selection: {
+      scene_id: null,
+      model_id: null,
+      pose_image_id: null,
+      confidence: 0,
+      reason: "当前没有可信检索候选，已回退为通用 Agent 自然语言回答。",
+    },
+    answer: "我是 BrainDance 的空间记忆智能管理助手。",
+    actions: [],
+    viewer_payload: {
+      ply: null,
+      poses: null,
+      matrix: null,
+      imageId: null,
+    },
+    evidence: null,
+    candidates: [],
+    top_candidates: [],
+    selected_candidate_reason: "未命中可信候选，已回退为通用 Agent 回答。",
+    tool_trace: [],
+    asset_context: {
+      last_tool_name: null,
+      list: null,
+      bundle: null,
+      comparison: null,
+      operation: null,
+      pose_summary: null,
+      related_models: null,
+      place_versions: null,
+      collection_summary: null,
+      thread_grouping: null,
+    },
+    compare_context: null,
+    collection_context: null,
+    creative_context: null,
+    memory_graph_context: null,
+  });
+
+  assertEquals(resolution.kind, "general_fallback");
 });
 
 Deno.test("shouldPreferHeuristicSpatialRoute 会让简单查找语句避开 LLM 路由", () => {

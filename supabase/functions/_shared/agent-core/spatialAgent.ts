@@ -150,6 +150,19 @@ const toolTraceEntrySchema = z.object({
   resultSummary: z.string(),
 });
 
+const responseResolutionSchema = z.object({
+  kind: z.enum([
+    "direct_reply",
+    "general_fallback",
+    "retrieval_success",
+    "tool_success",
+    "compare_success",
+    "creative_success",
+    "memory_graph_success",
+  ]),
+  note: z.string(),
+});
+
 const selectionSummarySchema = z.object({
   scene_id: z.string().nullable(),
   model_id: z.string().nullable(),
@@ -660,6 +673,7 @@ const responseBaseSchema = z.object({
   top_candidates: z.array(candidateSchema),
   selected_candidate_reason: z.string().nullable(),
   tool_trace: z.array(toolTraceEntrySchema),
+  response_resolution: responseResolutionSchema.optional(),
   asset_context: assetContextSchema,
   session_state: sessionStateSchema.nullable().optional(),
   conversation_summary: z.string().nullable().optional(),
@@ -2827,6 +2841,8 @@ function finalizeResponse(
 ): SpatialSearchResponse {
   const normalized = {
     ...response,
+    response_resolution: response.response_resolution ??
+      buildResponseResolutionFromResponse(response),
     session_state: response.session_state ??
       buildSessionStateFromResponse(response),
     conversation_summary: response.conversation_summary ??
@@ -2834,6 +2850,65 @@ function finalizeResponse(
     follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
   };
   return spatialSearchResponseSchemaUnion.parse(normalized);
+}
+
+export function buildResponseResolutionFromResponse(
+  response: SpatialSearchResponse,
+): z.infer<typeof responseResolutionSchema> {
+  if (response.mode === "asset_metadata") {
+    return {
+      kind: "tool_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由资产工具链路整理得出。",
+    };
+  }
+  if (response.mode === "time_compare") {
+    return {
+      kind: "compare_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由时间对比链路整理得出。",
+    };
+  }
+  if (response.mode === "creative") {
+    return {
+      kind: "creative_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由创作链路整理得出。",
+    };
+  }
+  if (response.mode === "memory_graph") {
+    return {
+      kind: "memory_graph_success",
+      note: response.selected_candidate_reason ??
+        "当前回答由记忆图谱链路整理得出。",
+    };
+  }
+
+  if (
+    response.top_candidates.length === 0 &&
+    response.selection.confidence >= 1 &&
+    response.tool_trace.length === 0
+  ) {
+    return {
+      kind: "direct_reply",
+      note: response.selected_candidate_reason ??
+        "当前回答直接由闲聊直答生成。",
+    };
+  }
+
+  if (response.top_candidates.length === 0) {
+    return {
+      kind: "general_fallback",
+      note: response.selected_candidate_reason ??
+        "当前回答由共享 Agent Core 的通用自然语言 fallback 生成。",
+    };
+  }
+
+  return {
+    kind: "retrieval_success",
+    note: response.selected_candidate_reason ??
+      "当前回答由检索候选与工具结果共同整理得出。",
+  };
 }
 
 function buildSessionStateFromResponse(
