@@ -103,6 +103,7 @@ const agentModeSchema = z.enum([
 
 const agentRouteSchema = z.object({
   mode: agentModeSchema,
+  tool_policy: z.enum(["direct_answer", "tool_chain"]),
   reasoning: z.string(),
 });
 
@@ -1248,12 +1249,17 @@ async function classifyAgentMode(
   model: ChatOpenAI,
   query: string,
   options: SpatialSearchAgentOptions = {},
-): Promise<{ mode: AgentMode; reasoning: string }> {
+): Promise<{
+  mode: AgentMode;
+  toolPolicy: "direct_answer" | "tool_chain";
+  reasoning: string;
+}> {
   const currentMode = options.currentMode ?? null;
 
   if (isDirectReplyQuery(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "direct_answer",
       reasoning: "当前输入是闲聊问候或致谢，直接走空间链路里的自然语言兜底。",
     };
   }
@@ -1261,12 +1267,14 @@ async function classifyAgentMode(
   if (currentMode === "compare") {
     return {
       mode: "time_compare",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式已经是 compare，直接进入时间对比模式。",
     };
   }
   if (currentMode === "batch_edit" || currentMode === "collection") {
     return {
       mode: "asset_metadata",
+      toolPolicy: "tool_chain",
       reasoning: "前端当前模式是批量编辑或集合操作，优先进入资产元数据模式。",
     };
   }
@@ -1274,6 +1282,7 @@ async function classifyAgentMode(
   if (isAssetDiscoveryQuery(query)) {
     return {
       mode: "asset_metadata",
+      toolPolicy: "tool_chain",
       reasoning:
         "当前输入是在找某类模型/场景资产本身，而不是问场景内物体的位置，应进入资产元数据模式。",
     };
@@ -1282,6 +1291,7 @@ async function classifyAgentMode(
   if (shouldPreferHeuristicSpatialRoute(query)) {
     return {
       mode: "spatial_search",
+      toolPolicy: "tool_chain",
       reasoning: "当前输入是简单空间检索语句，直接走确定性的空间检索路由，避免额外分类轮次。",
     };
   }
@@ -1297,6 +1307,7 @@ async function classifyAgentMode(
   ]);
   return {
     mode: result.mode,
+    toolPolicy: result.tool_policy,
     reasoning: result.reasoning,
   };
 }
@@ -3468,10 +3479,12 @@ export async function runSpatialSearchAgent(
   }
 
   let mode: AgentMode;
+  let toolPolicy: "direct_answer" | "tool_chain" = "tool_chain";
   let modeReasoning = "";
   try {
     const routeDecision = await classifyAgentMode(model, query, options);
     mode = routeDecision.mode;
+    toolPolicy = routeDecision.toolPolicy;
     modeReasoning = routeDecision.reasoning;
   } catch (error) {
     await emitProgress(callbacks, {
@@ -3483,6 +3496,7 @@ export async function runSpatialSearchAgent(
       },
     });
     mode = "spatial_search";
+    toolPolicy = "tool_chain";
     modeReasoning = "路由模型不可用，因此回退到默认空间检索模式。";
   }
   await emitProgress(callbacks, {
@@ -3495,8 +3509,61 @@ export async function runSpatialSearchAgent(
   });
   await emitThought(
     callbacks,
-    `路由判断：选择 ${mode}，原因是 ${modeReasoning}`,
+    `路由判断：选择 ${mode}，工具策略为 ${toolPolicy}，原因是 ${modeReasoning}`,
   );
+
+  if (mode === "spatial_search" && toolPolicy === "direct_answer") {
+    await emitProgress(callbacks, {
+      event: "status",
+      data: {
+        phase: "general_answer",
+        summary: "当前问题更适合通用 Agent 直接回答，跳过空间检索工具链",
+        detail: modeReasoning,
+      },
+    });
+    const fallbackAnswer = await buildGeneralAssistantFallbackAnswer(
+      model,
+      query,
+      options,
+    ).catch(() =>
+      "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想做什么。"
+    );
+    return finalizeResponse({
+      success: true,
+      mode: "spatial_search",
+      intent: {
+        rewrittenQuery: query.trim(),
+        targetType: "scene",
+        objectHint: null,
+        locationHint: null,
+        sceneHint: null,
+        timeHint: null,
+        startTime: null,
+        endTime: null,
+        reasoning: modeReasoning,
+      },
+      selection: {
+        scene_id: null,
+        model_id: null,
+        pose_image_id: null,
+        confidence: 0,
+        reason: "当前问题更适合通用 Agent 直接回答，已主动跳过空间检索工具链。",
+      },
+      answer: fallbackAnswer,
+      actions: [],
+      viewer_payload: emptyViewerPayload(),
+      evidence: null,
+      candidates: [],
+      top_candidates: [],
+      selected_candidate_reason: "路由已判定为 direct_answer，未进入空间检索工具链。",
+      tool_trace: [],
+      asset_context: serializeAssetContext(createEmptyAssetToolState()),
+      compare_context: null,
+      collection_context: null,
+      creative_context: null,
+      memory_graph_context: null,
+    });
+  }
 
   if (mode === "time_compare") {
     return await buildTimeCompareModeResponse(query, options, callbacks);

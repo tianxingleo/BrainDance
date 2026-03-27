@@ -20,6 +20,7 @@
 - 在 [asset_tool_loop.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/prompts/asset_tool_loop.ts) 中补充资产工具边界、非工具场景、自主停止条件，并明确“解释、澄清、引导”优先于机械调工具。
 - 在 [context.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/prompts/context.ts) 中增加统一 Agent 工作约束，让 route、spatial、asset 三条 prompt 共享同一套基础行为原则。
 - 在 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts) 中新增 `shouldStopAssetToolLoop()`，把“已经拿到预览/对比/摘要/关系结果就停止”“多轮只剩列表读取就停止”收敛为共享 Core 的系统级退出策略，而不是只靠模型自觉。
+- 在 [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts) 中进一步补上 `tool_policy` 执行分叉：route 不再只返回 mode，还会显式声明 `direct_answer / tool_chain`。共享 Core 现在会在 `spatial_search + direct_answer` 时直接跳过 `parseSpatialIntent` 和检索 tools，避免出现“reasoning 说不该调工具，但执行上还是继续检索”的控制流错位。
 
 ## 外部设计借鉴
 
@@ -48,6 +49,9 @@
   - `deno check supabase/functions/_shared/agent-core/spatialAgent.ts supabase/functions/agent-recall/index.ts`
   - `deno check supabase/functions/_shared/agent-core/prompts/route.ts supabase/functions/_shared/agent-core/prompts/spatial_tool_loop.ts supabase/functions/_shared/agent-core/prompts/asset_tool_loop.ts supabase/functions/_shared/agent-core/prompts/context.ts`
   - `deno test --allow-env supabase/functions/agent-recall/smoke.ts`
+- 已执行桌面联调：
+  - `python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py --query '你可以干什么' --execution-mode preview`
+  - 本轮结果已确认不再进入 `intent` / `tool_call` / `tool_result`，而是直接走 `general_answer`，最终 `tool_trace_count=0`、`candidate_count=0`。
 - 当前环境未提供 `SUPABASE_SERVICE_ROLE_KEY`，因此 `smoke.ts` 本轮只验证了闭环入口脚本可执行，并把 `你是谁` 纳入真实请求用例列表；未实际打到远端函数服务。
 
 ## 影响与风险
