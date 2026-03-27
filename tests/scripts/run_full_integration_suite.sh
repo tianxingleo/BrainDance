@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MODE="local"
+DRY_RUN="${BRAINDANCE_IT_DRY_RUN:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,6 +20,9 @@ done
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "[suite] mode=$MODE root=$ROOT_DIR"
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "[suite] dry-run enabled, downstream scripts will run in no-op mode"
+fi
 "$ROOT_DIR/tests/scripts/cleanup_supabase_test_data.sh" || true
 "$ROOT_DIR/tests/scripts/bootstrap_supabase_test_env.sh"
 "$ROOT_DIR/tests/scripts/seed_supabase_test_data.sh" --profile minimal

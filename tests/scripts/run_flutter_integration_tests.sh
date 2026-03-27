@@ -4,6 +4,7 @@ set -euo pipefail
 GROUP=""
 ENV_NAME="rls"
 FAULT=""
+DRY_RUN="${BRAINDANCE_IT_DRY_RUN:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,4 +47,9 @@ case "$GROUP" in
 esac
 
 echo "[flutter-it] group=$GROUP env=$ENV_NAME fault=$FAULT target=$TARGET"
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "[flutter-it] dry-run enabled, skip flutter execution"
+  exit 0
+fi
+
 echo "[flutter-it] TODO: 注入 dart-defines / .env.test 并执行 flutter test $TARGET"

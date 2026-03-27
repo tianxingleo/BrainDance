@@ -4,6 +4,7 @@ set -euo pipefail
 TASK_ID=""
 STATUS=""
 APPEND_LOG=""
+DRY_RUN="${BRAINDANCE_IT_DRY_RUN:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,4 +33,9 @@ if [[ -z "$TASK_ID" || -z "$STATUS" ]]; then
 fi
 
 echo "[mutate-task] task_id=$TASK_ID status=$STATUS append_log=$APPEND_LOG"
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "[mutate-task] dry-run enabled, skip task status mutation"
+  exit 0
+fi
+
 echo "[mutate-task] TODO: 通过 psql 或 service-role API 更新 processing_tasks"
