@@ -199,6 +199,18 @@ class IntegrationSkeletonTests(unittest.TestCase):
           payload = output_file.read_text(encoding="utf-8")
           self.assertIn('"target":"search-models"', payload)
 
+    def test_http_search_models_smoke_script_against_local_supabase(self) -> None:
+        script = HTTP_DIR / "search_models_smoke.sh"
+        with tempfile.TemporaryDirectory() as temp_dir:
+          output_file = Path(temp_dir) / "search_models_response.json"
+          result = run_command([str(script), str(output_file)])
+          self.assertEqual(result.returncode, 0, msg=result.stderr)
+          self.assertTrue(output_file.exists())
+          payload = output_file.read_text(encoding="utf-8")
+          self.assertIn('"success":false', payload)
+          self.assertIn("query", payload)
+          self.assertIn("status=400", result.stdout)
+
     def test_http_confirm_text_image_smoke_script_writes_output_file_in_dry_run(self) -> None:
         script = HTTP_DIR / "confirm_text_image_smoke.sh"
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,6 +244,16 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertTrue((OUTPUT_DIR / "edge").exists())
         self.assertTrue((OUTPUT_DIR / "sql").exists())
         self.assertTrue((OUTPUT_DIR / "storage").exists())
+
+    def test_run_edge_function_smoke_tests_dispatches_search_models_against_local_supabase(self) -> None:
+        script = SCRIPTS_DIR / "run_edge_function_smoke_tests.sh"
+        result = run_command([str(script), "search-models"])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("[edge-smoke] target=search-models", result.stdout)
+        self.assertIn("[http-search-models] wrote", result.stdout)
+        payload = (OUTPUT_DIR / "edge" / "search_models_response.json").read_text(encoding="utf-8")
+        self.assertIn('"success":false', payload)
+        self.assertIn("query", payload)
 
     def test_seed_and_cleanup_minimal_profile_against_local_supabase(self) -> None:
         cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
@@ -282,6 +304,54 @@ class IntegrationSkeletonTests(unittest.TestCase):
         self.assertEqual(asset_count_after, "0")
         self.assertEqual(post_count_after, "0")
         self.assertEqual(object_count_after, "0")
+
+    def test_mutate_processing_task_status_updates_row_and_logs(self) -> None:
+        cleanup_script = SCRIPTS_DIR / "cleanup_supabase_test_data.sh"
+        seed_script = SCRIPTS_DIR / "seed_supabase_test_data.sh"
+        mutate_script = SCRIPTS_DIR / "mutate_processing_task_status.sh"
+
+        cleanup_before = run_command([str(cleanup_script)])
+        self.assertEqual(cleanup_before.returncode, 0, msg=cleanup_before.stderr)
+
+        try:
+            seed_result = run_command([str(seed_script), "--profile", "realtime"])
+            self.assertEqual(seed_result.returncode, 0, msg=seed_result.stderr)
+
+            before_state = run_psql_scalar(
+                "select status || '|' || jsonb_array_length(coalesce(logs, '[]'::jsonb))::text "
+                "from public.processing_tasks where id = '10000000-0000-0000-0000-000000000011';"
+            )
+            self.assertEqual(before_state, "pending|0")
+
+            mutate_result = run_command(
+                [
+                    str(mutate_script),
+                    "--task-id",
+                    "10000000-0000-0000-0000-000000000011",
+                    "--status",
+                    "processing",
+                    "--append-log",
+                    "integration test status updated",
+                ]
+            )
+            self.assertEqual(mutate_result.returncode, 0, msg=mutate_result.stderr)
+            self.assertIn("updated=", mutate_result.stdout)
+
+            after_state = run_psql_scalar(
+                "select status || '|' || jsonb_array_length(coalesce(logs, '[]'::jsonb))::text "
+                "from public.processing_tasks where id = '10000000-0000-0000-0000-000000000011';"
+            )
+            self.assertEqual(after_state, "processing|1")
+
+            logs_payload = run_psql_scalar(
+                "select logs::text from public.processing_tasks "
+                "where id = '10000000-0000-0000-0000-000000000011';"
+            )
+            self.assertIn("integration test status updated", logs_payload)
+            self.assertIn("integration_test", logs_payload)
+        finally:
+            cleanup_after = run_command([str(cleanup_script)])
+            self.assertEqual(cleanup_after.returncode, 0, msg=cleanup_after.stderr)
 
 
 if __name__ == "__main__":

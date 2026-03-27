@@ -13,7 +13,7 @@ python3 -m unittest tests.test_integration_skeleton -v
 说明：
 
 - 由于当前终端环境中缺少 `flutter` 与 `dart` 命令，本轮“真实可跑测试”优先覆盖已落地的 `integration_test` 骨架、`pubspec.yaml` 依赖声明以及 `tests/scripts` 的参数校验与 `dry-run` 编排行为。
-- 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 20 条可跑测试，结果如下。
+ - 这批测试已经在当前分支真实执行；随着分支继续推进，当前结果已扩展为 23 条可跑测试，结果如下。
 
 | 具体步骤（即编号从1开始） | 输入 | 期望输出 | 实际输出 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -37,15 +37,18 @@ python3 -m unittest tests.test_integration_skeleton -v
 | 18 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh agent-recall`，并开启 `BRAINDANCE_IT_DRY_RUN=1` | 分发到 `tests/http/agent_recall_stream_smoke.sh` 并成功退出 | 通过，输出包含 `[http-agent-recall] dry-run wrote` | 验证 agent-recall 分发链路 |
 | 19 | 执行 `tests/scripts/bootstrap_supabase_test_env.sh`，不启用 dry-run | 本地 Supabase 可连接，且 `braindance-assets`、`braindance-models` bucket 被确保存在 | 通过，脚本真实执行并完成 bucket 确认 | 验证 bootstrap 已进入真实本地执行分支 |
 | 20 | 执行 `cleanup -> seed minimal -> 查库 -> cleanup`，不启用 dry-run | `processing_tasks`、`model_assets`、`community_posts` 与 `storage.objects` 在 seed 后存在，在 cleanup 后清空 | 通过，真实本地 DB/Storage 闭环执行成功 | 验证最小真实种子与清理链路已经打通 |
+| 21 | 执行 `tests/http/search_models_smoke.sh <临时输出文件>`，不启用 dry-run | 本地 `search-models` Edge Function 返回 400 校验错误，且响应写入输出文件 | 通过，输出文件中包含 `success=false` 与 `query` 校验错误，脚本输出 `status=400` | 验证 search-models 已接入真实本地 HTTP 冒烟 |
+| 22 | 执行 `tests/scripts/run_edge_function_smoke_tests.sh search-models`，不启用 dry-run | 通过分发入口调用真实 `search-models` 冒烟脚本并成功写出响应 | 通过，输出包含 `[http-search-models] wrote`，响应文件中存在真实 400 错误体 | 验证 Edge smoke 分发入口已能跑真实本地函数 |
+| 23 | 执行 `cleanup -> seed realtime -> mutate_processing_task_status -> 查库 -> cleanup`，不启用 dry-run | 指定任务状态从 `pending` 更新为 `processing`，并向 `logs` 追加一条集成测试日志 | 通过，数据库中状态已更新且 `logs` 数量从 0 增至 1，包含 `integration test status updated` | 验证 Realtime 任务状态改写脚本已进入真实本地执行分支 |
 
 ## 汇总
 
 | 指标 | 结果 |
 | --- | --- |
-| 总测试数 | 20 |
-| 通过 | 20 |
+| 总测试数 | 23 |
+| 通过 | 23 |
 | 失败 | 0 |
-| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排以及最小真实本地 DB/Storage 闭环的可跑测试全部通过 |
+| 结论 | 当前分支上基于骨架、fixtures、HTTP 冒烟脚本、脚本分发、dry-run 编排，以及真实本地 DB/Storage/Edge Function/任务状态改写闭环的可跑测试全部通过 |
 
 ## 限制
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_common.sh"
+
 TASK_ID=""
 STATUS=""
 APPEND_LOG=""
@@ -38,4 +41,38 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-echo "[mutate-task] TODO: 通过 psql 或 service-role API 更新 processing_tasks"
+bd_require_local_supabase
+
+UPDATE_RESULT="$(
+  bd_psql -At \
+    -v task_id="$TASK_ID" \
+    -v new_status="$STATUS" \
+    -v append_log="$APPEND_LOG" <<'SQL'
+with updated as (
+  update public.processing_tasks
+  set
+    status = :'new_status',
+    updated_at = now(),
+    logs = case
+      when :'append_log' = '' then coalesce(logs, '[]'::jsonb)
+      else coalesce(logs, '[]'::jsonb) || jsonb_build_array(
+        jsonb_build_object(
+          'msg', :'append_log',
+          'status', :'new_status',
+          'source', 'integration_test'
+        )
+      )
+    end
+  where id = :'task_id'::uuid
+  returning id, status, jsonb_array_length(coalesce(logs, '[]'::jsonb)) as log_count
+)
+select id::text || '|' || status || '|' || log_count::text from updated;
+SQL
+)"
+
+if [[ -z "$UPDATE_RESULT" ]]; then
+  echo "[mutate-task] task not found: $TASK_ID" >&2
+  exit 1
+fi
+
+echo "[mutate-task] updated=$UPDATE_RESULT"
