@@ -13,3 +13,4 @@ opencv-python>=4.8.0
 dashscope>=1.0.0
 pillow>=9.0.0
 scipy>=1.10.0
+PyYAML>=6.0

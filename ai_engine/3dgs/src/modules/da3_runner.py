@@ -6,12 +6,17 @@ import os
 import shutil
 import subprocess
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
 # 引入项目配置
 from src.config import PipelineConfig
-from src.utils.nerfstudio_cli import patch_nerfstudio_env, resolve_nerfstudio_cli
+from src.utils.nerfstudio_cli import (
+    patch_nerfstudio_env,
+    resolve_nerfstudio_cli,
+    resolve_python_executable,
+)
 
 class DA3Runner:
     def __init__(self, cfg: PipelineConfig, log_callback=None):
@@ -50,6 +55,12 @@ class DA3Runner:
         da3_src_path = self.da3_repo_path / "src"
         self.env["PYTHONPATH"] = f"{str(self.da3_repo_path)}{os.pathsep}{str(da3_src_path)}{os.pathsep}{pythonpath}"
         self.ns_process_exe = resolve_nerfstudio_cli("ns-process-data")
+        self.python_executable = resolve_python_executable(
+            required_modules=["yaml"],
+            preferred_envs=["Braindance"],
+        )
+        self._validate_da3_runtime()
+        self.log_callback(f"    -> 🐍 DA3 Python: {self.python_executable}")
 
     def run(self):
         """执行 DA3 完整流程"""
@@ -81,7 +92,7 @@ class DA3Runner:
 
             # Step 2: 转换为 COLMAP 文本格式
             self._run_cmd([
-                "python", str(self.da3_convert_cmd),
+                self.python_executable, str(self.da3_convert_cmd),
                 "--base_dir", str(da3_output_dir),
                 "--output_dir", str(colmap_output_dir),
                 "--image_dir", str(dest_images_dir)
@@ -91,7 +102,7 @@ class DA3Runner:
             # convert_da3_to_colmap.py 在 output_dir 下会创建 sparse/0
             colmap_sparse_0_dir = colmap_output_dir / "sparse" / "0"
             self._run_cmd([
-                "python", str(self.da3_binary_cmd),
+                self.python_executable, str(self.da3_binary_cmd),
                 str(colmap_sparse_0_dir)
             ], "Step 3: 转换为 COLMAP 二进制格式")
 
@@ -117,7 +128,7 @@ class DA3Runner:
 
     def _run_da3_streaming(self, raw_images_dir: Path, da3_config: Path, da3_output_dir: Path):
         cmd = [
-            "python", str(self.da3_streaming_cmd),
+            self.python_executable, str(self.da3_streaming_cmd),
             "--image_dir", str(raw_images_dir),
             "--config", str(da3_config),
             "--output_dir", str(da3_output_dir),
@@ -156,6 +167,48 @@ class DA3Runner:
 
         if last_error:
             raise last_error
+
+    def _validate_da3_runtime(self):
+        if self._python_has_modules(["yaml"], env=self.env):
+            return
+
+        relaxed_env = self.env.copy()
+        relaxed_env.pop("PYTHONNOUSERSITE", None)
+        if self._python_has_modules(["yaml"], env=relaxed_env):
+            # 某些历史环境把 PyYAML 装到了 ~/.local；这里仅对 DA3 进程放开用户站点，避免直接崩溃。
+            self.env = relaxed_env
+            self.log_callback(
+                "    -> ⚠️ DA3 运行环境缺少隔离态 PyYAML，已临时放开用户 site-packages 兼容历史安装。"
+            )
+            return
+
+        current_python = sys.executable
+        raise RuntimeError(
+            "❌ DA3 运行环境缺少 PyYAML（模块名: yaml）。"
+            f"当前主进程解释器: {current_python}；"
+            f"已选 DA3 解释器: {self.python_executable}。"
+            "请优先使用 Braindance 环境启动 3DGS 服务，或在所用解释器中安装 PyYAML。"
+        )
+
+    def _python_has_modules(self, modules: list[str], env: Optional[dict[str, str]] = None) -> bool:
+        probe = (
+            "import importlib.util, sys\n"
+            f"mods = {modules!r}\n"
+            "missing = [name for name in mods if importlib.util.find_spec(name) is None]\n"
+            "sys.exit(0 if not missing else 1)\n"
+        )
+        try:
+            result = subprocess.run(
+                [self.python_executable, "-c", probe],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                env=env or self.env,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0
 
     def _build_hf_endpoints(self):
         endpoints = []
