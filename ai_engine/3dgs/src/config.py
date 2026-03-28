@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import os
+import urllib.parse
 
 from dotenv import load_dotenv
 
@@ -107,6 +108,38 @@ def _normalize_supabase_url(url: str) -> str:
     return url.rstrip("/") + "/"
 
 
+def _merge_no_proxy_entries(existing: str, *entries: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for raw in (existing, *entries):
+        for item in str(raw or "").split(","):
+            value = item.strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            merged.append(value)
+    return ",".join(merged)
+
+
+def ensure_no_proxy_for_url(url: str, *extra_hosts: str) -> str:
+    """把目标 URL 的 host 与 host:port 同步加入 NO_PROXY/no_proxy，绕过全局代理。"""
+    entries = ["localhost", "127.0.0.1", "::1", *extra_hosts]
+    if url:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.hostname:
+            entries.append(parsed.hostname)
+            if parsed.port:
+                entries.append(f"{parsed.hostname}:{parsed.port}")
+
+    merged = _merge_no_proxy_entries(
+        _merge_no_proxy_entries(os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")),
+        *entries,
+    )
+    os.environ["NO_PROXY"] = merged
+    os.environ["no_proxy"] = merged
+    return merged
+
+
 def _apply_module_runtime_env() -> None:
     hf_endpoint = _get_str("HF_ENDPOINT", "runtime", "hf_endpoint", default="")
     proxy_url = _get_str("PROXY_URL", "runtime", "proxy_url", default="")
@@ -129,8 +162,12 @@ def _apply_module_runtime_env() -> None:
     if pytorch_alloc_conf:
         os.environ["PYTORCH_ALLOC_CONF"] = pytorch_alloc_conf
     if no_proxy:
-        os.environ["NO_PROXY"] = no_proxy
-        os.environ["no_proxy"] = no_proxy
+        merged_no_proxy = _merge_no_proxy_entries(
+            _merge_no_proxy_entries(os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")),
+            no_proxy,
+        )
+        os.environ["NO_PROXY"] = merged_no_proxy
+        os.environ["no_proxy"] = merged_no_proxy
     os.environ["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
 
 

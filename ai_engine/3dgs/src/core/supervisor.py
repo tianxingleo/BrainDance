@@ -4,13 +4,13 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import Client, ClientOptions, create_client
+from src.config import ensure_no_proxy_for_url
 
 load_dotenv()
 
@@ -32,17 +32,13 @@ class WorkerSupervisor:
         self.worker_id = os.getenv("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.poll_interval = max(2, int(os.getenv("WORKER_SUPERVISOR_POLL_INTERVAL", "3")))
         self.interrupt_grace_seconds = max(5, int(os.getenv("WORKER_INTERRUPT_GRACE_SECONDS", "20")))
-        self.postgrest_timeout = max(3, int(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "5")))
-        self.storage_timeout = max(5, int(os.getenv("SUPABASE_STORAGE_TIMEOUT_SECONDS", "30")))
+        self.postgrest_timeout = max(5, int(os.getenv("SUPABASE_POSTGREST_TIMEOUT_SECONDS", "15")))
+        self.storage_timeout = max(30, int(os.getenv("SUPABASE_STORAGE_TIMEOUT_SECONDS", "300")))
         self.child: subprocess.Popen | None = None
         self.root_dir = Path(__file__).resolve().parents[2]
 
         if self.supabase_url:
-            parsed = urllib.parse.urlparse(self.supabase_url)
-            if parsed.hostname:
-                no_proxy = os.environ.get("no_proxy", "")
-                if parsed.hostname not in no_proxy:
-                    os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
+            ensure_no_proxy_for_url(self.supabase_url)
 
         self.supabase: Client = create_client(
             self.supabase_url,

@@ -21,7 +21,7 @@ from urllib.request import urlopen, Request
 
 from supabase import Client, ClientOptions, create_client
 
-from src.config import PipelineConfig
+from src.config import PipelineConfig, ensure_no_proxy_for_url
 from src.core.factory import PipelineFactory
 from src.modules.knowledge_base import KnowledgeBase
 from src.modules.rag_memory import RagMemory
@@ -74,13 +74,8 @@ class CloudWorker:
 
         # --- 3. 建立连接 ---
         # 修复 HTTPX 对 no_proxy 的 CIDR 解析不兼容的问题，强制把目标 IP 塞入 no_proxy
-        import urllib.parse
         if self.SUPABASE_URL:
-            parsed = urllib.parse.urlparse(self.SUPABASE_URL)
-            if parsed.hostname:
-                no_proxy = os.environ.get("no_proxy", "")
-                if parsed.hostname not in no_proxy:
-                    os.environ["no_proxy"] = f"{no_proxy},{parsed.hostname}" if no_proxy else parsed.hostname
+            ensure_no_proxy_for_url(self.SUPABASE_URL)
 
         # 创建 Supabase 客户端实例，后续所有数据库/存储操作都通过它进行
         self.supabase: Client = create_client(

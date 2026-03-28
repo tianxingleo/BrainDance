@@ -35,10 +35,31 @@ def _prioritize_conda_site_packages():
 
 _prioritize_conda_site_packages()
 
+
+def _merge_no_proxy_entries(existing: str, *entries: str) -> str:
+    merged = []
+    seen = set()
+    for raw in (existing, *entries):
+        for item in str(raw or "").split(","):
+            value = item.strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            merged.append(value)
+    return ",".join(merged)
+
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
+_merged_no_proxy = _merge_no_proxy_entries(
+    _merge_no_proxy_entries(os.environ.get("NO_PROXY", ""), os.environ.get("no_proxy", "")),
+    "huggingface.co",
+    "hf-mirror.com",
+    "localhost",
+    "127.0.0.1",
+    "::1",
+)
+os.environ["NO_PROXY"] = _merged_no_proxy
+os.environ["no_proxy"] = _merged_no_proxy
 
 # main.py
 # 功能：程序入口文件，负责启动不同的运行模式
