@@ -185,20 +185,27 @@ class SAM3DEngine:
 
     def _load_inference_class(self):
         """
-        优先复用上游 notebook/inference.py 的公开接口。
+        优先按文件路径加载上游 notebook/inference.py 的公开接口。
         若其在导入阶段因为 kaolin / gradio 等可视化依赖失败，则回退到仅保留推理能力的轻量封装。
         """
+        notebook_path = self.repo_path / "notebook" / "inference.py"
+        if not notebook_path.is_file():
+            raise ImportError(f"无法找到 SAM3D 推理入口: {notebook_path}")
+
         try:
-            from inference import Inference
-
-            return Inference
+            spec = importlib.util.spec_from_file_location(
+                "sam3d_notebook_inference",
+                notebook_path,
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"无法为 {notebook_path} 创建 import spec")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            inference_cls = getattr(module, "Inference", None)
+            if inference_cls is None:
+                raise ImportError(f"{notebook_path} 中未找到 Inference")
+            return inference_cls
         except Exception as exc:
-            notebook_path = self.repo_path / "notebook" / "inference.py"
-            if not notebook_path.is_file():
-                raise ImportError(
-                    f"无法找到 SAM3D 推理入口: {notebook_path}"
-                ) from exc
-
             print(
                 "⚠️ [SAM3D] notebook/inference.py 导入失败，"
                 f"将回退到轻量推理封装: {type(exc).__name__}: {exc}"
