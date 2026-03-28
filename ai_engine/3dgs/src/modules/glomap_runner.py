@@ -12,16 +12,17 @@ from collections import deque
 
 # 引入项目配置
 from src.config import PipelineConfig
+from src.utils.nerfstudio_cli import patch_nerfstudio_env, resolve_nerfstudio_cli
 
 class GlomapRunner:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
         self.colmap_use_gpu = cfg.colmap_use_gpu
         self.colmap_gpu_index = self._normalize_gpu_index(cfg.colmap_gpu_index.strip() or "0")
-        self.env = os.environ.copy()
-        self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self.env = patch_nerfstudio_env(os.environ.copy())
         self.colmap_exe = self._resolve_executable("colmap", "COLMAP_BIN")
         self.glomap_exe = self._resolve_executable("glomap", "GLOMAP_BIN")
+        self.ns_process_exe = resolve_nerfstudio_cli("ns-process-data")
 
         missing = []
         if not self.colmap_exe:
@@ -213,7 +214,7 @@ class GlomapRunner:
 
             # Step 5: 生成 json
             self._run_cmd([
-                "ns-process-data", "images",
+                self.ns_process_exe, "images",
                 "--data", str(dest_images_dir),
                 "--output-dir", str(self.cfg.data_dir),
                 "--skip-colmap",

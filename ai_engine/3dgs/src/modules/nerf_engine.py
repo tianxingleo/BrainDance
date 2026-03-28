@@ -16,15 +16,17 @@ from src.config import PipelineConfig
 from src.utils.geometry import analyze_and_calculate_adaptive_collider
 # 关键：引入点云切割算法
 from src.utils.ply_utils import perform_percentile_culling
+from src.utils.nerfstudio_cli import patch_nerfstudio_env, resolve_nerfstudio_cli
 
 class NerfstudioEngine:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
         self.output_dir = cfg.project_dir / "outputs"
         # 准备环境变量
-        self.env = os.environ.copy()
+        self.env = patch_nerfstudio_env(os.environ.copy())
         self.env["QT_QPA_PLATFORM"] = "offscreen"
-        self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self.ns_train_exe = resolve_nerfstudio_cli("ns-train")
+        self.ns_export_exe = resolve_nerfstudio_cli("ns-export")
         self._fix_cuda_env_for_gsplat()
 
     def _fix_cuda_env_for_gsplat(self):
@@ -99,7 +101,7 @@ class NerfstudioEngine:
 
         # 2. 组装命令
         cmd = [
-            "ns-train", "splatfacto",
+            self.ns_train_exe, "splatfacto",
             "--data", str(self.cfg.data_dir),
             "--output-dir", str(self.output_dir),
             "--experiment-name", self.cfg.project_name,
@@ -152,7 +154,7 @@ class NerfstudioEngine:
 
         # 导出命令
         subprocess.run([
-            "ns-export", "gaussian-splat",
+            self.ns_export_exe, "gaussian-splat",
             "--load-config", str(config_path),
             "--output-dir", str(self.cfg.project_dir)
         ], check=True, env=self.env)
@@ -164,7 +166,7 @@ class NerfstudioEngine:
         cameras_export_dir.mkdir(parents=True, exist_ok=True)
         try:
             subprocess.run([
-                "ns-export", "cameras", "--load-config", str(config_path), 
+                self.ns_export_exe, "cameras", "--load-config", str(config_path), 
                 "--output-dir", str(cameras_export_dir)
             ], check=True, env=self.env)
         except Exception as e:

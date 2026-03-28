@@ -11,6 +11,7 @@ from typing import Optional
 
 # 引入项目配置
 from src.config import PipelineConfig
+from src.utils.nerfstudio_cli import patch_nerfstudio_env, resolve_nerfstudio_cli
 
 class DA3Runner:
     def __init__(self, cfg: PipelineConfig, log_callback=None):
@@ -27,8 +28,7 @@ class DA3Runner:
         
         self.log_callback(f"    -> 🎯 锁定引擎: DA3={self.da3_streaming_cmd}")
         
-        self.env = os.environ.copy()
-        self.env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+        self.env = patch_nerfstudio_env(os.environ.copy())
         self.env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         # 放宽 HuggingFace 超时，减少大模型下载时的瞬时网络失败。
         self.env.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
@@ -49,6 +49,7 @@ class DA3Runner:
         pythonpath = self.env.get("PYTHONPATH", "")
         da3_src_path = self.da3_repo_path / "src"
         self.env["PYTHONPATH"] = f"{str(self.da3_repo_path)}{os.pathsep}{str(da3_src_path)}{os.pathsep}{pythonpath}"
+        self.ns_process_exe = resolve_nerfstudio_cli("ns-process-data")
 
     def run(self):
         """执行 DA3 完整流程"""
@@ -96,7 +97,7 @@ class DA3Runner:
 
             # Step 4: 生成 transforms.json
             self._run_cmd([
-                "ns-process-data", "images",
+                self.ns_process_exe, "images",
                 "--data", str(dest_images_dir),
                 "--output-dir", str(self.cfg.data_dir),
                 "--skip-colmap",
