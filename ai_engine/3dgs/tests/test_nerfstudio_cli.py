@@ -32,3 +32,33 @@ def test_build_nerfstudio_cli_command_uses_python_module_entrypoint(monkeypatch)
     cmd = module.build_nerfstudio_cli_command("ns-export")
 
     assert cmd == ["/tmp/fake-python", "-m", "nerfstudio.scripts.exporter"]
+
+
+def test_resolve_nerfstudio_python_respects_isolated_probe_env(monkeypatch):
+    module = _load_nerfstudio_cli_module()
+
+    candidates = [
+        Path("/fake/braindance/bin/python"),
+        Path("/fake/urban/bin/python"),
+    ]
+
+    monkeypatch.setattr(module, "_candidate_env_bin_dirs", lambda preferred_envs=None: [p.parent for p in candidates])
+    monkeypatch.setattr(module, "sys", type("FakeSys", (), {"executable": str(candidates[0])})())
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(module.os, "access", lambda path, mode: True)
+    monkeypatch.setattr(module.Path, "exists", lambda self: str(self) in {str(p) for p in candidates})
+
+    seen = []
+
+    def fake_has_modules(python_path, required_modules, probe_env=None):
+        seen.append((str(python_path), probe_env))
+        if str(python_path) == str(candidates[0]):
+            return probe_env != {"PYTHONNOUSERSITE": "1"}
+        return True
+
+    monkeypatch.setattr(module, "_python_has_modules", fake_has_modules)
+
+    resolved = module.resolve_nerfstudio_python(["Braindance", "urban_fine_grained_modeling"])
+
+    assert resolved == str(candidates[1])
+    assert any(env == {"PYTHONNOUSERSITE": "1"} for _, env in seen)

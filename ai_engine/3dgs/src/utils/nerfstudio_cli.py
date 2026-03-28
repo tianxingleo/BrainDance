@@ -57,7 +57,11 @@ def _candidate_env_bin_dirs(preferred_envs: list[str] | None = None) -> list[Pat
     return env_bin_dirs
 
 
-def _python_has_modules(python_path: Path, required_modules: list[str]) -> bool:
+def _python_has_modules(
+    python_path: Path,
+    required_modules: list[str],
+    probe_env: dict[str, str] | None = None,
+) -> bool:
     if not required_modules:
         return True
 
@@ -73,6 +77,7 @@ def _python_has_modules(python_path: Path, required_modules: list[str]) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            env=probe_env,
             timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
@@ -83,6 +88,7 @@ def _python_has_modules(python_path: Path, required_modules: list[str]) -> bool:
 def resolve_python_executable(
     required_modules: list[str] | None = None,
     preferred_envs: list[str] | None = None,
+    probe_env: dict[str, str] | None = None,
 ) -> str:
     """
     为子进程解析 Python 解释器。
@@ -117,7 +123,7 @@ def resolve_python_executable(
         deduped.append(candidate)
 
     for candidate in deduped:
-        if _python_has_modules(candidate, required_modules):
+        if _python_has_modules(candidate, required_modules, probe_env=probe_env):
             return str(candidate)
 
     if deduped:
@@ -139,6 +145,7 @@ def resolve_nerfstudio_python(
     return resolve_python_executable(
         required_modules=["torch", "tyro", "yaml"],
         preferred_envs=preferred_envs or ["Braindance", "urban_fine_grained_modeling"],
+        probe_env={"PYTHONNOUSERSITE": "1"},
     )
 
 
