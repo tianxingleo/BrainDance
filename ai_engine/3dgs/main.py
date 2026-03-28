@@ -1,4 +1,40 @@
 import os
+import sys
+import site
+from pathlib import Path
+
+
+def _prioritize_conda_site_packages():
+    """优先使用当前 Conda 环境的依赖，避免 ~/.local 下的残缺包抢占导入顺序。"""
+    user_site = site.getusersitepackages()
+    conda_prefix = Path(sys.prefix).resolve()
+    conda_site_packages = []
+
+    for path in list(sys.path):
+        if not path or "site-packages" not in path:
+            continue
+        try:
+            if Path(path).resolve().is_relative_to(conda_prefix):
+                conda_site_packages.append(path)
+        except Exception:
+            continue
+
+    for path in conda_site_packages:
+        if path in sys.path:
+            sys.path.remove(path)
+
+    if user_site in sys.path:
+        sys.path.remove(user_site)
+
+    for path in reversed(conda_site_packages):
+        sys.path.insert(0, path)
+
+    if user_site:
+        sys.path.append(user_site)
+
+
+_prioritize_conda_site_packages()
+
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["no_proxy"] = "huggingface.co,hf-mirror.com"
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
@@ -10,7 +46,6 @@ os.environ["NO_PROXY"] = "huggingface.co,hf-mirror.com"
 # 逻辑：1. 加载环境变量 2. 解析命令行参数 3. 启动相应模式
 # 包含：本地模式运行函数、云端模式运行函数、模式选择逻辑
 import argparse
-from pathlib import Path
 
 from dotenv import load_dotenv
 

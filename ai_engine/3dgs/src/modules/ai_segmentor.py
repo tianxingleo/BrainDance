@@ -4,7 +4,6 @@
 # 逻辑：1. 调用Qwen-VL分析中心物体 2. 使用YOLO检测物体 3. 使用SAM进行分割 4. 处理和验证mask 5. 保存透明PNG
 # 包含：AISegmentor类、get_central_object_prompt函数、AI分割流水线、mask处理算法
 import os
-import os
 import shutil
 import json
 import cv2
@@ -12,15 +11,32 @@ import numpy as np
 import torch
 from pathlib import Path
 
+AI_IMPORT_ERROR = None
+
+
+def _check_cv2_runtime():
+    """校验当前 OpenCV 是否可用，避免残缺安装在导入阶段拖垮主流程。"""
+    required_attrs = ("imread", "imwrite", "cvtColor", "GaussianBlur")
+    missing_attrs = [attr for attr in required_attrs if not hasattr(cv2, attr)]
+    if missing_attrs:
+        raise RuntimeError(
+            "当前 cv2 安装不完整，缺少必要接口: "
+            + ", ".join(missing_attrs)
+            + "。请检查 Braindance 环境中的 OpenCV 安装。"
+        )
+
+
 # --- 1. 软依赖引入 (AI 库) ---
 try:
+    _check_cv2_runtime()
     import dashscope
     from dashscope import MultiModalConversation
     from ultralytics import SAM, YOLOWorld
     HAS_AI = True
-except ImportError:
+except Exception as e:
     HAS_AI = False
-    print("⚠️ [Module Warning] 'dashscope' or 'ultralytics' not found. AI features will be disabled.")
+    AI_IMPORT_ERROR = e
+    print(f"⚠️ [Module Warning] AI 分割依赖初始化失败: {type(e).__name__}: {e}")
 
 # --- 2. 项目引用 ---
 from src.config import PipelineConfig
@@ -108,7 +124,8 @@ class AISegmentor:
     def run(self):
         """执行 AI 分割总流水线 (对应原 run_ai_segmentation_pipeline)"""
         if not HAS_AI or not self.cfg.enable_ai:
-            print("⏩ 跳过 AI 分割 (未启用或缺少依赖)")
+            reason = f": {AI_IMPORT_ERROR}" if AI_IMPORT_ERROR else ""
+            print(f"⏩ 跳过 AI 分割 (未启用或缺少依赖{reason})")
             return False
             
         if not self.cfg.transforms_file.exists():

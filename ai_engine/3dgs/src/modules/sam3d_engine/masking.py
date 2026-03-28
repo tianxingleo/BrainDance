@@ -10,12 +10,29 @@ from typing import Optional, Union
 # 需要在导入 ultralytics 前设置，才能让其 AUTOINSTALL 常量生效。
 os.environ.setdefault("YOLO_AUTOINSTALL", "False")
 
+AI_IMPORT_ERROR = None
+
+
+def _check_cv2_runtime():
+    """校验 OpenCV 基础能力，避免残缺安装在导入时直接触发异常。"""
+    required_attrs = ("imdecode", "imread", "imwrite", "cvtColor", "GaussianBlur")
+    missing_attrs = [attr for attr in required_attrs if not hasattr(cv2, attr)]
+    if missing_attrs:
+        raise RuntimeError(
+            "当前 cv2 安装不完整，缺少必要接口: "
+            + ", ".join(missing_attrs)
+            + "。请检查 Braindance 环境中的 OpenCV 安装。"
+        )
+
+
 # 尝试引入 AI 库，如果环境没有装也不报错，自动降级
 try:
+    _check_cv2_runtime()
     from ultralytics import SAM, YOLOWorld
     HAS_AI = True
-except ImportError:
+except Exception as e:
     HAS_AI = False
+    AI_IMPORT_ERROR = e
 
 class MaskGenerator:
     def __init__(self, model_dir: str = "./models"):
@@ -73,7 +90,8 @@ class MaskGenerator:
             return self._smart_mask_gen(image_path)
         else:
             if method == "smart" and not HAS_AI:
-                print("    ⚠️ [Mask] 未安装 ultralytics，降级为 simple 模式")
+                reason = f": {AI_IMPORT_ERROR}" if AI_IMPORT_ERROR else ""
+                print(f"    ⚠️ [Mask] 智能抠图依赖不可用，降级为 simple 模式{reason}")
             return self._simple_mask_gen(img_pil)
 
     def _load_image_bgr(self, image_path: Path) -> np.ndarray:
