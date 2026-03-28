@@ -75,3 +75,35 @@ def test_build_image_data_url_keeps_small_png_without_wrong_mime(tmp_path):
     url = analyzer._build_image_data_url(str(image_path))
 
     assert url.startswith("data:image/png;base64,")
+
+
+def test_classify_scene_or_object_uses_built_data_url(monkeypatch, tmp_path):
+    image_path = tmp_path / "sample.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nsmall")
+
+    analyzer = SceneAnalyzer(PipelineConfig())
+    analyzer.api_key = "test-key"
+
+    expected_url = "data:image/png;base64,ZmFrZQ=="
+    monkeypatch.setattr(analyzer, "_build_image_data_url", lambda path, log_callback=None: expected_url)
+
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return _build_completion('{"label":"object","reason":"主体集中"}')
+
+    monkeypatch.setattr(
+        "src.modules.scene_analyzer.OpenAI",
+        lambda **kwargs: SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=fake_create)
+            )
+        ),
+    )
+
+    label, reason = analyzer.classify_scene_or_object(str(image_path))
+
+    assert label == "object"
+    assert reason == "主体集中"
+    assert captured["messages"][1]["content"][1]["image_url"]["url"] == expected_url

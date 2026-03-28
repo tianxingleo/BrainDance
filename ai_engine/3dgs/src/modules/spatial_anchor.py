@@ -285,7 +285,7 @@ class SpatialAnchorExtractor:
         messages = [
             {"role": "user", "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self.scene_analyzer._encode_image(str(image_path))}"}}
+                {"type": "image_url", "image_url": {"url": self.scene_analyzer._build_image_data_url(str(image_path))}}
             ]}
         ]
         

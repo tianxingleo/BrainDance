@@ -409,7 +409,7 @@ class SceneAnalyzer:
                 if os.path.exists(img_path):
                     messages[1]["content"].append({
                         "type": "image_url", 
-                        "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(img_path)}"}
+                        "image_url": {"url": self._build_image_data_url(img_path, log_callback=log_callback)}
                     })
 
             if len(messages[1]["content"]) == 1:
@@ -578,7 +578,7 @@ class SceneAnalyzer:
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(image_path)}"}},
+                        {"type": "image_url", "image_url": {"url": self._build_image_data_url(image_path, log_callback=log_callback)}},
                     ]},
                 ],
                 temperature=0.1,
