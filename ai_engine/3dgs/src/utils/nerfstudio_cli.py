@@ -9,6 +9,23 @@ class NerfstudioCliNotFoundError(FileNotFoundError):
     """未找到可用的 Nerfstudio CLI 可执行文件。"""
 
 
+_NERFSTUDIO_MODULE_MAP = {
+    "ns-process-data": "nerfstudio.scripts.process_data",
+    "ns-train": "nerfstudio.scripts.train",
+    "ns-export": "nerfstudio.scripts.exporter",
+}
+
+
+def get_repo_nerfstudio_root() -> Path:
+    """
+    返回仓库内 nerfstudio 源码根目录。
+
+    这里不是包目录 `.../nerfstudio/nerfstudio`，而是其上一层，
+    这样加入 `PYTHONPATH` 后可直接 `import nerfstudio`。
+    """
+    return Path(__file__).resolve().parents[1] / "libs" / "nerfstudio"
+
+
 def _candidate_env_bin_dirs(preferred_envs: list[str] | None = None) -> list[Path]:
     env_bin_dirs: list[Path] = []
     home = Path.home()
@@ -109,6 +126,22 @@ def resolve_python_executable(
     raise FileNotFoundError("❌ 找不到可用的 Python 解释器。")
 
 
+def resolve_nerfstudio_python(
+    preferred_envs: list[str] | None = None,
+) -> str:
+    """
+    为 nerfstudio CLI 解析 Python 解释器。
+
+    约束：
+    - 优先使用 Braindance 等 Conda 环境中的 Python，而不是 ~/.local/bin 下的脚本 wrapper。
+    - 结合 `patch_nerfstudio_env` 注入仓库内 fork，避免导入到被污染的 site-packages 版本。
+    """
+    return resolve_python_executable(
+        required_modules=["torch", "tyro", "yaml"],
+        preferred_envs=preferred_envs or ["Braindance", "urban_fine_grained_modeling"],
+    )
+
+
 def resolve_nerfstudio_cli(command_name: str) -> str:
     """
     解析 `ns-process-data` / `ns-train` / `ns-export`。
@@ -145,6 +178,26 @@ def resolve_nerfstudio_cli(command_name: str) -> str:
     )
 
 
+def build_nerfstudio_cli_command(
+    command_name: str,
+    preferred_envs: list[str] | None = None,
+) -> list[str]:
+    """
+    生成稳定的 Nerfstudio 命令前缀。
+
+    优先使用 `python -m nerfstudio.scripts.*`，从而：
+    - 绕过 `~/.local/bin/ns-*` 这类可能绑定到系统 Python 的 wrapper；
+    - 配合 `PYTHONPATH` 强制导入仓库内 fork 的 nerfstudio；
+    - 避免 PyTorch 2.6+ 在外部 site-packages 版本下触发 `weights_only=True` 的兼容问题。
+
+    若命令未维护模块映射，再回退到可执行文件解析。
+    """
+    module_name = _NERFSTUDIO_MODULE_MAP.get(command_name)
+    if module_name:
+        return [resolve_nerfstudio_python(preferred_envs=preferred_envs), "-m", module_name]
+    return [resolve_nerfstudio_cli(command_name)]
+
+
 def patch_nerfstudio_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     """
     为 Nerfstudio 子进程构造隔离环境，阻止 ~/.local site-packages 污染 Conda/系统解释器。
@@ -152,4 +205,14 @@ def patch_nerfstudio_env(base_env: dict[str, str] | None = None) -> dict[str, st
     env = dict(base_env or os.environ.copy())
     env["PYTHONNOUSERSITE"] = "1"
     env["SETUPTOOLS_USE_DISTUTILS"] = "stdlib"
+    # PyTorch 2.6+ 默认 `torch.load(weights_only=True)` 会让旧版 nerfstudio 导出在 checkpoint 反序列化时失败。
+    # 这里在子进程级别显式关闭该默认行为，避免外部环境未正确安装仓库 fork 时直接崩溃。
+    env.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
+    repo_nerfstudio_root = get_repo_nerfstudio_root()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_parts = [str(repo_nerfstudio_root)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     return env

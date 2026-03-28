@@ -13,8 +13,8 @@ from typing import Optional
 # 引入项目配置
 from src.config import PipelineConfig
 from src.utils.nerfstudio_cli import (
+    build_nerfstudio_cli_command,
     patch_nerfstudio_env,
-    resolve_nerfstudio_cli,
     resolve_python_executable,
 )
 
@@ -54,7 +54,7 @@ class DA3Runner:
         pythonpath = self.env.get("PYTHONPATH", "")
         da3_src_path = self.da3_repo_path / "src"
         self.env["PYTHONPATH"] = f"{str(self.da3_repo_path)}{os.pathsep}{str(da3_src_path)}{os.pathsep}{pythonpath}"
-        self.ns_process_exe = resolve_nerfstudio_cli("ns-process-data")
+        self.ns_process_cmd = build_nerfstudio_cli_command("ns-process-data")
         self.python_executable = resolve_python_executable(
             required_modules=["yaml"],
             preferred_envs=["Braindance"],
@@ -108,7 +108,8 @@ class DA3Runner:
 
             # Step 4: 生成 transforms.json
             self._run_cmd([
-                self.ns_process_exe, "images",
+                *self.ns_process_cmd,
+                "images",
                 "--data", str(dest_images_dir),
                 "--output-dir", str(self.cfg.data_dir),
                 "--skip-colmap",
