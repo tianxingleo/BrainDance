@@ -72,6 +72,21 @@ pytorch_alloc_conf = "expandable_segments:True"
 # 需要加入 no_proxy 的域名
 no_proxy = "huggingface.co,hf-mirror.com"
 
+# 显存守护配置：用于在 Pipeline 空窗期自动占住部分显存，降低被其他任务插入的概率。
+[vram_guard]
+# 是否启用自动显存守护；默认开启，main.py 在本地模式和 child worker 模式下会自动拉起。
+enabled = true
+# 期望长期占住的显存上限（GB）；L20 场景下默认预留 24GB，可按机器情况覆盖。
+reserve_gb = 24.0
+# 无论何时都尽量为当前主流程保留的可用显存下限（GB）。
+min_free_gb = 8.0
+# 守护进程按块申请/释放显存，块越小越灵活，但调节频率更高。
+chunk_gb = 1.0
+# 守护进程轮询显存状态的周期（秒）。
+poll_interval_seconds = 2.0
+# 主进程等待守护进程首次就绪的超时时间（秒）。
+startup_timeout_seconds = 15.0
+
 # 项目内通用路径
 [paths]
 # 本地运行时临时工作目录

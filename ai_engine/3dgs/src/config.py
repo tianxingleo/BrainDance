@@ -329,6 +329,34 @@ class PipelineConfig:
     )
     colmap_bin: str = field(default_factory=lambda: _get_str("COLMAP_BIN", "executables", "colmap_bin", default=""))
     glomap_bin: str = field(default_factory=lambda: _get_str("GLOMAP_BIN", "executables", "glomap_bin", default=""))
+    vram_guard_enabled: bool = field(
+        default_factory=lambda: _get_bool("VRAM_GUARD_ENABLED", "vram_guard", "enabled", default=False)
+    )
+    vram_guard_reserve_gb: float = field(
+        default_factory=lambda: _get_float("VRAM_GUARD_RESERVE_GB", "vram_guard", "reserve_gb", default=0.0)
+    )
+    vram_guard_min_free_gb: float = field(
+        default_factory=lambda: _get_float("VRAM_GUARD_MIN_FREE_GB", "vram_guard", "min_free_gb", default=8.0)
+    )
+    vram_guard_chunk_gb: float = field(
+        default_factory=lambda: _get_float("VRAM_GUARD_CHUNK_GB", "vram_guard", "chunk_gb", default=1.0)
+    )
+    vram_guard_poll_interval_seconds: float = field(
+        default_factory=lambda: _get_float(
+            "VRAM_GUARD_POLL_INTERVAL_SECONDS",
+            "vram_guard",
+            "poll_interval_seconds",
+            default=2.0,
+        )
+    )
+    vram_guard_startup_timeout_seconds: float = field(
+        default_factory=lambda: _get_float(
+            "VRAM_GUARD_STARTUP_TIMEOUT_SECONDS",
+            "vram_guard",
+            "startup_timeout_seconds",
+            default=15.0,
+        )
+    )
 
     @property
     def project_dir(self) -> Path:

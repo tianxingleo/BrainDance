@@ -214,6 +214,37 @@ python main.py /path/to/your/video.mp4
 > 💿 启动本地模式: video.mp4
 > ... (开始直接运行 Pipeline)
 
+### 自动显存守护（VRAM Guard）
+
+`main.py` 在以下模式下会自动拉起一个显存守护子进程：
+
+- 本地模式：`python main.py /path/to/video.mp4`
+- 子 Worker 模式：`python main.py --child-worker`
+
+用途：
+
+- 在 Pipeline 的 CPU 密集或磁盘 I/O 空窗期，持续占住一部分 GPU 显存
+- 降低其他任务在中途插入、导致后续阶段显存不足的概率
+- 当主流程自己重新需要显存时，守护器会按配置自动缩容，尽量先给当前 Pipeline 留出可用显存
+
+默认配置位于 `config/default.toml`：
+
+```toml
+[vram_guard]
+enabled = true
+reserve_gb = 24.0
+min_free_gb = 8.0
+chunk_gb = 1.0
+poll_interval_seconds = 2.0
+startup_timeout_seconds = 15.0
+```
+
+建议：
+
+- L20 这类 45GB 级别显卡，可先保持默认 `reserve_gb = 24`
+- 如果你的慢链高峰经常需要 30GB 以上显存，可把 `min_free_gb` 提高到 `10~16`
+- 如需在某台机器关闭，可在 `config/local.toml` 或环境变量里设置 `VRAM_GUARD_ENABLED=false`
+
 ## 🧪 论文 Pipeline 使用指南（新增）
 
 下面三条是近期新增的“论文复现/组合型”流水线，统一通过 `processing_tasks.task_type` 触发。

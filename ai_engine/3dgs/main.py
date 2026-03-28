@@ -75,6 +75,7 @@ from src.core.local_runner import (
     SLOW_PIPELINE_CHOICES,
     run_local_mode,
 )
+from src.utils.vram_guard import managed_vram_guard
 
 load_dotenv()
 
@@ -92,8 +93,10 @@ def run_child_worker_mode():
     from src.config import PipelineConfig
     from src.core.worker import CloudWorker
 
-    worker = CloudWorker(PipelineConfig())
-    worker.start()
+    config = PipelineConfig()
+    with managed_vram_guard(config):
+        worker = CloudWorker(config)
+        worker.start()
 
 
 def main():
@@ -143,14 +146,18 @@ def main():
         return
 
     if args.input:
-        run_local_mode(
-            video_file=Path(args.input),
-            task_type=args.task_type,
-            slow_pipeline=args.slow_pipeline,
-            sample_count=args.best_frame_sample_count,
-            sam3d_vram_threshold_gb=args.sam3d_vram_threshold_gb,
-            project_name=args.project_name,
-        )
+        from src.config import PipelineConfig
+
+        config = PipelineConfig()
+        with managed_vram_guard(config):
+            run_local_mode(
+                video_file=Path(args.input),
+                task_type=args.task_type,
+                slow_pipeline=args.slow_pipeline,
+                sample_count=args.best_frame_sample_count,
+                sam3d_vram_threshold_gb=args.sam3d_vram_threshold_gb,
+                project_name=args.project_name,
+            )
         return
 
     print("☁️ 启动云端监听模式（Supervisor）...")
