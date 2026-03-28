@@ -27,6 +27,14 @@ def inject_rtx50_mocks():
     def mock_func(*args, **kwargs): return torch.tensor(0.0, device=device)
     def mock_check_func(*args, **kwargs): return False 
 
+    # --- setuptools / pkg_resources 兼容层 ---
+    # 某些精简环境只装了 lightning 但没有携带 pkg_resources，
+    # 会在 import lightning.pytorch 时直接失败。
+    if "pkg_resources" not in sys.modules:
+        mock_pkg_resources = ModuleType("pkg_resources")
+        mock_pkg_resources.declare_namespace = lambda *args, **kwargs: None
+        sys.modules["pkg_resources"] = mock_pkg_resources
+
     # --- Kaolin Mock ---
     if "kaolin" not in sys.modules:
         mock_kaolin = ModuleType("kaolin")

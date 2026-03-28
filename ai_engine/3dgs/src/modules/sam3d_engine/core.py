@@ -6,6 +6,9 @@ import torch
 import types
 import numpy as np
 import importlib.util
+import builtins
+import shutil
+import subprocess
 from pathlib import Path
 from PIL import Image
 from typing import Optional, Iterable
@@ -180,6 +183,107 @@ class SAM3DEngine:
         if repo_str not in sys.path:
             sys.path.insert(0, repo_str)
 
+    def _load_inference_class(self):
+        """
+        优先复用上游 notebook/inference.py 的公开接口。
+        若其在导入阶段因为 kaolin / gradio 等可视化依赖失败，则回退到仅保留推理能力的轻量封装。
+        """
+        try:
+            from inference import Inference
+
+            return Inference
+        except Exception as exc:
+            notebook_path = self.repo_path / "notebook" / "inference.py"
+            if not notebook_path.is_file():
+                raise ImportError(
+                    f"无法找到 SAM3D 推理入口: {notebook_path}"
+                ) from exc
+
+            print(
+                "⚠️ [SAM3D] notebook/inference.py 导入失败，"
+                f"将回退到轻量推理封装: {type(exc).__name__}: {exc}"
+            )
+            return self._build_lightweight_inference_class()
+
+    def _build_lightweight_inference_class(self):
+        from hydra.utils import get_method, instantiate
+        from omegaconf import DictConfig, ListConfig, OmegaConf
+        from sam3d_objects.pipeline.inference_pipeline_pointmap import InferencePipelinePointMap
+
+        whitelist_filters = [
+            lambda target: target.split(".", 1)[0] in {"sam3d_objects", "torch", "torchvision", "moge"},
+        ]
+        blacklist_filters = [
+            lambda target: get_method(target)
+            in {
+                builtins.exec,
+                builtins.eval,
+                builtins.__import__,
+                os.kill,
+                os.system,
+                os.putenv,
+                os.remove,
+                os.removedirs,
+                os.rmdir,
+                os.fchdir,
+                os.setuid,
+                os.fork,
+                os.forkpty,
+                os.killpg,
+                os.rename,
+                os.renames,
+                os.truncate,
+                os.replace,
+                os.unlink,
+                os.fchmod,
+                os.fchown,
+                os.chmod,
+                os.chown,
+                os.chroot,
+                os.lchown,
+                os.getcwd,
+                os.chdir,
+                shutil.rmtree,
+                shutil.move,
+                shutil.chown,
+                subprocess.Popen,
+                builtins.help,
+            },
+        ]
+
+        def check_target(target: str):
+            if any(filt(target) for filt in whitelist_filters) and not any(
+                filt(target) for filt in blacklist_filters
+            ):
+                return
+            raise RuntimeError(
+                f"target '{target}' 不允许被 hydra 实例化，请检查配置来源。"
+            )
+
+        def check_hydra_safety(config: DictConfig):
+            to_check = [config]
+            while to_check:
+                node = to_check.pop()
+                if isinstance(node, DictConfig):
+                    to_check.extend(list(node.values()))
+                    if "_target_" in node:
+                        check_target(node["_target_"])
+                elif isinstance(node, ListConfig):
+                    to_check.extend(list(node))
+
+        class LightweightInference:
+            """只保留推理初始化能力，避免 notebook 侧可视化依赖阻塞主链路。"""
+
+            def __init__(self, config_file: str, compile: bool = False):
+                config = OmegaConf.load(config_file)
+                config.rendering_engine = "pytorch3d"
+                config.compile_model = compile
+                config.workspace_dir = os.path.dirname(config_file)
+                check_hydra_safety(config)
+                self._pipeline: InferencePipelinePointMap = instantiate(config)
+
+        return LightweightInference
+
     def run(self, image_path: str, output_dir: str, mask_path: Optional[str] = None):
         inference = None
         pipeline = None
@@ -207,9 +311,14 @@ class SAM3DEngine:
 
         # 延迟 import (避免过早加载 torch)
         try:
-            from inference import Inference
-        except ImportError:
-            raise ImportError(f"无法从 {self.repo_path} 导入 inference，请检查路径")
+            Inference = self._load_inference_class()
+        except Exception as exc:
+            raise ImportError(
+                "SAM3D 推理入口加载失败。"
+                f"\n仓库路径: {self.repo_path}"
+                f"\nnotebook 路径: {self.repo_path / 'notebook' / 'inference.py'}"
+                f"\n原始异常: {type(exc).__name__}: {exc}"
+            ) from exc
 
         total_vram_gb = self._get_total_vram_gb()
         use_direct_pipeline = total_vram_gb is not None and total_vram_gb > self.DIRECT_PIPELINE_VRAM_THRESHOLD_GB
