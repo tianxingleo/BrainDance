@@ -94,10 +94,22 @@ BrainDance 面向的是一个很具体的移动端问题：手机已经能高频
 
 BrainDance 不只想记录一个静态场景，也想记录同一空间在不同时间下的变化。对于房间布置、成长记录、装修过程和城市更新这类场景，在同一坐标系里对比前后变化，往往比按时间顺序翻照片更直观。
 
+### Agent Recall：把检索升级成可解释的多轮空间助理
+
+当前仓库已经在 `supabase/functions/agent-recall` 上落地统一 Agent 入口，并把核心编排能力收敛到共享
+Core `supabase/functions/_shared/agent-core/spatialAgent.ts`。这条链路不再只返回“搜到了什么”，而是会根据查询在多种模式之间路由，并把结构化结果直接交给 Flutter Recall 页消费。
+
+- **统一入口与共享 Core**：`agent-recall`、`spatial-search-agent` 共享同一套 Agent Core，避免协议和能力散落在多个函数里。
+- **多模式能力**：当前已覆盖 `spatial_search`、`asset_metadata`、`time_compare`、`creative`、`memory_graph` 五类模式。
+- **稳定动作协议**：正式前端动作已经统一为 `open_scene`、`fly_to_pose`，降低 Flutter / Viewer 接口漂移。
+- **多轮续聊与预览确认**：返回 `session_state`、`conversation_summary`、`follow_up`，支持“先预览，再确认执行”的资产写操作闭环。
+- **流式过程可视化**：`agent-recall` 已支持 `text/event-stream` 与 `application/x-ndjson`，Recall 页会展示状态、工具调用和最终结果时间线。
+
 ### 技术亮点
 
 - **移动端轻采集，云端重计算**：用户在手机端完成视频或图片采集，计算密集型重建任务放在 GPU Worker 执行，更符合移动应用的性能边界。
 - **从 3D 重建走向 3D 检索**：项目不只生成三维模型，还把场景理解、对象标注和向量检索整合进链路，形成可查询的空间记忆系统。
+- **从检索接口走向 Agent 编排**：在 `search-models` 之上新增 LangChain / Agent 统一入口，把空间检索、资产整理、时间对比、创作准备与弱图谱摘要纳入同一协议。
 - **端云协同的完整闭环**：从素材上传、任务调度、状态回传，到模型浏览和语义搜索，当前仓库已经覆盖完整的软件链路，而不是单点算法演示。
 - **支持多种重建流水线**：除了常规 `video_3dgs`，还接入了 `single_image_sam3d`、`single_image_sharp`、`da3_sugar`、`da3_2dgs`、`sparse2dgs` 等任务类型，便于根据不同输入场景切换方案。
 
@@ -129,7 +141,11 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
    - **RLS**：基于数据库策略控制用户资产访问权限，并为 Dashboard 提供只读读表策略。
 
 3. **Edge Functions (Deno)**  
-   当前仓库已包含 `supabase/functions/search-models`，用于承载语义搜索接口，负责 Embedding 调用、时间解析与向量检索，是“搜索现实空间”这条链路的接口层。
+   当前仓库已不只包含基础搜索函数，还形成了“基础检索 + 统一 Agent 入口 + 实验入口”的分层：
+   - `supabase/functions/search-models`：基础语义搜索能力，负责 Embedding、时间解析与向量检索。
+   - `supabase/functions/agent-recall`：正式统一入口，负责多模式路由、流式事件输出、稳定动作协议与前端会话状态。
+   - `supabase/functions/spatial-search-agent`：LangChain / Agent 实验入口，复用共享 Core。
+   - `supabase/functions/time-compare-agent`：面向双时间窗口的专用时间对比能力。
 
 4. **AI Worker (Python)**  
    部署在 Linux / WSL GPU 节点，监听 `processing_tasks`，根据 `task_type` 执行不同流水线，上传结果并回写日志、评分、标签和资产信息，承担项目主要的 AI 和 3D 重建计算。
@@ -170,7 +186,11 @@ BrainDance/
 ├── supabase/             # [BaaS] 本地后端基础设施
 │   ├── migrations/       #   - SQL 迁移
 │   ├── functions/        #   - Edge Functions
-│   │   └── search-models/#       - 语义搜索函数
+│   │   ├── search-models/#       - 基础语义搜索函数
+│   │   ├── agent-recall/#        - 统一 Agent Recall 入口
+│   │   ├── spatial-search-agent/# - LangChain 试验入口
+│   │   ├── time-compare-agent/#  - 双时间窗口对比
+│   │   └── _shared/agent-core/#  - 共享 Agent Core 与工具
 │   ├── config.toml
 │   └── README.md
 │
@@ -277,7 +297,7 @@ python main.py /path/to/video.mp4
 VITE_SUPABASE_URL=http://127.0.0.1:54321
 VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 VITE_STORAGE_BUCKETS=braindance-assets
-VITE_SUPABASE_EDGE_FUNCTIONS=search-models,test-timeout
+VITE_SUPABASE_EDGE_FUNCTIONS=search-models,agent-recall,spatial-search-agent,time-compare-agent,test-timeout
 ```
 
 然后运行：
@@ -305,12 +325,19 @@ flutter run
 - 任务状态页
 - Recall 资产页
 - 基于 WebView 的移动端 WebGL 模型查看
+- `agent-recall` 驱动的 Agent 检索、多轮续聊与流式步骤面板
+- 端侧本地问答模型下载、选择与受约束问答
 
-如需单独验证搜索链路，可在本地启动 `search-models` 函数：
+如需单独验证搜索 / Agent 链路，可分别在本地启动以下函数：
 
 ```bash
 cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
+```
+
+```bash
+cd supabase/functions/agent-recall
+supabase functions serve agent-recall --no-verify-jwt
 ```
 
 搜索接口的测试方法见 [tests/README.md](/ltx-data/BrainDance/tests/README.md)。
@@ -357,18 +384,28 @@ releases/qwen3-0.6b-braindance-round1/*
 数据库中的关键表包括：
 
 - `processing_tasks`：任务状态、日志、质量分数、任务类型、参数与 `display_name`
-- `model_assets`：模型路径、描述、标签、对象与 Embedding
+- `model_assets`：模型路径、描述、标签、对象、Embedding，以及 `place_id`、`memory_thread_id`、`summary_title`、`agent_meta` 等 Agent 辅助字段
 - `memory_poses`：帧级空间锚点与向量
+- `related_model_links`：模型间弱关系，如同地点、同事件、前后变化
+- `memory_collections` / `memory_collection_items`：记忆专题、时间线与集合成员
 - `community_posts`：社区贴文与地理位置索引
 - `worker_nodes`：Worker 注册、心跳与控制状态
 
-## 语义搜索 (Semantic Search)
+## 语义搜索与 Agent 编排
 
 当前仓库已包含 `supabase/functions/search-models`，用于承载自然语言搜索接口。它主要负责：
 
 1. 解析自然语言中的检索目标与时间条件。
 2. 调用 Embedding 接口生成向量。
 3. 通过 `pgvector` 与数据库函数检索相关场景和空间锚点。
+
+在此基础上，`supabase/functions/agent-recall` 已进一步把检索能力升级为统一 Agent 入口：
+
+1. 统一路由 `spatial_search`、`asset_metadata`、`time_compare`、`creative`、`memory_graph` 多种模式。
+2. 输出稳定结构 `answer + evidence + actions + top_candidates + tool_trace`。
+3. 支持 `selectedModelIds`、`executionMode`、`sessionState`、`conversationSummary` 等上下文参数。
+4. 支持 `SSE / NDJSON` 流式协议，便于 Flutter 展示过程态与最终答案。
+5. 通过 `follow_up` 和 `session_state` 支持多轮续聊、候选确认和写操作预览重放。
 
 本地运行示例：
 
@@ -383,6 +420,7 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 - 入门与部署：[docs/01-入门指南/快速开始.md](./docs/01-入门指南/快速开始.md)、[docs/01-入门指南/本地部署.md](./docs/01-入门指南/本地部署.md)
 - 后端与基础设施：[supabase/README.md](./supabase/README.md)
+- LangChain / Agent 专题：[docs/09-LangChain专题/README.md](./docs/09-LangChain专题/README.md)、[docs/09-LangChain专题/LangChain实现现状-2026-03-26.md](./docs/09-LangChain专题/LangChain实现现状-2026-03-26.md)
 - AI 引擎与重建流水线：[ai_engine/3dgs/README.md](./ai_engine/3dgs/README.md)
 - 第三方依赖与引用：[ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md](./ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md)
 - 项目设计文档：[docs/开发文档/设计及创新性分析报告.md](./docs/开发文档/设计及创新性分析报告.md)

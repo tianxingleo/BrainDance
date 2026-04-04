@@ -1,11 +1,16 @@
 # BrainDance Supabase
 
-`supabase/` 提供 BrainDance 当前使用的本地后端基础设施，包括数据库迁移、Edge Functions 和本地开发配置。
+`supabase/` 提供 BrainDance 当前使用的本地后端基础设施，包括数据库迁移、Edge
+Functions 和本地开发配置。
 
 ## 目录内容
 
 - `migrations/`：数据库结构与策略迁移
 - `functions/search-models/`：自然语言搜索接口
+- `functions/agent-recall/`：统一 Agent Recall 入口
+- `functions/spatial-search-agent/`：基于 LangChain 的实验入口
+- `functions/time-compare-agent/`：双时间窗口对比能力
+- `functions/_shared/agent-core/`：共享 Agent Core、提示词与工具
 - `functions/test-timeout/`：测试用函数
 - `config.toml`：Supabase CLI 本地配置
 - `deploy-functions.sh`：函数部署脚本
@@ -18,6 +23,8 @@
 - `worker_nodes` 的注册、心跳与集群控制
 - `community_posts` 的社区贴文存储
 - `pgvector` 向量检索
+- `agent-recall` / `spatial-search-agent` 的 Agent 编排
+- 记忆专题、弱关系和时间对比相关数据承载
 - Storage 文件管理
 - Realtime 状态同步
 - Edge Functions 承载搜索接口
@@ -63,6 +70,9 @@ supabase start
 - `20260317170000_create_community_posts.sql`
 - `20260320143000_add_dashboard_table_read_policies.sql`
 - `20260320143000_create_worker_nodes.sql`
+- `20260325110000_add_display_name_to_model_assets.sql`
+- `20260326121000_add_agent_memory_fields.sql`
+- `20260326122000_create_memory_links_and_collections.sql`
 
 当前与最近几次表结构变更直接相关的对象可以概括为：
 
@@ -71,7 +81,18 @@ supabase start
 - `memory_poses`：空间锚点与向量检索表
 - `community_posts`：社区贴文表，引用 `model_assets.id`
 - `worker_nodes`：Worker 注册、心跳、当前任务和控制状态表
+- `related_model_links`：模型之间的弱关系表，用于 same_place、before_after 等关联表达
+- `memory_collections` / `memory_collection_items`：用户整理出的记忆专题、时间线与主题归档
 - `dashboard_read_*` 策略：为 Dashboard 直连读表补齐只读 RLS
+
+与 Agent 相关的增量字段当前主要集中在 `model_assets`：
+
+- `place_id`
+- `memory_thread_id`
+- `version_label`
+- `summary_title`
+- `event_label`
+- `agent_meta`
 
 ## Storage 约定
 
@@ -123,7 +144,7 @@ releases/qwen3-0.6b-braindance-round1/*
 
 ### `search-models`
 
-这是当前仓库里的主要函数，用于承载自然语言搜索接口。它负责：
+这是当前仓库里的基础检索函数，用于承载自然语言搜索接口。它负责：
 
 1. 解析查询中的检索目标和时间范围
 2. 调用 Embedding 接口生成向量
@@ -136,18 +157,129 @@ cd supabase/functions/search-models
 supabase functions serve search-models --no-verify-jwt --env-file .env.local
 ```
 
-如果要测试接口，可以参考 [tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+如果使用 `supabase start` 启动本地自部署容器，请把 `DASHSCOPE_API_KEY`
+写在仓库下的 `supabase/.env.local`，并确保
+[`supabase/config.toml`](/home/ltx/projects/BrainDance/supabase/config.toml)
+通过 `[edge_runtime.secrets]` 从宿主机环境读取该变量；修改后需要重启本地
+Supabase，Edge Runtime 才会重新加载它。
+
+如果要测试接口，可以参考
+[tests/README.md](/home/ltx/projects/BrainDance/tests/README.md)。
+
+### `agent-recall`
+
+`agent-recall` 是当前正式对前端暴露的统一 Agent 入口，负责：
+
+1. 识别用户查询意图并路由到 `spatial_search`、`asset_metadata`、`time_compare`、`creative`、`memory_graph`
+2. 复用共享 Agent Core `functions/_shared/agent-core/spatialAgent.ts`
+3. 组织 `answer + evidence + actions + top_candidates + tool_trace` 结构化响应
+4. 返回 `session_state`、`conversation_summary`、`follow_up`，支持 Flutter 多轮续聊
+5. 兼容 `text/event-stream` 与 `application/x-ndjson`，用于 Agent 流式过程展示
+
+当前动作协议已经稳定为：
+
+- `open_scene`
+- `fly_to_pose`
+
+本地运行：
+
+```bash
+cd supabase/functions/agent-recall
+supabase functions serve agent-recall --no-verify-jwt
+```
+
+最小回归题集位于
+[tests/agent_recall_cases.jsonl](/home/ltx/projects/BrainDance/tests/agent_recall_cases.jsonl)。详细路线见：[docs/02-架构设计/Agent规划与LangChain实践路线.md](/home/ltx/projects/BrainDance/docs/02-架构设计/Agent规划与LangChain实践路线.md)。
+
+当前请求体除 `query` 外，还支持：
+
+- `selectedModelIds`
+- `executionMode`
+- `currentSceneId`
+- `currentModelId`
+- `currentMode`
+- `candidateSceneIds`
+- `sessionId`
+- `conversationSummary`
+- `sessionState`
 
 ### `test-timeout`
 
 这是一个辅助测试函数，主要用于本地联调，不承担核心业务能力。
 
+### `spatial-search-agent`
+
+这是保留的 LangChain / Agent 实验入口，当前并不是 Flutter 的正式入口。它与 `agent-recall`
+共用 `functions/_shared/agent-core/spatialAgent.ts`，主要用于验证和暴露更贴近 Agent Core
+原始能力的实验链路。
+
+它当前具备：
+
+1. 解析用户意图
+2. 判断是在找物体、位置、时间还是场景
+3. 通过 LangChain / 共享 Agent Core 调用多个检索或资产工具
+4. 选择最可信的 scene / pose
+5. 当前正式动作输出也已跟随共享 Core 收敛到 `open_scene`、`fly_to_pose`
+6. 处理模型资产元数据类请求，包括：
+   - `list_model_assets`
+   - `rename_model_asset`
+   - `batch_patch_model_metadata`
+   - `get_model_asset_bundle`
+   - `compare_model_assets`
+   - 以及记忆专题、专题摘要、线程归组等共享工具能力
+7. 对写工具默认走 `dry_run` 预览，只有请求显式传入
+   `executionMode: "execute"` 时才正式写库
+8. 可选接收前端多选传入的 `selectedModelIds`，把 Agent 操作范围限制在已选模型内
+
+本地运行：
+
+```bash
+cd supabase/functions/spatial-search-agent
+supabase functions serve spatial-search-agent --no-verify-jwt
+```
+
+请求体示例：
+
+```json
+{
+  "query": "把这几个模型统一改成宿舍-{{created_date}}",
+  "selectedModelIds": [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222"
+  ],
+  "executionMode": "preview"
+}
+```
+
+### `time-compare-agent`
+
+这是面向双时间窗口对比的专用函数。它当前不是完整 LangChain tool calling 链路，但已经被共享
+Agent Core 复用，用于支撑“某个地方和上周相比有什么变化”这类时间对比问答。
+
+它当前负责：
+
+1. 解析 baseline / target 双时间窗口
+2. 复用 `search-models/shared.ts` 搜索两个时间段的候选场景
+3. 汇总 `objects / tags / matched_frames` 差异
+4. 生成双侧候选、差分说明与动作建议
+
+本地运行：
+
+```bash
+cd supabase/functions/time-compare-agent
+supabase functions serve time-compare-agent --no-verify-jwt
+```
+
 ## 与其他模块的关系
 
 - `app/`：使用 Anon Key 直连数据库、Storage 和 Realtime
-- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入 `desired_state`
-- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和 Storage，同时持续更新 `worker_nodes`
+- `dashboard/`：读取任务、资产、空间锚点和 `worker_nodes` 状态，并可写入
+  `desired_state`
+- `ai_engine/3dgs/`：监听 `processing_tasks`，回写结果到数据库和
+  Storage，同时持续更新 `worker_nodes`
 
 ## 说明
 
-这份 README 只描述当前仓库里的 Supabase 层，不覆盖线上部署策略，也不替代具体的表结构设计文档。更完整的系统链路请参考项目根目录的 [README.md](/home/ltx/projects/BrainDance/README.md)。
+这份 README 只描述当前仓库里的 Supabase
+层，不覆盖线上部署策略，也不替代具体的表结构设计文档。更完整的系统链路请参考项目根目录的
+[README.md](/home/ltx/projects/BrainDance/README.md)。
