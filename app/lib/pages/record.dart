@@ -226,6 +226,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
       thumbPath = await VThumb.ensureThumb(file.path);
     } catch (_) {}
 
+    if (thumbPath.startsWith('assets/')) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_record_too_short'), context: context);
+      }
+      return;
+    }
+
     if (navigateToSubmit && mounted) {
       Navigator.push(
         context,
