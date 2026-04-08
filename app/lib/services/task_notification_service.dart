@@ -74,7 +74,13 @@ class TaskNotificationService extends ChangeNotifier {
     hideNotification();
     final context = _navigatorKey?.currentContext;
     if (context != null) {
-      Navigator.pushNamed(context, '/tasks');
+      final route = ModalRoute.of(context);
+      if (route?.settings.name == '/tasks') {
+        return;
+      }
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
     }
   }
 
