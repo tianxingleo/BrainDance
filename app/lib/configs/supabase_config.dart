@@ -1,4 +1,20 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+class SupabaseEndpointResolution {
+  const SupabaseEndpointResolution({
+    required this.url,
+    required this.attemptedUrls,
+    this.diagnosticMessage,
+    this.usedFallback = false,
+  });
+
+  final String url;
+  final List<String> attemptedUrls;
+  final String? diagnosticMessage;
+  final bool usedFallback;
+}
 
 class SupabaseConfig {
   static const String _defaultLocalModelBucket = 'braindance-models';
@@ -8,9 +24,186 @@ class SupabaseConfig {
   ];
   static const String _defaultLocalModelObjectPath =
       'releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf';
+  static String? _runtimeResolvedUrl;
+  static String? _runtimeDiagnosticMessage;
 
   /// Supabase project URL
-  static String get url => dotenv.env['SUPABASE_URL'] ?? '';
+  static String get url =>
+      _runtimeResolvedUrl ?? normalizeUrl(dotenv.env['SUPABASE_URL'] ?? '');
+
+  static String get configuredUrl =>
+      normalizeUrl(dotenv.env['SUPABASE_URL'] ?? '');
+
+  static String? get runtimeDiagnosticMessage => _runtimeDiagnosticMessage;
+
+  static void applyRuntimeResolution(SupabaseEndpointResolution resolution) {
+    _runtimeResolvedUrl = normalizeUrl(resolution.url);
+    _runtimeDiagnosticMessage = resolution.diagnosticMessage;
+  }
+
+  static String normalizeUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    return trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+  }
+
+  static bool isLikelyLocalUrl(String rawUrl) {
+    final normalized = normalizeUrl(rawUrl).toLowerCase();
+    return normalized.startsWith('http://127.0.0.1') ||
+        normalized.startsWith('http://localhost') ||
+        normalized.startsWith('http://10.0.2.2') ||
+        normalized.startsWith('http://192.168.') ||
+        normalized.startsWith('http://10.') ||
+        RegExp(r'^http://172\.(1[6-9]|2\d|3[01])\.').hasMatch(normalized);
+  }
+
+  static List<String> get urlFallbacks {
+    final raw = dotenv.env['SUPABASE_URL_FALLBACKS']?.trim() ?? '';
+    if (raw.isEmpty) {
+      return const <String>[];
+    }
+    return raw
+        .split(',')
+        .map(normalizeUrl)
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  static List<String> buildUrlCandidates() {
+    final configured = configuredUrl;
+    final candidates = <String>[
+      if (configured.isNotEmpty) configured,
+      ...urlFallbacks,
+    ];
+
+    final lowerConfigured = configured.toLowerCase();
+    if (lowerConfigured.startsWith('http://127.0.0.1') ||
+        lowerConfigured.startsWith('http://localhost')) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        candidates.add(configured.replaceFirst(
+          RegExp(r'://(127\.0\.0\.1|localhost)'),
+          '://10.0.2.2',
+        ));
+      }
+    }
+
+    final deduplicated = <String>{};
+    for (final item in candidates) {
+      final normalized = normalizeUrl(item);
+      if (normalized.isNotEmpty) {
+        deduplicated.add(normalized);
+      }
+    }
+    return deduplicated.toList(growable: false);
+  }
+
+  static String edgeFunctionUrl(String functionName) {
+    final baseUrl = url;
+    if (baseUrl.isEmpty) {
+      return '';
+    }
+    return '$baseUrl/functions/v1/$functionName';
+  }
+
+  static Future<SupabaseEndpointResolution> resolveEndpoint({
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final candidates = buildUrlCandidates();
+    if (candidates.isEmpty) {
+      return const SupabaseEndpointResolution(
+        url: '',
+        attemptedUrls: <String>[],
+        diagnosticMessage:
+            'SUPABASE_URL is missing, so Supabase cannot be initialized.',
+      );
+    }
+
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: timeout,
+        receiveTimeout: timeout,
+        sendTimeout: timeout,
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    );
+
+    try {
+      for (var index = 0; index < candidates.length; index++) {
+        final candidate = candidates[index];
+        if (await _isEndpointReachable(dio, candidate)) {
+          final usedFallback = index > 0 || candidate != configuredUrl;
+          final diagnostic = usedFallback
+              ? 'Supabase switched to reachable endpoint: $candidate'
+              : null;
+          return SupabaseEndpointResolution(
+            url: candidate,
+            attemptedUrls: candidates,
+            diagnosticMessage: diagnostic,
+            usedFallback: usedFallback,
+          );
+        }
+      }
+    } finally {
+      dio.close();
+    }
+
+    final configured = configuredUrl;
+    final isLocal = isLikelyLocalUrl(configured);
+    final diagnostic = configured.isEmpty
+        ? 'SUPABASE_URL is missing, so Supabase cannot be initialized.'
+        : isLocal
+        ? 'Current SUPABASE_URL points to a local/LAN address ($configured), but it is unreachable. Start local Supabase first or update app/.env to a reachable endpoint.'
+        : 'Current SUPABASE_URL=$configured is unreachable. Check the host, port, and network.';
+    return SupabaseEndpointResolution(
+      url: configured,
+      attemptedUrls: candidates,
+      diagnosticMessage: diagnostic,
+    );
+  }
+
+  static Future<bool> _isEndpointReachable(Dio dio, String baseUrl) async {
+    final probes = <String>[
+      '$baseUrl/rest/v1/',
+      '$baseUrl/auth/v1/health',
+    ];
+    for (final probe in probes) {
+      try {
+        final response = await dio.get<Object?>(
+          probe,
+          options: Options(
+            headers: {
+              if (apiKey.isNotEmpty) 'apikey': apiKey,
+            },
+          ),
+        );
+        if ((response.statusCode ?? 0) > 0) {
+          return true;
+        }
+      } on DioException {
+        continue;
+      }
+    }
+    return false;
+  }
+
+  static String buildConnectionHelp(String target, {String? endpoint}) {
+    final baseUrl = url;
+    final configured = configuredUrl;
+    final current = baseUrl.isNotEmpty ? baseUrl : configured;
+    if (current.isEmpty) {
+      return '$target failed: SUPABASE_URL is missing.';
+    }
+    if (isLikelyLocalUrl(current)) {
+      return '$target failed: current Supabase endpoint $current is unreachable. Confirm local Supabase is running and that this device/emulator can reach the host.'
+          '${endpoint == null || endpoint.isEmpty ? '' : ' Endpoint: $endpoint'}';
+    }
+    return '$target failed: current Supabase endpoint $current is unreachable. Check the host, port, or network.'
+        '${endpoint == null || endpoint.isEmpty ? '' : ' Endpoint: $endpoint'}';
+  }
 
   /// Unified Supabase key.
   ///
@@ -98,9 +291,7 @@ class SupabaseConfig {
       return '';
     }
 
-    final normalizedBaseUrl = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
+    final normalizedBaseUrl = normalizeUrl(baseUrl);
     return '$normalizedBaseUrl/storage/v1/object/public/$localModelBucket/$localModelObjectPath';
   }
 }

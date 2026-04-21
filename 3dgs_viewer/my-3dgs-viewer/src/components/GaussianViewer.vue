@@ -2540,6 +2540,9 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container {
+  --flutter-safe-top: 92px;
+  --flutter-safe-left: 14px;
+  --flutter-safe-right: 154px;
   position: relative;
   width: 100vw;
   height: 100vh;
@@ -2585,9 +2588,10 @@ onBeforeUnmount(async () => {
 
 .top-hud {
   position: absolute;
-  top: 18px;
-  left: 18px;
-  right: 18px;
+  top: calc(var(--flutter-safe-top) + 56px);
+  left: var(--flutter-safe-left);
+  right: auto;
+  width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
   z-index: 120;
   display: flex;
   flex-direction: column;
@@ -2597,11 +2601,13 @@ onBeforeUnmount(async () => {
 
 .top-actions {
   display: flex;
+  width: auto;
+  max-width: 100%;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 0 0 auto;
-  align-self: flex-end;
-  justify-content: flex-end;
+  align-self: flex-start;
+  justify-content: flex-start;
   flex-wrap: wrap;
 }
 
@@ -2793,7 +2799,7 @@ onBeforeUnmount(async () => {
 
 .controls-ui {
   position: absolute;
-  top: 30px;
+  top: calc(var(--flutter-safe-top) + 48px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2884,8 +2890,8 @@ button.active {
 .search-panel {
   position: static;
   z-index: auto;
-  width: min(560px, 100%);
-  max-width: 560px;
+  width: 100%;
+  max-width: none;
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -2928,8 +2934,8 @@ button.active {
 
 .focal-settings-panel {
   position: absolute;
-  top: 122px;
-  right: 18px;
+  top: calc(var(--flutter-safe-top) + 130px);
+  right: var(--flutter-safe-right);
   z-index: 120;
   width: 236px;
   background: rgba(249, 249, 248, 0.9);
@@ -2973,8 +2979,8 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: 76px;
-  right: 18px;
+  top: calc(var(--flutter-safe-top) + 56px);
+  right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
   background: rgba(249, 249, 248, 0.9);
@@ -3101,16 +3107,24 @@ input[type='range'] {
 }
 
 @media (max-width: 768px) {
+  .app-container {
+    --flutter-safe-top: 84px;
+    --flutter-safe-left: 12px;
+    --flutter-safe-right: 144px;
+  }
+
   .top-hud {
-    top: 12px;
-    left: 12px;
-    right: 12px;
+    left: var(--flutter-safe-left);
+    right: auto;
+    width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
     gap: 8px;
   }
 
   .top-actions {
-    align-self: stretch;
-    justify-content: space-between;
+    width: auto;
+    max-width: 100%;
+    align-self: flex-start;
+    justify-content: flex-start;
     gap: 8px;
   }
 
@@ -3134,7 +3148,7 @@ input[type='range'] {
 
   .search-panel {
     width: 100%;
-    max-width: none;
+    max-width: calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right));
     padding: 6px;
     gap: 6px;
   }
@@ -3150,11 +3164,15 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: 60px;
+    top: calc(var(--flutter-safe-top) + 48px);
     right: 12px;
     width: 112px;
     min-width: 112px;
     padding: 7px;
+  }
+
+  .focal-settings-panel {
+    top: calc(var(--flutter-safe-top) + 122px);
   }
 }
 </style>

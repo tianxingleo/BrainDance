@@ -188,6 +188,18 @@ app/assets/webgl/models/*.gltf
 # 忽略 app/assets/webgl/models 下的图片文件
 app/assets/webgl/models/images/
 
+# 忽略 app/assets/webgl/assets/ 下的构建产物
+app/assets/webgl/assets/index-*.js
+app/assets/webgl/assets/index-*.css
+# 忽略 WebGL Demo 的 HTML 文件
+app/assets/webgl/index.html
+
+# 忽略 app/assets/webgl_spark/assets/ 下的构建产物
+app/assets/webgl_spark/assets/index-*.js
+app/assets/webgl_spark/assets/index-*.css
+# 忽略 WebGL Demo 的 HTML 文件
+app/assets/webgl_spark/index.html
+
 # 忽略 3dgs_viewer/ (WebGL Demo) 下的媒体文件
 3dgs_viewer/**/*.mp4
 3dgs_viewer/**/*.mov
