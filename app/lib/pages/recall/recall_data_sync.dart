@@ -121,6 +121,22 @@ extension _RecallPageDataSync on _RecallPageState {
     }
   }
 
+  /// 将可能包含旧服务器地址的完整 Storage URL 转换为当前配置下的 URL。
+  /// 如果已经是相对路径则直接生成公开 URL。
+  String _normalizeStorageUrl(String raw) {
+    const marker = '/storage/v1/object/public/braindance-assets/';
+    final idx = raw.indexOf(marker);
+    if (idx >= 0) {
+      final relativePath = raw.substring(idx + marker.length);
+      return _toPublicUrl(relativePath);
+    }
+    // 不含完整 URL 标记，当作相对路径处理
+    if (!raw.startsWith('http')) {
+      return _toPublicUrl(raw);
+    }
+    return raw;
+  }
+
   /// 根据模型路径推导同场景的 webgl_poses.json 公开 URL。
   /// ply_path 格式：{user_id}/{scene_id}/output/point_cloud.(ply|splat|ksplat)
   /// poses 路径：{user_id}/{scene_id}/output/webgl_poses.json
@@ -183,6 +199,15 @@ extension _RecallPageDataSync on _RecallPageState {
         }
       } catch (_) {
         // display_name 获取失败不影响主流程
+      }
+
+      // 修正 preview_img_path：数据库中可能存储了旧服务器的完整 URL，
+      // 需要提取相对路径后用当前 Supabase 配置重新生成。
+      for (final m in models) {
+        final raw = m['preview_img_path']?.toString() ?? '';
+        if (raw.isNotEmpty) {
+          m['preview_img_path'] = _normalizeStorageUrl(raw);
+        }
       }
 
       if (models.isEmpty) {
