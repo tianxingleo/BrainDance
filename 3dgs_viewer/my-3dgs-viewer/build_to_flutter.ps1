@@ -19,8 +19,7 @@ Write-Host "====================================="
 
 $scriptDir = $PSScriptRoot
 $targets = @(
-    (Join-Path $scriptDir "..\..\app\assets\webgl"),
-    (Join-Path $scriptDir "..\..\app\assets\webgl_spark")
+    (Join-Path $scriptDir "..\..\app\assets\webgl")
 )
 
 foreach ($target in $targets) {
