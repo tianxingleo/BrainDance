@@ -504,9 +504,6 @@ const onClipOffsetChange = (value) => {
 onMounted(() => {
   notifyFlutter({ status: 'ready' });
 
-  // Stub: Flutter always calls this after ready, but Spark viewer doesn't use TimePeeling model list.
-  window.setModelListForTimePeeling = () => {};
-
   window.loadModelFromFlutter = (input) => {
     console.log('[Flutter->SparkViewer] 收到加载请求:', input);
     if (typeof input === 'string') {
@@ -550,10 +547,6 @@ onBeforeUnmount(() => {
 
   if (window.loadModelFromFlutter) {
     delete window.loadModelFromFlutter;
-  }
-
-  if (window.setModelListForTimePeeling) {
-    delete window.setModelListForTimePeeling;
   }
 
   disposeViewer();
