@@ -28,7 +28,7 @@ class WebGLViewerPage extends StatefulWidget {
 
   const WebGLViewerPage({
     super.key,
-    this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.initialModelUrl = '',
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
@@ -393,11 +393,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       targetUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      targetUrl = widget.initialModelUrl;
+      // 相对路径或空路径：不传给 JS，让查看器以空状态打开
+      targetUrl = '';
     }
 
     return {
-      'ply': targetUrl,
+      if (targetUrl.isNotEmpty) 'ply': targetUrl,
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,

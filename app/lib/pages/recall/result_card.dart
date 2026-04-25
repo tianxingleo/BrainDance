@@ -210,7 +210,7 @@ class SearchResultCard extends StatelessWidget {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty
         ? toPublicUrl(plyPath)
-        : './models/scene_auto_sync_raw.ply';
+        : '';
     final posesUrlResolved = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
     final sceneId =
         model['display_name']?.toString() ??

@@ -1048,7 +1048,7 @@ extension _RecallPageSearch on _RecallPageState {
                 unawaited(
                   openViewer(
                     context,
-                    initialModelUrl: './models/scene_auto_sync_raw.ply',
+                    initialModelUrl: '',
                     sceneId: textLocalize("recall_demo_title"),
                   ),
                 );

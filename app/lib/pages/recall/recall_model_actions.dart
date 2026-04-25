@@ -23,7 +23,7 @@ extension _RecallPageModelActions on _RecallPageState {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty
         ? toPublicUrl(plyPath)
-        : './models/scene_auto_sync_raw.ply';
+        : '';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = _modelDisplayName(model);
     String? initialPoseId;
@@ -579,7 +579,7 @@ extension _RecallPageModelActions on _RecallPageState {
       ),
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty
-          ? './models/scene_auto_sync_raw.ply'
+          ? ''
           : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,

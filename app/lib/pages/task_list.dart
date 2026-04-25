@@ -352,7 +352,7 @@ class _TaskListPageState extends State<TaskListPage> {
     }
 
     // 查询 model_assets 获取 ply_path，确保 Viewer 能触发下载
-    String modelUrl = './models/scene_auto_sync_raw.ply';
+    String modelUrl = '';
     String? posesUrl;
     try {
       final asset = await Supabase.instance.client

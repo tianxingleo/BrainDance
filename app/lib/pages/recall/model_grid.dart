@@ -930,7 +930,7 @@ class RecallModelTile extends StatelessWidget {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty && toPublicUrl != null
         ? toPublicUrl!(plyPath)
-        : './models/scene_auto_sync_raw.ply';
+        : '';
     final radius = BorderRadius.circular(28.0);
 
     return Container(
