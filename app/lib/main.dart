@@ -52,6 +52,11 @@ void main() async {
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
   await dotenv.load(fileName: ".env");
+  final supabaseResolution = await SupabaseConfig.resolveEndpoint();
+  SupabaseConfig.applyRuntimeResolution(supabaseResolution);
+  if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
+    debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
+  }
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.apiKey,

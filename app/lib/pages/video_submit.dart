@@ -1,13 +1,15 @@
-import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
-import 'package:braindance/configs/app_config.dart';
-import '../configs/supabase_config.dart';
 import 'dart:io';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/main.dart' show pageIndexProvider;
+import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+import '../configs/supabase_config.dart';
 
 class DateFormat {
   static String format(int number, int length) {
@@ -39,7 +41,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   static final Random _rdg = Random();
 
   static String _generateSceneId() {
-    DateTime time = DateTime.now();
+    final time = DateTime.now();
     return 'scene_'
         '${DateFormat.format(time.year, 4)}'
         '${DateFormat.format(time.month, 2)}'
@@ -64,10 +66,17 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
       user = client.auth.currentUser;
       if (user == null) {
-        if (mounted) TDToast.showText(textLocalize('login_cancelled'), context: context);
+        if (mounted) {
+          TDToast.showText(textLocalize('login_cancelled'), context: context);
+        }
         return;
       } else {
-        if (mounted) TDToast.showText(textLocalize('login_success_upload'), context: context);
+        if (mounted) {
+          TDToast.showText(
+            textLocalize('login_success_upload'),
+            context: context,
+          );
+        }
       }
     }
 
@@ -78,7 +87,6 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     try {
       final sceneId = _generateSceneId();
 
-      // 上传视频
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
       final file = File(widget.videoPath);
       final fileSize = await file.length();
@@ -113,11 +121,12 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         },
       );
 
-      // 创建任务
-      await client.from("processing_tasks").insert({
+      await client.from('processing_tasks').insert({
         'scene_id': sceneId,
         'user_id': user.id,
-        'display_name': nameController.text.trim().isEmpty ? null : nameController.text.trim(),
+        'display_name': nameController.text.trim().isEmpty
+            ? null
+            : nameController.text.trim(),
         'task_type': 'video_dual_chain',
         'task_params': {
           'slow_pipeline': 'video_3dgs',
@@ -131,16 +140,19 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
-        // 回到 Recall (也就是主页列表) 页面查看生成的模型状态
         ref.read(pageIndexProvider.notifier).state = 0;
-        final nav = Navigator.of(context);
-        nav.popUntil((route) => route.isFirst); // 退出到主页
-        nav.pushNamed('/tasks'); // 自动打开任务列表
+        // 统一收敛为一次导航，避免先 pop 再 push 导致返回手势期间路由栈抖动。
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {
         debugPrint(e.toString());
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_submit_fail')}: $e',
+          context: context,
+        );
       }
     } finally {
       if (mounted) {
@@ -177,7 +189,10 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(textLocalize('video_submit_name'), style: TextStyle(fontSize: 16)),
+                Text(
+                  textLocalize('video_submit_name'),
+                  style: const TextStyle(fontSize: 16),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: nameController,
@@ -187,7 +202,10 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                Text(textLocalize('video_submit_thumbnail'), style: TextStyle(fontSize: 16)),
+                Text(
+                  textLocalize('video_submit_thumbnail'),
+                  style: const TextStyle(fontSize: 16),
+                ),
                 const SizedBox(height: 8),
                 Center(
                   child: Image.file(
