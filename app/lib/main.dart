@@ -481,10 +481,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) return;
 
-    _slideDirection = newIndex > oldIndex ? 1 : -1;
-    _previousIndex = oldIndex;
-    _builtPages.add(newIndex);
-    _isAnimating = true;
+    setState(() {
+      _slideDirection = newIndex > oldIndex ? 1 : -1;
+      _previousIndex = oldIndex;
+      _builtPages.add(newIndex);
+      _isAnimating = true;
+    });
     _animController.forward(from: 0);
     ref.read(pageIndexProvider.notifier).state = newIndex;
   }
@@ -496,12 +498,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final bool isRecording = ref.watch(isRecordingProvider);
 
     // 外部改 pageIndex 时（如 provider 直接修改），同步方向
-    // _previousIndex 保留旧值供动画使用，动画结束后在回调中更新
     if (pageIndex != _previousIndex && !_isAnimating) {
-      _slideDirection = pageIndex > _previousIndex ? 1 : -1;
-      _builtPages.add(pageIndex);
-      _isAnimating = true;
-      _animController.forward(from: 0);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _slideDirection = pageIndex > _previousIndex ? 1 : -1;
+          _builtPages.add(pageIndex);
+          _isAnimating = true;
+        });
+        _animController.forward(from: 0);
+      });
     }
 
     return Scaffold(
@@ -511,54 +517,39 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // ── 3 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  // ── 页面槽位：保证每个页面的 State 不被销毁 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
-                      // 占位：保持索引稳定，类型始终是 SizedBox
                       return const SizedBox.shrink();
                     }
-                    final isActive = i == pageIndex;
-                    final isLeaving =
-                        _isAnimating && i == _previousIndex && i != pageIndex;
 
-                    // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
                     return AnimatedBuilder(
                       animation: _animController,
                       builder: (context, child) {
+                        final bool isActive = i == pageIndex;
+                        final bool isLeaving = _isAnimating && i == _previousIndex && i != pageIndex;
                         Offset translation = Offset.zero;
-                        double opacity = isActive ? 1.0 : 0.0;
+                        final double t = Curves.easeInOutCubic.transform(_animController.value);
 
                         if (_isAnimating && isActive) {
-                          // 入场：从侧面滑入 + 淡入
-                          final t = Curves.easeOutCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(
-                            0.15 * _slideDirection * (1.0 - t),
-                            0,
-                          );
-                          opacity = t;
+                          translation = Offset(_slideDirection * (1.0 - t), 0);
                         } else if (isLeaving) {
-                          // 离场：向反方向滑出 + 淡出
-                          final t = Curves.easeInCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(-0.15 * _slideDirection * t, 0);
-                          opacity = 1.0 - t;
+                          translation = Offset(-_slideDirection * t, 0);
                         }
 
-                        return IgnorePointer(
-                          ignoring: !isActive,
-                          child: FractionalTranslation(
-                            translation: translation,
-                            child: Opacity(
-                              opacity: opacity.clamp(0.0, 1.0),
-                              child: RepaintBoundary(child: child),
+                        final bool isVisible = isActive || isLeaving;
+                        return Offstage(
+                          offstage: !isVisible,
+                          child: IgnorePointer(
+                            ignoring: !isActive,
+                            child: FractionalTranslation(
+                              translation: translation,
+                              child: child,
                             ),
                           ),
                         );
                       },
-                      child: _ensurePage(i),
+                      child: RepaintBoundary(child: _ensurePage(i)),
                     );
                   }),
                   if (!isRecording)

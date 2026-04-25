@@ -77,11 +77,13 @@ class _LoginPageState extends State<LoginPage> {
       }
     } on AuthException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('login_auth_fail')}: ${e.message}', context: context);
+        debugPrint('[Login] auth error: $e');
+        TDToast.showText(textLocalize('login_auth_fail'), context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('login_error')}: $e', context: context);
+        debugPrint('[Login] error: $e');
+        TDToast.showText(textLocalize('login_error'), context: context);
       }
     } finally {
       if (mounted) {

@@ -7,6 +7,7 @@ import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
@@ -27,16 +28,27 @@ class _CommunityPageState extends State<CommunityPage>
   List<CommunityModelOption> _shareableModels = const [];
   int _selectedMapIndex = 0;
   bool _isLoading = true;
+  int _tabIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _loadCommunity();
+  }
+
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) {
+      setState(() {
+        _tabIndex = _tabController.index;
+      });
+    }
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _feedController.dispose();
     super.dispose();
@@ -260,8 +272,8 @@ class _CommunityPageState extends State<CommunityPage>
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
-                    : TabBarView(
-                        controller: _tabController,
+                    : BDTabSwitcher(
+                        index: _tabIndex,
                         children: [
                           CommunityFeedView(
                             posts: posts,

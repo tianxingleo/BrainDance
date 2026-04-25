@@ -190,12 +190,13 @@ class _TaskListPageState extends State<TaskListPage> {
       }
     } catch (e) {
       if (mounted) {
+        debugPrint('[TaskList] fetch error: $e');
         setState(() {
           _isLoading = false;
-          _error = e.toString();
+          _error = textLocalize('error_unknown');
         });
         TDToast.showText(
-          '${textLocalize('error_fetch_tasks')}: $e',
+          textLocalize('error_fetch_tasks'),
           context: context,
         );
       }

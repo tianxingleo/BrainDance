@@ -323,7 +323,7 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _downloadModelToPrivateDir() async {
     final modelUrl = _localModelUrlController.text.trim();
     if (modelUrl.isEmpty) {
-      TDToast.showText(context: context, '请先填写模型下载链接');
+      TDToast.showText(context: context, textLocalize('local_model_fill_url'));
       return;
     }
 
@@ -373,17 +373,18 @@ extension _RecallPageLocalAi on _RecallPageState {
         _localAnswerStatus =
             '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
-      TDToast.showText(context: context, '模型已下载到应用私有目录');
+      TDToast.showText(context: context, textLocalize('local_model_download_success'));
     } catch (e) {
       if (!mounted) return;
+      debugPrint('[RecallLocalAI] model download error: $e');
       setState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = null;
         _modelDownloadedBytes = 0;
         _modelDownloadTotalBytes = null;
-        _localAnswerStatus = '模型下载失败：$e';
+        _localAnswerStatus = textLocalize('local_model_download_fail');
       });
-      TDToast.showText(context: context, '模型下载失败：$e');
+      TDToast.showText(context: context, textLocalize('local_model_download_fail'));
     }
   }
 
@@ -412,7 +413,7 @@ extension _RecallPageLocalAi on _RecallPageState {
           modelPath.isEmpty ? _RecallPageState._defaultModelFileName : modelPath,
         );
     if (modelPath.isEmpty) {
-      TDToast.showText(context: context, '请先填写 GGUF 模型路径');
+      TDToast.showText(context: context, textLocalize('local_model_fill_path'));
       return;
     }
 
@@ -431,12 +432,12 @@ extension _RecallPageLocalAi on _RecallPageState {
       final modelFile = File(modelPath);
       final exists = await modelFile.exists();
       if (!exists) {
-        throw Exception('模型文件不存在：$modelPath');
+        throw Exception('model file not found: $modelPath');
       }
       final modelSize = await modelFile.length();
       if (modelSize < 100 * 1024 * 1024) {
         throw Exception(
-          '模型文件体积异常：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB，可能不是完整 GGUF',
+          'model file too small: ${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB',
         );
       }
 
@@ -512,9 +513,10 @@ extension _RecallPageLocalAi on _RecallPageState {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
         _activeLocalModelUrl = null;
-        _localAnswerStatus = '模型加载失败：$e';
+        _localAnswerStatus = textLocalize('local_model_load_fail');
       });
-      TDToast.showText(context: context, '端侧模型加载失败：$e');
+      debugPrint('[RecallLocalAI] model load error: $e');
+      TDToast.showText(context: context, textLocalize('local_model_load_fail'));
     }
   }
 
@@ -531,11 +533,11 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
-      TDToast.showText(context: context, '请输入要提问的问题');
+      TDToast.showText(context: context, textLocalize('local_model_fill_question'));
       return;
     }
     if (_localQnaModel == null || !_isLocalModelReady) {
-      TDToast.showText(context: context, '请先加载本地 GGUF 模型');
+      TDToast.showText(context: context, textLocalize('local_model_load_first'));
       return;
     }
 
@@ -635,10 +637,11 @@ extension _RecallPageLocalAi on _RecallPageState {
       if (!mounted) {
         return;
       }
+      debugPrint('[RecallLocalAI] Q&A error: $e');
       setState(() {
-        _localAnswerStatus = '端侧问答失败：$e';
+        _localAnswerStatus = textLocalize('local_model_qa_fail');
       });
-      TDToast.showText(context: context, '端侧问答失败：$e');
+      TDToast.showText(context: context, textLocalize('local_model_qa_fail'));
     }
   }
 

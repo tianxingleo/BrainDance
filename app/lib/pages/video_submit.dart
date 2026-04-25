@@ -148,9 +148,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
     } catch (e) {
       if (mounted) {
-        debugPrint(e.toString());
+        debugPrint('[VideoSubmit] error: $e');
         TDToast.showText(
-          '${textLocalize('gen_submit_fail')}: $e',
+          textLocalize('gen_submit_fail'),
           context: context,
         );
       }

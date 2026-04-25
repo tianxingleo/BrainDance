@@ -255,8 +255,9 @@ extension _RecallPageDataSync on _RecallPageState {
         });
         _updateOverviewProvider();
         if (showErrorToast) {
+          debugPrint('[RecallDataSync] offline error: $e');
           TDToast.showText(
-            '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
+            textLocalize('recall_error_offline'),
             context: context,
           );
         }

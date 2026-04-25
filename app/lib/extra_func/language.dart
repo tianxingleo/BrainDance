@@ -355,6 +355,23 @@ enum Language {
       "gen_text_preview_title": "文本生成结果预览",
       "gen_text_regenerate": "重新生成",
       "gen_text_confirm": "确认",
+      // Local model
+      "local_model_download_fail": "模型下载失败，请检查网络后重试",
+      "local_model_load_fail": "模型加载失败，请重新尝试",
+      "local_model_qa_fail": "问答失败，请重新提问",
+      "local_model_download_success": "模型已下载到应用私有目录",
+      "local_model_fill_url": "请先填写模型下载链接",
+      "local_model_fill_path": "请先填写模型路径",
+      "local_model_fill_question": "请输入要提问的问题",
+      "local_model_load_first": "请先加载本地模型",
+      // Cloud model
+      "cloud_model_delete_success": "云端模型删除成功",
+      "cloud_model_delete_fail": "云端模型删除失败，请重试",
+      "cloud_model_missing_id": "模型数据异常，无法删除",
+      "cloud_model_no_permission": "只能删除自己的云端模型",
+      // Viewer
+      "viewer_download_fail": "模型下载失败，请重试",
+      "viewer_spark_error": "渲染服务异常，请稍后重试",
     },
   ),
   en(
@@ -758,6 +775,23 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_text_preview_title": "Text Generation Preview",
       "gen_text_regenerate": "Regenerate",
       "gen_text_confirm": "Confirm",
+      // Local model
+      "local_model_download_fail": "Model download failed. Please check your network and retry.",
+      "local_model_load_fail": "Model loading failed. Please try again.",
+      "local_model_qa_fail": "Q&A failed. Please try again.",
+      "local_model_download_success": "Model downloaded to app storage.",
+      "local_model_fill_url": "Please enter the model download URL first.",
+      "local_model_fill_path": "Please enter the model file path first.",
+      "local_model_fill_question": "Please enter your question.",
+      "local_model_load_first": "Please load a local model first.",
+      // Cloud model
+      "cloud_model_delete_success": "Cloud model deleted.",
+      "cloud_model_delete_fail": "Failed to delete cloud model. Please try again.",
+      "cloud_model_missing_id": "Model data is invalid, cannot delete.",
+      "cloud_model_no_permission": "You can only delete your own cloud models.",
+      // Viewer
+      "viewer_download_fail": "Model download failed. Please try again.",
+      "viewer_spark_error": "Rendering service error. Please try again later.",
     },
   );
 

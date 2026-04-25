@@ -614,9 +614,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
         mediaQuery.padding.bottom +
         (isAnyRecording ? 36 : _kFloatingNavReservedHeight + 18);
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
-      body: Stack(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
+        body: Stack(
         children: [
           Positioned.fill(child: cameraView),
           Positioned.fill(
@@ -948,6 +952,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             ),
         ],
       ),
+    ),
     );
   }
 }

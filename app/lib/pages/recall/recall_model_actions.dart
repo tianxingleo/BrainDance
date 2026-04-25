@@ -273,8 +273,9 @@ extension _RecallPageModelActions on _RecallPageState {
       }
     } catch (e) {
       if (mounted) {
+        debugPrint('[RecallModelActions] rename error: $e');
         TDToast.showText(
-          '${textLocalize('recall_rename_fail')}: $e',
+          textLocalize('recall_rename_fail'),
           context: context,
         );
       }
@@ -343,8 +344,9 @@ extension _RecallPageModelActions on _RecallPageState {
       }
     } catch (e) {
       if (mounted) {
+        debugPrint('[RecallModelActions] download error: $e');
         TDToast.showText(
-          '${textLocalize('recall_download_model_fail')}: $e',
+          textLocalize('recall_download_model_fail'),
           context: context,
         );
       }
@@ -471,13 +473,13 @@ extension _RecallPageModelActions on _RecallPageState {
     final modelUserId = model['user_id']?.toString().trim() ?? '';
     if (modelId.isEmpty) {
       if (mounted) {
-        TDToast.showText('云端模型缺少 id，无法删除', context: context);
+        TDToast.showText(textLocalize('cloud_model_missing_id'), context: context);
       }
       return;
     }
     if (currentUserId.isEmpty || modelUserId != currentUserId) {
       if (mounted) {
-        TDToast.showText('只能删除当前账号自己的云端模型', context: context);
+        TDToast.showText(textLocalize('cloud_model_no_permission'), context: context);
       }
       return;
     }
@@ -539,10 +541,11 @@ extension _RecallPageModelActions on _RecallPageState {
       });
       _updateOverviewProvider();
 
-      TDToast.showText('云端模型删除成功', context: context);
+      TDToast.showText(textLocalize('cloud_model_delete_success'), context: context);
     } catch (e) {
       if (mounted) {
-        TDToast.showText('云端模型删除失败：$e', context: context);
+        debugPrint('[RecallModelActions] delete cloud model error: $e');
+        TDToast.showText(textLocalize('cloud_model_delete_fail'), context: context);
       }
     }
   }

@@ -10,6 +10,7 @@ import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:braindance/main.dart' show pageIndexProvider;
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -102,6 +103,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   @override
   void dispose() {
+    FocusManager.instance.primaryFocus?.unfocus();
     _clearGenerateDraft();
     _tabController.dispose();
     _scrollController.dispose();
@@ -204,6 +206,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
       _wasGeneratePageActive = true;
     } else if (_wasGeneratePageActive) {
       _wasGeneratePageActive = false;
+      FocusScope.of(context).unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _refresh(_clearGenerateDraft);
@@ -289,282 +292,206 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
       ),
     ];
 
-    Widget? currentTabContent;
-    switch (_tabController.index) {
-      case 0:
-        final upload = TDUpload(
-          key: _uploadKey,
-          files: GenConfig.uploadedImages,
-          multiple: true,
-          max: maxImageCount,
-          onUploadTap: () => _showActionSheet(context, true),
-          onChange: (files, type) {
-            switch (type) {
-              case TDUploadType.add:
-                GenConfig.uploadedImages = [
-                  ...GenConfig.uploadedImages,
-                  ...files,
-                ];
-                break;
-              case TDUploadType.remove:
-                for (final f in files) {
-                  GenConfig.uploadedImages.remove(f);
+    // 构建三个 tab 内容，供 BDTabSwitcher 使用
+    Widget buildTabContent(int idx) {
+        switch (idx) {
+          case 0:
+            final upload0 = TDUpload(
+              key: _uploadKey,
+              files: GenConfig.uploadedImages,
+              multiple: true,
+              max: maxImageCount,
+              onUploadTap: () => _showActionSheet(context, true),
+              onChange: (files, type) {
+                switch (type) {
+                  case TDUploadType.add:
+                    GenConfig.uploadedImages = [...GenConfig.uploadedImages, ...files];
+                    break;
+                  case TDUploadType.remove:
+                    for (final f in files) {
+                      GenConfig.uploadedImages.remove(f);
+                    }
+                    break;
+                  case TDUploadType.replace:
+                    break;
                 }
-                break;
-              case TDUploadType.replace:
-                break;
-            }
-            setState(() {
-              _uploadKey = UniqueKey();
-            });
-          },
-          mediaType: const [TDUploadMediaType.image],
-          width: 150,
-          height: 150,
-        );
-        currentTabContent = Scrollbar(
-          key: const ValueKey<int>(0),
-          controller: _scrollController,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(
-              24,
-              24,
-              24,
-              contentBottomPadding,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _GenerateSectionHeading(
-                  title: textLocalize('gen_section_image'),
-                  description: textLocalize(
-                    'gen_tip_pic',
-                  ).replaceAll('[FILE_SIZE]', _formatBytes(sizeLimit * 1024)),
-                ),
-                const SizedBox(height: 18),
-                BDPanelCard(
-                  padding: const EdgeInsets.all(20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: bgCardColor,
-                      borderRadius: BDDesign.radiusNormal,
+                setState(() { _uploadKey = UniqueKey(); });
+              },
+              mediaType: const [TDUploadMediaType.image],
+              width: 150,
+              height: 150,
+            );
+            return Scrollbar(
+              key: const ValueKey<int>(0),
+              controller: _scrollController,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _GenerateSectionHeading(
+                      title: textLocalize('gen_section_image'),
+                      description: textLocalize('gen_tip_pic').replaceAll('[FILE_SIZE]', _formatBytes(sizeLimit * 1024)),
                     ),
-                    child: upload,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        break;
-      case 1:
-        _textEditingController.text = GenConfig.uploadedText;
-        currentTabContent = Scrollbar(
-          key: const ValueKey<int>(1),
-          controller: _scrollController,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(
-              24,
-              24,
-              24,
-              contentBottomPadding,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _GenerateSectionHeading(
-                  title: textLocalize('gen_section_text'),
-                  description: textLocalize('gen_tip_text'),
-                ),
-                const SizedBox(height: 18),
-                BDPanelCard(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: bgCardColor,
-                      borderRadius: BDDesign.radiusNormal,
-                    ),
-                    child: TDTextarea(
-                      controller: _textEditingController,
-                      hintText: textLocalize('gen_tip_textbox'),
-                      minLines: 8,
-                      maxLines: 20,
-                      onChanged: (value) {
-                        GenConfig.uploadedText = value;
-                        setState(() {});
-                      },
-                      decoration: BoxDecoration(
-                        color: Colors.transparent,
-                        borderRadius: BDDesign.radiusNormal,
-                        border: Border.all(color: Colors.transparent),
-                      ),
-                      textStyle: TextStyle(color: textColor, fontSize: 16),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        break;
-      case 2:
-        final upload = TDUpload(
-          type: TDUploadBoxType.circle,
-          key: _uploadKey2,
-          files: GenConfig.uploadedVideos,
-          multiple: false,
-          onUploadTap: () => _showActionSheet(context, false),
-          onChange: (files, type) {
-            switch (type) {
-              case TDUploadType.add:
-                GenConfig.uploadedVideos = [
-                  ...GenConfig.uploadedVideos,
-                  ...files,
-                ];
-                break;
-              case TDUploadType.remove:
-                for (final f in files) {
-                  GenConfig.uploadedVideos.remove(f);
-                }
-                if (GenConfig.uploadedVideos.isEmpty) {
-                  _selectedVideoTaskType = 'video_3dgs';
-                }
-                break;
-              case TDUploadType.replace:
-                break;
-            }
-            setState(() {
-              _uploadKey2 = UniqueKey();
-            });
-          },
-          mediaType: const [TDUploadMediaType.video],
-          width: 150,
-          height: 150,
-        );
-        currentTabContent = Scrollbar(
-          key: const ValueKey<int>(2),
-          controller: _scrollController,
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: const EdgeInsets.fromLTRB(
-              24,
-              24,
-              24,
-              contentBottomPadding,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _GenerateSectionHeading(
-                  title: textLocalize('gen_section_video'),
-                  description: textLocalize('gen_tip_video'),
-                ),
-                const SizedBox(height: 18),
-                BDPanelCard(
-                  padding: const EdgeInsets.all(20),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: bgCardColor,
-                      borderRadius: BDDesign.radiusNormal,
-                    ),
-                    child: upload,
-                  ),
-                ),
-                if (GenConfig.uploadedVideos.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  BDPanelCard(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 16,
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(18),
-                      onTap: _showVideoTaskTypeSheet,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  textLocalize('gen_video_task_title'),
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  _videoTaskTypeLabel(_selectedVideoTaskType),
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _videoTaskTypeHint(_selectedVideoTaskType),
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.62)
-                                        : theme.fontGyColor3,
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.tune_rounded,
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.72)
-                                : BDDesign.colorMutedBlue,
-                          ),
-                        ],
+                    const SizedBox(height: 18),
+                    BDPanelCard(
+                      padding: const EdgeInsets.all(20),
+                      child: Container(
+                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
+                        child: upload0,
                       ),
                     ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        );
-        break;
-    }
+                  ],
+                ),
+              ),
+            );
+          case 1:
+            _textEditingController.text = GenConfig.uploadedText;
+            return Scrollbar(
+              key: const ValueKey<int>(1),
+              controller: _scrollController,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _GenerateSectionHeading(
+                      title: textLocalize('gen_section_text'),
+                      description: textLocalize('gen_tip_text'),
+                    ),
+                    const SizedBox(height: 18),
+                    BDPanelCard(
+                      child: Container(
+                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
+                        child: TDTextarea(
+                          controller: _textEditingController,
+                          hintText: textLocalize('gen_tip_textbox'),
+                          minLines: 8,
+                          maxLines: 20,
+                          onChanged: (value) {
+                            GenConfig.uploadedText = value;
+                            setState(() {});
+                          },
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BDDesign.radiusNormal,
+                            border: Border.all(color: Colors.transparent),
+                          ),
+                          textStyle: TextStyle(color: textColor, fontSize: 16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          default:
+            final upload2 = TDUpload(
+              type: TDUploadBoxType.circle,
+              key: _uploadKey2,
+              files: GenConfig.uploadedVideos,
+              multiple: false,
+              onUploadTap: () => _showActionSheet(context, false),
+              onChange: (files, type) {
+                switch (type) {
+                  case TDUploadType.add:
+                    GenConfig.uploadedVideos = [...GenConfig.uploadedVideos, ...files];
+                    break;
+                  case TDUploadType.remove:
+                    for (final f in files) {
+                      GenConfig.uploadedVideos.remove(f);
+                      if (GenConfig.uploadedVideos.isEmpty) _selectedVideoTaskType = 'video_3dgs';
+                    }
+                    break;
+                  case TDUploadType.replace:
+                    break;
+                }
+                setState(() { _uploadKey2 = UniqueKey(); });
+              },
+              mediaType: const [TDUploadMediaType.video],
+              width: 150,
+              height: 150,
+            );
+            return Scrollbar(
+              key: const ValueKey<int>(2),
+              controller: _scrollController,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _GenerateSectionHeading(
+                      title: textLocalize('gen_section_video'),
+                      description: textLocalize('gen_tip_video'),
+                    ),
+                    const SizedBox(height: 18),
+                    BDPanelCard(
+                      padding: const EdgeInsets.all(20),
+                      child: Container(
+                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
+                        child: upload2,
+                      ),
+                    ),
+                    if (GenConfig.uploadedVideos.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      BDPanelCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: _showVideoTaskTypeSheet,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(textLocalize('gen_video_task_title'), style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w700)),
+                                    const SizedBox(height: 6),
+                                    Text(_videoTaskTypeLabel(_selectedVideoTaskType), style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w600)),
+                                    const SizedBox(height: 4),
+                                    Text(_videoTaskTypeHint(_selectedVideoTaskType), style: TextStyle(color: isDark ? Colors.white.withValues(alpha: 0.62) : theme.fontGyColor3, fontSize: 12.5)),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.tune_rounded, color: isDark ? Colors.white.withValues(alpha: 0.72) : BDDesign.colorMutedBlue),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+        }
+      }
 
-    if (currentTabContent != null) {
       tabContents.add(
         Expanded(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0.05, 0.0),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              );
-            },
-            child: currentTabContent,
+          child: BDTabSwitcher(
+            index: _tabController.index,
+            duration: BDMotion.durationNormal,
+            children: [
+              buildTabContent(0),
+              buildTabContent(1),
+              buildTabContent(2),
+            ],
           ),
         ),
       );
-    }
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: BDPageBackdrop(
-        child: SafeArea(
-          child: Stack(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: BDPageBackdrop(
+          child: SafeArea(
+            child: Stack(
             children: [
               Column(
                 children: [
@@ -711,6 +638,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
           ),
         ),
       ),
+    ),
     );
   }
 }

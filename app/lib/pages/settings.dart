@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:braindance/extra_func/theme_animation_notifier.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/set_config.dart';
@@ -131,8 +132,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       onOpenTasks: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const TaskListPage(),
+                          PageRouteBuilder(
+                            transitionDuration: const Duration(milliseconds: 320),
+                            reverseTransitionDuration: const Duration(milliseconds: 320),
+                            opaque: true,
+                            pageBuilder: (_, __, ___) => const TaskListPage(),
+                            transitionsBuilder: (_, animation, __, child) {
+                              final curved = CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeInOutCubic,
+                              );
+                              return SlideTransition(
+                                position: Tween<Offset>(
+                                  begin: const Offset(0, -1),
+                                  end: Offset.zero,
+                                ).animate(curved),
+                                child: child,
+                              );
+                            },
                           ),
                         );
                       },
@@ -168,20 +185,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 
   Widget _buildTabContent(BuildContext context, WidgetRef ref) {
-    return AnimatedSwitcher(
-      duration: BDMotion.durationNormal,
-      switchInCurve: BDMotion.curveEnter,
-      switchOutCurve: BDMotion.curveExit,
-      transitionBuilder: (child, animation) {
-        return FadeTransition(opacity: animation, child: child);
-      },
-      child: KeyedSubtree(
-        key: ValueKey<int>(_currentTabIndex),
-        child: switch (_currentTabIndex) {
-          0 => setTab1(context, ref),
-          1 => setTab3(context),
-          _ => const SizedBox.shrink(),
-        },
+    return SizedBox(
+      width: double.infinity,
+      child: BDTabSwitcher(
+        index: _currentTabIndex,
+        children: [
+          setTab1(context, ref),
+          setTab3(context),
+        ],
       ),
     );
   }

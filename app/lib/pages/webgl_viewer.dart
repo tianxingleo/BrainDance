@@ -144,8 +144,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
         } catch (e) {
+          debugPrint('[WebGLViewer] proxy error: $e');
           request.response.statusCode = HttpStatus.badGateway;
-          request.response.write('Proxy error: $e');
+          request.response.write('Proxy error');
         }
         await request.response.close();
         return;
@@ -360,12 +361,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           }
         }
       } catch (e) {
-        debugPrint('Download error: $e');
+        debugPrint('[WebGLViewer] download error: $e');
         if (mounted) {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          TDToast.showText(textLocalize('viewer_download_fail'), context: context);
           _launchViewer();
         }
       }
@@ -468,8 +469,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
+            debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
-              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+              TDToast.showText(textLocalize('viewer_spark_error'), context: context);
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');

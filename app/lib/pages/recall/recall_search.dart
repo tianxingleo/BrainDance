@@ -124,8 +124,9 @@ extension _RecallPageSearch on _RecallPageState {
         setState(() {
           _isLoading = false;
         });
+        debugPrint('[RecallSearch] search error: $e');
         TDToast.showText(
-          '${textLocalize("recall_error_search")}$e',
+          textLocalize("recall_error_search"),
           context: context,
         );
       }
@@ -205,8 +206,9 @@ extension _RecallPageSearch on _RecallPageState {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
+        debugPrint('[RecallSearch] agent search error: $ex');
         TDToast.showText(
-          '${textLocalize('agent_search_failed')}: $ex',
+          textLocalize('agent_search_failed'),
           context: context,
         );
       }
@@ -253,12 +255,13 @@ extension _RecallPageSearch on _RecallPageState {
           });
           _agentBootstrapTimer?.cancel();
           _agentBootstrapTimer = null;
+          debugPrint('[RecallSearch] agent stream error: $e');
           _updateAgentLiveStatus(
             textLocalize('agent_status_stream_fallback'),
             detail: '$e',
           );
           TDToast.showText(
-            '${textLocalize('agent_stream_failed')}: $e',
+            textLocalize('agent_stream_failed'),
             context: context,
           );
           fallback();
@@ -284,12 +287,13 @@ extension _RecallPageSearch on _RecallPageState {
       });
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
+      debugPrint('[RecallSearch] agent stream start error: $e');
       _updateAgentLiveStatus(
         textLocalize('agent_status_stream_start_fallback'),
         detail: '$e',
       );
       TDToast.showText(
-        '${textLocalize('agent_stream_start_failed')}: $e',
+        textLocalize('agent_stream_start_failed'),
         context: context,
       );
       fallback();

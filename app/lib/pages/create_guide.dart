@@ -6,6 +6,30 @@ import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
 
+PageRoute<T> _verticalSlideRoute<T>({
+  required WidgetBuilder builder,
+  required bool fromTop, // true = 新页面从上进（相机），false = 从下进（图文生成）
+}) {
+  return PageRouteBuilder<T>(
+    transitionDuration: BDMotion.durationNormal,
+    reverseTransitionDuration: BDMotion.durationNormal,
+    opaque: true,
+    pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final double dir = fromTop ? -1.0 : 1.0;
+      // 新页面入场：从 dir 方向滑入
+      final enterAnim = CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic);
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(0, dir),
+          end: Offset.zero,
+        ).animate(enterAnim),
+        child: child,
+      );
+    },
+  );
+}
+
 /// Create 引导页 — record 和 generate 的统一入口
 class CreateGuidePage extends StatelessWidget {
   const CreateGuidePage({super.key});
@@ -38,8 +62,10 @@ class CreateGuidePage extends StatelessWidget {
                           subtitle: textLocalize('create_record_desc'),
                           onTap: () => Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (_) => const RecordPage()),
+                            _verticalSlideRoute(
+                              builder: (_) => const RecordPage(),
+                              fromTop: true,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
@@ -50,8 +76,10 @@ class CreateGuidePage extends StatelessWidget {
                           subtitle: textLocalize('create_generate_desc'),
                           onTap: () => Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (_) => const GeneratePage()),
+                            _verticalSlideRoute(
+                              builder: (_) => const GeneratePage(),
+                              fromTop: false,
+                            ),
                           ),
                         ),
                       ],

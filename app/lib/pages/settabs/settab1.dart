@@ -2,6 +2,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/set_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
+import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
@@ -62,9 +63,53 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
             onTap: () {},
           ),
         ],
+        const SizedBox(height: 12),
+        BDPanelCard(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: _ClearCacheRow(context: context),
+        ),
       ],
     ),
   );
+}
+
+class _ClearCacheRow extends StatelessWidget {
+  final BuildContext context;
+  const _ClearCacheRow({required this.context});
+
+  @override
+  Widget build(BuildContext ctx) {
+    final isDark = Theme.of(ctx).brightness == Brightness.dark;
+    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final actionColor = isDark ? BDDesign.colorMutedBlueLight : BDDesign.colorMutedBlue;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () async {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(textLocalize('tip_cache'))),
+          );
+          await DirSystem.deleteDir(await DirFinder.cacheDir());
+        },
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  textLocalize('set_cache'),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: textColor),
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: actionColor, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _LanguageToggleChip extends StatelessWidget {

@@ -220,8 +220,9 @@ extension _GenerateSubmissionX on _GeneratePageState {
                                       }
                                     } catch (e) {
                                       if (mounted) {
+                                        debugPrint('[GenerateSubmission] regenerate error: $e');
                                         TDToast.showText(
-                                          '${textLocalize('gen_regenerate_fail')}: $e',
+                                          textLocalize('gen_regenerate_fail'),
                                           context: context,
                                         );
                                       }
@@ -335,11 +336,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: ${e.details}', context: context);
+        debugPrint('[GenerateSubmission] submit FunctionException: ${e.details}');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        debugPrint('[GenerateSubmission] submit error: $e');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
       }
     } finally {
       if (mounted) {
@@ -456,11 +459,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_generate_fail')}: ${e.details}', context: context);
+        debugPrint('[GenerateSubmission] generate FunctionException: ${e.details}');
+        TDToast.showText(textLocalize('gen_generate_fail'), context: context);
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_generate_fail')}: $e', context: context);
+        debugPrint('[GenerateSubmission] generate error: $e');
+        TDToast.showText(textLocalize('gen_generate_fail'), context: context);
       }
     } finally {
       if (mounted) {
@@ -518,7 +523,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        debugPrint('[GenerateSubmission] video submit error: $e');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
       }
     } finally {
       if (mounted) {
