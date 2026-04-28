@@ -570,9 +570,9 @@ PermissionError: [Errno 13] Permission denied
 
 | 文档 | 链接 |
 |------|------|
-| **开发环境配置** | [docs/开发环境配置.md](../开发环境配置.md) |
+| **开发环境配置** | [docs/06-部署运维/环境配置（详细版）.md](../06-部署运维/环境配置（详细版）.md) |
 | **3DGS 引擎文档** | [ai_engine/3dgs/README.md](../ai_engine/3dgs/README.md) |
-| **项目架构** | [docs/1.总览/项目架构.md](docs/1.总览/项目架构.md) |
+| **项目架构** | [docs/02-架构设计/项目架构.md](../02-架构设计/项目架构.md) |
 
 ### 外部教程
 

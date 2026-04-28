@@ -423,7 +423,7 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 - LangChain / Agent 专题：[docs/09-LangChain专题/README.md](./docs/09-LangChain专题/README.md)、[docs/09-LangChain专题/LangChain实现现状-2026-03-26.md](./docs/09-LangChain专题/LangChain实现现状-2026-03-26.md)
 - AI 引擎与重建流水线：[ai_engine/3dgs/README.md](./ai_engine/3dgs/README.md)
 - 第三方依赖与引用：[ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md](./ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md)
-- 项目设计文档：[docs/开发文档/设计及创新性分析报告.md](./docs/开发文档/设计及创新性分析报告.md)
+- 项目设计文档：[docs/02-架构设计/项目架构.md](./docs/02-架构设计/项目架构.md)
 
 ## 参考与致谢 (Acknowledgements)
 
