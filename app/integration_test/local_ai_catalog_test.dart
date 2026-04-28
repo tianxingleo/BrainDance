@@ -16,7 +16,7 @@ void main() {
         (tester) async {
           await launchBrainDanceApp(tester);
         },
-        skip: '依赖 braindance-models bucket 测试布局。',
+        skip: true,
       );
     }
   });

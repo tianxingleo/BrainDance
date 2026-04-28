@@ -130,7 +130,7 @@ extension _RecallPageModelActions on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _activeModelAction = {
         ...model,
         if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
@@ -251,7 +251,7 @@ extension _RecallPageModelActions on _RecallPageState {
           context: context,
         );
         final targetKey = _modelKey(model);
-        setState(() {
+        _refreshState(() {
           for (final m in _allModels) {
             if (_modelKey(m) == targetKey) {
               m['display_name'] = newName;
@@ -518,7 +518,7 @@ extension _RecallPageModelActions on _RecallPageState {
         return;
       }
 
-      setState(() {
+      _refreshState(() {
         _allModels.removeWhere((item) => _modelKey(item) == targetKey);
         _models.removeWhere((item) => _modelKey(item) == targetKey);
         if (_activeModelAction != null &&
@@ -558,7 +558,7 @@ extension _RecallPageModelActions on _RecallPageState {
     }
 
     if (mounted) {
-      setState(() {
+      _refreshState(() {
         _activeModelAction = null;
         _activeModelActionRect = null;
       });

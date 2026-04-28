@@ -20,7 +20,7 @@ void main() {
         (tester) async {
           await launchBrainDanceApp(tester);
         },
-        skip: '依赖函数服务、种子数据与部分外部模型服务。',
+        skip: true,
       );
     }
   });

@@ -37,7 +37,7 @@ extension _RecallPageDataSync on _RecallPageState {
       final logsJson = newData['logs'] as List<dynamic>?;
       final allLogs = _parseAllLogMsgs(logsJson);
       if (mounted) {
-        setState(() {
+        _refreshState(() {
           // 移除旧版本（如果存在）
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
           // 添加更新后的任务
@@ -50,7 +50,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       if (mounted) {
-        setState(() {
+        _refreshState(() {
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
           _taskAllLogs.remove(taskId);
           _expandedTaskLogs.remove(taskId);
@@ -98,7 +98,7 @@ extension _RecallPageDataSync on _RecallPageState {
           }
         }
 
-        setState(() {
+        _refreshState(() {
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
@@ -218,7 +218,7 @@ extension _RecallPageDataSync on _RecallPageState {
         final ownModelSignature = _buildModelSignature(
           _extractOwnModels(models),
         );
-        setState(() {
+        _refreshState(() {
           _allModels = models;
           _models = models;
           _didFinishInitialModelLoad = true;
@@ -234,7 +234,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } catch (e) {
       if (preserveExistingDataOnError) {
         if (mounted) {
-          setState(() {
+          _refreshState(() {
             _isLoading = false;
           });
         }
@@ -246,7 +246,7 @@ extension _RecallPageDataSync on _RecallPageState {
         final ownModelSignature = _buildModelSignature(
           _extractOwnModels(demoModels),
         );
-        setState(() {
+        _refreshState(() {
           _allModels = demoModels;
           _models = demoModels;
           _didFinishInitialModelLoad = true;
@@ -282,7 +282,7 @@ extension _RecallPageDataSync on _RecallPageState {
 
   Future<void> _syncLocalIndex(List<Map<String, dynamic>> models) async {
     if (mounted) {
-      setState(() {
+      _refreshState(() {
         _isLocalIndexing = true;
       });
     }
@@ -290,13 +290,13 @@ extension _RecallPageDataSync on _RecallPageState {
     try {
       final stats = await _localRagIndex.syncModels(models);
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _indexStats = stats;
         _isLocalIndexing = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isLocalIndexing = false;
       });
     }

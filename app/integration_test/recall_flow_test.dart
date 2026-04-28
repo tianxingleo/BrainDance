@@ -21,7 +21,7 @@ void main() {
         (tester) async {
           await launchBrainDanceApp(tester);
         },
-        skip: '集成测试骨架已建立，待补充真实步骤与断言。',
+        skip: true,
       );
     }
   });
