@@ -42,6 +42,7 @@ class WebGLViewerPage extends StatefulWidget {
 }
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
+  static const int _downloadProgressThrottleMs = 100;
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -57,6 +58,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   int _totalBytes = -1;
   String? _localModelPath;
   bool _downloadCancelled = false;
+  int _lastDownloadUiUpdate = 0;
   late bool _useSparkViewer;
 
   void _attachViewerHeaders(HttpResponse response) {
@@ -69,8 +71,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel =>
-      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
@@ -265,8 +266,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -316,12 +316,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               }
               sink.add(chunk);
               receivedBytes += chunk.length;
-              if (totalBytes > 0 && mounted) {
+              if (totalBytes > 0) {
                 final progress = receivedBytes / totalBytes;
-                setState(() {
-                  _downloadProgress = progress;
-                  _downloadedBytes = receivedBytes;
-                });
+                _updateDownloadProgress(
+                  progress: progress,
+                  downloadedBytes: receivedBytes,
+                  totalBytes: totalBytes,
+                );
                 downloadEventBus.add(
                   ModelDownloadEvent(
                     url: originalUrl,
@@ -365,13 +366,39 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          TDToast.showText(
+            '\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e',
+            context: context,
+          );
           _launchViewer();
         }
       }
     } else {
       if (mounted) _launchViewer();
     }
+  }
+
+  void _updateDownloadProgress({
+    required double progress,
+    required int downloadedBytes,
+    required int totalBytes,
+    bool force = false,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force &&
+        now - _lastDownloadUiUpdate < _downloadProgressThrottleMs &&
+        downloadedBytes < totalBytes) {
+      return;
+    }
+    _lastDownloadUiUpdate = now;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _downloadProgress = progress;
+      _downloadedBytes = downloadedBytes;
+      _totalBytes = totalBytes;
+    });
   }
 
   void _launchViewer() {
@@ -469,7 +496,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
             if (mounted) {
-              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+              TDToast.showText(
+                'Spark \u9519\u8bef: ${data['msg']}',
+                context: context,
+              );
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');
@@ -499,11 +529,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _loadLocalHtml();
   }
 
-  Future<void> _loadLocalHtml() async {
+  Future<void> _loadLocalHtml({bool clearCache = false}) async {
     try {
-      await _controller?.clearCache();
-      final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
+      if (clearCache) {
+        await _controller?.clearCache();
+      }
+      final url = 'http://127.0.0.1:$_localPort/index.html';
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
@@ -548,7 +579,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
       _controller?.runJavaScript(
-          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
+      );
       return;
     }
 
@@ -601,7 +633,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName = model['display_name']?.toString() ??
+      final displayName =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
@@ -620,7 +653,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
     _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '$currentModelId')");
+      "window.setModelListForTimePeeling($json, '$currentModelId')",
+    );
   }
 
   String _findCurrentModelId() {
@@ -914,8 +948,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
-                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text(
+                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
+                      ),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),

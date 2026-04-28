@@ -1,5 +1,3 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/rendering.dart';
 import 'package:braindance/extra_func/theme_animation_notifier.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -25,6 +23,8 @@ class SettingsPage extends ConsumerStatefulWidget {
 
 class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
+  static const bool _enableFancyThemeTransition = true;
+  static const double _themeCaptureScale = 0.5;
   late final TabController tabController;
   int _currentTabIndex = 0;
   final GlobalKey _themeSwitchKey = GlobalKey();
@@ -70,27 +70,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   trailing: GestureDetector(
                     onTap: () async {
                       // 1. Capture the UI before changing theme
-                      final boundary = themeAnimationKey.currentContext
-                          ?.findRenderObject() as RenderRepaintBoundary?;
+                      final boundary =
+                          themeAnimationKey.currentContext?.findRenderObject()
+                              as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final image = await boundary.toImage(
-                              pixelRatio:
-                                  MediaQuery.of(context).devicePixelRatio);
+                          final mediaQuery = MediaQuery.of(context);
+                          final pixelRatio =
+                              (mediaQuery.devicePixelRatio * _themeCaptureScale)
+                                  .clamp(1.0, 2.0);
+                          if (_enableFancyThemeTransition &&
+                              !mediaQuery.disableAnimations) {
+                            final image = await boundary.toImage(
+                              pixelRatio: pixelRatio,
+                            );
 
-                          final RenderBox? buttonBox =
-                              _themeSwitchKey.currentContext?.findRenderObject()
-                                  as RenderBox?;
+                            final RenderBox? buttonBox =
+                                _themeSwitchKey.currentContext
+                                        ?.findRenderObject()
+                                    as RenderBox?;
 
-                          if (buttonBox != null) {
-                            final offset = buttonBox.localToGlobal(Offset.zero);
-                            final center = offset +
-                                Offset(buttonBox.size.width / 2,
-                                    buttonBox.size.height / 2);
+                            if (buttonBox != null) {
+                              final offset = buttonBox.localToGlobal(
+                                Offset.zero,
+                              );
+                              final center =
+                                  offset +
+                                  Offset(
+                                    buttonBox.size.width / 2,
+                                    buttonBox.size.height / 2,
+                                  );
 
-                            ref
-                                .read(themeAnimationProvider.notifier)
-                                .startBase(image, center);
+                              ref
+                                  .read(themeAnimationProvider.notifier)
+                                  .startBase(image, center);
+                            } else {
+                              image.dispose();
+                            }
                           }
                         } catch (e) {
                           debugPrint('Theme transition error: $e');
@@ -187,8 +203,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 }
 
-
-
 class _SettingsTabSwitch extends StatelessWidget {
   final TabController controller;
 
@@ -220,68 +234,74 @@ class _SettingsTabSwitch extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       height: 56,
-      child: ClipRRect(
-        borderRadius: BDDesign.radiusLarge,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
-          child: Container(
-            padding: const EdgeInsets.all(4.0),
-            decoration: BoxDecoration(
-              color: navBackground,
-              borderRadius: BDDesign.radiusLarge,
-              border: Border.all(color: navBorder, width: 1.0),
-              boxShadow: [
-                BoxShadow(
-                  color: navShadow,
-                  blurRadius: 28,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+      child: Container(
+        padding: const EdgeInsets.all(4.0),
+        decoration: BoxDecoration(
+          color: navBackground,
+          borderRadius: BDDesign.radiusLarge,
+          border: Border.all(color: navBorder, width: 1.0),
+          boxShadow: [
+            BoxShadow(
+              color: navShadow,
+              blurRadius: 28,
+              offset: const Offset(0, 8),
             ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final tabWidth = constraints.maxWidth / 2;
-                return Stack(
+          ],
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final tabWidth = constraints.maxWidth / 2;
+            return Stack(
+              children: [
+                AnimatedBuilder(
+                  animation: controller.animation!,
+                  builder: (context, child) {
+                    final double offset =
+                        controller.animation!.value * tabWidth;
+                    return Positioned(
+                      left: offset,
+                      width: tabWidth,
+                      top: 0,
+                      bottom: 0,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: selectedBackground,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                Row(
                   children: [
-                    AnimatedBuilder(
-                      animation: controller.animation!,
-                      builder: (context, child) {
-                        final double offset =
-                            controller.animation!.value * tabWidth;
-                        return Positioned(
-                          left: offset,
-                          width: tabWidth,
-                          top: 0,
-                          bottom: 0,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: selectedBackground,
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                          ),
-                        );
-                      },
+                    _buildTabItem(
+                      0,
+                      textLocalize('set_tab1'),
+                      selectedColor,
+                      unselectedColor,
                     ),
-                    Row(
-                      children: [
-                        _buildTabItem(0, textLocalize('set_tab1'),
-                            selectedColor, unselectedColor),
-                        _buildTabItem(1, textLocalize('set_tab3'),
-                            selectedColor, unselectedColor),
-                      ],
+                    _buildTabItem(
+                      1,
+                      textLocalize('set_tab3'),
+                      selectedColor,
+                      unselectedColor,
                     ),
                   ],
-                );
-              },
-            ),
-          ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildTabItem(int index, String label,
-      Color selectedColor, Color unselectedColor) {
+  Widget _buildTabItem(
+    int index,
+    String label,
+    Color selectedColor,
+    Color unselectedColor,
+  ) {
     return Expanded(
       child: GestureDetector(
         onTap: () => controller.animateTo(index),

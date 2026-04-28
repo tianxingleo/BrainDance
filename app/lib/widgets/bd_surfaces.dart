@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import '../configs/app_theme.dart';
@@ -77,12 +75,19 @@ class _BackdropOrb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ImageFiltered(
-      imageFilter: ImageFilter.blur(sigmaX: 42, sigmaY: 42),
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [
+            color,
+            color.withValues(alpha: color.a * 0.42),
+            Colors.transparent,
+          ],
+          stops: const [0.0, 0.58, 1.0],
+        ),
       ),
     );
   }

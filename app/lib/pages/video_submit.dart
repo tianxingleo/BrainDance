@@ -32,6 +32,7 @@ class VideoSubmitPage extends ConsumerStatefulWidget {
 }
 
 class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
+  static const int _uploadProgressThrottleMs = 100;
   final TextEditingController nameController = TextEditingController();
   bool _isUploading = false;
   double _uploadProgress = 0.0;
@@ -97,11 +98,19 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         _uploadProgress = 0.0;
       });
 
+      var lastProgressUiUpdate = 0;
+
       await ChunkedUpload.upload(
         file: file,
         storagePath: videoStoragePath,
         contentType: 'video/mp4',
         onProgress: (uploaded, total) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - lastProgressUiUpdate < _uploadProgressThrottleMs &&
+              uploaded < total) {
+            return;
+          }
+          lastProgressUiUpdate = now;
           if (mounted) {
             setState(() {
               _uploadedBytes = uploaded;
