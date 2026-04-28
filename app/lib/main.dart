@@ -45,55 +45,126 @@ final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
+  AppConfig.initializeAppConfig();
+  runApp(const _AppBootstrap());
+}
 
-  /// 开启多套主题功能
-  AppConfig.initializeAppConfig(); //加载默认数据
-  await dotenv.load(fileName: ".env");
-  final supabaseResolution = await SupabaseConfig.resolveEndpoint();
-  SupabaseConfig.applyRuntimeResolution(supabaseResolution);
-  if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
-    debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
+class _AppBootstrap extends StatefulWidget {
+  const _AppBootstrap();
+
+  @override
+  State<_AppBootstrap> createState() => _AppBootstrapState();
+}
+
+class _AppBootstrapState extends State<_AppBootstrap> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
   }
-  await Supabase.initialize(
-    url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.apiKey,
-  ); //Supabase
 
-  // 初始化全局任务通知服务
-  taskNotificationService.setNavigatorKey(navigatorKey);
-  await taskNotificationService.init();
-  //Camera
-  try {
-    final List<CameraDescription> camsTemp = await availableCameras();
-    //摄像机分类。
-    for (var cam in camsTemp) {
-      switch (cam.lensDirection) {
-        case CameraLensDirection.front:
-          RecoConfig.frontCameras.add(cam);
-          break;
-        case CameraLensDirection.back:
-          RecoConfig.backCameras.add(cam);
-          break;
-        case CameraLensDirection.external:
-          RecoConfig.externalCameras.add(cam);
-          break;
+  Future<void> _init() async {
+    try {
+      await dotenv.load(fileName: ".env");
+      final supabaseResolution = await SupabaseConfig.resolveEndpoint();
+      SupabaseConfig.applyRuntimeResolution(supabaseResolution);
+      if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
+        debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
       }
+      await Supabase.initialize(
+        url: SupabaseConfig.url,
+        anonKey: SupabaseConfig.apiKey,
+      );
+    } catch (e) {
+      debugPrint('Bootstrap env/supabase error: $e');
     }
-    RecoConfig.cameras = camsTemp;
-    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
-  } catch (e) {
-    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
-    RecoConfig.cameras = [];
-    RecoConfig.frontCameras = [];
-    RecoConfig.backCameras = [];
-    RecoConfig.externalCameras = [];
-    RecoConfig.cameraEnabled = false;
+
+    try {
+      taskNotificationService.setNavigatorKey(navigatorKey);
+      await taskNotificationService.init();
+    } catch (e) {
+      debugPrint('Bootstrap notification error: $e');
+    }
+
+    try {
+      final List<CameraDescription> camsTemp = await availableCameras();
+      for (var cam in camsTemp) {
+        switch (cam.lensDirection) {
+          case CameraLensDirection.front:
+            RecoConfig.frontCameras.add(cam);
+            break;
+          case CameraLensDirection.back:
+            RecoConfig.backCameras.add(cam);
+            break;
+          case CameraLensDirection.external:
+            RecoConfig.externalCameras.add(cam);
+            break;
+        }
+      }
+      RecoConfig.cameras = camsTemp;
+      RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
+    } catch (e) {
+      debugPrint('Bootstrap camera error: $e');
+      RecoConfig.cameras = [];
+      RecoConfig.frontCameras = [];
+      RecoConfig.backCameras = [];
+      RecoConfig.externalCameras = [];
+      RecoConfig.cameraEnabled = false;
+    }
+
+    if (mounted) setState(() => _ready = true);
   }
-  //
-  runApp(const ProviderScope(child: MyApp()));
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: const _SplashScreen(),
+      );
+    }
+    return const ProviderScope(child: MyApp());
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_awesome,
+              size: 64,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Brain Dance',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 32),
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 //App定义

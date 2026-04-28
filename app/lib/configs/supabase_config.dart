@@ -76,8 +76,10 @@ class SupabaseConfig {
   static List<String> buildUrlCandidates() {
     final configured = configuredUrl;
     final candidates = <String>[
-      if (configured.isNotEmpty) configured,
+      // Try fallbacks (local/LAN IPs) first — they respond instantly on LAN
+      // and bypass Cloudflare's 100-second timeout for large uploads.
       ...urlFallbacks,
+      if (configured.isNotEmpty) configured,
     ];
 
     final lowerConfigured = configured.toLowerCase();
@@ -110,7 +112,7 @@ class SupabaseConfig {
   }
 
   static Future<SupabaseEndpointResolution> resolveEndpoint({
-    Duration timeout = const Duration(seconds: 2),
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     final candidates = buildUrlCandidates();
     if (candidates.isEmpty) {

@@ -3,7 +3,7 @@ import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/main.dart' show pageIndexProvider;
-import 'package:dio/dio.dart';
+import 'package:braindance/services/chunked_upload.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -90,38 +90,28 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
       final file = File(widget.videoPath);
       final fileSize = await file.length();
-      final url =
-          '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
-      final dio = Dio();
 
       setState(() {
         _totalFileSize = fileSize;
         _uploadedBytes = 0;
+        _uploadProgress = 0.0;
       });
 
-      await dio.post(
-        url,
-        data: file.openRead(),
-        options: Options(
-          headers: {
-            'Authorization':
-                'Bearer ${client.auth.currentSession?.accessToken}',
-            'apikey': SupabaseConfig.apiKey,
-            'Content-Type': 'video/mp4',
-            'Content-Length': fileSize.toString(),
-          },
-        ),
-        onSendProgress: (count, total) {
+      await ChunkedUpload.upload(
+        file: file,
+        storagePath: videoStoragePath,
+        contentType: 'video/mp4',
+        onProgress: (uploaded, total) {
           if (mounted) {
             setState(() {
-              _uploadedBytes = count;
-              _uploadProgress = count / fileSize;
+              _uploadedBytes = uploaded;
+              _uploadProgress = uploaded / total;
             });
           }
         },
       );
 
-      await client.from('processing_tasks').insert({
+      await ChunkedUpload.insertTask({
         'scene_id': sceneId,
         'user_id': user.id,
         'display_name': nameController.text.trim().isEmpty

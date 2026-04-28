@@ -375,7 +375,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
       return;
     }
 
-    final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
       adminModeMessage: textLocalize('admin_mode_msg'),
     );
@@ -397,7 +396,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         contentType: 'image/png',
       );
 
-      await client.from("processing_tasks").insert({
+      await ChunkedUpload.insertTask({
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
@@ -477,7 +476,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
       return;
     }
 
-    final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
       adminModeMessage: textLocalize('admin_mode_msg'),
     );
@@ -501,7 +499,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         contentType: 'video/mp4',
       );
 
-      await client.from("processing_tasks").insert({
+      await ChunkedUpload.insertTask({
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
@@ -571,35 +569,25 @@ extension _GenerateSubmissionX on _GeneratePageState {
     required String storageFileName,
     required String contentType,
   }) async {
-    final client = Supabase.instance.client;
     final file = File(localPath);
     final fileSize = await file.length();
     final storagePath = '$userId/$sceneId/raw/$storageFileName';
-    final url =
-        '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$storagePath';
-    final dio = Dio();
 
     _refresh(() {
       _totalFileSize = fileSize;
       _uploadedBytes = 0;
+      _uploadProgress = 0.0;
     });
 
-    await dio.post(
-      url,
-      data: file.openRead(),
-      options: Options(
-        headers: {
-          'Authorization': 'Bearer ${client.auth.currentSession?.accessToken}',
-          'apikey': SupabaseConfig.apiKey,
-          'Content-Type': contentType,
-          'Content-Length': fileSize.toString(),
-        },
-      ),
-      onSendProgress: (count, total) {
+    await ChunkedUpload.upload(
+      file: file,
+      storagePath: storagePath,
+      contentType: contentType,
+      onProgress: (uploaded, total) {
         if (mounted) {
           _refresh(() {
-            _uploadedBytes = count;
-            _uploadProgress = count / fileSize;
+            _uploadedBytes = uploaded;
+            _uploadProgress = uploaded / total;
           });
         }
       },
