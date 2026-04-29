@@ -33,7 +33,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.sceneId = '3DGS Viewer',
     this.initialPose,
     this.initialPoseId,
-    this.useSparkViewer = false,
+    this.useSparkViewer = true,
     this.timePeelingModels = const [],
   });
 
@@ -160,15 +160,78 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final file = File(filePath);
         if (await file.exists()) {
           _attachViewerHeaders(request.response);
+
           if (filePath.endsWith('.ply') ||
               filePath.endsWith('.splat') ||
-              filePath.endsWith('.ksplat')) {
+              filePath.endsWith('.ksplat') ||
+              filePath.endsWith('.spz') ||
+              filePath.endsWith('.rad') ||
+              filePath.endsWith('.sog')) {
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
             );
           }
-          await request.response.addStream(file.openRead());
+
+          // ── HTTP Range support for .rad / .spz streaming ──
+          final fileLength = await file.length();
+          final rangeHeader = request.headers.value('range');
+
+          if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
+            // Parse "bytes=START-END" (END is optional)
+            final rangeSpec = rangeHeader.substring(6);
+            final parts = rangeSpec.split('-');
+
+            int start = 0;
+            int end = fileLength - 1;
+
+            if (parts.length == 2) {
+              if (parts[0].isNotEmpty) {
+                start = int.tryParse(parts[0]) ?? 0;
+              }
+              if (parts[1].isNotEmpty) {
+                end = int.tryParse(parts[1]) ?? (fileLength - 1);
+              }
+            }
+
+            // Clamp range
+            if (start < 0) start = 0;
+            if (end >= fileLength) end = fileLength - 1;
+            if (start > end) start = end;
+
+            final contentLength = end - start + 1;
+
+            request.response.statusCode = HttpStatus.partialContent;
+            request.response.headers.set(
+              'Content-Range',
+              'bytes $start-$end/$fileLength',
+            );
+            request.response.headers.set('Accept-Ranges', 'bytes');
+            request.response.contentLength = contentLength;
+
+            // Read only the requested byte range
+            final raf = await file.open(mode: FileMode.read);
+            try {
+              await raf.setPosition(start);
+              var remaining = contentLength;
+              const chunkSize = 64 * 1024; // 64KB chunks
+              while (remaining > 0) {
+                final toRead = remaining > chunkSize ? chunkSize : remaining;
+                final buffer = await raf.read(toRead);
+                request.response.add(buffer);
+                remaining -= buffer.length;
+                if (buffer.length < toRead) break;
+              }
+            } finally {
+              await raf.close();
+            }
+          } else {
+            // No Range header — serve full file with Accept-Ranges hint
+            request.response.headers.set('Accept-Ranges', 'bytes');
+            request.response.contentLength = fileLength;
+            await request.response.addStream(file.openRead());
+          }
+
           await request.response.close();
           return;
         }
@@ -409,18 +472,48 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _initWebView();
   }
 
-  Map<String, dynamic> _buildViewerPayload() {
-    String targetUrl;
+  /// Resolve the best model URL for Spark 2.0.
+  /// Priority: .rad > .spz > .ksplat > .ply
+  /// Checks the local cache for optimized formats before falling back.
+  String _resolveBestModelUrl(String originalUrl) {
+    if (!_useSparkViewer) return originalUrl;
+
+    // If local model is cached, check for optimized format variants
     if (_localModelPath != null) {
-      targetUrl =
+      final baseName = _localModelPath!.replaceAll(
+        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
+        '',
+      );
+
+      // Priority order: .rad > .spz > .ksplat > original
+      const extensions = ['.rad', '.spz', '.ksplat'];
+      for (final ext in extensions) {
+        final candidate = File('$baseName$ext');
+        if (candidate.existsSync()) {
+          debugPrint('Using optimized model format: $ext');
+          return 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(candidate.path)}';
+        }
+      }
+    }
+
+    return originalUrl;
+  }
+
+  Map<String, dynamic> _buildViewerPayload() {
+    String rawUrl;
+    if (_localModelPath != null) {
+      rawUrl =
           'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
     } else if (widget.initialModelUrl.startsWith('http://') ||
         widget.initialModelUrl.startsWith('https://')) {
-      targetUrl =
+      rawUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      targetUrl = widget.initialModelUrl;
+      rawUrl = widget.initialModelUrl;
     }
+
+    // Try to resolve a better format for Spark 2.0
+    final targetUrl = _resolveBestModelUrl(rawUrl);
 
     return {
       'ply': targetUrl,
@@ -718,8 +811,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     String targetUrl;
     if (await localFile.exists()) {
       debugPrint('TimePeeling: model cached locally');
+
+      // Try optimized format variants (.rad > .spz > .ksplat > original)
+      final basePath = localFile.path.replaceAll(
+        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
+        '',
+      );
+      String resolvedPath = localFile.path;
+      for (final ext in ['.rad', '.spz', '.ksplat']) {
+        final candidate = File('$basePath$ext');
+        if (await candidate.exists()) {
+          debugPrint('TimePeeling: using optimized format $ext');
+          resolvedPath = candidate.path;
+          break;
+        }
+      }
       targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(localFile.path)}';
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(resolvedPath)}';
     } else {
       // 未缓存，下载模型
       debugPrint('TimePeeling: downloading model...');
