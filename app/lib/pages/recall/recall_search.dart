@@ -265,16 +265,15 @@ extension _RecallPageSearch on _RecallPageState {
           fallback();
         },
         onDone: () {
-          if (mounted) {
-            setState(() {
-              _isAgentSearching = false;
-              _finishAgentRunTracking();
-            });
-            _agentBootstrapTimer?.cancel();
-            _agentBootstrapTimer = null;
-            if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
-              _completeAgentRun();
-            }
+          if (!mounted || _agentChatMessage == null) return;
+          setState(() {
+            _isAgentSearching = false;
+            _finishAgentRunTracking();
+          });
+          _agentBootstrapTimer?.cancel();
+          _agentBootstrapTimer = null;
+          if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
+            _completeAgentRun();
           }
         },
       );

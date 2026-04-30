@@ -19,6 +19,7 @@ import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'services/download_event_bus.dart';
 import 'services/task_notification_service.dart';
 import 'floating_nav_bar.dart';
 import 'widgets/bd_surfaces.dart';
@@ -92,12 +93,29 @@ void main() async {
 }
 
 //App定义
-class MyApp extends StatelessWidget with WidgetsBindingObserver {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    disposeDownloadEventBus();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addObserver(this); // 注册观察者
     return const Home();
   }
 
@@ -176,7 +194,7 @@ class Home extends ConsumerWidget {
           child: ThemeAnimationOverlay(
             child: Stack(
               children: [
-                child!,
+                child ?? const SizedBox.shrink(),
                 // 语言切换时一并重建全局通知和页面树，避免旧文案残留
                 const GlobalNotificationOverlay(),
               ],

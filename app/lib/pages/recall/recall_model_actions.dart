@@ -45,7 +45,9 @@ extension _RecallPageModelActions on _RecallPageState {
     // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
-      initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
+      initialPose = transformMatrix
+          .map((e) => (e is num) ? e.toDouble() : 0.0)
+          .toList();
     }
 
     unawaited(
