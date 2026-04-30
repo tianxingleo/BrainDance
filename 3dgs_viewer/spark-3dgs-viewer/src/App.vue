@@ -1,10 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import SparkGaussianViewer from './components/SparkGaussianViewer.vue'
+import MarkerARViewer from './components/MarkerARViewer.vue'
+
+const params = new URLSearchParams(window.location.search)
+const mode = params.get('mode') || 'viewer'
 </script>
 
 <template>
   <main>
-    <SparkGaussianViewer />
+    <MarkerARViewer v-if="mode === 'marker-ar'" />
+    <SparkGaussianViewer v-else />
   </main>
 </template>
 
