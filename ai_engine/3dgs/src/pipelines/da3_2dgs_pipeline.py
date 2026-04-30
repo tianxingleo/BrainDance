@@ -1,7 +1,5 @@
 import os
-import pty
 import re
-import select
 import shutil
 import socket
 import subprocess
@@ -340,50 +338,29 @@ class DA3TwoDGSPipeline(BasePipeline):
         env = env.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
 
-        master_fd, slave_fd = pty.openpty()
+        # 使用 subprocess.PIPE 替代 Unix-only pty，兼容 Windows 和 Linux
         process = subprocess.Popen(
             cmd,
             cwd=str(cwd),
             env=env,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            text=False,
-            close_fds=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
         )
-        os.close(slave_fd)
 
         buffer = ""
         try:
             while True:
-                ready, _, _ = select.select([master_fd], [], [], 0.2)
-                saw_eof = False
-                if ready:
-                    try:
-                        chunk = os.read(master_fd, 4096)
-                    except OSError:
-                        chunk = b""
-                    if chunk:
-                        buffer = self._flush_stream_buffer(
-                            buffer + chunk.decode("utf-8", errors="replace")
-                        )
-                    else:
-                        saw_eof = True
-
-                if process.poll() is not None and (not ready or saw_eof):
-                    break
-
-            while True:
-                try:
-                    chunk = os.read(master_fd, 4096)
-                except OSError:
-                    break
+                chunk = process.stdout.read(4096)
                 if not chunk:
-                    break
+                    if process.poll() is not None:
+                        break
+                    continue
                 buffer = self._flush_stream_buffer(
                     buffer + chunk.decode("utf-8", errors="replace")
                 )
         finally:
-            os.close(master_fd)
+            process.stdout.close()
 
         if buffer.strip():
             self._log_subprocess_line(buffer)

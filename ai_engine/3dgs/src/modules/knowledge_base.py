@@ -4,19 +4,28 @@
 # 逻辑：1. 生成文本向量 2. 构造资产记录 3. 存储到数据库 4. 支持语义搜索
 # 包含：KnowledgeBase类、向量生成方法、资产存储方法、语义搜索方法
 import json
-from openai import OpenAI
-from supabase import Client
 from typing import Optional
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+try:
+    from supabase import Client
+except ImportError:
+    Client = None
 
 from src.config import PipelineConfig
 
 class KnowledgeBase:
-    def __init__(self, supabase_client: Client, cfg: Optional[PipelineConfig] = None):
+    def __init__(self, supabase_client, cfg: Optional[PipelineConfig] = None):
         self.supabase = supabase_client
         self.cfg = cfg or PipelineConfig()
-        
-        # 使用兼容 OpenAI 接口的 Embedding 服务 (这里以阿里云为例，或者直接用 OpenAI)
-        # 建议使用 text-embedding-v3-small (OpenAI) 或 text-embedding-v2 (Aliyun)
+
+        if OpenAI is None:
+            raise ImportError("openai 包未安装，KnowledgeBase 无法初始化。请运行: pip install openai")
+
         self.client = OpenAI(
             api_key=self.cfg.dashscope_api_key,
             base_url=self.cfg.dashscope_base_url
