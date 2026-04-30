@@ -1,3 +1,4 @@
+// ignore_for_file: invalid_use_of_protected_member
 part of '../recall.dart';
 
 extension _RecallPageAgentRuntime on _RecallPageState {
@@ -213,9 +214,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     String? summary,
     String? detail,
   }) {
-    if (_agentFirstRemoteEventAt == null) {
-      _agentFirstRemoteEventAt = DateTime.now();
-    }
+    _agentFirstRemoteEventAt ??= DateTime.now();
     _agentBootstrapTimer?.cancel();
     _agentBootstrapTimer = null;
 

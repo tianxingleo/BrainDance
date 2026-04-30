@@ -3,6 +3,7 @@
 /// 包含 [RecallModelGrid]（主网格视图）、[RecallModelTile]（模型卡片）和
 /// [RecallModelMockCover]（占位封面）三个公开组件。
 ///
+library;
 /// 其他子模块拆分至：
 /// - [model_grid_helpers.dart]  工具函数与常量
 /// - [model_action_overlay.dart] 操作浮层

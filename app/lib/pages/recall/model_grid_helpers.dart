@@ -1,6 +1,7 @@
 /// 模型网格通用工具函数
 ///
 /// 提供模型名称解析、颜色辅助、相似度格式化等可复用工具。
+library;
 
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';

@@ -13,7 +13,7 @@ void main() {
         await launchBrainDanceApp(tester);
         // TODO: 填充真实登录动作与断言。
       },
-      skip: '集成测试骨架已建立，待补充真实步骤与断言。',
+      skip: true,
     );
 
     testWidgets(
@@ -21,7 +21,7 @@ void main() {
       (tester) async {
         await launchBrainDanceApp(tester);
       },
-      skip: '集成测试骨架已建立，待补充真实步骤与断言。',
+      skip: true,
     );
 
     testWidgets(
@@ -29,7 +29,7 @@ void main() {
       (tester) async {
         await launchBrainDanceApp(tester);
       },
-      skip: '需要 admin 环境变量与独立运行口径。',
+      skip: true,
     );
 
     testWidgets(
@@ -37,7 +37,7 @@ void main() {
       (tester) async {
         await launchBrainDanceApp(tester);
       },
-      skip: '依赖真实登录态和任务数据。',
+      skip: true,
     );
   });
 }

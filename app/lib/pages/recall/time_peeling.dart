@@ -2,6 +2,7 @@
 ///
 /// 将模型按名称分组，每组显示一个水平时间线条带（carousel），
 /// 带有连接节点的时间线和动画选中效果。
+library;
 
 import 'dart:ui' as ui;
 

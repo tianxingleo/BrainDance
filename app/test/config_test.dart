@@ -1,4 +1,6 @@
 /// Smoke tests: 确认配置类能正常构造，不崩溃。
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -20,11 +22,11 @@ void main() {
     });
 
     test('primaryColor alpha > 0（非完全透明）', () {
-      expect(AppConfig.primaryColor.alpha, greaterThan(0));
+      expect(AppConfig.primaryColor.a, greaterThan(0.0));
     });
 
     test('accentColor alpha > 0', () {
-      expect(AppConfig.accentColor.alpha, greaterThan(0));
+      expect(AppConfig.accentColor.a, greaterThan(0.0));
     });
   });
 
@@ -85,12 +87,12 @@ void main() {
   // ─── BDDesign ──────────────────────────────────────────────────────
   group('BDDesign 设计令牌', () {
     test('颜色常量 alpha == 255（完全不透明）', () {
-      expect(BDDesign.colorPaperWhite.alpha, 255);
-      expect(BDDesign.colorAshGray.alpha, 255);
-      expect(BDDesign.colorInkBlack.alpha, 255);
-      expect(BDDesign.colorMutedBlue.alpha, 255);
-      expect(BDDesign.colorDarkRed.alpha, 255);
-      expect(BDDesign.colorFadedOlive.alpha, 255);
+      expect(BDDesign.colorPaperWhite.a, 1.0);
+      expect(BDDesign.colorAshGray.a, 1.0);
+      expect(BDDesign.colorInkBlack.a, 1.0);
+      expect(BDDesign.colorMutedBlue.a, 1.0);
+      expect(BDDesign.colorDarkRed.a, 1.0);
+      expect(BDDesign.colorFadedOlive.a, 1.0);
     });
 
     test('圆角常量构造成功', () {

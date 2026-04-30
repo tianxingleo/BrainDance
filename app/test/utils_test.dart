@@ -1,6 +1,8 @@
 /// Smoke tests: 确认 dir_and_file.dart 的纯 I/O 工具函数能正常工作。
 ///
 /// 这些测试使用系统临时目录，不依赖网络或硬件。
+library;
+
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:braindance/extra_func/dir_and_file.dart';
