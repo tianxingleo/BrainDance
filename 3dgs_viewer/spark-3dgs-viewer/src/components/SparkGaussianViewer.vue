@@ -50,6 +50,14 @@ const clipOffset = ref(0);
 const currentModelUrl = ref('./models/scene_auto_sync_raw.ply');
 const currentPosesPath = ref('/models/webgl_poses_with_tags.json');
 
+// ==================== Orbit 相机模式 ====================
+// Orbit 模式：相机绕模型中心自动旋转（圆周运动），不改变现有手动控制逻辑
+const orbitEnabled = ref(false);    // 是否开启 orbit 模式
+const orbitPaused = ref(false);     // 是否暂停旋转
+const orbitSpeed = ref(20);         // 旋转速度，单位：度/秒
+const orbitDirection = ref(1);      // 旋转方向：1=逆时针(CCW)，-1=顺时针(CW)
+const orbitRadius = ref(0);         // 旋转半径：0=自动计算（保持当前距离），>0 使用指定值
+
 const filteredPoses = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) {
@@ -92,6 +100,13 @@ let hasInitializedFromExternalInput = false;
 let fpsFrames = 0;
 let fpsTimestamp = 0;
 
+// ===== Orbit 运行时变量（非响应式，避免不必要的 Vue 重渲染） =====
+let orbitAngle = 0;           // 当前旋转角度（弧度）
+let orbitY = 0;               // 相机 Y 坐标（保持 orbit 高度不变）
+let autoOrbitRadius = 0;      // 自动计算的轨道半径（从当前相机距离获取）
+let orbitLastFrameTime = performance.now();
+let isOrbitDragging = false;  // 用户正在手动拖拽（临时中断 orbit）
+
 const refreshCurrentFocalInfo = () => {
   if (!camera) return;
   const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
@@ -125,6 +140,54 @@ const syncClipPlane = () => {
     point,
     normal,
   });
+};
+
+// ==================== Orbit 相机模式：核心函数 ====================
+
+// 从当前相机位置同步 orbit 参数（角度、高度、半径）
+// 用于：(1) 开启 orbit 时初始化 (2) 手动拖拽松开后恢复 (3) 模型加载后重新锚定
+const syncOrbitFromCamera = () => {
+  if (!camera || !sceneCenter) return;
+  const dx = camera.position.x - sceneCenter.x;
+  const dz = camera.position.z - sceneCenter.z;
+  orbitAngle = Math.atan2(dz, dx);
+  orbitY = camera.position.y;
+  autoOrbitRadius = Math.sqrt(dx * dx + dz * dz);
+};
+
+// 开启 orbit 模式：从当前相机位置初始化轨道参数并开始旋转
+const startOrbit = () => {
+  if (!sceneCenter) return;
+  syncOrbitFromCamera();
+  // 如果自动半径过小（相机太靠近中心），使用默认距离
+  if (autoOrbitRadius < 0.1) {
+    autoOrbitRadius = sceneRadius * 2.4;
+  }
+  orbitPaused.value = false;
+  orbitEnabled.value = true;
+};
+
+// 关闭 orbit 模式：相机停留在当前位置，恢复原有手动控制
+const stopOrbit = () => {
+  orbitEnabled.value = false;
+  orbitPaused.value = false;
+};
+
+// 暂停/恢复 orbit 旋转
+const toggleOrbitPause = () => {
+  if (!orbitEnabled.value) return;
+  if (orbitPaused.value) {
+    // 恢复时从当前相机位置重新同步轨道参数，确保无缝衔接
+    syncOrbitFromCamera();
+    orbitPaused.value = false;
+  } else {
+    orbitPaused.value = true;
+  }
+};
+
+// 切换旋转方向（顺时针/逆时针）
+const toggleOrbitDirection = () => {
+  orbitDirection.value *= -1;
 };
 
 const applyFocalLengthPx = (focalPx, options = {}) => {
@@ -406,6 +469,28 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     containerRef.value.innerHTML = '';
     containerRef.value.appendChild(renderer.domElement);
 
+    // ===== Orbit 指针事件：检测手动拖拽以临时中断/恢复 orbit 旋转 =====
+    // 按下时标记拖拽状态，暂停 orbit
+    renderer.domElement.addEventListener('pointerdown', () => {
+      isOrbitDragging = true;
+    });
+    // 松手后从当前相机位置重新同步轨道参数，实现无缝恢复
+    renderer.domElement.addEventListener('pointerup', () => {
+      isOrbitDragging = false;
+      if (orbitEnabled.value && !orbitPaused.value) {
+        syncOrbitFromCamera();
+      }
+    });
+    // pointerleave 作为安全兜底，防止拖拽状态卡住
+    renderer.domElement.addEventListener('pointerleave', () => {
+      if (isOrbitDragging) {
+        isOrbitDragging = false;
+        if (orbitEnabled.value && !orbitPaused.value) {
+          syncOrbitFromCamera();
+        }
+      }
+    });
+
     spark = new SparkRenderer({
       renderer,
       maxStdDev: Math.sqrt(7),
@@ -430,15 +515,47 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
 
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return;
-      controls?.update(camera);
-      renderer.render(scene, camera);
-      fpsFrames += 1;
+
+      // 计算帧时间差（用于 orbit 旋转增量）
       const now = performance.now();
+      const dt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
+      orbitLastFrameTime = now;
+
+      // FPS 统计
+      fpsFrames += 1;
       if (now - fpsTimestamp >= 1000) {
         currentFps.value = fpsFrames;
         fpsFrames = 0;
         fpsTimestamp = now;
       }
+
+      // ===== Orbit 模式：自动旋转相机（非暂停、非手动拖拽时生效） =====
+      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging && dt > 0) {
+        // 根据速度和方向更新旋转角度
+        const speedRad = orbitSpeed.value * (Math.PI / 180);
+        orbitAngle += speedRad * dt * orbitDirection.value;
+        // 计算圆周位置并应用到相机
+        const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
+        const x = sceneCenter.x + r * Math.cos(orbitAngle);
+        const z = sceneCenter.z + r * Math.sin(orbitAngle);
+        camera.position.set(x, orbitY, z);
+        camera.lookAt(sceneCenter);
+        camera.updateProjectionMatrix();
+      }
+
+      // 始终更新 controls（处理滚轮缩放、手动拖拽等输入）
+      controls?.update(camera);
+
+      // ===== Orbit 模式下重新锁定相机位置，防止 controls 覆盖 orbit 位置 =====
+      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging) {
+        const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
+        const x = sceneCenter.x + r * Math.cos(orbitAngle);
+        const z = sceneCenter.z + r * Math.sin(orbitAngle);
+        camera.position.set(x, orbitY, z);
+        camera.lookAt(sceneCenter);
+      }
+
+      renderer.render(scene, camera);
     });
 
     setupResizeHandler();
@@ -451,6 +568,11 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     const size = bbox.getSize(new THREE.Vector3());
     sceneCenter = bbox.getCenter(new THREE.Vector3());
     sceneRadius = Math.max(size.length() * 0.32, DEFAULT_SCENE_RADIUS);
+
+    // 如果 orbit 已开启，重新同步轨道参数到新计算的模型中心
+    if (orbitEnabled.value) {
+      syncOrbitFromCamera();
+    }
 
     frameScene();
     highlightEffect = createSphereHighlightEffect(sceneRadius, highlightEnabled.value);
@@ -624,6 +746,62 @@ onBeforeUnmount(() => {
       :scene-metadata="sceneMetadata"
       @close="activeImage = ''; activeTag = ''"
     />
+
+    <!-- ===== Orbit 控制面板：相机绕模型中心自动旋转 ===== -->
+    <div
+      v-if="!isLoading && !loadError"
+      class="orbit-panel panel-card"
+      @mousedown.stop
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+      @touchcancel.stop
+    >
+      <div class="eyebrow">Orbit Control</div>
+      <div class="panel-title">轨道旋转</div>
+      <div class="orbit-btn-row">
+        <button class="panel-btn panel-btn--solid" @click="orbitEnabled ? stopOrbit() : startOrbit()">
+          {{ orbitEnabled ? '关闭轨道' : '开启轨道' }}
+        </button>
+        <button v-if="orbitEnabled" class="panel-btn panel-btn--ghost" @click="toggleOrbitPause()">
+          {{ orbitPaused ? '恢复' : '暂停' }}
+        </button>
+      </div>
+      <template v-if="orbitEnabled">
+        <!-- 旋转速度控制 -->
+        <div class="focal-row" style="margin-top: 10px;">
+          <span>速度</span>
+          <span>{{ orbitSpeed }}度/秒</span>
+        </div>
+        <input
+          type="range"
+          :min="1"
+          :max="120"
+          :value="orbitSpeed"
+          step="1"
+          @input="orbitSpeed = Number($event.target.value)"
+        />
+        <!-- 旋转半径控制 -->
+        <div class="focal-row" style="margin-top: 6px;">
+          <span>半径</span>
+          <span>{{ orbitRadius > 0 ? orbitRadius.toFixed(2) : '自动' }}</span>
+        </div>
+        <input
+          type="range"
+          :min="0"
+          :max="20"
+          :value="orbitRadius"
+          step="0.1"
+          @input="orbitRadius = Number($event.target.value)"
+        />
+        <!-- 旋转方向切换 -->
+        <div style="margin-top: 8px;">
+          <button class="panel-btn panel-btn--ghost orbit-dir-btn" @click="toggleOrbitDirection()">
+            {{ orbitDirection === 1 ? '逆时针' : '顺时针' }}
+          </button>
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -1093,6 +1271,36 @@ button {
     width: 78px;
     height: 56px;
   }
+
+  .orbit-panel {
+    top: 510px;
+    right: 12px;
+    width: 180px;
+    padding: 10px;
+  }
+}
+
+/* ===== Orbit 控制面板样式 ===== */
+.orbit-panel {
+  position: absolute;
+  top: 370px;
+  right: 18px;
+  z-index: 60;
+  width: 210px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.orbit-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.orbit-dir-btn {
+  width: 100%;
 }
 </style>
 
