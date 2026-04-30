@@ -77,6 +77,9 @@ service_account.json
 # Dart doc 生成的 API 文档
 doc/api/
 
+# Flutter lock file
+/app/pubspec.lock
+
 # Flutter web 构建产物
 /app/web/build/
 
@@ -294,6 +297,10 @@ tmp/docs/
 
 # pandoc 提取的文档媒体目录
 docs/**/*-media/
+
+# 草稿文档
+docs/3dgs-mobile-rendering.md
+docs/cinematic-mode-algorithm.md
 
 # 备份文件超过100MB不应提交
 *.ply.bak
