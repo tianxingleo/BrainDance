@@ -142,7 +142,7 @@
 cd supabase && supabase start
 
 # 启动 AI Worker
-conda activate gs_linux_backup
+conda activate braindance
 cd ai_engine/3dgs && python main.py
 
 # 启动 Edge Function
@@ -154,9 +154,9 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 ## 🔄 文档版本与更新
 
-- **文档版本**: v1.0
-- **最后更新**: 2026-03-22
-- **主要更新**: 补充 Qwen3 Part 27-30、部署候选结论与仓库入口文档同步
+- **文档版本**: v1.1
+- **最后更新**: 2026-04-30
+- **主要更新**: 修正 conda 环境名、同步目录结构说明
 
 ---
 

@@ -112,97 +112,48 @@
 
 ---
 
-## 🔗 文档目录树
+## 文档目录树
+
+> 以下仅列出当前推荐使用的文档目录结构。旧目录（`1.总览/`、`2.架构说明/`、`3.API文档/`、`4.测试/`、`5.贡献/`）为早期版本，建议优先参考编号目录（`01-` 至 `09-`）。
 
 ```
 BrainDance/
-│
 ├── README.md                          # 项目主文档
 │
-├── docs/                              # 核心文档目录
-│   ├── README.md                      # 文档索引（本文档）
-│   ├── INDEX.md                       # 文档导航
-│   ├── 快速开始指南.md                 # 5 步启动指南
-│   ├── 开发环境配置.md                 # 详细环境配置
-│   │
-│   ├── 1.总览/                        # 架构总览
-│   │   └── 项目架构.md                # 系统整体架构
-│   │
-│   ├── 2.架构说明/                    # 详细架构文档
-│   │   └── 系统架构.md                # 组件设计
-│   │
-│   ├── 3.API文档/                     # API 文档
-│   │   ├── API_DOC.md                 # API 接口
-│   │   └── 数据库设计.md              # 数据库 DDL
-│   │
-│   ├── 4.测试/                        # 测试文档
-│   │   └── 测试指南.md                # 测试规范
-│   │
-│   ├── 5.贡献/                        # 贡献指南
-│   │   └── 贡献指南.md                # 代码贡献流程
-│   │
-│   ├── 协同规范/                      # 协作规范
-│   │   ├── BrainDance 项目协作规范与开发协议 (v1.0).md
-│   │   └── 详细技术栈清单、技术协同规范.md
-│   │
-│   ├── 技术报告/                      # 技术报告
-│   │   ├── 项目技术前沿性分析.md       # 技术前沿性分析
-│   │   ├── 【首发】在 RTX 5070 (Blackwell) + WSL2 上跑通最新模型 Meta SAM 3D 的终极方案.md
-│   │   ├── 【首发】针对 Windows 环境下 NVIDIA RTX 50 系列图形处理单元的 Nerfstudio (3DGS) 部署流程.md
-│   │   ├── 关于首次在 Google Colab 平台基于 Tesla T4 加速器全流程部署三维高斯泼溅（3DGS）技术的实施协议（2025.12）.md
-│   │   └── 在 Linux (WSL) + RTX 50 系列显卡上部署原生 GPU 加速 COLMAP 的指南.md
-│   │
-│   ├── 代办/                          # 待办事项
-│   │   ├── 项目改进建议_20260120.md
-│   │   ├── TODO_AUTH_MIGRATION.md
-│   │   └── ... (其他待办文档)
-│   │
-│   ├── old/                           # 历史文档
-│   │   ├── README.md
-│   │   ├── 项目重新定义.md
-│   │   └── idea.md
-│   │
-│   ├── API_DOC.md                     # API 文档（根级副本）
-│   ├── API_TEST_REPORT.md             # API 测试报告
-│   └── LOCAL_DEPLOYMENT.md            # 本地部署指南
+├── app/                               # [Flutter] 移动端客户端
+├── ai_engine/                         # [Python] 核心算法引擎
+│   ├── 3dgs/                          #   GPU Worker 与 3D/2D 重建流水线
+│   └── finetune_qwen3/                #   Qwen3 本地问答微调、量化、评测
 │
-├── ai_engine/                         # AI 引擎（Python）
-│   ├── README.md                      # AI Engine 说明
-│   │
-│   ├── 3dgs/                          # 3DGS 引擎
-│   │   ├── README.md                  # 3DGS 引擎说明
-│   │   ├── TEST_GUIDE.md              # 测试指南
-│   │   ├── requirements.txt           # 依赖配置
-│   │   ├── .env.example               # 环境变量模板
-│   │   │
-│   │   ├── src/                       # 源代码
-│   │   │   ├── config.py              # 配置管理
-│   │   │   ├── core/                  # 核心逻辑
-│   │   │   │   ├── pipeline.py        # 3DGS 处理流水线
-│   │   │   │   ├── worker.py          # 云端任务处理器
-│   │   │   │   └── factory.py         # Pipeline 工厂
-│   │   │   │
-│   │   │   ├── pipelines/             # Pipeline 实现
-│   │   │   ├── modules/               # 功能模块
-│   │   │   └── utils/                 # 工具函数
-│   │   │
-│   │   ├── tests/                     # 测试脚本
-│   │   └── docs/                      # 文档
-│   │       └── 交互.md
-│   │
-│   └── demo/                          # 演示脚本
+├── supabase/                          # [BaaS] 本地后端基础设施
+│   ├── migrations/                    #   SQL 迁移
+│   └── functions/                     #   Edge Functions
+│       ├── search-models/             #     基础语义搜索函数
+│       ├── agent-recall/              #     统一 Agent Recall 入口
+│       ├── spatial-search-agent/      #     LangChain 试验入口
+│       ├── time-compare-agent/        #     双时间窗口对比
+│       └── _shared/agent-core/        #     共享 Agent Core 与工具
 │
-├── supabase/                          # Supabase 后端
-│   ├── README.md                      # Supabase 配置说明
-│   ├── config.toml                    # Supabase 配置
-│   ├── migrations/                    # 数据库迁移
-│   └── functions/                     # Edge Functions
-│       └── search-models/             # 搜索功能
-│           ├── index.ts               # Edge Function 主程序
-│           ├── test.ts                # 测试脚本
-│           └── .env.local.example     # 环境变量模板
+├── dashboard/                         # [Vue 3 + Vite] 系统状态看板
 │
-└── CLAUDE.md                          # AI 助手配置
+├── docs/                              # [Doc] 项目文档
+│   ├── README.md                      #   文档索引
+│   ├── INDEX.md                       #   文档导航（本文档）
+│   ├── changelog-doc-sync.md          #   文档一致性审查变更日志
+│   │
+│   ├── 01-入门指南/                   #   快速开始和本地部署
+│   ├── 02-架构设计/                   #   系统结构、技术栈、Agent 规划
+│   ├── 03-API参考/                    #   接口指南、数据库设计、测试报告
+│   ├── 04-本地问答与微调/             #   Qwen3 微调记录、评测报告
+│   ├── 05-开发规范/                   #   协作规范、贡献指南、测试指南
+│   ├── 06-部署运维/                   #   环境配置
+│   ├── 07-技术报告/                   #   专项技术报告
+│   ├── 08-待办事项/                   #   整理后的待办与改进建议
+│   ├── 09-LangChain专题/              #   LangChain / Agent 编排
+│   ├── 开发文档/                      #   核心开发纪要、比赛材料
+│   └── .archive/                      #   历史归档
+│
+└── 3dgs_viewer/                       # [Tools] 3DGS 脚本与辅助工具
 ```
 
 ---
