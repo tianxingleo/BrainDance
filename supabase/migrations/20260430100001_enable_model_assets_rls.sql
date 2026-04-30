@@ -1,6 +1,19 @@
 -- P0 修复: 启用 model_assets 表的 RLS，添加基于 user_id 的行级隔离策略
 -- model_assets.user_id 为 text 类型，需用 auth.uid()::text 转换
 -- Worker 使用 service_role 绕过 RLS，不受影响
+--
+-- 风险说明：
+--   现有数据中存在 user_id IS NULL 或 user_id = 'default_user' 的历史记录。
+--   启用 RLS 后，这些记录对所有 authenticated 用户不可见（auth.uid()::text 不匹配）。
+--   执行本迁移前，必须先确认这些记录的归属，并执行下方的 backfill 步骤。
+--
+-- 必须先执行 backfill（在 Supabase SQL Editor 中手动运行，迁移不自动执行）：
+--   UPDATE public.model_assets
+--   SET user_id = '<真实 user_id>'
+--   WHERE user_id IS NULL OR user_id = 'default_user';
+--
+-- 如果历史数据确认无需保留，可改为：
+--   DELETE FROM public.model_assets WHERE user_id IS NULL OR user_id = 'default_user';
 
 -- 启用 RLS
 ALTER TABLE public.model_assets ENABLE ROW LEVEL SECURITY;

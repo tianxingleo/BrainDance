@@ -7,6 +7,7 @@ CREATE OR REPLACE FUNCTION public.claim_next_pending_task()
 RETURNS processing_tasks
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     claimed processing_tasks%ROWTYPE;
