@@ -141,6 +141,8 @@ flutter:
     - assets/sprites/
     - assets/webgl/
     - assets/webgl/assets/
+    - assets/webgl_spark/
+    - assets/webgl_spark/assets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:

@@ -844,6 +844,13 @@ onMounted(() => {
     initViewer(null, null, null);
   };
 
+  // 注册供 Flutter 调用的 TimePeeling 模型列表设置函数
+  window.setModelListForTimePeeling = (list, currentId) => {
+    console.log('[Flutter->SparkViewer] 收到 TimePeeling 模型列表:', list, '当前模型:', currentId);
+    // Spark 2.0 当前版本暂不支持 TimePeeling 切换，但需要提供空实现避免 Flutter 端报错
+    // 后续可扩展为多模型切换逻辑
+  };
+
   const initialInput = parseInitialInputFromUrl();
   if (window.BrainDanceChannel) {
     return;
@@ -869,6 +876,10 @@ onBeforeUnmount(() => {
 
   if (window.loadModelFromFlutter) {
     delete window.loadModelFromFlutter;
+  }
+
+  if (window.setModelListForTimePeeling) {
+    delete window.setModelListForTimePeeling;
   }
 
   disposeViewer();
