@@ -138,7 +138,8 @@ onBeforeUnmount(() => {
             <div v-else class="bs-thumb bs-thumb--empty">
               <span>未命名</span>
             </div>
-            <div v-if="pose.tag" class="bs-tag">{{ pose.tag }}</div>
+            <!-- 文字标签已隐藏，只显示图片 -->
+            <!-- <div v-if="pose.tag" class="bs-tag">{{ pose.tag }}</div> -->
           </div>
         </template>
 
