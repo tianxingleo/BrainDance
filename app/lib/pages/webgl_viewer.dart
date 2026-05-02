@@ -270,7 +270,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       }
 
       final assetPath = '$_viewerAssetRoot$path';
-      if (path == '/index.html' || path.endsWith('.js')) {
+      if (path == '/index.html' ||
+          path.endsWith('.js') ||
+          path.endsWith('.mind')) {
         debugPrint('Viewer asset request: $assetPath');
       }
 
@@ -308,6 +310,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         request.response.add(bytes);
         await request.response.close();
       } catch (_) {
+        debugPrint('Viewer asset missing: $assetPath');
         request.response.statusCode = HttpStatus.notFound;
         request.response.write('Not Found');
         await request.response.close();
@@ -647,11 +650,24 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ..addJavaScriptChannel(
         'BrainDanceChannel',
         onMessageReceived: (JavaScriptMessage message) {
-          final data = jsonDecode(message.message);
           debugPrint('BrainDanceChannel: ${message.message}');
+          final dynamic decoded;
+          try {
+            decoded = jsonDecode(message.message);
+          } catch (error) {
+            debugPrint('BrainDanceChannel parse error: $error');
+            return;
+          }
+          if (decoded is! Map<String, dynamic>) {
+            debugPrint('BrainDanceChannel ignored non-object payload');
+            return;
+          }
+          final data = decoded;
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            _sendModelToVue();
+            if (!_isMarkerArMode) {
+              _sendModelToVue();
+            }
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
@@ -706,6 +722,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     final platformController = _controller?.platform;
     if (platformController is AndroidWebViewController) {
+      platformController.setMediaPlaybackRequiresUserGesture(false);
       platformController.setOnPlatformPermissionRequest((request) {
         if (!_isMarkerArMode) {
           request.deny();
@@ -729,6 +746,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       await _controller?.clearCache();
       final cacheBust = DateTime.now().millisecondsSinceEpoch;
       final url = _buildViewerUrl(cacheBust);
+      debugPrint('Loading WebGL viewer URL: $url');
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');

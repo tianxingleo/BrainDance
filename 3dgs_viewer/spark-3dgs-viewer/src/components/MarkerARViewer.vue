@@ -39,6 +39,10 @@ let spark: SparkRenderer | null = null
 let splatMesh: SplatMesh | null = null
 let arRoot: THREE.Group | null = null
 
+const postBridgeMessage = (payload: Record<string, unknown>) => {
+  window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
+}
+
 watch(
   transform,
   (value) => {
@@ -85,8 +89,23 @@ onMounted(async () => {
   if (!containerRef.value) return
 
   try {
+    postBridgeMessage({
+      status: 'info',
+      msg: 'Marker AR params resolved',
+      href: window.location.href,
+      model: params.modelUrl,
+      target: params.targetUrl,
+    })
+
     status.value = '正在检查 Marker 目标文件...'
     const targetResponse = await fetch(params.targetUrl, { method: 'HEAD' })
+    postBridgeMessage({
+      status: 'info',
+      msg: 'Marker AR target HEAD result',
+      target: params.targetUrl,
+      ok: targetResponse.ok,
+      httpStatus: targetResponse.status,
+    })
     if (!targetResponse.ok) {
       throw new Error(`Marker 目标文件不存在或不可访问：${params.targetUrl}`)
     }
@@ -155,6 +174,13 @@ onMounted(async () => {
     })
   } catch (error) {
     console.error('[MarkerARViewer] init error:', error)
+    postBridgeMessage({
+      status: 'error',
+      msg: error instanceof Error ? error.message : String(error),
+      href: window.location.href,
+      model: params.modelUrl,
+      target: params.targetUrl,
+    })
     status.value = error instanceof Error
       ? error.message
       : 'AR 启动失败，请检查摄像头权限和 Marker 目标文件'
