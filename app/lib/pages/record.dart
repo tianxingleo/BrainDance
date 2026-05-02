@@ -43,6 +43,7 @@ class RecordPage extends ConsumerStatefulWidget {
 
 class _RecordPageState extends ConsumerState<RecordPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
+  static const int _motionUiThrottleMs = 100;
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
   late AnimationController _hudAnimController; // HUD animation
@@ -75,6 +76,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
   _MotionState _motionState = _MotionState.steady;
+  int _lastMotionUiUpdateTime = 0;
 
   final List<double> _accelHistory = [];
 
@@ -96,18 +98,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _hudAnimController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
-    )..repeat(reverse: true);
-
-    if (!RecoConfig.cameraEnabled) {
-      return;
-    }
+    );
 
     RecoConfig.onUpdate = () {
       if (mounted) {
         setState(() {});
       }
     };
-    RecoConfig.cameraInitialize();
+    unawaited(_initializeCamera());
   }
 
   @override
@@ -235,7 +233,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (thumbPath.startsWith('assets/')) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_record_too_short'), context: context);
+        TDToast.showText(
+          textLocalize('reco_record_too_short'),
+          context: context,
+        );
       }
       return;
     }
@@ -300,7 +301,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (yaw < 0) {
       yaw += 360;
     }
-
   }
 
   void _updateMotionFeedback(
@@ -355,7 +355,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _hudAnimController.duration = _isMovingTooFast
           ? const Duration(milliseconds: 150)
           : const Duration(seconds: 1);
-      _hudAnimController.repeat(reverse: true);
+      if (_isMotionHudEnabled) {
+        _hudAnimController.repeat(reverse: true);
+      }
     }
 
     if (_isMovingTooFast && mounted && now - _lastFastToastTime > 1800) {
@@ -374,7 +376,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
     _accelHistory.add(motionMeter);
 
-    if (mounted) {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final shouldRefreshUi =
+        _isMotionHudEnabled &&
+        (forceRefresh ||
+            currentWarning != _isMovingTooFast ||
+            nowMs - _lastMotionUiUpdateTime >= _motionUiThrottleMs);
+
+    if (shouldRefreshUi && mounted) {
+      _lastMotionUiUpdateTime = nowMs;
       setState(() {
         _linearAccel = linearAccel;
         _smoothedLinearAccel = smoothedAccel;
@@ -392,10 +402,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _motionHint = nextHint;
       _motionDetail = nextDetail;
       _motionState = effectiveState;
-    }
-
-    if (forceRefresh && mounted) {
-      setState(() {});
     }
   }
 
@@ -453,7 +459,28 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _motionState = _MotionState.steady;
     _isMovingTooFast = false;
     _warningEndTime = 0;
+    _lastMotionUiUpdateTime = 0;
     _accelHistory.clear();
+  }
+
+  Future<void> _initializeCamera() async {
+    final ready = await RecoConfig.cameraInitialize();
+    if (!ready && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _startHudAnimation() {
+    if (!_hudAnimController.isAnimating) {
+      _hudAnimController.repeat(reverse: true);
+    }
+  }
+
+  void _stopHudAnimation() {
+    if (_hudAnimController.isAnimating) {
+      _hudAnimController.stop();
+    }
+    _hudAnimController.value = 0;
   }
 
   void _startSensors() {
@@ -504,9 +531,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _isMotionHudEnabled = !_isMotionHudEnabled;
       if (_isMotionHudEnabled) {
         _resetMotionState();
+        _startHudAnimation();
         _startSensors();
       } else {
         _stopSensors();
+        _stopHudAnimation();
         _resetMotionState();
       }
     });
@@ -619,17 +648,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
       body: Stack(
         children: [
           Positioned.fill(child: cameraView),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: RecordHUDPainter(
-                isWarning: _isMotionHudEnabled && _isMovingTooFast,
-                isCaution:
-                    _isMotionHudEnabled && _motionState == _MotionState.caution,
-                motionValue: _isMotionHudEnabled ? _motionMeter : 0,
-                animation: _hudAnimController,
+          if (_isMotionHudEnabled)
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: RecordHUDPainter(
+                    isWarning: _isMovingTooFast,
+                    isCaution: _motionState == _MotionState.caution,
+                    motionValue: _motionMeter,
+                    animation: _hudAnimController,
+                  ),
+                ),
               ),
             ),
-          ),
           Positioned(
             top: mediaQuery.padding.top + 16,
             left: 16,

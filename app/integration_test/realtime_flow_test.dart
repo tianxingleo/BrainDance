@@ -17,7 +17,7 @@ void main() {
         (tester) async {
           await launchBrainDanceApp(tester);
         },
-        skip: '依赖后台改库脚本与可控测试数据。',
+        skip: true,
       );
     }
   });

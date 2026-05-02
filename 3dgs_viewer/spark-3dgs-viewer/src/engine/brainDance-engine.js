@@ -13,6 +13,7 @@ const DEFAULT_POSES = './models/webgl_poses_with_tags.json';
 const MOBILE_ROTATE_SPEED = 0.0055;
 const MOBILE_PAN_SPEED = 0.0016;
 const MOBILE_ZOOM_SPEED = 1.0;
+const ENGINE_ROLLFIX_VERSION = 'engine-rollfix-20260502';
 
 function injectStyles() {
   const style = document.createElement('style');
@@ -506,6 +507,7 @@ class BrainDanceEngine {
       lastDistance: 0,
       lastMidX: 0,
       lastMidY: 0,
+      debugCount: 0,
     };
     this.uiInteracting = false;
 
@@ -752,7 +754,7 @@ class BrainDanceEngine {
         const touch = event.touches[0];
         const dx = touch.clientX - this.touchState.lastX;
         const dy = touch.clientY - this.touchState.lastY;
-        this._mobileOrbit(dx, dy, focus);
+        this._mobileLook(dx, dy);
         this.touchState.lastX = touch.clientX;
         this.touchState.lastY = touch.clientY;
       }
@@ -794,6 +796,33 @@ class BrainDanceEngine {
     surface.addEventListener('touchcancel', onTouchEnd, { passive: false });
   }
 
+  _setManualCameraFromCurrent() {
+    this.cinema.manualCameraState = {
+      position: this.camera.position.clone(),
+      quaternion: this.camera.quaternion.clone().normalize(),
+    };
+    this.cinema.autoPlay = false;
+    this.runtime.autoCamera = false;
+    if (this.io?.dom?.autoCamera) {
+      this.io.dom.autoCamera.checked = false;
+    }
+  }
+
+  _mobileLook(dx, dy) {
+    const yaw = -dx * MOBILE_ROTATE_SPEED;
+    const pitch = -dy * MOBILE_ROTATE_SPEED;
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(right, pitch);
+    this.camera.quaternion.premultiply(qYaw).premultiply(qPitch).normalize();
+    this._setManualCameraFromCurrent();
+    if (this.touchState.debugCount < 3) {
+      this.touchState.debugCount += 1;
+      const roll = THREE.MathUtils.radToDeg(new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ').z).toFixed(1);
+      sendChannelMessage({ status: 'info', msg: `Spark engine gesture look: roll=${roll}deg` });
+    }
+  }
+
   _mobileOrbit(dx, dy, focus) {
     this.cinema.manualCameraState = null;
     const offset = this.camera.position.clone().sub(focus);
@@ -802,13 +831,11 @@ class BrainDanceEngine {
     spherical.phi += dy * MOBILE_ROTATE_SPEED;
     spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.18, Math.PI - 0.18);
     offset.setFromSpherical(spherical);
+    const roll = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ').z;
     this.camera.position.copy(focus.clone().add(offset));
     this.camera.lookAt(focus);
-    this.cinema.autoPlay = false;
-    this.runtime.autoCamera = false;
-    if (this.io?.dom?.autoCamera) {
-      this.io.dom.autoCamera.checked = false;
-    }
+    if (Math.abs(roll) > 1e-6) this.camera.rotateZ(roll);
+    this._setManualCameraFromCurrent();
   }
 
   _mobilePan(dx, dy) {
@@ -822,12 +849,7 @@ class BrainDanceEngine {
     this.camera.position.add(offset);
     this.cinema.focus.add(offset);
     this.cinema.focusLerp.add(offset);
-    this.camera.lookAt(this.cinema.focus);
-    this.cinema.autoPlay = false;
-    this.runtime.autoCamera = false;
-    if (this.io?.dom?.autoCamera) {
-      this.io.dom.autoCamera.checked = false;
-    }
+    this._setManualCameraFromCurrent();
   }
 
   _mobileZoom(scale, focus) {
@@ -837,12 +859,7 @@ class BrainDanceEngine {
     const distance = THREE.MathUtils.clamp(offset.length() / Math.max(scale, 0.25), this.sceneRadius * 0.6, this.sceneRadius * 6.0);
     offset.setLength(distance);
     this.camera.position.copy(focus.clone().add(offset));
-    this.camera.lookAt(focus);
-    this.cinema.autoPlay = false;
-    this.runtime.autoCamera = false;
-    if (this.io?.dom?.autoCamera) {
-      this.io.dom.autoCamera.checked = false;
-    }
+    this._setManualCameraFromCurrent();
   }
 
   _installGlobalErrorHooks() {
@@ -883,6 +900,7 @@ class BrainDanceEngine {
   }
 
   async init() {
+    sendChannelMessage({ status: 'info', msg: `Spark engine version: ${ENGINE_ROLLFIX_VERSION}` });
     if (window.BrainDanceChannel) {
       this.setStatus('等待 Flutter 发送模型数据');
       return;
@@ -1045,6 +1063,8 @@ class BrainDanceEngine {
       pose.image_url ? '当前镜头对应一张参考图片，运镜会朝这张图的采集视角靠近。' : '当前镜头对应一组相机位姿矩阵。'
     );
     this.cinema.flyToPose(cameraState);
+    const roll = THREE.MathUtils.radToDeg(new THREE.Euler().setFromQuaternion(cameraState.quaternion, 'YXZ').z).toFixed(1);
+    sendChannelMessage({ status: 'info', msg: `Spark engine focusPose: roll=${roll}deg` });
   }
 
   animate() {

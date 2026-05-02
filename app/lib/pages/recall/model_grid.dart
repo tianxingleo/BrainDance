@@ -63,7 +63,8 @@ class RecallModelGrid extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
@@ -130,7 +131,10 @@ class RecallModelGrid extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () => onNavigateToViewer(model, null),
-                            onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
+                            onLongPressStart: (_) => onShowModelActions(
+                              model,
+                              imageOnly: false,
+                            ), // Here we are sending false for standard view cards
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Row(
@@ -261,7 +265,10 @@ class RecallModelGrid extends StatelessWidget {
                   opacity: isActionTarget ? 0.0 : 1.0,
                   child: GestureDetector(
                     onTap: () => onNavigateToViewer(model, null),
-                    onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
+                    onLongPressStart: (_) => onShowModelActions(
+                      model,
+                      imageOnly: false,
+                    ), // Here we are sending false for standard view cards
                     child: Container(
                       key: cardKey,
                       child: RecallModelTile(
@@ -450,26 +457,29 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                       scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
                       child: GestureDetector(
-                  onTap: () => widget.onNavigateToViewer(widget.model, null),
-                  onLongPress: widget.onDismiss,
-                  child: RecallModelTile(
-                    model: widget.model,
-                    theme: widget.theme,
-                    isDark: widget.isDark,
-                    darkCard: widget.darkCard,
-                    darkInput: widget.darkInput,
-                    textColor: widget.isDark
-                        ? const Color(0xFFFFFFFF)
-                        : BDDesign.colorInkBlack,
-                    hintTextColor: widget.isDark
-                        ? const Color(0xFF888888)
-                        : widget.theme.fontGyColor3,
-                    elevated: true,
-                    elevationProgress: sValue,
-                    toPublicUrl: widget.toPublicUrl,
-                    imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
-                  ),
-                ),
+                        onTap: () =>
+                            widget.onNavigateToViewer(widget.model, null),
+                        onLongPress: widget.onDismiss,
+                        child: RecallModelTile(
+                          model: widget.model,
+                          theme: widget.theme,
+                          isDark: widget.isDark,
+                          darkCard: widget.darkCard,
+                          darkInput: widget.darkInput,
+                          textColor: widget.isDark
+                              ? const Color(0xFFFFFFFF)
+                              : BDDesign.colorInkBlack,
+                          hintTextColor: widget.isDark
+                              ? const Color(0xFF888888)
+                              : widget.theme.fontGyColor3,
+                          elevated: true,
+                          elevationProgress: sValue,
+                          toPublicUrl: widget.toPublicUrl,
+                          imageOnly:
+                              widget.model['_imageOnly'] ==
+                              true, // Correctly read boolean
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -487,7 +497,9 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              widget.theme.brandColor4.withValues(alpha: widget.isDark ? 0.25 : 0.15),
+                              widget.theme.brandColor4.withValues(
+                                alpha: widget.isDark ? 0.25 : 0.15,
+                              ),
                               Colors.transparent,
                             ],
                             begin: Alignment.centerLeft,
@@ -684,6 +696,7 @@ class _AdaptiveFrameThumbnail extends StatefulWidget {
 
 /// Shared image resolution logic for widgets that load a network image by URL.
 mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
+  static const int _maxImageCacheEntries = 80;
   static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
 
   ui.Image? resolvedImage;
@@ -692,6 +705,7 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   ImageStreamListener? _imageStreamListener;
 
   String get imageUrl;
+  int? get cacheWidthHint => null;
 
   @override
   void initState() {
@@ -717,16 +731,22 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   void _resolveImage() {
     final cached = _imageCache[imageUrl];
     if (cached != null) {
+      _imageCache.remove(imageUrl);
+      _imageCache[imageUrl] = cached;
       resolvedImage = cached;
       return;
     }
 
-    final provider = NetworkImage(imageUrl);
+    final provider = ResizeImage.resizeIfNeeded(
+      cacheWidthHint,
+      null,
+      NetworkImage(imageUrl),
+    );
     final stream = provider.resolve(const ImageConfiguration());
     _imageStream = stream;
     _imageStreamListener = ImageStreamListener(
       (ImageInfo info, bool synchronousCall) {
-        _imageCache[imageUrl] = info.image;
+        _putImage(imageUrl, info.image);
         if (!mounted) {
           return;
         }
@@ -747,6 +767,16 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
     stream.addListener(_imageStreamListener!);
   }
 
+  void _putImage(String url, ui.Image image) {
+    _imageCache.remove(url);
+    _imageCache[url] = image;
+    while (_imageCache.length > _maxImageCacheEntries) {
+      final oldestKey = _imageCache.keys.first;
+      final evicted = _imageCache.remove(oldestKey);
+      evicted?.dispose();
+    }
+  }
+
   void _stopListening() {
     final stream = _imageStream;
     final listener = _imageStreamListener;
@@ -762,6 +792,9 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail>
     with _NetworkImageResolverMixin {
   @override
   String get imageUrl => widget.imageUrl;
+
+  @override
+  int get cacheWidthHint => 440;
 
   @override
   void didUpdateWidget(covariant _AdaptiveFrameThumbnail oldWidget) {
@@ -863,6 +896,9 @@ class _CoverNetworkImageState extends State<_CoverNetworkImage>
   String get imageUrl => widget.imageUrl;
 
   @override
+  int get cacheWidthHint => 720;
+
+  @override
   void didUpdateWidget(covariant _CoverNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     onImageUrlChanged(oldWidget.imageUrl);
@@ -941,7 +977,9 @@ class RecallModelTile extends StatelessWidget {
           BoxShadow(
             color: Colors.black.withAlpha(
               elevationProgress != null
-                  ? (elevationProgress! > 0 ? (20 + (46 - 20) * elevationProgress!).round() : 20)
+                  ? (elevationProgress! > 0
+                        ? (20 + (46 - 20) * elevationProgress!).round()
+                        : 20)
                   : (elevated ? 46 : 20),
             ),
             blurRadius: elevationProgress != null
@@ -1111,7 +1149,8 @@ class TimePeelingList extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
@@ -1202,7 +1241,8 @@ class _TimePeelingSlot extends StatefulWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const _TimePeelingSlot({

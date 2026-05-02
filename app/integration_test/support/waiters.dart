@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter_test/flutter_test.dart';
-
 Future<void> waitUntil(
   FutureOr<bool> Function() predicate, {
   Duration timeout = const Duration(seconds: 10),

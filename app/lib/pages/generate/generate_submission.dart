@@ -1,6 +1,8 @@
 part of '../generate.dart';
 
 extension _GenerateSubmissionX on _GeneratePageState {
+  static const int _uploadProgressThrottleMs = 100;
+
   void _openTaskListAfterSubmit() {
     final navigator = Navigator.of(context);
     // 统一收敛为一次导航，避免先 pop 再 push 导致交互式返回期间路由树抖动。
@@ -10,14 +12,9 @@ extension _GenerateSubmissionX on _GeneratePageState {
   Map<String, dynamic>? _videoTaskParamsFor(String taskType) {
     switch (taskType) {
       case 'video_dual_chain':
-        return {
-          'slow_pipeline': 'video_3dgs',
-        };
+        return {'slow_pipeline': 'video_3dgs'};
       case 'da3_feed_forward_3dgs':
-        return {
-          'frame_interval': 5,
-          'conf_threshold': 0.5,
-        };
+        return {'frame_interval': 5, 'conf_threshold': 0.5};
       case 'da3_sugar':
         return {
           'regularization': 'dn_consistency',
@@ -25,11 +22,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
           'fast_mode': true,
         };
       case 'da3_2dgs':
-        return {
-          'iterations': 30000,
-          'extract_fps': 2.0,
-          'min_images': 24,
-        };
+        return {'iterations': 30000, 'extract_fps': 2.0, 'min_images': 24};
       case 'sparse2dgs':
         return {
           'video_sample_count': 12,
@@ -322,7 +315,10 @@ extension _GenerateSubmissionX on _GeneratePageState {
       final data = response.data;
       if (data is Map && data['success'] == true) {
         if (mounted) {
-          TDToast.showText(textLocalize('gen_submit_success'), context: context);
+          TDToast.showText(
+            textLocalize('gen_submit_success'),
+            context: context,
+          );
           ref.read(pageIndexProvider.notifier).state = 0;
           _generatedImageUrl = null;
           _textEditingController.clear();
@@ -330,16 +326,24 @@ extension _GenerateSubmissionX on _GeneratePageState {
           _openTaskListAfterSubmit();
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_submit_fail')) : textLocalize('gen_server_error');
+        final errMsg = (data is Map)
+            ? (data['error'] ?? textLocalize('gen_submit_fail'))
+            : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: ${e.details}', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_submit_fail')}: ${e.details}',
+          context: context,
+        );
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_submit_fail')}: $e',
+          context: context,
+        );
       }
     } finally {
       if (mounted) {
@@ -366,7 +370,9 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitImageTask() async {
     if (GenConfig.uploadedImages.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_select_image'), context: context);
+      if (mounted) {
+        TDToast.showText(textLocalize('gen_select_image'), context: context);
+      }
       return;
     }
 
@@ -375,7 +381,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
       return;
     }
 
-    final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
       adminModeMessage: textLocalize('admin_mode_msg'),
     );
@@ -397,7 +402,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         contentType: 'image/png',
       );
 
-      await client.from("processing_tasks").insert({
+      await ChunkedUpload.insertTask({
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
@@ -412,7 +417,10 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_submit_fail')}: $e',
+          context: context,
+        );
       }
     } finally {
       if (mounted) {
@@ -426,7 +434,9 @@ extension _GenerateSubmissionX on _GeneratePageState {
   Future<void> _submitTextTask() async {
     final prompt = _textEditingController.text.trim();
     if (prompt.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_enter_text'), context: context);
+      if (mounted) {
+        TDToast.showText(textLocalize('gen_enter_text'), context: context);
+      }
       return;
     }
 
@@ -451,16 +461,24 @@ extension _GenerateSubmissionX on _GeneratePageState {
           _showTextImagePreview(prompt);
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_generate_fail')) : textLocalize('gen_server_error');
+        final errMsg = (data is Map)
+            ? (data['error'] ?? textLocalize('gen_generate_fail'))
+            : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_generate_fail')}: ${e.details}', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_generate_fail')}: ${e.details}',
+          context: context,
+        );
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_generate_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_generate_fail')}: $e',
+          context: context,
+        );
       }
     } finally {
       if (mounted) {
@@ -473,11 +491,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitVideoTask() async {
     if (GenConfig.uploadedVideos.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_select_video'), context: context);
+      if (mounted) {
+        TDToast.showText(textLocalize('gen_select_video'), context: context);
+      }
       return;
     }
 
-    final client = Supabase.instance.client;
     final user = await _requireAuthenticatedUser(
       adminModeMessage: textLocalize('admin_mode_msg'),
     );
@@ -501,7 +520,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         contentType: 'video/mp4',
       );
 
-      await client.from("processing_tasks").insert({
+      await ChunkedUpload.insertTask({
         'scene_id': sceneId,
         'user_id': user.id,
         'status': 'pending',
@@ -518,7 +537,10 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        TDToast.showText(
+          '${textLocalize('gen_submit_fail')}: $e',
+          context: context,
+        );
       }
     } finally {
       if (mounted) {
@@ -571,35 +593,33 @@ extension _GenerateSubmissionX on _GeneratePageState {
     required String storageFileName,
     required String contentType,
   }) async {
-    final client = Supabase.instance.client;
     final file = File(localPath);
     final fileSize = await file.length();
     final storagePath = '$userId/$sceneId/raw/$storageFileName';
-    final url =
-        '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$storagePath';
-    final dio = Dio();
 
     _refresh(() {
       _totalFileSize = fileSize;
       _uploadedBytes = 0;
+      _uploadProgress = 0.0;
     });
 
-    await dio.post(
-      url,
-      data: file.openRead(),
-      options: Options(
-        headers: {
-          'Authorization': 'Bearer ${client.auth.currentSession?.accessToken}',
-          'apikey': SupabaseConfig.apiKey,
-          'Content-Type': contentType,
-          'Content-Length': fileSize.toString(),
-        },
-      ),
-      onSendProgress: (count, total) {
+    var lastProgressUiUpdate = 0;
+
+    await ChunkedUpload.upload(
+      file: file,
+      storagePath: storagePath,
+      contentType: contentType,
+      onProgress: (uploaded, total) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - lastProgressUiUpdate < _uploadProgressThrottleMs &&
+            uploaded < total) {
+          return;
+        }
+        lastProgressUiUpdate = now;
         if (mounted) {
           _refresh(() {
-            _uploadedBytes = count;
-            _uploadProgress = count / fileSize;
+            _uploadedBytes = uploaded;
+            _uploadProgress = uploaded / total;
           });
         }
       },

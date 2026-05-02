@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:braindance/configs/reco_config.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
@@ -45,65 +45,143 @@ final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
-
-  /// 开启多套主题功能
-  AppConfig.initializeAppConfig(); //加载默认数据
-  await dotenv.load(fileName: ".env");
-  final supabaseResolution = await SupabaseConfig.resolveEndpoint();
-  SupabaseConfig.applyRuntimeResolution(supabaseResolution);
-  if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
-    debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
+  AppConfig.initializeAppConfig();
+  if (!kReleaseMode) {
+    installFrameTimingLogger();
   }
-  await Supabase.initialize(
-    url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.apiKey,
-  ); //Supabase
-
-  // 初始化全局任务通知服务
-  taskNotificationService.setNavigatorKey(navigatorKey);
-  await taskNotificationService.init();
-  //Camera
-  try {
-    final List<CameraDescription> camsTemp = await availableCameras();
-    //摄像机分类。
-    for (var cam in camsTemp) {
-      switch (cam.lensDirection) {
-        case CameraLensDirection.front:
-          RecoConfig.frontCameras.add(cam);
-          break;
-        case CameraLensDirection.back:
-          RecoConfig.backCameras.add(cam);
-          break;
-        case CameraLensDirection.external:
-          RecoConfig.externalCameras.add(cam);
-          break;
-      }
-    }
-    RecoConfig.cameras = camsTemp;
-    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
-  } catch (e) {
-    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
-    RecoConfig.cameras = [];
-    RecoConfig.frontCameras = [];
-    RecoConfig.backCameras = [];
-    RecoConfig.externalCameras = [];
-    RecoConfig.cameraEnabled = false;
-  }
-  //
-  runApp(const ProviderScope(child: MyApp()));
+  runApp(const _AppBootstrap());
 }
 
-//App定义
-class MyApp extends StatelessWidget with WidgetsBindingObserver {
-  const MyApp({super.key});
+void installFrameTimingLogger() {
+  SchedulerBinding.instance.addTimingsCallback((timings) {
+    for (final t in timings) {
+      final buildMs = t.buildDuration.inMicroseconds / 1000.0;
+      final rasterMs = t.rasterDuration.inMicroseconds / 1000.0;
+      final totalMs = buildMs + rasterMs;
+      if (totalMs > 16.6) {
+        debugPrint(
+          '[JANK] build=${buildMs.toStringAsFixed(1)}ms '
+          'raster=${rasterMs.toStringAsFixed(1)}ms '
+          'total=${totalMs.toStringAsFixed(1)}ms',
+        );
+      }
+    }
+  });
+}
+
+class _AppBootstrap extends StatefulWidget {
+  const _AppBootstrap();
+
+  @override
+  State<_AppBootstrap> createState() => _AppBootstrapState();
+}
+
+class _AppBootstrapState extends State<_AppBootstrap> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      await dotenv.load(fileName: ".env");
+      final supabaseResolution = await SupabaseConfig.resolveEndpoint();
+      SupabaseConfig.applyRuntimeResolution(supabaseResolution);
+      if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
+        debugPrint(
+          'Supabase bootstrap: ${supabaseResolution.diagnosticMessage}',
+        );
+      }
+      await Supabase.initialize(
+        url: SupabaseConfig.url,
+        anonKey: SupabaseConfig.apiKey,
+      );
+    } catch (e) {
+      debugPrint('Bootstrap env/supabase error: $e');
+    }
+
+    try {
+      taskNotificationService.setNavigatorKey(navigatorKey);
+      await taskNotificationService.init();
+    } catch (e) {
+      debugPrint('Bootstrap notification error: $e');
+    }
+
+    if (mounted) setState(() => _ready = true);
+  }
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addObserver(this); // 注册观察者
-    return const Home();
+    if (!_ready) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: const _SplashScreen(),
+      );
+    }
+    return const ProviderScope(child: MyApp());
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_awesome,
+              size: 64,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Brain Dance',
+              style: Theme.of(
+                context,
+              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 32),
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+//App定义
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
@@ -121,6 +199,9 @@ class MyApp extends StatelessWidget with WidgetsBindingObserver {
       default:
     }
   }
+
+  @override
+  Widget build(BuildContext context) => const Home();
 }
 
 class Home extends ConsumerWidget {
@@ -425,40 +506,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
   static const int _pageCount = 3;
 
-  int _previousIndex = 0;
-  int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
-
-  late final AnimationController _animController;
-  bool _isAnimating = false;
-
   /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
   final List<Widget?> _cachedPages = List.filled(_pageCount, null);
   final Set<int> _builtPages = {0}; // 首屏默认构建
-
-  @override
-  void initState() {
-    super.initState();
-    _animController =
-        AnimationController(
-          duration: const Duration(milliseconds: 360),
-          vsync: this,
-        )..addStatusListener((status) {
-          if (status == AnimationStatus.completed) {
-            if (mounted) {
-              setState(() {
-                _isAnimating = false;
-                _previousIndex = ref.read(pageIndexProvider);
-              });
-            }
-          }
-        });
-  }
-
-  @override
-  void dispose() {
-    _animController.dispose();
-    super.dispose();
-  }
 
   Widget _ensurePage(int index) {
     if (_cachedPages[index] != null) return _cachedPages[index]!;
@@ -478,14 +528,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   void _switchToPage(int newIndex) {
-    final oldIndex = ref.read(pageIndexProvider);
-    if (newIndex == oldIndex) return;
-
-    _slideDirection = newIndex > oldIndex ? 1 : -1;
-    _previousIndex = oldIndex;
+    if (newIndex == ref.read(pageIndexProvider)) return;
     _builtPages.add(newIndex);
-    _isAnimating = true;
-    _animController.forward(from: 0);
     ref.read(pageIndexProvider.notifier).state = newIndex;
   }
 
@@ -495,14 +539,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
 
-    // 外部改 pageIndex 时（如 provider 直接修改），同步方向
-    // _previousIndex 保留旧值供动画使用，动画结束后在回调中更新
-    if (pageIndex != _previousIndex && !_isAnimating) {
-      _slideDirection = pageIndex > _previousIndex ? 1 : -1;
-      _builtPages.add(pageIndex);
-      _isAnimating = true;
-      _animController.forward(from: 0);
-    }
+    _builtPages.add(pageIndex);
 
     return Scaffold(
       extendBody: true,
@@ -511,54 +548,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
-                  // ── 3 个页面槽位，位置永远固定，保证 State 不被重建 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
-                      // 占位：保持索引稳定，类型始终是 SizedBox
                       return const SizedBox.shrink();
                     }
                     final isActive = i == pageIndex;
-                    final isLeaving =
-                        _isAnimating && i == _previousIndex && i != pageIndex;
-
-                    // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
-                    return AnimatedBuilder(
-                      animation: _animController,
-                      builder: (context, child) {
-                        Offset translation = Offset.zero;
-                        double opacity = isActive ? 1.0 : 0.0;
-
-                        if (_isAnimating && isActive) {
-                          // 入场：从侧面滑入 + 淡入
-                          final t = Curves.easeOutCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(
-                            0.15 * _slideDirection * (1.0 - t),
-                            0,
-                          );
-                          opacity = t;
-                        } else if (isLeaving) {
-                          // 离场：向反方向滑出 + 淡出
-                          final t = Curves.easeInCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(-0.15 * _slideDirection * t, 0);
-                          opacity = 1.0 - t;
-                        }
-
-                        return IgnorePointer(
-                          ignoring: !isActive,
-                          child: FractionalTranslation(
-                            translation: translation,
-                            child: Opacity(
-                              opacity: opacity.clamp(0.0, 1.0),
-                              child: RepaintBoundary(child: child),
-                            ),
-                          ),
-                        );
-                      },
-                      child: _ensurePage(i),
+                    return Offstage(
+                      offstage: !isActive,
+                      child: TickerMode(
+                        enabled: isActive,
+                        child: RepaintBoundary(child: _ensurePage(i)),
+                      ),
                     );
                   }),
                   if (!isRecording)

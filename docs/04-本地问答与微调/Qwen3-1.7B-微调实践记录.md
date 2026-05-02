@@ -2,7 +2,7 @@
 
 ## 项目目标
 
-- 参考 `docs/开发文档/ChatGPT-本地AI问答微调建议.md`
+- 参考仓库内早期本地问答微调建议稿（现已转为本地归档，不再作为 Git 表层文档）
 - 从零开始实践 BrainDance 本地问答场景的 `Qwen3-1.7B` 微调
 - 明确要求：
   - 只使用 `gpu1`
@@ -22,7 +22,7 @@
 
 ### 已完成内容
 
-- 阅读了 `docs/开发文档/ChatGPT-本地AI问答微调建议.md`
+- 阅读了早期本地问答微调建议稿，并据此整理当前实验路径
 - 检查了仓库内是否已有 LoRA / SFT / Qwen 微调脚本
 - 检查了 GPU 使用情况
 - 检查了 `Braindance` conda 环境中的 Python、PyTorch 与 Hugging Face 相关依赖状态
@@ -352,7 +352,7 @@
 ### 当前产物
 
 - 文档记录：
-  - `docs/开发文档/Qwen3-1.7B-微调实践记录.md`
+  - `docs/04-本地问答与微调/Qwen3-1.7B-微调实践记录.md`
 - 数据集：
   - `ai_engine/finetune_qwen3/data/braindance_qwen3_sft_train.jsonl`
   - `ai_engine/finetune_qwen3/data/braindance_qwen3_sft_val.jsonl`
