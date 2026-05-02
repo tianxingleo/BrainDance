@@ -33,7 +33,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.sceneId = '3DGS Viewer',
     this.initialPose,
     this.initialPoseId,
-    this.useSparkViewer = false,
+    this.useSparkViewer = true,
     this.timePeelingModels = const [],
   });
 
@@ -42,6 +42,7 @@ class WebGLViewerPage extends StatefulWidget {
 }
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
+  static const int _downloadProgressThrottleMs = 100;
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -57,6 +58,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   int _totalBytes = -1;
   String? _localModelPath;
   bool _downloadCancelled = false;
+  int _lastDownloadUiUpdate = 0;
   late bool _useSparkViewer;
 
   void _attachViewerHeaders(HttpResponse response) {
@@ -69,8 +71,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel =>
-      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
@@ -159,15 +160,78 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final file = File(filePath);
         if (await file.exists()) {
           _attachViewerHeaders(request.response);
+
           if (filePath.endsWith('.ply') ||
               filePath.endsWith('.splat') ||
-              filePath.endsWith('.ksplat')) {
+              filePath.endsWith('.ksplat') ||
+              filePath.endsWith('.spz') ||
+              filePath.endsWith('.rad') ||
+              filePath.endsWith('.sog')) {
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
             );
           }
-          await request.response.addStream(file.openRead());
+
+          // ── HTTP Range support for .rad / .spz streaming ──
+          final fileLength = await file.length();
+          final rangeHeader = request.headers.value('range');
+
+          if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
+            // Parse "bytes=START-END" (END is optional)
+            final rangeSpec = rangeHeader.substring(6);
+            final parts = rangeSpec.split('-');
+
+            int start = 0;
+            int end = fileLength - 1;
+
+            if (parts.length == 2) {
+              if (parts[0].isNotEmpty) {
+                start = int.tryParse(parts[0]) ?? 0;
+              }
+              if (parts[1].isNotEmpty) {
+                end = int.tryParse(parts[1]) ?? (fileLength - 1);
+              }
+            }
+
+            // Clamp range
+            if (start < 0) start = 0;
+            if (end >= fileLength) end = fileLength - 1;
+            if (start > end) start = end;
+
+            final contentLength = end - start + 1;
+
+            request.response.statusCode = HttpStatus.partialContent;
+            request.response.headers.set(
+              'Content-Range',
+              'bytes $start-$end/$fileLength',
+            );
+            request.response.headers.set('Accept-Ranges', 'bytes');
+            request.response.contentLength = contentLength;
+
+            // Read only the requested byte range
+            final raf = await file.open(mode: FileMode.read);
+            try {
+              await raf.setPosition(start);
+              var remaining = contentLength;
+              const chunkSize = 64 * 1024; // 64KB chunks
+              while (remaining > 0) {
+                final toRead = remaining > chunkSize ? chunkSize : remaining;
+                final buffer = await raf.read(toRead);
+                request.response.add(buffer);
+                remaining -= buffer.length;
+                if (buffer.length < toRead) break;
+              }
+            } finally {
+              await raf.close();
+            }
+          } else {
+            // No Range header — serve full file with Accept-Ranges hint
+            request.response.headers.set('Accept-Ranges', 'bytes');
+            request.response.contentLength = fileLength;
+            await request.response.addStream(file.openRead());
+          }
+
           await request.response.close();
           return;
         }
@@ -181,6 +245,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       }
 
       final assetPath = '$_viewerAssetRoot$path';
+      if (path == '/index.html' || path.endsWith('.js')) {
+        debugPrint('Viewer asset request: $assetPath');
+      }
 
       try {
         final data = await rootBundle.load(assetPath);
@@ -204,6 +271,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
+        request.response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        request.response.headers.set('Pragma', 'no-cache');
+        request.response.headers.set('Expires', '0');
         _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
@@ -265,8 +335,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -316,12 +385,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               }
               sink.add(chunk);
               receivedBytes += chunk.length;
-              if (totalBytes > 0 && mounted) {
+              if (totalBytes > 0) {
                 final progress = receivedBytes / totalBytes;
-                setState(() {
-                  _downloadProgress = progress;
-                  _downloadedBytes = receivedBytes;
-                });
+                _updateDownloadProgress(
+                  progress: progress,
+                  downloadedBytes: receivedBytes,
+                  totalBytes: totalBytes,
+                );
                 downloadEventBus.add(
                   ModelDownloadEvent(
                     url: originalUrl,
@@ -365,13 +435,39 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          TDToast.showText(
+            '\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e',
+            context: context,
+          );
           _launchViewer();
         }
       }
     } else {
       if (mounted) _launchViewer();
     }
+  }
+
+  void _updateDownloadProgress({
+    required double progress,
+    required int downloadedBytes,
+    required int totalBytes,
+    bool force = false,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force &&
+        now - _lastDownloadUiUpdate < _downloadProgressThrottleMs &&
+        downloadedBytes < totalBytes) {
+      return;
+    }
+    _lastDownloadUiUpdate = now;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _downloadProgress = progress;
+      _downloadedBytes = downloadedBytes;
+      _totalBytes = totalBytes;
+    });
   }
 
   void _launchViewer() {
@@ -382,18 +478,48 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _initWebView();
   }
 
-  Map<String, dynamic> _buildViewerPayload() {
-    String targetUrl;
+  /// Resolve the best model URL for Spark 2.0.
+  /// Priority: .rad > .spz > .ksplat > .ply
+  /// Checks the local cache for optimized formats before falling back.
+  String _resolveBestModelUrl(String originalUrl) {
+    if (!_useSparkViewer) return originalUrl;
+
+    // If local model is cached, check for optimized format variants
     if (_localModelPath != null) {
-      targetUrl =
+      final baseName = _localModelPath!.replaceAll(
+        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
+        '',
+      );
+
+      // Priority order: .rad > .spz > .ksplat > original
+      const extensions = ['.rad', '.spz', '.ksplat'];
+      for (final ext in extensions) {
+        final candidate = File('$baseName$ext');
+        if (candidate.existsSync()) {
+          debugPrint('Using optimized model format: $ext');
+          return 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(candidate.path)}';
+        }
+      }
+    }
+
+    return originalUrl;
+  }
+
+  Map<String, dynamic> _buildViewerPayload() {
+    String rawUrl;
+    if (_localModelPath != null) {
+      rawUrl =
           'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
     } else if (widget.initialModelUrl.startsWith('http://') ||
         widget.initialModelUrl.startsWith('https://')) {
-      targetUrl =
+      rawUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      targetUrl = widget.initialModelUrl;
+      rawUrl = widget.initialModelUrl;
     }
+
+    // Try to resolve a better format for Spark 2.0
+    final targetUrl = _resolveBestModelUrl(rawUrl);
 
     return {
       'ply': targetUrl,
@@ -469,7 +595,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
             if (mounted) {
-              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+              TDToast.showText(
+                'Spark \u9519\u8bef: ${data['msg']}',
+                context: context,
+              );
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');
@@ -499,11 +628,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _loadLocalHtml();
   }
 
-  Future<void> _loadLocalHtml() async {
+  Future<void> _loadLocalHtml({bool clearCache = false}) async {
     try {
+      // 本地 WebGL viewer 文件名和内容会频繁更新，进入页面时强制清理 WebView 缓存，
+      // 避免 Android WebView 继续执行旧的构建产物导致相机修复看起来没有生效。
       await _controller?.clearCache();
       final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
+      final url = 'http://127.0.0.1:$_localPort/index.html?v=rollfix-$cacheBust';
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
@@ -548,7 +679,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
       _controller?.runJavaScript(
-          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
+      );
       return;
     }
 
@@ -601,7 +733,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName = model['display_name']?.toString() ??
+      final displayName =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
@@ -620,7 +753,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
     _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '$currentModelId')");
+      "window.setModelListForTimePeeling($json, '$currentModelId')",
+    );
   }
 
   String _findCurrentModelId() {
@@ -684,8 +818,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     String targetUrl;
     if (await localFile.exists()) {
       debugPrint('TimePeeling: model cached locally');
+
+      // Try optimized format variants (.rad > .spz > .ksplat > original)
+      final basePath = localFile.path.replaceAll(
+        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
+        '',
+      );
+      String resolvedPath = localFile.path;
+      for (final ext in ['.rad', '.spz', '.ksplat']) {
+        final candidate = File('$basePath$ext');
+        if (await candidate.exists()) {
+          debugPrint('TimePeeling: using optimized format $ext');
+          resolvedPath = candidate.path;
+          break;
+        }
+      }
       targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(localFile.path)}';
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(resolvedPath)}';
     } else {
       // 未缓存，下载模型
       debugPrint('TimePeeling: downloading model...');
@@ -914,8 +1063,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
-                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text(
+                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
+                      ),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),

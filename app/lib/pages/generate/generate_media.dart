@@ -65,6 +65,68 @@ extension _GenerateMediaX on _GeneratePageState {
     return "";
   }
 
+  Future<XFile> _cacheCapturedMedia(
+    XFile file, {
+    required bool isImage,
+  }) async {
+    final cacheRoot = await DirFinder.cacheDir();
+    if (cacheRoot.isEmpty) {
+      return file;
+    }
+
+    final captureDir = path.join(
+      cacheRoot,
+      'generate_capture',
+      isImage ? 'images' : 'videos',
+    );
+    final ensured = await DirSystem.ensureDir(captureDir);
+    if (!ensured) {
+      return file;
+    }
+
+    final originalExt = path.extension(file.path);
+    final fallbackExt = isImage ? '.jpg' : '.mp4';
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_GeneratePageState._rdg.nextInt(1000000).toString().padLeft(6, '0')}'
+        '${originalExt.isNotEmpty ? originalExt : fallbackExt}';
+    final cachedPath = path.join(captureDir, fileName);
+    final copiedFile = await File(file.path).copy(cachedPath);
+    await FileSystem.deleteFile(file.path);
+    return XFile(copiedFile.path, name: path.basename(copiedFile.path));
+  }
+
+  Future<XFile> _resolveCapturedMedia(
+    XFile file, {
+    required bool isImage,
+  }) async {
+    final PermissionState ps = await PhotoManager.requestPermissionExtend();
+    if (!ps.isAuth) {
+      // 未授予相册权限时，把拍摄结果转存到缓存目录，后续直接从缓存路径加载。
+      return _cacheCapturedMedia(file, isImage: isImage);
+    }
+
+    try {
+      final AssetEntity newAsset = isImage
+          ? await PhotoManager.editor.saveImageWithPath(
+              file.path,
+              title: file.name,
+            )
+          : await PhotoManager.editor.saveVideo(
+              File(file.path),
+              title: file.name,
+            );
+      final File? savedFile = await newAsset.originFile;
+      if (savedFile != null) {
+        await FileSystem.deleteFile(file.path);
+        return XFile(savedFile.path, name: path.basename(savedFile.path));
+      }
+    } catch (_) {
+      // 保存到相册失败时回退到缓存目录，避免拍照上传流程被权限阻断。
+    }
+
+    return _cacheCapturedMedia(file, isImage: isImage);
+  }
+
   void _showActionSheet(BuildContext context, bool isImage) {
     TDActionSheet(
       context,
@@ -77,27 +139,11 @@ extension _GenerateMediaX on _GeneratePageState {
         var shouldShowVideoTaskTypeSheet = false;
         if (index == 0) {
           final XFile? file;
-          late final AssetEntity newAsset;
-          final PermissionState ps =
-              await PhotoManager.requestPermissionExtend();
-          if (!ps.isAuth) {
-            if (context.mounted) {
-              TDToast.showText(
-                textLocalize("tip_no_permission"),
-                context: context,
-              );
-            }
-            return;
-          }
           if (isImage) {
             file = await _picker.pickImage(source: ImageSource.camera);
             if (file == null) {
               return;
             }
-            newAsset = await PhotoManager.editor.saveImageWithPath(
-              file.path,
-              title: file.name,
-            );
           } else {
             file = await _picker.pickVideo(
               source: ImageSource.camera,
@@ -106,18 +152,12 @@ extension _GenerateMediaX on _GeneratePageState {
             if (file == null) {
               return;
             }
-            newAsset = await PhotoManager.editor.saveVideo(
-              File(file.path),
-              title: file.name,
-            );
           }
           try {
-            await FileSystem.deleteFile(file.path);
-            final File? savedFile = await newAsset.originFile;
-            if (savedFile == null) {
-              throw Exception('Failed to save captured asset.');
-            }
-            final savedXFile = XFile(savedFile.path);
+            final savedXFile = await _resolveCapturedMedia(
+              file,
+              isImage: isImage,
+            );
             final String msg = isImage
                 ? await _uploadImages([savedXFile])
                 : await _uploadVideo(savedXFile);

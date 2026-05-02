@@ -14,6 +14,15 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name]-rollfix-[hash].js',
+        chunkFileNames: 'assets/[name]-rollfix-[hash].js',
+        assetFileNames: 'assets/[name]-rollfix-[hash][extname]',
+      },
+    },
+  },
   server: {
     host: '0.0.0.0',
     // 【✅ 必须添加以下 headers 才能让 3DGS 运行】

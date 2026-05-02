@@ -36,6 +36,7 @@ class RecallProcessingSection extends StatelessWidget {
     final hintTextColor = isDark ? const Color(0xFF888888) : theme.fontGyColor3;
 
     return BDPanelCard(
+      glass: true,
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -129,7 +130,9 @@ class RecallProcessingSection extends StatelessWidget {
                     hintTextColor: hintTextColor,
                     darkInput: darkInput,
                     allLogs: taskAllLogs[task['id'].toString()] ?? const [],
-                    isExpanded: expandedTaskLogs.contains(task['id'].toString()),
+                    isExpanded: expandedTaskLogs.contains(
+                      task['id'].toString(),
+                    ),
                     isFirst: index == 0,
                     isLast: index == processingTasks.length - 1,
                     onToggleLogs: () => onToggleTaskLogs(task['id'].toString()),

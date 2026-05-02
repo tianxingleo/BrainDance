@@ -65,7 +65,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
       if (downloadedPath != null) {
         _localModelPathController.text = downloadedPath;
@@ -131,7 +131,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     final query = _searchController.text.trim();
     if (!mounted) return;
     if (showLoadingIndicator) {
-      setState(() {
+      _refreshState(() {
         _isLoading = true;
       });
     }
@@ -191,7 +191,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         : savedPath;
     final hasLocalFile = await File(effectivePath).exists();
     if (!mounted) return;
-    setState(() {
+    _refreshState(() {
       _localModelPathController.text = effectivePath;
       _localModelUrlController.text = effectiveUrl;
       _selectedLocalModelUrl = effectiveUrl;
@@ -218,7 +218,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
 
-    setState(() {
+    _refreshState(() {
       _localModelCatalog = catalog;
       _downloadedLocalModelPathsByUrl
         ..clear()
@@ -310,7 +310,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _selectedLocalModelUrl = modelUrl;
       _localModelUrlController.text = modelUrl;
       _localModelPathController.text = modelPath;
@@ -329,7 +329,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     }
 
     final modelPath = await _getPrivateModelPathForUrl(modelUrl);
-    setState(() {
+    _refreshState(() {
       _isModelDownloading = true;
       _modelDownloadProgress = 0;
       _modelDownloadedBytes = 0;
@@ -354,7 +354,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         ),
         onReceiveProgress: (received, total) {
           if (!mounted) return;
-          setState(() {
+          _refreshState(() {
             _modelDownloadedBytes = received;
             _modelDownloadTotalBytes = total > 0 ? total : null;
             _modelDownloadProgress = total > 0 ? received / total : null;
@@ -364,7 +364,7 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final fileSize = await File(modelPath).length();
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
@@ -377,7 +377,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       TDToast.showText(context: context, '模型已下载到应用私有目录');
     } catch (e) {
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = null;
         _modelDownloadedBytes = 0;
@@ -417,7 +417,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
 
-    setState(() {
+    _refreshState(() {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
       _localAnswer = '';
@@ -479,7 +479,7 @@ extension _RecallPageLocalAi on _RecallPageState {
           return;
         }
         await fallbackLlama.setNativeLogLevel(LlamaLogLevel.info);
-        setState(() {
+        _refreshState(() {
           _localQnaModel = fallbackLlama;
           _isLocalModelLoading = false;
           _isLocalModelReady = true;
@@ -496,7 +496,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         return;
       }
 
-      setState(() {
+      _refreshState(() {
         _localQnaModel = llama;
         _isLocalModelLoading = false;
         _isLocalModelReady = true;
@@ -509,7 +509,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       if (!mounted) {
         return;
       }
-      setState(() {
+      _refreshState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
         _activeLocalModelUrl = null;
@@ -555,7 +555,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         '<|im_start|>assistant\n'
         '请直接给出最终回答；如果你仍然生成 <think> 思考链，系统会将其与正式回答分离，仅正式回答会作为最终结果展示。\n';
 
-    setState(() {
+    _refreshState(() {
       _localAnswer = '';
       _localReasoning = '';
       // 预览上下文现在展示构建好的 JSON，方便调试
@@ -603,7 +603,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               streamedAnswer = nextRaw;
               lockedAnswer =
                   nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
-              setState(() {
+              _refreshState(() {
                 _localReasoning = nextReasoning;
                 _localAnswer = nextAnswer;
               });
@@ -615,7 +615,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               if (!mounted) {
                 return;
               }
-              setState(() {
+              _refreshState(() {
                 _localAnswerStatus = '端侧问答失败：$error';
               });
             },
@@ -623,7 +623,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               if (!mounted) {
                 return;
               }
-              setState(() {
+              _refreshState(() {
                 if (_localAnswer.trim().isEmpty) {
                   _localAnswer = '我不知道';
                 }
@@ -636,7 +636,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       if (!mounted) {
         return;
       }
-      setState(() {
+      _refreshState(() {
         _localAnswerStatus = '端侧问答失败：$e';
       });
       TDToast.showText(context: context, '端侧问答失败：$e');

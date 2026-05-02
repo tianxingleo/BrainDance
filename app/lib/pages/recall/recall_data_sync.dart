@@ -38,7 +38,7 @@ extension _RecallPageDataSync on _RecallPageState {
       final logsJson = newData['logs'] as List<dynamic>?;
       final allLogs = _parseAllLogMsgs(logsJson);
       if (mounted) {
-        setState(() {
+        _refreshState(() {
           // 移除旧版本（如果存在）
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
           // 添加更新后的任务
@@ -51,7 +51,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       if (mounted) {
-        setState(() {
+        _refreshState(() {
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
           _taskAllLogs.remove(taskId);
           _expandedTaskLogs.remove(taskId);
@@ -99,7 +99,7 @@ extension _RecallPageDataSync on _RecallPageState {
           }
         }
 
-        setState(() {
+        _refreshState(() {
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
@@ -120,6 +120,22 @@ extension _RecallPageDataSync on _RecallPageState {
     } catch (_) {
       return storagePath; // 兜底：原样返回，让 viewer 显示错误提示
     }
+  }
+
+  /// 将可能包含旧服务器地址的完整 Storage URL 转换为当前配置下的 URL。
+  /// 如果已经是相对路径则直接生成公开 URL。
+  String _normalizeStorageUrl(String raw) {
+    const marker = '/storage/v1/object/public/braindance-assets/';
+    final idx = raw.indexOf(marker);
+    if (idx >= 0) {
+      final relativePath = raw.substring(idx + marker.length);
+      return _toPublicUrl(relativePath);
+    }
+    // 不含完整 URL 标记，当作相对路径处理
+    if (!raw.startsWith('http')) {
+      return _toPublicUrl(raw);
+    }
+    return raw;
   }
 
   /// 根据模型路径推导同场景的 webgl_poses.json 公开 URL。
@@ -186,6 +202,15 @@ extension _RecallPageDataSync on _RecallPageState {
         // display_name 获取失败不影响主流程
       }
 
+      // 修正 preview_img_path：数据库中可能存储了旧服务器的完整 URL，
+      // 需要提取相对路径后用当前 Supabase 配置重新生成。
+      for (final m in models) {
+        final raw = m['preview_img_path']?.toString() ?? '';
+        if (raw.isNotEmpty) {
+          m['preview_img_path'] = _normalizeStorageUrl(raw);
+        }
+      }
+
       if (models.isEmpty) {
         models.add(_buildDemoModel());
       }
@@ -194,7 +219,7 @@ extension _RecallPageDataSync on _RecallPageState {
         final ownModelSignature = _buildModelSignature(
           _extractOwnModels(models),
         );
-        setState(() {
+        _refreshState(() {
           _allModels = models;
           _models = models;
           _didFinishInitialModelLoad = true;
@@ -210,7 +235,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } catch (e) {
       if (preserveExistingDataOnError) {
         if (mounted) {
-          setState(() {
+          _refreshState(() {
             _isLoading = false;
           });
         }
@@ -222,7 +247,7 @@ extension _RecallPageDataSync on _RecallPageState {
         final ownModelSignature = _buildModelSignature(
           _extractOwnModels(demoModels),
         );
-        setState(() {
+        _refreshState(() {
           _allModels = demoModels;
           _models = demoModels;
           _didFinishInitialModelLoad = true;
@@ -258,7 +283,7 @@ extension _RecallPageDataSync on _RecallPageState {
 
   Future<void> _syncLocalIndex(List<Map<String, dynamic>> models) async {
     if (mounted) {
-      setState(() {
+      _refreshState(() {
         _isLocalIndexing = true;
       });
     }
@@ -266,13 +291,13 @@ extension _RecallPageDataSync on _RecallPageState {
     try {
       final stats = await _localRagIndex.syncModels(models);
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _indexStats = stats;
         _isLocalIndexing = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isLocalIndexing = false;
       });
     }

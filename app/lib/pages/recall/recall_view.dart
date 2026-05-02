@@ -124,13 +124,13 @@ extension _RecallPageView on _RecallPageState {
                               taskAllLogs: _taskAllLogs,
                               expandedTaskLogs: _expandedTaskLogs,
                               onToggleExpanded: () {
-                                setState(() {
+                                _refreshState(() {
                                   _isProcessingExpanded =
                                       !_isProcessingExpanded;
                                 });
                               },
                               onToggleTaskLogs: (taskId) {
-                                setState(() {
+                                _refreshState(() {
                                   if (_expandedTaskLogs.contains(taskId)) {
                                     _expandedTaskLogs.remove(taskId);
                                   } else {

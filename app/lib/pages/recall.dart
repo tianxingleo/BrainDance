@@ -136,6 +136,13 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final darkInput = const Color(0xFF23232A);
   final darkBorder = const Color(0xFF23232A);
 
+  void _refreshState([VoidCallback? fn]) {
+    if (!mounted) {
+      return;
+    }
+    setState(fn ?? () {});
+  }
+
   @override
   void initState() {
     super.initState();

@@ -11,7 +11,7 @@ void main() {
       'BD-IT-AUTH-001 普通用户登录成功',
       (tester) async {
         await launchBrainDanceApp(tester);
-        // TODO: 填充真实登录动作与断言。
+        // 待接入真实登录动作与断言。
       },
       skip: true,
     );

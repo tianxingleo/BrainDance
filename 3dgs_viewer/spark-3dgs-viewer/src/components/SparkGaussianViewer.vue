@@ -2,7 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import * as THREE from 'three';
 import gsap from 'gsap';
-import { SparkControls, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { BrainDanceCameraRig } from '../lib/interaction/BrainDanceCameraRig';
+import { classifyInteractionProfile } from '../lib/interaction/classifySceneProfile';
+import { PoseGraph } from '../lib/interaction/poseGraph';
+import { GestureHandler } from '../lib/interaction/gestures';
 import TopHud from './TopHud.vue';
 import FocalPanel from './FocalPanel.vue';
 import StatusRibbon from './StatusRibbon.vue';
@@ -86,7 +90,6 @@ let scene = null;
 let camera = null;
 let renderer = null;
 let spark = null;
-let controls = null;
 let splatMesh = null;
 let highlightEffect = null;
 let clipEffect = null;
@@ -99,6 +102,17 @@ let posesFetchSettled = false;
 let hasInitializedFromExternalInput = false;
 let fpsFrames = 0;
 let fpsTimestamp = 0;
+let clock = new THREE.Clock();
+
+// ── Spark 2.0 interaction state ──
+let cameraRig = null;
+let poseGraph = null;
+let gestureHandler = null;
+const interactionProfile = ref('hybrid');
+const profileConfidence = ref(0);
+const focusPointArr = ref([]);
+const qualityMode = ref('standard');
+const currentPoseIndex = ref(-1);
 
 // ===== Orbit 运行时变量（非响应式，避免不必要的 Vue 重渲染） =====
 let orbitAngle = 0;           // 当前旋转角度（弧度）
@@ -243,8 +257,23 @@ const toggleFocalSettings = () => {
 const frameScene = () => {
   if (!camera) return;
   const distance = Math.max(sceneRadius * 2.4, 2.5);
-  camera.position.copy(sceneCenter).add(new THREE.Vector3(0, sceneRadius * 0.3, distance));
-  camera.lookAt(sceneCenter);
+  const pos = sceneCenter.clone().add(new THREE.Vector3(0, sceneRadius * 0.3, distance));
+
+  if (cameraRig) {
+    cameraRig.targetPosition.copy(pos);
+    cameraRig.targetYaw = 0;
+    cameraRig.targetPitch = -Math.atan2(sceneRadius * 0.3, distance);
+    cameraRig.position.copy(pos);
+    cameraRig.yaw = 0;
+    cameraRig.pitch = cameraRig.targetPitch;
+    cameraRig.pivot.copy(sceneCenter);
+    cameraRig.distance = distance;
+    cameraRig.targetDistance = distance;
+  } else {
+    camera.position.copy(pos);
+    camera.lookAt(sceneCenter);
+  }
+
   camera.updateProjectionMatrix();
   refreshCurrentFocalInfo();
   syncHighlight(sceneCenter, Math.max(sceneRadius * 0.16, 0.08));
@@ -266,27 +295,35 @@ const flyToImage = (poseData) => {
   const targetScale = new THREE.Vector3();
   targetMatrix.decompose(targetPosition, targetQuaternion, targetScale);
 
-  gsap.killTweensOf(camera.position);
-  gsap.killTweensOf(camera.quaternion);
-
-  gsap.to(camera.position, {
-    x: targetPosition.x,
-    y: targetPosition.y,
-    z: targetPosition.z,
-    duration: 0.9,
-    ease: 'power2.inOut',
-    onUpdate: renderOnce,
-  });
-
-  gsap.to(camera.quaternion, {
-    x: targetQuaternion.x,
-    y: targetQuaternion.y,
-    z: targetQuaternion.z,
-    w: targetQuaternion.w,
-    duration: 0.9,
-    ease: 'power2.inOut',
-    onUpdate: renderOnce,
-  });
+  if (cameraRig) {
+    // 底部镜头代表真实采集相机，跳转后必须按第一人称相机继续交互。
+    cameraRig.flyToPose(targetPosition, targetQuaternion);
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark rollfix active: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(cameraRig.targetRoll).toFixed(1)}deg`,
+    });
+  } else {
+    // Fallback: direct GSAP tween
+    gsap.killTweensOf(camera.position);
+    gsap.killTweensOf(camera.quaternion);
+    gsap.to(camera.position, {
+      x: targetPosition.x,
+      y: targetPosition.y,
+      z: targetPosition.z,
+      duration: 0.9,
+      ease: 'power2.inOut',
+      onUpdate: renderOnce,
+    });
+    gsap.to(camera.quaternion, {
+      x: targetQuaternion.x,
+      y: targetQuaternion.y,
+      z: targetQuaternion.z,
+      w: targetQuaternion.w,
+      duration: 0.9,
+      ease: 'power2.inOut',
+      onUpdate: renderOnce,
+    });
+  }
 
   activeImage.value = poseData.image_url || '';
   activeTag.value = poseData.tag || '';
@@ -301,7 +338,32 @@ const flyToImage = (poseData) => {
     deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
     Math.max(sceneRadius * 0.12, 0.08),
   );
+
+  // ── Focus-area LoD boost: temporarily boost quality around search hit ──
+  boostLodAroundPoint(
+    deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
+    Math.max(sceneRadius * 0.3, 0.2),
+  );
+
   highlightStatus.value = activeTag.value ? `高亮镜头: ${activeTag.value}` : '高亮当前视角区域';
+};
+
+/**
+ * Boost LoD quality around a specific point for a short duration.
+ * Uses Spark 2.0 lodSplatScale to increase quality in the focus area.
+ */
+const boostLodAroundPoint = (point, radius) => {
+  if (spark && 'lodSplatScale' in spark) {
+    // Temporarily boost quality
+    spark.lodSplatScale = 1.3;
+
+    // Gradually return to normal after flight settles
+    setTimeout(() => {
+      if (spark && 'lodSplatScale' in spark) {
+        spark.lodSplatScale = 1.0;
+      }
+    }, 2000);
+  }
 };
 
 const searchAndFly = () => {
@@ -376,6 +438,39 @@ const loadPoses = async () => {
       applyFocalLengthPx(DEFAULT_FOCAL_PX);
     }
 
+    // ── Scene topology classification ──
+    if (cameraPoses.value.length >= 4) {
+      const profile = classifyInteractionProfile(cameraPoses.value, sceneRadius);
+      interactionProfile.value = profile.profile;
+      profileConfidence.value = profile.confidence;
+
+      if (profile.focusPoint) {
+        focusPointArr.value = profile.focusPoint;
+        if (cameraRig) {
+          cameraRig.pivot.fromArray(profile.focusPoint);
+          if (profile.defaultRadius) {
+            cameraRig.distance = profile.defaultRadius;
+            cameraRig.targetDistance = profile.defaultRadius;
+          }
+          cameraRig.sceneRadius = sceneRadius;
+          cameraRig.initFromCamera();
+
+          if (profile.profile === 'object_orbit') {
+            cameraRig.mode = 'inspect';
+          }
+        }
+      }
+
+      // Build pose graph for guided navigation
+      poseGraph = new PoseGraph(sceneRadius);
+      poseGraph.buildFromPoses(cameraPoses.value);
+
+      notifyFlutter({
+        status: 'info',
+        msg: `Scene profile: ${profile.profile} (conf: ${(profile.confidence * 100).toFixed(0)}%)`,
+      });
+    }
+
     maybeApplyInitialTarget(true);
   } catch (error) {
     posesFetchSettled = true;
@@ -391,7 +486,18 @@ const disposeViewer = () => {
     renderer.setAnimationLoop(null);
   }
 
-  controls = null;
+  if (gestureHandler) {
+    gestureHandler.dispose();
+    gestureHandler = null;
+  }
+
+  if (cameraRig) {
+    cameraRig.dispose();
+    cameraRig = null;
+  }
+
+  stopMemoryPath();
+  poseGraph = null;
 
   if (splatMesh) {
     splatMesh.removeFromParent();
@@ -437,6 +543,30 @@ const setupResizeHandler = () => {
   window.addEventListener('resize', resizeHandler);
 };
 
+/**
+ * Resolve the best model URL using Spark 2.0 format priority:
+ * .rad (LoD streaming) > .spz (compressed) > .ksplat > .ply (original)
+ */
+const resolveBestModelUrl = async (originalUrl) => {
+  const stripExt = (url) => url.replace(/\.(ply|splat|ksplat|spz|rad|sog)$/i, '');
+  const candidates = ['.rad', '.spz', '.ksplat'];
+
+  for (const ext of candidates) {
+    const candidateUrl = stripExt(originalUrl) + ext;
+    try {
+      const resp = await fetch(candidateUrl, { method: 'HEAD' });
+      if (resp.ok) {
+        console.log(`[SparkViewer] Using optimized format: ${ext}`);
+        return candidateUrl;
+      }
+    } catch {
+      // File doesn't exist or not reachable — skip
+    }
+  }
+
+  return originalUrl;
+};
+
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
@@ -463,7 +593,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       alpha: true,
       powerPreference: 'high-performance',
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     containerRef.value.innerHTML = '';
@@ -501,24 +631,40 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     });
     scene.add(spark);
 
-    controls = new SparkControls({ canvas: renderer.domElement });
-    controls.fpsMovement.enable = false;
-    controls.pointerControls.rotateSpeed = 0.0018;
-    controls.pointerControls.slideSpeed = 0.0045;
-    controls.pointerControls.scrollSpeed = 0.0013;
+    // ── BrainDance camera rig (replaces SparkControls) ──
+    cameraRig = new BrainDanceCameraRig({
+      camera,
+      sceneRadius: DEFAULT_SCENE_RADIUS,
+    });
+
+    gestureHandler = new GestureHandler(renderer.domElement, {
+      onAction: handleGesture,
+    });
 
     splatMesh = new SplatMesh({
-      url: currentModelUrl.value,
+      url: await resolveBestModelUrl(currentModelUrl.value),
       editable: true,
     });
     scene.add(splatMesh);
 
+    clock.start();
+
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return;
 
-      // 计算帧时间差（用于 orbit 旋转增量）
+      const dt = clock.getDelta();
+      if (cameraRig) {
+        cameraRig.update(dt);
+
+        // Adaptive quality: adjust LoD scale and DPR based on FPS
+        if (spark && 'lodSplatScale' in spark) {
+          spark.lodSplatScale = cameraRig.getRecommendedLodScale(currentFps.value);
+        }
+        const baseDpr = window.devicePixelRatio || 1;
+        renderer.setPixelRatio(cameraRig.getRecommendedDpr(baseDpr));
+      }
       const now = performance.now();
-      const dt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
+      const orbitDt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
       orbitLastFrameTime = now;
 
       // FPS 统计
@@ -530,10 +676,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       }
 
       // ===== Orbit 模式：自动旋转相机（非暂停、非手动拖拽时生效） =====
-      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging && dt > 0) {
+      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging && orbitDt > 0) {
         // 根据速度和方向更新旋转角度
         const speedRad = orbitSpeed.value * (Math.PI / 180);
-        orbitAngle += speedRad * dt * orbitDirection.value;
+        orbitAngle += speedRad * orbitDt * orbitDirection.value;
         // 计算圆周位置并应用到相机
         const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
         const x = sceneCenter.x + r * Math.cos(orbitAngle);
@@ -623,6 +769,194 @@ const onClipOffsetChange = (value) => {
   renderOnce();
 };
 
+// ── Gesture → camera rig bridge ──
+
+let gestureDebugCount = 0;
+
+const handleGesture = (action) => {
+  if (!cameraRig) return;
+
+  if (gestureDebugCount < 3 && (action.type === 'look' || action.type === 'pinch' || action.type === 'pan')) {
+    gestureDebugCount += 1;
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark gesture ${action.type}: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(euler.z).toFixed(1)}deg`,
+    });
+  }
+
+  switch (action.type) {
+    case 'look':
+      cameraRig.onLookDrag(action.dx, action.dy);
+      break;
+    case 'pinch':
+      cameraRig.onPinch(action.scaleDelta);
+      break;
+    case 'pan':
+      cameraRig.onPan(action.dx, action.dy);
+      break;
+    case 'doubletap':
+      frameScene();
+      break;
+    case 'longpress':
+      // Could enter inspect mode at long-press point
+      break;
+    case 'swipe_forward':
+      navigatePoseGraph('forward');
+      break;
+    case 'swipe_backward':
+      navigatePoseGraph('backward');
+      break;
+  }
+};
+
+const navigatePoseGraph = (direction) => {
+  if (!poseGraph || poseGraph.size === 0) return;
+
+  const currentIdx = currentPoseIndex.value >= 0
+    ? currentPoseIndex.value
+    : poseGraph.findNearestNode(cameraRig.position);
+
+  const nextIdx = poseGraph.getNextAlongPath(currentIdx, direction);
+  if (nextIdx == null) return;
+
+  const node = poseGraph.getNode(nextIdx);
+  if (!node) return;
+
+  currentPoseIndex.value = nextIdx;
+
+  const matrix = new THREE.Matrix4().fromArray(node.matrix);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  matrix.decompose(pos, quat, scl);
+
+  cameraRig.flyToPose(pos, quat);
+
+  activeImage.value = node.imageUrl;
+  activeTag.value = node.tag;
+
+  syncHighlight(
+    deriveHighlightPointFromPose(node.matrix, sceneRadius),
+    Math.max(sceneRadius * 0.12, 0.08),
+  );
+  highlightStatus.value = node.tag ? `高亮镜头: ${node.tag}` : '高亮当前视角区域';
+};
+
+// ── Quality mode switching ──
+
+const setQualityMode = (mode) => {
+  qualityMode.value = mode;
+  if (!cameraRig) return;
+
+  switch (mode) {
+    case 'smooth':
+      cameraRig.lookDamping = 22;
+      cameraRig.moveDamping = 18;
+      break;
+    case 'standard':
+      cameraRig.lookDamping = 18;
+      cameraRig.moveDamping = 14;
+      break;
+    case 'hd':
+      cameraRig.lookDamping = 14;
+      cameraRig.moveDamping = 10;
+      break;
+  }
+};
+
+// ── Interaction profile switching ──
+
+const setInteractionMode = (mode) => {
+  if (!cameraRig) return;
+  cameraRig.setMode(mode);
+  highlightStatus.value = `交互模式: ${mode === 'recall' ? '回忆' : mode === 'inspect' ? '观察' : '自由'}`;
+};
+
+// ── Memory path auto-camera (recall path cinematography) ──
+
+let memoryPathTimer = null;
+let isPlayingMemoryPath = false;
+const memoryPathSpeed = ref(1.0); // 0.5x – 3x
+let memoryPathPoses = [];
+let memoryPathIndex = 0;
+
+const startMemoryPath = (poses) => {
+  if (!poses || poses.length < 2 || !cameraRig) return;
+
+  stopMemoryPath();
+  memoryPathPoses = poses;
+  memoryPathIndex = 0;
+  isPlayingMemoryPath = true;
+  highlightStatus.value = '回忆路径播放中...';
+
+  flyToNextMemoryPose();
+};
+
+const flyToNextMemoryPose = () => {
+  if (!isPlayingMemoryPath || memoryPathIndex >= memoryPathPoses.length) {
+    stopMemoryPath();
+    return;
+  }
+
+  const poseData = memoryPathPoses[memoryPathIndex];
+  const normalizedMatrix = normalizeMatrixArray(poseData.matrix);
+  if (!normalizedMatrix) {
+    memoryPathIndex += 1;
+    flyToNextMemoryPose();
+    return;
+  }
+
+  const m = new THREE.Matrix4().fromArray(normalizedMatrix);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  m.decompose(pos, quat, scl);
+
+  cameraRig.flyToPose(pos, quat, () => {
+    activeImage.value = poseData.image_url || '';
+    activeTag.value = poseData.tag || '';
+    syncHighlight(
+      deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
+      Math.max(sceneRadius * 0.12, 0.08),
+    );
+
+    memoryPathIndex += 1;
+    if (memoryPathIndex < memoryPathPoses.length) {
+      // Delay between poses inversely proportional to speed
+      const delay = Math.max(400, 1800 / memoryPathSpeed.value);
+      memoryPathTimer = setTimeout(flyToNextMemoryPose, delay);
+    } else {
+      stopMemoryPath();
+    }
+  });
+};
+
+const pauseMemoryPath = () => {
+  if (memoryPathTimer !== null) {
+    clearTimeout(memoryPathTimer);
+    memoryPathTimer = null;
+  }
+  isPlayingMemoryPath = false;
+  highlightStatus.value = '回忆路径已暂停';
+};
+
+const resumeMemoryPath = () => {
+  if (memoryPathIndex >= memoryPathPoses.length) return;
+  isPlayingMemoryPath = true;
+  highlightStatus.value = '回忆路径播放中...';
+  flyToNextMemoryPose();
+};
+
+const stopMemoryPath = () => {
+  if (memoryPathTimer !== null) {
+    clearTimeout(memoryPathTimer);
+    memoryPathTimer = null;
+  }
+  isPlayingMemoryPath = false;
+  highlightStatus.value = '回忆路径已停止';
+};
+
 onMounted(() => {
   notifyFlutter({ status: 'ready' });
 
@@ -642,6 +976,13 @@ onMounted(() => {
     }
 
     initViewer(null, null, null);
+  };
+
+  // 注册供 Flutter 调用的 TimePeeling 模型列表设置函数
+  window.setModelListForTimePeeling = (list, currentId) => {
+    console.log('[Flutter->SparkViewer] 收到 TimePeeling 模型列表:', list, '当前模型:', currentId);
+    // Spark 2.0 当前版本暂不支持 TimePeeling 切换，但需要提供空实现避免 Flutter 端报错
+    // 后续可扩展为多模型切换逻辑
   };
 
   const initialInput = parseInitialInputFromUrl();
@@ -669,6 +1010,10 @@ onBeforeUnmount(() => {
 
   if (window.loadModelFromFlutter) {
     delete window.loadModelFromFlutter;
+  }
+
+  if (window.setModelListForTimePeeling) {
+    delete window.setModelListForTimePeeling;
   }
 
   disposeViewer();
@@ -739,6 +1084,60 @@ onBeforeUnmount(() => {
       :search-query="searchQuery"
       @select-pose="flyToImage"
     />
+
+    <!-- Quality HUD -->
+    <div class="quality-hud">
+      <div class="quality-row">
+        <button
+          v-for="q in [
+            { key: 'smooth', label: '流畅' },
+            { key: 'standard', label: '标准' },
+            { key: 'hd', label: '高清' },
+          ]"
+          :key="q.key"
+          class="quality-btn"
+          :class="{ 'quality-btn--active': qualityMode === q.key }"
+          @click="setQualityMode(q.key)"
+        >
+          {{ q.label }}
+        </button>
+      </div>
+      <div class="quality-row" style="margin-top: 4px">
+        <button
+          v-for="m in [
+            { key: 'recall', label: '回忆' },
+            { key: 'inspect', label: '观察' },
+            { key: 'freeWalk', label: '自由' },
+          ]"
+          :key="m.key"
+          class="quality-btn quality-btn--mode"
+          :class="{ 'quality-btn--active': cameraRig?.mode === m.key }"
+          @click="setInteractionMode(m.key)"
+        >
+          {{ m.label }}
+        </button>
+      </div>
+      <div class="quality-row" style="margin-top: 4px">
+        <button
+          class="quality-btn quality-btn--path"
+          @click="startMemoryPath(filteredPoses)"
+        >
+          ▶ 路径
+        </button>
+        <button
+          class="quality-btn quality-btn--path"
+          @click="isPlayingMemoryPath ? pauseMemoryPath() : resumeMemoryPath()"
+        >
+          {{ isPlayingMemoryPath ? '⏸ 暂停' : '▶ 继续' }}
+        </button>
+        <button
+          class="quality-btn quality-btn--path"
+          @click="stopMemoryPath()"
+        >
+          ⏹ 停止
+        </button>
+      </div>
+    </div>
 
     <ReferenceCard
       :active-image="activeImage"
@@ -822,6 +1221,16 @@ onBeforeUnmount(() => {
 .viewer-layer {
   position: absolute;
   inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+.viewer-layer canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ambient-mask {
@@ -1301,6 +1710,61 @@ button {
 
 .orbit-dir-btn {
   width: 100%;
+}
+
+.quality-hud {
+  position: absolute;
+  bottom: 18px;
+  right: 18px;
+  z-index: 65;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(250, 248, 243, 0.86);
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.quality-row {
+  display: flex;
+  gap: 3px;
+}
+
+.quality-btn {
+  appearance: none;
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(30, 30, 32, 0.62);
+  transition: background-color 160ms, color 160ms;
+  font-family: inherit;
+}
+
+.quality-btn:hover {
+  background: rgba(200, 107, 60, 0.08);
+}
+
+.quality-btn--active {
+  background: rgba(200, 107, 60, 0.14);
+  color: #c86b3c;
+  border-color: rgba(200, 107, 60, 0.28);
+}
+
+.quality-btn--mode {
+  font-size: 10px;
+  padding: 5px 8px;
+}
+
+.quality-btn--path {
+  font-size: 10px;
+  padding: 5px 7px;
 }
 </style>
 

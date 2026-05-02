@@ -37,7 +37,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       if (!mounted || !_isAgentSearching) {
         return;
       }
-      setState(() {});
+      _refreshState();
     });
   }
 
@@ -85,7 +85,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       _agentStreamSubscription?.cancel();
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
-      setState(() {
+      _refreshState(() {
         _isAgentSearching = false;
         _finishAgentRunTracking();
         _agentChatMessage?.isProcessCollapsed = false;
@@ -559,7 +559,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
 
     if (event == 'done') {
       if (payload != null && payload is Map) {
-        setState(() {
+        _refreshState(() {
           _agentResult = AgentRecallResponse.fromJson(
             Map<String, dynamic>.from(payload),
           );
@@ -577,7 +577,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
           _agentChatMessage!.finalAnswer = answer;
         }
       } else if (data['result'] != null && data['result'] is Map) {
-        setState(() {
+        _refreshState(() {
           _agentResult = AgentRecallResponse.fromJson(
             Map<String, dynamic>.from(data['result']),
           );

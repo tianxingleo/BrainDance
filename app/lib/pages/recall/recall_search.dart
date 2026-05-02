@@ -54,7 +54,7 @@ extension _RecallPageSearch on _RecallPageState {
         _resetAgentUiState();
       }
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
         if (_searchMode == RecallSearchMode.localAi) {
           _localAnswer = '';
@@ -78,7 +78,7 @@ extension _RecallPageSearch on _RecallPageState {
         now.difference(cached.createdAt) < const Duration(minutes: 2)) {
       _lastSearchKey = cacheKey;
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _models = cached.results
             .map((item) => Map<String, dynamic>.from(item))
             .toList();
@@ -93,7 +93,7 @@ extension _RecallPageSearch on _RecallPageState {
 
     final requestId = ++_searchRequestId;
     _lastSearchKey = cacheKey;
-    setState(() {
+    _refreshState(() {
       _isLoading = true;
     });
 
@@ -116,13 +116,13 @@ extension _RecallPageSearch on _RecallPageState {
         }).key;
         _searchCache.remove(oldestKey);
       }
-      setState(() {
+      _refreshState(() {
         _models = results;
         _isLoading = false;
       });
     } catch (e) {
       if (mounted && requestId == _searchRequestId) {
-        setState(() {
+        _refreshState(() {
           _isLoading = false;
         });
         TDToast.showText(
@@ -159,7 +159,7 @@ extension _RecallPageSearch on _RecallPageState {
     _agentLatestSubmittedQuery = trimmedQuery;
     final executionMode = _resolveAgentExecutionMode(trimmedQuery);
 
-    setState(() {
+    _refreshState(() {
       _isAgentSearching = true;
       _agentResult = null;
       _agentChatMessage = ChatMessage(
@@ -176,7 +176,7 @@ extension _RecallPageSearch on _RecallPageState {
       if (!mounted) return;
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
-      setState(() {
+      _refreshState(() {
         _isAgentSearching = true;
       });
       _ensureAgentRunTrackingTimer();
@@ -189,7 +189,7 @@ extension _RecallPageSearch on _RecallPageState {
           sessionState: _agentSessionState,
         );
         if (!mounted) return;
-        setState(() {
+        _refreshState(() {
           _agentResult = result;
           _agentChatMessage!.finalAnswer = result.answer;
           _isAgentSearching = false;
@@ -202,7 +202,7 @@ extension _RecallPageSearch on _RecallPageState {
         _completeAgentRun();
       } catch (ex) {
         if (!mounted) return;
-        setState(() {
+        _refreshState(() {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
@@ -235,9 +235,9 @@ extension _RecallPageSearch on _RecallPageState {
             if (data is Map) {
               final eventData = Map<String, dynamic>.from(data);
               _consumeAgentEvent(eventData);
-              setState(() {}); // 强制刷新 UI，体现最新状态
+              _refreshState(); // 强制刷新 UI，体现最新状态
               if (eventData['event']?.toString() == 'done') {
-                setState(() {
+                _refreshState(() {
                   _isAgentSearching = false;
                   _finishAgentRunTracking();
                 });
@@ -249,7 +249,7 @@ extension _RecallPageSearch on _RecallPageState {
         },
         onError: (e) {
           if (!mounted) return;
-          setState(() {
+          _refreshState(() {
             _isAgentSearching = false;
           });
           _agentBootstrapTimer?.cancel();
@@ -265,21 +265,22 @@ extension _RecallPageSearch on _RecallPageState {
           fallback();
         },
         onDone: () {
-          if (!mounted || _agentChatMessage == null) return;
-          setState(() {
-            _isAgentSearching = false;
-            _finishAgentRunTracking();
-          });
-          _agentBootstrapTimer?.cancel();
-          _agentBootstrapTimer = null;
-          if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
-            _completeAgentRun();
+          if (mounted) {
+            _refreshState(() {
+              _isAgentSearching = false;
+              _finishAgentRunTracking();
+            });
+            _agentBootstrapTimer?.cancel();
+            _agentBootstrapTimer = null;
+            if (_agentChatMessage?.finalAnswer.isNotEmpty == true) {
+              _completeAgentRun();
+            }
           }
         },
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isAgentSearching = false;
       });
       _agentBootstrapTimer?.cancel();
@@ -435,7 +436,7 @@ extension _RecallPageSearch on _RecallPageState {
     if (_searchMode == mode) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _searchMode = mode;
       if (mode != RecallSearchMode.localAi) {
         _localAnswer = '';

@@ -26,3 +26,28 @@
 
 - **动作曲线**（BDMotion）：
   - 物理段落动作不拖泥带水，采用迅速的 durationFast。
+
+## 玻璃表面组件规范（2026-05-02）
+
+本项目可以借鉴 Kyant AndroidLiquidGlass / Backdrop 的分层思路，但 Flutter 端不直接依赖 Android Compose 或 Wear Material3。当前统一通过 `app/lib/widgets/bd_surfaces.dart` 中的 `BDGlassSurface` 和 `BDPanelCard(glass: true)` 管理毛玻璃表面。
+
+### 使用原则
+
+- 优先把玻璃用于悬浮导航、搜索入口、底部弹层、设置页主面板、Recall 关键结果面板等少量高层级容器。
+- 不要在长列表的每一个 item 上默认启用真 `BackdropFilter`，避免滚动时产生过多离屏渲染开销。
+- 普通内容卡片继续使用 `BDPanelCard` 默认实体面板；只有需要透出背景层次时才传入 `glass: true`。
+- 新增玻璃效果时不要手写 `ClipRRect + BackdropFilter + BoxDecoration`，应先复用 `BDGlassSurface`，确需差异化再通过参数覆盖 `blurSigma`、`tintColor`、`borderColor` 或 `shadows`。
+
+### 分层结构
+
+- 背景采样层：由 `BackdropFilter` 对背后内容做局部模糊，`panel` 默认较轻，`floating` 默认更强。
+- 可读性染色层：浅色模式使用纸白半透明，暗色模式使用深色 surface 半透明，保证文字和图标对比度。
+- 边缘高光层：使用低透明度边框和左上到右下的轻微高光渐变，避免廉价大面积玻璃拟态。
+- 投影层：只保留低透明度阴影，强调悬浮关系，不制造厚重发光感。
+
+### 已接入位置
+
+- `app/lib/floating_nav_bar.dart`：底部悬浮导航改为 `BDGlassSurface(variant: BDGlassVariant.floating)`。
+- `app/lib/pages/recall/search_header_section.dart`：Recall 搜索框、Agent 提示面板和搜索模式弹层接入统一玻璃表面。
+- `app/lib/pages/recall/overview_card.dart`、`app/lib/pages/recall/processing_section.dart`：Recall 关键概览与处理面板启用 `BDPanelCard(glass: true)`。
+- `app/lib/pages/settabs/`：设置页主要面板启用统一玻璃卡片，保持与悬浮导航一致的材质语言。

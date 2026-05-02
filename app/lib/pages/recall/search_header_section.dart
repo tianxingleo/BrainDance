@@ -1,5 +1,4 @@
 import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/services/local_model_catalog_service.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
@@ -113,9 +112,6 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
 
   @override
   Widget build(BuildContext context) {
-    final panelBackground = widget.isDark
-        ? AppTheme.darkSurface.withValues(alpha: 0.94)
-        : BDDesign.colorPaperWhite.withValues(alpha: 0.94);
     final panelBorderColor = _isSearchFocused
         ? BDDesign.colorMutedBlue
         : (widget.isDark
@@ -127,111 +123,106 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
         AnimatedContainer(
           duration: BDMotion.durationFast,
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: panelBackground,
+          child: BDGlassSurface(
             borderRadius: _searchFieldRadius,
-            border: Border.all(
-              color: panelBorderColor,
-              width: _isSearchFocused ? 1.5 : 1,
-            ),
-            boxShadow: [
-              widget.isDark ? BDDesign.shadowLight : BDDesign.shadowElevated,
-            ],
-          ),
-          child: TextField(
-            focusNode: _searchFocusNode,
-            controller: widget.searchController,
-            style: TextStyle(color: widget.textColor, fontSize: 15),
-            minLines: 1,
-            maxLines: 5,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: widget.searchFieldHint,
-              hintStyle: TextStyle(
-                color: widget.isDark
-                    ? Colors.white.withValues(alpha: 0.45)
-                    : BDDesign.colorMutedBlue.withValues(alpha: 0.78),
-                fontSize: 15,
-              ),
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                color: widget.isDark
-                    ? Colors.white.withValues(alpha: 0.5)
-                    : BDDesign.colorMutedBlue,
-              ),
-              suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                valueListenable: widget.searchController,
-                builder: (context, value, _) {
-                  final hasText = value.text.trim().isNotEmpty;
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      RecallSearchModeButton(
-                        isDark: widget.isDark,
-                        icon: switch (widget.searchMode) {
-                          RecallSearchMode.cloud => Icons.cloud_rounded,
-                          RecallSearchMode.local => Icons.privacy_tip_rounded,
-                          RecallSearchMode.localAi =>
-                            Icons.auto_awesome_rounded,
-                          RecallSearchMode.agent =>
-                            Icons.travel_explore_rounded,
-                        },
-                        onTap: widget.onTapSearchMode,
-                      ),
-                      if (hasText)
-                        IconButton(
-                          onPressed: widget.onClear,
-                          visualDensity: VisualDensity.compact,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 36,
-                            height: 36,
-                          ),
-                          padding: EdgeInsets.zero,
-                          splashColor: Colors.transparent,
-                          highlightColor: Colors.transparent,
-                          hoverColor: Colors.transparent,
-                          focusColor: Colors.transparent,
-                          icon: Icon(
-                            Icons.close_rounded,
-                            size: 18,
-                            color: widget.isDark
-                                ? Colors.white.withValues(alpha: 0.5)
-                                : BDDesign.colorMutedBlue,
-                          ),
+            variant: BDGlassVariant.floating,
+            blurSigma: 20,
+            borderColor: panelBorderColor,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: TextField(
+              focusNode: _searchFocusNode,
+              controller: widget.searchController,
+              style: TextStyle(color: widget.textColor, fontSize: 15),
+              minLines: 1,
+              maxLines: 5,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: widget.searchFieldHint,
+                hintStyle: TextStyle(
+                  color: widget.isDark
+                      ? Colors.white.withValues(alpha: 0.45)
+                      : BDDesign.colorMutedBlue.withValues(alpha: 0.78),
+                  fontSize: 15,
+                ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: widget.isDark
+                      ? Colors.white.withValues(alpha: 0.5)
+                      : BDDesign.colorMutedBlue,
+                ),
+                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.searchController,
+                  builder: (context, value, _) {
+                    final hasText = value.text.trim().isNotEmpty;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        RecallSearchModeButton(
+                          isDark: widget.isDark,
+                          icon: switch (widget.searchMode) {
+                            RecallSearchMode.cloud => Icons.cloud_rounded,
+                            RecallSearchMode.local => Icons.privacy_tip_rounded,
+                            RecallSearchMode.localAi =>
+                              Icons.auto_awesome_rounded,
+                            RecallSearchMode.agent =>
+                              Icons.travel_explore_rounded,
+                          },
+                          onTap: widget.onTapSearchMode,
                         ),
-                    ],
-                  );
-                },
+                        if (hasText)
+                          IconButton(
+                            onPressed: widget.onClear,
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 36,
+                              height: 36,
+                            ),
+                            padding: EdgeInsets.zero,
+                            splashColor: Colors.transparent,
+                            highlightColor: Colors.transparent,
+                            hoverColor: Colors.transparent,
+                            focusColor: Colors.transparent,
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: widget.isDark
+                                  ? Colors.white.withValues(alpha: 0.5)
+                                  : BDDesign.colorMutedBlue,
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                suffixIconConstraints: const BoxConstraints(
+                  minWidth: 0,
+                  minHeight: 0,
+                ),
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 16,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: _searchFieldRadius,
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: _searchFieldRadius,
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: _searchFieldRadius,
+                  borderSide: BorderSide.none,
+                ),
               ),
-              suffixIconConstraints: const BoxConstraints(
-                minWidth: 0,
-                minHeight: 0,
-              ),
-              filled: true,
-              fillColor: Colors.transparent,
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 14,
-                horizontal: 16,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: _searchFieldRadius,
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: _searchFieldRadius,
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: _searchFieldRadius,
-                borderSide: BorderSide.none,
-              ),
+              onSubmitted: (value) {
+                widget.onSubmit(value);
+              },
+              onChanged: widget.onChanged,
             ),
-            onSubmitted: (value) {
-              widget.onSubmit(value);
-            },
-            onChanged: widget.onChanged,
           ),
         ),
         if (widget.searchMode == RecallSearchMode.localAi) ...[
@@ -265,6 +256,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
         ] else if (widget.searchMode == RecallSearchMode.agent) ...[
           const SizedBox(height: 10),
           BDPanelCard(
+            glass: true,
             padding: const EdgeInsets.all(16),
             child: Text(
               textLocalize('recall_agent_panel_hint'),
@@ -440,6 +432,7 @@ class RecallSearchModeSheet extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
       child: BDPanelCard(
+        glass: true,
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
         child: SafeArea(
           top: false,

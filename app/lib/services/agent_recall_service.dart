@@ -33,19 +33,14 @@ class AgentRecallService {
       throw Exception(textLocalize('agent_error_empty_query'));
     }
 
-    final baseUrl = SupabaseConfig.url.trim();
-    if (baseUrl.isEmpty) {
+    final endpoint = SupabaseConfig.edgeFunctionUrl('agent-recall');
+    if (endpoint.isEmpty) {
       throw Exception(textLocalize('agent_error_missing_supabase_url'));
     }
 
-    // 构造 Edge Function URL
-    final endpoint = baseUrl.endsWith('/')
-        ? '${baseUrl}functions/v1/agent-recall'
-        : '$baseUrl/functions/v1/agent-recall';
-
     final dio = Dio();
     // 配置超时 (根据需要调整)
-    dio.options.connectTimeout = const Duration(seconds: 10);
+    dio.options.connectTimeout = const Duration(seconds: 20);
     dio.options.receiveTimeout = const Duration(seconds: 300); // 长连接需较长超时
 
     try {

@@ -5,8 +5,8 @@ class RecoConfig {
   //更新
   static VoidCallback? onUpdate;
   //程序
-  static late final bool cameraEnabled;
-  static late final List<CameraDescription> cameras;
+  static bool cameraEnabled = false;
+  static List<CameraDescription> cameras = [];
   static List<CameraDescription> frontCameras = [];
   static List<CameraDescription> backCameras = [];
   static List<CameraDescription> externalCameras = [];
@@ -14,8 +14,53 @@ class RecoConfig {
   //可变
   static int camNum = 0;
   static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
+
+  static Future<void> ensureCameraCatalog() async {
+    if (cameras.isNotEmpty) {
+      cameraEnabled = true;
+      return;
+    }
+
+    try {
+      final discovered = await availableCameras();
+      frontCameras = [];
+      backCameras = [];
+      externalCameras = [];
+      for (final cam in discovered) {
+        switch (cam.lensDirection) {
+          case CameraLensDirection.front:
+            frontCameras.add(cam);
+            break;
+          case CameraLensDirection.back:
+            backCameras.add(cam);
+            break;
+          case CameraLensDirection.external:
+            externalCameras.add(cam);
+            break;
+        }
+      }
+      cameras = discovered;
+      cameraEnabled = discovered.isNotEmpty;
+      if (camNum >= cameras.length) {
+        camNum = 0;
+      }
+    } catch (_) {
+      cameras = [];
+      frontCameras = [];
+      backCameras = [];
+      externalCameras = [];
+      cameraEnabled = false;
+      camNum = 0;
+    }
+  }
+
   //基础函数
   static Future<bool> cameraInitialize() async {
+    await ensureCameraCatalog();
+    if (!cameraEnabled || cameras.isEmpty) {
+      onUpdate?.call();
+      return false;
+    }
     cameraController = CameraController(cameras[camNum], resolutionPreset);
     bool suc = true;
     await cameraController!.initialize().catchError((Object e) {
