@@ -245,6 +245,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       }
 
       final assetPath = '$_viewerAssetRoot$path';
+      if (path == '/index.html' || path.endsWith('.js')) {
+        debugPrint('Viewer asset request: $assetPath');
+      }
 
       try {
         final data = await rootBundle.load(assetPath);
@@ -268,6 +271,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
+        request.response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        request.response.headers.set('Pragma', 'no-cache');
+        request.response.headers.set('Expires', '0');
         _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
@@ -624,10 +630,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   Future<void> _loadLocalHtml({bool clearCache = false}) async {
     try {
-      if (clearCache) {
-        await _controller?.clearCache();
-      }
-      final url = 'http://127.0.0.1:$_localPort/index.html';
+      // 本地 WebGL viewer 文件名和内容会频繁更新，进入页面时强制清理 WebView 缓存，
+      // 避免 Android WebView 继续执行旧的构建产物导致相机修复看起来没有生效。
+      await _controller?.clearCache();
+      final cacheBust = DateTime.now().millisecondsSinceEpoch;
+      final url = 'http://127.0.0.1:$_localPort/index.html?v=rollfix-$cacheBust';
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');

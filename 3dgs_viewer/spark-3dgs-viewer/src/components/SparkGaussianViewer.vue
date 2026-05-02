@@ -233,8 +233,12 @@ const flyToImage = (poseData) => {
   targetMatrix.decompose(targetPosition, targetQuaternion, targetScale);
 
   if (cameraRig) {
-    // Use the new camera rig for flight (smooth critically-damped interpolation)
+    // 底部镜头代表真实采集相机，跳转后必须按第一人称相机继续交互。
     cameraRig.flyToPose(targetPosition, targetQuaternion);
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark rollfix active: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(cameraRig.targetRoll).toFixed(1)}deg`,
+    });
   } else {
     // Fallback: direct GSAP tween
     gsap.killTweensOf(camera.position);
@@ -648,8 +652,19 @@ const onClipOffsetChange = (value) => {
 
 // ── Gesture → camera rig bridge ──
 
+let gestureDebugCount = 0;
+
 const handleGesture = (action) => {
   if (!cameraRig) return;
+
+  if (gestureDebugCount < 3 && (action.type === 'look' || action.type === 'pinch' || action.type === 'pan')) {
+    gestureDebugCount += 1;
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark gesture ${action.type}: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(euler.z).toFixed(1)}deg`,
+    });
+  }
 
   switch (action.type) {
     case 'look':
@@ -1031,6 +1046,16 @@ onBeforeUnmount(() => {
 .viewer-layer {
   position: absolute;
   inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+.viewer-layer canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ambient-mask {

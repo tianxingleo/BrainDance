@@ -24,13 +24,21 @@ export class BrainDanceCameraRig {
   mode: InteractionMode = 'recall';
 
   // Scalar yaw / pitch — the single source of truth for camera orientation.
+  // 手机竖屏或部分 WebGL 位姿会携带 ±90° 横滚；触控拖动时必须保留 roll，
+  // 否则首次交互会把横滚归零，表现为画面瞬间旋转 90°。
   yaw = 0;
   pitch = 0;
+  roll = 0;
   targetYaw = 0;
   targetPitch = 0;
+  targetRoll = 0;
 
   position = new THREE.Vector3();
   targetPosition = new THREE.Vector3();
+
+  // 完整保留采集相机四元数，避免欧拉角拆解在竖屏/横滚场景下丢失真实姿态。
+  orientation = new THREE.Quaternion();
+  targetOrientation = new THREE.Quaternion();
 
   // Orbit state (used in inspect mode)
   pivot = new THREE.Vector3();
@@ -77,11 +85,16 @@ export class BrainDanceCameraRig {
     this.position.copy(this.camera.position);
     this.targetPosition.copy(this.camera.position);
 
+    this.orientation.copy(this.camera.quaternion);
+    this.targetOrientation.copy(this.camera.quaternion);
+
     const euler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
     this.yaw = euler.y;
     this.pitch = euler.x;
+    this.roll = euler.z;
     this.targetYaw = this.yaw;
     this.targetPitch = this.pitch;
+    this.targetRoll = this.roll;
   }
 
   // ── Input handlers ──────────────────────────────────────────
@@ -99,13 +112,26 @@ export class BrainDanceCameraRig {
     const pitchPerPixel = fovY / vpH;
     const sensitivity = 1.2;
 
-    this.targetYaw -= dx * yawPerPixel * sensitivity;
-    this.targetPitch -= dy * pitchPerPixel * sensitivity;
+    const deltaYaw = -dx * yawPerPixel * sensitivity;
+    const deltaPitch = -dy * pitchPerPixel * sensitivity;
 
-    const maxPitch = THREE.MathUtils.degToRad(
-      this.mode === 'inspect' ? 85 : MAX_PITCH_DEG,
-    );
-    this.targetPitch = THREE.MathUtils.clamp(this.targetPitch, -maxPitch, maxPitch);
+    if (this.mode === 'inspect') {
+      this.targetYaw += deltaYaw;
+      const maxPitch = THREE.MathUtils.degToRad(85);
+      this.targetPitch = THREE.MathUtils.clamp(this.targetPitch + deltaPitch, -maxPitch, maxPitch);
+      return;
+    }
+
+    // 第一人称/回忆模式直接对完整四元数做增量旋转，避免首次触控把 roll 重建丢失。
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deltaYaw);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.targetOrientation).normalize();
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(right, deltaPitch);
+    this.targetOrientation.premultiply(qYaw).premultiply(qPitch).normalize();
+
+    const euler = new THREE.Euler().setFromQuaternion(this.targetOrientation, 'YXZ');
+    this.targetYaw = euler.y;
+    this.targetPitch = euler.x;
+    this.targetRoll = euler.z;
   }
 
   onPinch(scaleDelta: number) {
@@ -179,6 +205,12 @@ export class BrainDanceCameraRig {
     quat: THREE.Quaternion,
     onComplete?: () => void,
   ) {
+    // 采集镜头跳转必须回到 recall/first-person 模式。
+    // 如果仍停留在 inspect/orbit，下一帧会用 lookAt(pivot) 覆盖真实相机姿态，
+    // 用户一触控就会看到画面被轨道相机强行转正。
+    this.mode = 'recall';
+    this.targetOrientation.copy(quat).normalize();
+    this.orientation.copy(this.camera.quaternion).normalize();
     const euler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
 
     this.targetPosition.copy(pos);
@@ -188,6 +220,7 @@ export class BrainDanceCameraRig {
       -THREE.MathUtils.degToRad(MAX_PITCH_DEG),
       THREE.MathUtils.degToRad(MAX_PITCH_DEG),
     );
+    this.targetRoll = euler.z;
 
     if (onComplete) {
       const dist = this.position.distanceTo(pos);
@@ -206,6 +239,8 @@ export class BrainDanceCameraRig {
 
     this.yaw = dampAngle(this.yaw, this.targetYaw, lookAlpha);
     this.pitch = THREE.MathUtils.lerp(this.pitch, this.targetPitch, lookAlpha);
+    this.roll = dampAngle(this.roll, this.targetRoll, lookAlpha);
+    this.orientation.slerp(this.targetOrientation, lookAlpha).normalize();
     this.distance = THREE.MathUtils.lerp(this.distance, this.targetDistance, moveAlpha);
     this.position.lerp(this.targetPosition, moveAlpha);
 
@@ -262,15 +297,7 @@ export class BrainDanceCameraRig {
   private applyFirstPerson() {
     this.camera.position.copy(this.position);
 
-    const qYaw = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.yaw,
-    );
-    const qPitch = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0),
-      this.pitch,
-    );
-    this.camera.quaternion.copy(qYaw).multiply(qPitch).normalize();
+    this.camera.quaternion.copy(this.orientation).normalize();
   }
 
   private applyOrbit() {
@@ -281,6 +308,12 @@ export class BrainDanceCameraRig {
     this.position.set(this.pivot.x + x, this.pivot.y + y, this.pivot.z + z);
     this.camera.position.copy(this.position);
     this.camera.lookAt(this.pivot);
+
+    // lookAt 只决定注视方向，会用 camera.up 重建“正上方”，从而抹掉竖屏位姿的 roll。
+    // 对象轨道模式是触控后最常进入的分支，因此这里需要在 lookAt 后把横滚补回来。
+    if (Math.abs(this.roll) > 1e-6) {
+      this.camera.rotateZ(this.roll);
+    }
   }
 
   private beginInteraction() {
