@@ -76,7 +76,7 @@ function injectStyles() {
     }
     .bd-topbar {
       position: absolute;
-      top: 16px;
+      top: 140px;
       left: 16px;
       right: 16px;
       display: flex;
@@ -139,7 +139,7 @@ function injectStyles() {
     
     .bd-status {
       position: absolute;
-      top: 80px;
+      top: 204px;
       left: 50%;
       transform: translateX(-50%) translateY(-10px);
       padding: 10px 16px;
@@ -359,7 +359,7 @@ function injectStyles() {
 
     @media (max-width: 820px) {
       .bd-topbar {
-        top: 12px;
+        top: 132px;
         left: 12px;
         right: 12px;
       }

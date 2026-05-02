@@ -177,19 +177,26 @@ class _RecordPageState extends ConsumerState<RecordPage>
     ref.read(isRecordingProvider.notifier).state = value;
   }
 
+  void _resetRecordingState({bool updateUi = false}) {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+    _recordSeconds = 0;
+    _setGlobalRecording(false);
+    if (updateUi && mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _stopVideoRecording(
     CameraController controller, {
     bool showToast = true,
     bool navigateToSubmit = true,
   }) async {
-    _recordTimer?.cancel();
-    _recordTimer = null;
+    _resetRecordingState(updateUi: true);
 
     if (!controller.value.isRecordingVideo) {
       return;
     }
-
-    _setGlobalRecording(false);
     var file = await controller.stopVideoRecording();
 
     if (showToast && mounted) {
@@ -226,6 +233,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
       thumbPath = await VThumb.ensureThumb(file.path);
     } catch (_) {}
 
+    if (thumbPath.startsWith('assets/')) {
+      if (mounted) {
+        TDToast.showText(textLocalize('reco_record_too_short'), context: context);
+      }
+      return;
+    }
+
     if (navigateToSubmit && mounted) {
       Navigator.push(
         context,
@@ -249,8 +263,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
       return;
     }
 
+    _resetRecordingState(updateUi: false);
     _setGlobalRecording(true);
-    await controller.startVideoRecording();
+    try {
+      await controller.startVideoRecording();
+    } catch (_) {
+      _resetRecordingState(updateUi: true);
+      rethrow;
+    }
     try {
       await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
     } catch (_) {}

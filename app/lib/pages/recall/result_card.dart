@@ -1,4 +1,7 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
 import '../../services/viewer_navigation.dart';
@@ -121,8 +124,13 @@ class SearchResultCard extends StatelessWidget {
                   final imageName = frame['image_name'];
                   final frameSim = frame['similarity'] as double?;
 
-                  final imageUrl =
-                      "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
+                  final imageUrl = Supabase.instance.client.storage
+                      .from('braindance-assets')
+                      .getPublicUrl('$userId/$sceneId/output/images/$imageName');
+                  developer.log(
+                    '[RecallPreview] url=$imageUrl | user=$userId scene=$sceneId image=$imageName',
+                    name: 'ResultCard',
+                  );
 
                   return GestureDetector(
                     onTap: () => _navigateToViewer(context, frame),
@@ -146,13 +154,20 @@ class SearchResultCard extends StatelessWidget {
                                   imageUrl,
                                   fit: BoxFit.contain,
                                   alignment: Alignment.center,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Center(
-                                        child: Icon(
-                                          Icons.broken_image,
-                                          color: Colors.grey,
-                                        ),
+                                  errorBuilder: (context, error, stackTrace) {
+                                    developer.log(
+                                      '[RecallPreview] FAILED url=$imageUrl error=$error',
+                                      name: 'ResultCard',
+                                      error: error,
+                                      stackTrace: stackTrace,
+                                    );
+                                    return const Center(
+                                      child: Icon(
+                                        Icons.broken_image,
+                                        color: Colors.grey,
                                       ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),

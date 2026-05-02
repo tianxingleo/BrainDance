@@ -1,6 +1,12 @@
 part of '../generate.dart';
 
 extension _GenerateSubmissionX on _GeneratePageState {
+  void _openTaskListAfterSubmit() {
+    final navigator = Navigator.of(context);
+    // 统一收敛为一次导航，避免先 pop 再 push 导致交互式返回期间路由树抖动。
+    navigator.pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
+  }
+
   Map<String, dynamic>? _videoTaskParamsFor(String taskType) {
     switch (taskType) {
       case 'video_dual_chain':
@@ -318,11 +324,10 @@ extension _GenerateSubmissionX on _GeneratePageState {
         if (mounted) {
           TDToast.showText(textLocalize('gen_submit_success'), context: context);
           ref.read(pageIndexProvider.notifier).state = 0;
-          final nav = Navigator.of(context);
           _generatedImageUrl = null;
           _textEditingController.clear();
           GenConfig.uploadedText = '';
-          nav.pushNamed('/tasks');
+          _openTaskListAfterSubmit();
         }
       } else {
         final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_submit_fail')) : textLocalize('gen_server_error');
@@ -402,9 +407,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
         ref.read(pageIndexProvider.notifier).state = 0;
-        final nav = Navigator.of(context);
         GenConfig.uploadedImages.clear();
-        nav.pushNamed('/tasks');
+        _openTaskListAfterSubmit();
       }
     } catch (e) {
       if (mounted) {
@@ -508,10 +512,9 @@ extension _GenerateSubmissionX on _GeneratePageState {
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
         ref.read(pageIndexProvider.notifier).state = 0;
-        final nav = Navigator.of(context);
         GenConfig.uploadedVideos.clear();
         _selectedVideoTaskType = 'video_3dgs';
-        nav.pushNamed('/tasks');
+        _openTaskListAfterSubmit();
       }
     } catch (e) {
       if (mounted) {
