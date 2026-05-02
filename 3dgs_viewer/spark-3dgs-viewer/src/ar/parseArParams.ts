@@ -6,13 +6,18 @@ const parseNumber = (value: string | null, fallback: number) => {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+const parseText = (value: string | null, fallback: string) => {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : fallback
+}
+
 export function parseArParams(): ArViewerParams {
   const params = new URLSearchParams(window.location.search)
 
   return {
     mode: (params.get('mode') === 'marker-ar' ? 'marker-ar' : 'viewer'),
-    modelUrl: params.get('model') || DEFAULT_MODEL_URL,
-    targetUrl: params.get('target') || DEFAULT_MARKER_TARGET,
+    modelUrl: parseText(params.get('model'), DEFAULT_MODEL_URL),
+    targetUrl: parseText(params.get('target'), DEFAULT_MARKER_TARGET),
     scale: parseNumber(params.get('scale'), 0.25),
     rotation: [
       parseNumber(params.get('rx'), -Math.PI / 2),

@@ -5,7 +5,7 @@ import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import ArControlPanel from './ArControlPanel.vue'
 import { applyArTransform, cloneArTransform } from '../ar/arTransform'
 import { parseArParams } from '../ar/parseArParams'
-import type { ArTransform, ArStatus } from '../types/ar'
+import type { ArTransform } from '../types/ar'
 
 type MindARInstance = {
   renderer: THREE.WebGLRenderer
@@ -21,7 +21,7 @@ type MindARInstance = {
 }
 
 const containerRef = ref<HTMLDivElement | null>(null)
-const status = ref<ArStatus>('准备启动 AR...')
+const status = ref('准备启动 AR...')
 
 const params = parseArParams()
 const initialTransform: ArTransform = {
@@ -85,9 +85,22 @@ onMounted(async () => {
   if (!containerRef.value) return
 
   try {
+    status.value = '正在检查 Marker 目标文件...'
+    const targetResponse = await fetch(params.targetUrl, { method: 'HEAD' })
+    if (!targetResponse.ok) {
+      throw new Error(`Marker 目标文件不存在或不可访问：${params.targetUrl}`)
+    }
+
     status.value = '模型加载中...'
     const module = await import('mind-ar/dist/mindar-image-three.prod.js')
-    const MindARThree = module.MindARThree
+    const MindARThree = module.MindARThree as new (options: {
+      container: HTMLElement
+      imageTargetSrc: string
+      maxTrack: number
+      uiLoading: boolean
+      uiScanning: boolean
+      uiError: boolean
+    }) => MindARInstance
 
     mindarThree = new MindARThree({
       container: containerRef.value,
@@ -96,7 +109,7 @@ onMounted(async () => {
       uiLoading: false,
       uiScanning: false,
       uiError: false,
-    }) as MindARInstance
+    })
 
     renderer = mindarThree.renderer
     scene = mindarThree.scene
@@ -109,9 +122,6 @@ onMounted(async () => {
       renderer,
       maxStdDev: Math.sqrt(7),
       preUpdate: false,
-      view: {
-        sortRadial: true,
-      },
     })
     scene.add(spark)
 
@@ -145,10 +155,11 @@ onMounted(async () => {
     })
   } catch (error) {
     console.error('[MarkerARViewer] init error:', error)
-    status.value = 'AR 启动失败，请检查浏览器摄像头权限'
+    status.value = error instanceof Error
+      ? error.message
+      : 'AR 启动失败，请检查摄像头权限和 Marker 目标文件'
   }
 })
-
 onBeforeUnmount(() => {
   disposeViewer()
 })
@@ -201,4 +212,3 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 </style>
-

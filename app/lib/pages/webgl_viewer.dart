@@ -9,8 +9,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../services/download_event_bus.dart';
+import '../configs/reco_config.dart';
 
 // ============================================================
 // Dev/prod mode notes
@@ -24,6 +26,7 @@ class WebGLViewerPage extends StatefulWidget {
   final List<double>? initialPose;
   final String? initialPoseId;
   final bool useSparkViewer;
+  final bool initialMarkerArMode;
   final List<Map<String, dynamic>> timePeelingModels;
 
   const WebGLViewerPage({
@@ -34,6 +37,7 @@ class WebGLViewerPage extends StatefulWidget {
     this.initialPose,
     this.initialPoseId,
     this.useSparkViewer = true,
+    this.initialMarkerArMode = false,
     this.timePeelingModels = const [],
   });
 
@@ -43,6 +47,7 @@ class WebGLViewerPage extends StatefulWidget {
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
   static const int _downloadProgressThrottleMs = 100;
+  static const String _defaultMarkerTargetPath = '/targets/braindance-card.mind';
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -60,6 +65,20 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _downloadCancelled = false;
   int _lastDownloadUiUpdate = 0;
   late bool _useSparkViewer;
+  late bool _isMarkerArMode;
+
+  Future<bool> _ensureRuntimeCameraPermission() async {
+    // Android WebView getUserMedia 依赖宿主 App 已拿到运行时 CAMERA 权限。
+    // 这里复用现有相机初始化链路主动触发系统授权，再立即释放，避免占用摄像头。
+    try {
+      final granted = await RecoConfig.cameraInitialize();
+      RecoConfig.disposeCamera();
+      return granted;
+    } catch (error) {
+      debugPrint('Request runtime camera permission failed: $error');
+      return false;
+    }
+  }
 
   void _attachViewerHeaders(HttpResponse response) {
     response.headers.add('Access-Control-Allow-Origin', '*');
@@ -71,12 +90,18 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _isMarkerArMode
+      ? 'Marker AR'
+      : (_useSparkViewer ? 'Spark' : '\u539f\u7248');
 
   @override
   void initState() {
     super.initState();
     _useSparkViewer = widget.useSparkViewer;
+    _isMarkerArMode = widget.initialMarkerArMode;
+    if (_isMarkerArMode) {
+      _useSparkViewer = true;
+    }
 
     // Flutter Web is not supported here. Desktop uses the external browser mode.
     if (kIsWeb) {
@@ -264,6 +289,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           contentType = 'image/png';
         } else if (path.endsWith('.ico')) {
           contentType = 'image/x-icon';
+        } else if (path.endsWith('.mind')) {
+          contentType = 'application/octet-stream';
         } else if (path.endsWith('.ply') ||
             path.endsWith('.splat') ||
             path.endsWith('.ksplat')) {
@@ -271,7 +298,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
-        request.response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        request.response.headers.set(
+          'Cache-Control',
+          'no-store, no-cache, must-revalidate, max-age=0',
+        );
         request.response.headers.set('Pragma', 'no-cache');
         request.response.headers.set('Expires', '0');
         _attachViewerHeaders(request.response);
@@ -532,6 +562,37 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   Future<void> _openInExternalBrowser() async {
+    if (_isMarkerArMode) {
+      final cacheBust = DateTime.now().millisecondsSinceEpoch;
+      final url = _buildViewerUrl(cacheBust);
+      _externalViewerUrl = url;
+
+      if (_didAttemptExternalOpen) {
+        if (mounted) setState(() {});
+        return;
+      }
+
+      _didAttemptExternalOpen = true;
+      if (mounted) {
+        setState(() {
+          _isOpeningExternalViewer = true;
+        });
+      }
+
+      try {
+        await _openUrlOnDesktop(url);
+      } catch (e) {
+        debugPrint('Open external Marker AR viewer failed: $e');
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isOpeningExternalViewer = false;
+          });
+        }
+      }
+      return;
+    }
+
     final payload = _buildViewerPayload();
     final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
     final url =
@@ -608,13 +669,32 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
+            // 注入 overscroll 防护脚本：在 Android/iOS WebView 层面强化禁用弹性边界效果，
+            // 防止拖动 WebGL canvas 时出现浏览器特征的画面拉伸（overscroll bounce）。
+            // canvas 上的 touchmove 已由 GestureHandler（gestures.ts）调用 e.preventDefault() 处理，
+            // 此处只需确保 html/body 的 overscroll 被彻底关闭。
+            _controller?.runJavaScript('''
+              (function() {
+                var html = document.documentElement;
+                var body = document.body;
+                html.style.overflow = 'hidden';
+                body.style.overflow = 'hidden';
+                html.style.overscrollBehavior = 'none';
+                body.style.overscrollBehavior = 'none';
+                html.style.touchAction = 'none';
+                body.style.touchAction = 'none';
+              })();
+            ''');
+
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
                   'WebView: no ready signal received, triggering manually',
                 );
                 setState(() => _isWebReady = true);
-                _sendModelToVue();
+                if (!_isMarkerArMode) {
+                  _sendModelToVue();
+                }
               }
             });
           },
@@ -624,24 +704,59 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         ),
       );
 
+    final platformController = _controller?.platform;
+    if (platformController is AndroidWebViewController) {
+      platformController.setOnPlatformPermissionRequest((request) {
+        if (!_isMarkerArMode) {
+          request.deny();
+          return;
+        }
+
+        // Marker AR 运行在内置 WebView 中，需要把网页 camera 权限请求
+        // 明确转交给 Android WebView，否则 MindAR 无法启动摄像头。
+        request.grant();
+      });
+    }
+
     if (mounted) setState(() {});
     _loadLocalHtml();
   }
 
-  Future<void> _loadLocalHtml({bool clearCache = false}) async {
+  Future<void> _loadLocalHtml() async {
     try {
       // 本地 WebGL viewer 文件名和内容会频繁更新，进入页面时强制清理 WebView 缓存，
       // 避免 Android WebView 继续执行旧的构建产物导致相机修复看起来没有生效。
       await _controller?.clearCache();
       final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = 'http://127.0.0.1:$_localPort/index.html?v=rollfix-$cacheBust';
+      final url = _buildViewerUrl(cacheBust);
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
     }
   }
 
+  String _buildViewerUrl(int cacheBust) {
+    if (_isMarkerArMode) {
+      final payload = _buildViewerPayload();
+      return Uri(
+        scheme: 'http',
+        host: '127.0.0.1',
+        port: _localPort,
+        path: '/index.html',
+        queryParameters: {
+          'mode': 'marker-ar',
+          'model': payload['ply']?.toString() ?? '',
+          'target': _defaultMarkerTargetPath,
+          'v': 'marker-ar-$cacheBust',
+        },
+      ).toString();
+    }
+
+    return 'http://127.0.0.1:$_localPort/index.html?v=rollfix-$cacheBust';
+  }
+
   void _sendModelToVue() {
+    if (_isMarkerArMode) return;
     if (!_isWebReady) return;
     final payloadData = _buildViewerPayload();
     final targetUrl = payloadData['ply'];
@@ -879,10 +994,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
 
     // 通知 WebView 加载模型
-    final payload = jsonEncode({
-      'ply': targetUrl,
-      if (posesUrl != null) 'poses': posesUrl,
-    });
+    final payloadData = <String, String>{'ply': targetUrl};
+    if (posesUrl != null) {
+      payloadData['poses'] = posesUrl;
+    }
+    final payload = jsonEncode(payloadData);
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
@@ -890,6 +1006,37 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     if (_useSparkViewer == useSpark) return;
     setState(() {
       _useSparkViewer = useSpark;
+      _isMarkerArMode = false;
+      _isWebReady = false;
+      _didAttemptExternalOpen = false;
+      _externalViewerUrl = null;
+    });
+
+    if (_useExternalBrowserMode) {
+      await _openInExternalBrowser();
+      return;
+    }
+
+    await _loadLocalHtml();
+  }
+
+  Future<void> _switchMarkerArMode() async {
+    final nextMarkerMode = !_isMarkerArMode;
+    if (nextMarkerMode) {
+      final granted = await _ensureRuntimeCameraPermission();
+      if (!granted) {
+        if (mounted) {
+          TDToast.showText('未获得摄像头权限，无法进入 Marker AR', context: context);
+        }
+        return;
+      }
+    }
+
+    setState(() {
+      _isMarkerArMode = nextMarkerMode;
+      if (_isMarkerArMode) {
+        _useSparkViewer = true;
+      }
       _isWebReady = false;
       _didAttemptExternalOpen = false;
       _externalViewerUrl = null;
@@ -972,6 +1119,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildMarkerArButton(bool isDark) {
+    return _buildFloatingCircleButton(
+      icon: _isMarkerArMode
+          ? Icons.view_in_ar_rounded
+          : Icons.view_in_ar_outlined,
+      onPressed: _useSparkViewer || _isMarkerArMode
+          ? _switchMarkerArMode
+          : null,
+      isDark: isDark,
+      tooltip: _isMarkerArMode ? '退出 Marker AR' : '进入 Marker AR',
     );
   }
 
@@ -1191,7 +1351,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                             tooltip: '\u8fd4\u56de',
                           ),
                           const Spacer(),
-                          _buildFloatingViewerToggle(isDark),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildMarkerArButton(isDark),
+                              const SizedBox(width: 10),
+                              _buildFloatingViewerToggle(isDark),
+                            ],
+                          ),
                         ],
                       ),
                     ),
