@@ -1,4 +1,4 @@
-import 'package:braindance/configs/app_config.dart';
+﻿import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
@@ -11,6 +11,7 @@ Widget setTab3(BuildContext context) {
       mainAxisSize: MainAxisSize.min,
       children: [
         BDPanelCard(
+          glass: true,
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(
             children: [

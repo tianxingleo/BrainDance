@@ -1,4 +1,4 @@
-import 'package:tdesign_flutter/tdesign_flutter.dart';
+﻿import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -32,6 +32,7 @@ Widget setTab2(VoidCallback onUpdate, BuildContext context) {
         ),
         const SizedBox(height: 14),
         BDPanelCard(
+          glass: true,
           child: ClipRRect(
             borderRadius: BDDesign.radiusLarge,
             child: TDCellGroup(

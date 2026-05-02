@@ -19,6 +19,7 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
       mainAxisSize: MainAxisSize.min,
       children: [
         BDPanelCard(
+          glass: true,
           padding: const EdgeInsets.all(18),
           child: Row(
             children: [
@@ -87,8 +88,8 @@ class _LanguageToggleChip extends StatelessWidget {
     final borderColor = selected
         ? selectedColor.withValues(alpha: 0.22)
         : (isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : BDDesign.colorMutedBlue.withValues(alpha: 0.10));
+              ? Colors.white.withValues(alpha: 0.08)
+              : BDDesign.colorMutedBlue.withValues(alpha: 0.10));
 
     return Material(
       color: Colors.transparent,
@@ -113,7 +114,9 @@ class _LanguageToggleChip extends StatelessWidget {
               fontWeight: FontWeight.w700,
               color: selected
                   ? selectedColor
-                  : (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
+                  : (isDark
+                        ? BDDesign.colorPaperWhite
+                        : BDDesign.colorInkBlack),
             ),
           ),
         ),

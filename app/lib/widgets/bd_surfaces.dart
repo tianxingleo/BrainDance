@@ -156,6 +156,7 @@ class BDPanelCard extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
   final BorderRadius? borderRadius;
+  final bool glass;
 
   const BDPanelCard({
     super.key,
@@ -163,11 +164,22 @@ class BDPanelCard extends StatelessWidget {
     this.padding,
     this.margin,
     this.borderRadius,
+    this.glass = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+    if (glass) {
+      return BDGlassSurface(
+        margin: margin,
+        padding: padding,
+        borderRadius: borderRadius ?? BDDesign.radiusLarge,
+        variant: BDGlassVariant.panel,
+        child: child,
+      );
+    }
+
     final background = isDark
         ? AppTheme.darkSurface.withValues(alpha: 0.94)
         : BDDesign.colorPaperWhite.withValues(alpha: 0.94);
@@ -185,6 +197,106 @@ class BDPanelCard extends StatelessWidget {
         boxShadow: [isDark ? BDDesign.shadowLight : BDDesign.shadowElevated],
       ),
       child: child,
+    );
+  }
+}
+
+enum BDGlassVariant { panel, floating }
+
+class BDGlassSurface extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
+  final BorderRadius borderRadius;
+  final BDGlassVariant variant;
+  final double? blurSigma;
+  final Color? tintColor;
+  final Color? borderColor;
+  final List<BoxShadow>? shadows;
+
+  const BDGlassSurface({
+    super.key,
+    required this.child,
+    this.padding,
+    this.margin,
+    this.borderRadius = const BorderRadius.all(Radius.circular(24)),
+    this.variant = BDGlassVariant.panel,
+    this.blurSigma,
+    this.tintColor,
+    this.borderColor,
+    this.shadows,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final effectiveBlur =
+        blurSigma ??
+        switch (variant) {
+          BDGlassVariant.panel => 18.0,
+          BDGlassVariant.floating => 24.0,
+        };
+    final effectiveTint =
+        tintColor ??
+        (isDark
+            ? AppTheme.darkSurface.withValues(
+                alpha: variant == BDGlassVariant.floating ? 0.56 : 0.72,
+              )
+            : BDDesign.colorPaperWhite.withValues(
+                alpha: variant == BDGlassVariant.floating ? 0.54 : 0.66,
+              ));
+    final effectiveBorder =
+        borderColor ??
+        (isDark
+            ? Colors.white.withValues(alpha: 0.09)
+            : BDDesign.colorMutedBlue.withValues(alpha: 0.12));
+    final effectiveShadows =
+        shadows ??
+        [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: isDark
+                  ? (variant == BDGlassVariant.floating ? 0.24 : 0.18)
+                  : (variant == BDGlassVariant.floating ? 0.06 : 0.04),
+            ),
+            blurRadius: variant == BDGlassVariant.floating ? 28 : 22,
+            offset: Offset(0, variant == BDGlassVariant.floating ? 8 : 6),
+          ),
+        ];
+
+    return Container(
+      margin: margin,
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        boxShadow: effectiveShadows,
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: effectiveBlur,
+            sigmaY: effectiveBlur,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: effectiveTint,
+              borderRadius: borderRadius,
+              border: Border.all(color: effectiveBorder),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: isDark ? 0.08 : 0.28),
+                  Colors.white.withValues(alpha: isDark ? 0.02 : 0.08),
+                ],
+              ),
+            ),
+            child: padding == null
+                ? child
+                : Padding(padding: padding!, child: child),
+          ),
+        ),
+      ),
     );
   }
 }
