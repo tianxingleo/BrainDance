@@ -8,7 +8,8 @@ plugins {
 android {
     namespace = "com.example.braindance"
     compileSdk = flutter.compileSdkVersion
-    // ndkVersion = flutter.ndkVersion  // 注释掉，让 AGP 自动管理
+    // 与 integration_test、jni 等原生插件保持一致，避免 Flutter 默认 NDK 版本过低导致构建中断。
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
