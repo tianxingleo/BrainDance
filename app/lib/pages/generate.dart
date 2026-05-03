@@ -171,32 +171,26 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   ];
 
   Future<void> _showVideoTaskTypeSheet() async {
-    final completer = Completer<void>();
-    TDActionSheet(
-      context,
-      description: textLocalize('gen_video_task_sheet_desc'),
-      items: _videoTaskTypeOptions
-          .map(
-            (taskType) => TDActionSheetItem(
-              label: _videoTaskTypeLabel(taskType),
-            ),
-          )
-          .toList(),
-      cancelText: textLocalize("gen_cancel"),
-      onSelected: (item, index) {
-        _refresh(() {
-          _selectedVideoTaskType = _videoTaskTypeOptions[index];
-        });
-        completer.complete();
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _VideoTaskTypeSheet(
+          selectedTaskType: _selectedVideoTaskType,
+          labelBuilder: _videoTaskTypeLabel,
+          hintBuilder: _videoTaskTypeHint,
+          options: _videoTaskTypeOptions,
+          onSelect: (taskType) => Navigator.pop(context, taskType),
+        );
       },
-      onCancel: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onClose: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-    ).show();
-    await completer.future;
+    );
+
+    if (selected != null && mounted) {
+      _refresh(() {
+        _selectedVideoTaskType = selected;
+      });
+    }
   }
 
   @override
