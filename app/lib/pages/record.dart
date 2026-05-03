@@ -20,6 +20,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
+import 'package:flutter_riverpod/legacy.dart';
 part 'record/record_ui_widgets.dart';
 part 'record/record_motion_guidance_card.dart';
 
@@ -31,6 +32,15 @@ const double _kInstantSpikeAccel = 2.60;
 const double _kJerkThreshold = 0.95;
 const int _kAccelHistoryLength = 40;
 const double _kFloatingNavReservedHeight = 112.0;
+
+/// 加速度过快 → 顶部横幅
+final showAccelBannerProvider = StateProvider<bool>((ref) => false);
+
+/// 保存到相册失败 → 中下方悬浮气泡（null = 隐藏）
+final saveFailBubbleProvider = StateProvider<String?>((ref) => null);
+
+/// 录制时间过短 → 中央气泡
+final showTooShortBubbleProvider = StateProvider<bool>((ref) => false);
 
 enum _MotionState { steady, ideal, caution, danger }
 
@@ -206,7 +216,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final permissionState = await PhotoManager.requestPermissionExtend();
     if (!permissionState.isAuth) {
       if (showToast && mounted) {
-        TDToast.showText(textLocalize('reco_save_fail'), context: context);
+        ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+          'reco_save_fail',
+        );
       }
     } else {
       try {
@@ -219,11 +231,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
         if (savedFile != null) {
           file = XFile(savedFile.path);
         } else if (mounted) {
-          TDToast.showText(textLocalize('reco_save_error'), context: context);
+          ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+            'reco_save_error',
+          );
         }
       } catch (_) {
         if (mounted) {
-          TDToast.showText(textLocalize('reco_save_error'), context: context);
+          ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+            'reco_save_error',
+          );
         }
       }
     }
@@ -235,7 +251,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (thumbPath.startsWith('assets/')) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_record_too_short'), context: context);
+        ref.read(showTooShortBubbleProvider.notifier).state = true;
       }
       return;
     }
@@ -300,7 +316,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (yaw < 0) {
       yaw += 360;
     }
-
   }
 
   void _updateMotionFeedback(
@@ -358,9 +373,12 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _hudAnimController.repeat(reverse: true);
     }
 
-    if (_isMovingTooFast && mounted && now - _lastFastToastTime > 1800) {
+    if (_isMovingTooFast &&
+        mounted &&
+        !ref.read(showAccelBannerProvider) &&
+        now - _lastFastToastTime > 1800) {
       _lastFastToastTime = now;
-      TDToast.showText(context: context, textLocalize('reco_accel_warning'));
+      ref.read(showAccelBannerProvider.notifier).state = true;
     }
 
     _syncMotionHaptics(effectiveState);
@@ -621,118 +639,120 @@ class _RecordPageState extends ConsumerState<RecordPage>
       child: Scaffold(
         backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
         body: Stack(
-        children: [
-          Positioned.fill(child: cameraView),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: RecordHUDPainter(
-                isWarning: _isMotionHudEnabled && _isMovingTooFast,
-                isCaution:
-                    _isMotionHudEnabled && _motionState == _MotionState.caution,
-                motionValue: _isMotionHudEnabled ? _motionMeter : 0,
-                animation: _hudAnimController,
+          children: [
+            Positioned.fill(child: cameraView),
+            Positioned.fill(
+              child: CustomPaint(
+                painter: RecordHUDPainter(
+                  isWarning: _isMotionHudEnabled && _isMovingTooFast,
+                  isCaution:
+                      _isMotionHudEnabled &&
+                      _motionState == _MotionState.caution,
+                  motionValue: _isMotionHudEnabled ? _motionMeter : 0,
+                  animation: _hudAnimController,
+                ),
               ),
             ),
-          ),
-          Positioned(
-            top: mediaQuery.padding.top + 16,
-            left: 16,
-            child: AnimatedSwitcher(
-              duration: BDMotion.durationFast,
-              switchInCurve: BDMotion.curveEnter,
-              switchOutCurve: BDMotion.curveExit,
-              child: !_isMotionHudEnabled
-                  ? const SizedBox.shrink()
-                  : _SimpleMotionGuidanceCard(
-                      motionMeter: _motionMeter,
-                      motionState: _motionState,
-                      motionHint: _motionHint,
-                      motionDetail: _motionDetail,
-                    ),
+            Positioned(
+              top: mediaQuery.padding.top + 16,
+              left: 16,
+              child: AnimatedSwitcher(
+                duration: BDMotion.durationFast,
+                switchInCurve: BDMotion.curveEnter,
+                switchOutCurve: BDMotion.curveExit,
+                child: !_isMotionHudEnabled
+                    ? const SizedBox.shrink()
+                    : _SimpleMotionGuidanceCard(
+                        motionMeter: _motionMeter,
+                        motionState: _motionState,
+                        motionHint: _motionHint,
+                        motionDetail: _motionDetail,
+                      ),
+              ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: bottomOffset,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isVideoRecording) ...[
-                  AnimatedSwitcher(
-                    duration: BDMotion.durationFast,
-                    switchInCurve: BDMotion.curveEnter,
-                    switchOutCurve: BDMotion.curveExit,
-                    child: _StatusPill(
-                      key: ValueKey<String>('rec_$_recordSeconds'),
-                      label:
-                          'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
-                      color: Colors.redAccent,
-                      backgroundColor: darkInput,
-                      isSquareDot: true,
-                      compact: true,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: bottomOffset,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isVideoRecording) ...[
+                    AnimatedSwitcher(
+                      duration: BDMotion.durationFast,
+                      switchInCurve: BDMotion.curveEnter,
+                      switchOutCurve: BDMotion.curveExit,
+                      child: _StatusPill(
+                        key: ValueKey<String>('rec_$_recordSeconds'),
+                        label:
+                            'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                        color: Colors.redAccent,
+                        backgroundColor: darkInput,
+                        isSquareDot: true,
+                        compact: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                Center(
-                  child: GestureDetector(
-                    onTapDown: (_) => _buttonAnimController.forward(),
-                    onTapUp: (_) async {
-                      _buttonAnimController.reverse();
-                      await _onRecordTap();
-                    },
-                    onTapCancel: () => _buttonAnimController.reverse(),
-                    child: ScaleTransition(
-                      scale: _buttonScaleAnimation,
-                      child: AnimatedContainer(
-                        duration: BDMotion.durationFast,
-                        curve: BDMotion.curveEnter,
-                        width: 78,
-                        height: 78,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isAnyRecording
-                              ? Colors.redAccent
-                              : BDDesign.colorPaperWhite,
-                          border: Border.all(
-                            color: BDDesign.colorInkBlack,
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  (isAnyRecording
-                                          ? Colors.redAccent
-                                          : BDDesign.colorMutedBlue)
-                                      .withAlpha(isAnyRecording ? 92 : 46),
-                              blurRadius: 14,
-                              spreadRadius: isAnyRecording ? 2 : 0,
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: AnimatedContainer(
-                            duration: BDMotion.durationFast,
-                            curve: BDMotion.curveEnter,
-                            width: 60,
-                            height: 60,
-                            decoration: const BoxDecoration(
+                    const SizedBox(height: 10),
+                  ],
+                  Center(
+                    child: GestureDetector(
+                      onTapDown: (_) => _buttonAnimController.forward(),
+                      onTapUp: (_) async {
+                        _buttonAnimController.reverse();
+                        await _onRecordTap();
+                      },
+                      onTapCancel: () => _buttonAnimController.reverse(),
+                      child: ScaleTransition(
+                        scale: _buttonScaleAnimation,
+                        child: AnimatedContainer(
+                          duration: BDMotion.durationFast,
+                          curve: BDMotion.curveEnter,
+                          width: 78,
+                          height: 78,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isAnyRecording
+                                ? Colors.redAccent
+                                : BDDesign.colorPaperWhite,
+                            border: Border.all(
                               color: BDDesign.colorInkBlack,
-                              shape: BoxShape.circle,
+                              width: 2,
                             ),
-                            child: Center(
-                              child: AnimatedContainer(
-                                duration: BDMotion.durationFast,
-                                curve: BDMotion.curveEnter,
-                                width: isAnyRecording ? 26 : 22,
-                                height: isAnyRecording ? 26 : 22,
-                                decoration: BoxDecoration(
-                                  color: isAnyRecording
-                                      ? Colors.redAccent
-                                      : BDDesign.colorPaperWhite,
-                                  borderRadius: BorderRadius.circular(
-                                    isAnyRecording ? 4 : 12,
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    (isAnyRecording
+                                            ? Colors.redAccent
+                                            : BDDesign.colorMutedBlue)
+                                        .withAlpha(isAnyRecording ? 92 : 46),
+                                blurRadius: 14,
+                                spreadRadius: isAnyRecording ? 2 : 0,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: AnimatedContainer(
+                              duration: BDMotion.durationFast,
+                              curve: BDMotion.curveEnter,
+                              width: 60,
+                              height: 60,
+                              decoration: const BoxDecoration(
+                                color: BDDesign.colorInkBlack,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: AnimatedContainer(
+                                  duration: BDMotion.durationFast,
+                                  curve: BDMotion.curveEnter,
+                                  width: isAnyRecording ? 26 : 22,
+                                  height: isAnyRecording ? 26 : 22,
+                                  decoration: BoxDecoration(
+                                    color: isAnyRecording
+                                        ? Colors.redAccent
+                                        : BDDesign.colorPaperWhite,
+                                    borderRadius: BorderRadius.circular(
+                                      isAnyRecording ? 4 : 12,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -742,217 +762,219 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            left: 16,
-            bottom: cornerControlBottom,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _RecordOverlayPanel(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 4,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      currentLensDirection == CameraLensDirection.front
-                          ? Icons.camera_front
-                          : Icons.camera_rear,
-                      color: canSwitchPrimaryCamera
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorAshGray,
-                      size: 24,
-                    ),
-                    onPressed: canSwitchPrimaryCamera
-                        ? _switchPrimaryCamera
-                        : null,
-                  ),
-                ),
-                if (!isVideoRecording) ...[
-                  const SizedBox(width: 12),
+            Positioned(
+              left: 16,
+              bottom: cornerControlBottom,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   _RecordOverlayPanel(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 4,
                     ),
                     child: IconButton(
-                      icon: const Icon(
-                        Icons.close,
-                        color: BDDesign.colorAshGray,
+                      icon: Icon(
+                        currentLensDirection == CameraLensDirection.front
+                            ? Icons.camera_front
+                            : Icons.camera_rear,
+                        color: canSwitchPrimaryCamera
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorAshGray,
                         size: 24,
                       ),
-                      onPressed: () => Navigator.maybePop(context),
+                      onPressed: canSwitchPrimaryCamera
+                          ? _switchPrimaryCamera
+                          : null,
                     ),
                   ),
+                  if (!isVideoRecording) ...[
+                    const SizedBox(width: 12),
+                    _RecordOverlayPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.close,
+                          color: BDDesign.colorAshGray,
+                          size: 24,
+                        ),
+                        onPressed: () => Navigator.maybePop(context),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          Positioned(
-            right: 16,
-            bottom: cornerControlBottom,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isVideoRecording) ...[
+            Positioned(
+              right: 16,
+              bottom: cornerControlBottom,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isVideoRecording) ...[
+                    _RecordOverlayPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.info_outline,
+                          color: BDDesign.colorAshGray,
+                          size: 24,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showTips = true;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   _RecordOverlayPanel(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 4,
                     ),
                     child: IconButton(
-                      icon: const Icon(
-                        Icons.info_outline,
-                        color: BDDesign.colorAshGray,
+                      icon: Icon(
+                        _isMotionHudEnabled
+                            ? Icons.speed_rounded
+                            : Icons.speed_outlined,
+                        color: _isMotionHudEnabled
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorAshGray,
                         size: 24,
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _showTips = true;
-                        });
-                      },
+                      onPressed: _toggleMotionHud,
                     ),
                   ),
-                  const SizedBox(width: 12),
                 ],
-                _RecordOverlayPanel(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 4,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      _isMotionHudEnabled
-                          ? Icons.speed_rounded
-                          : Icons.speed_outlined,
-                      color: _isMotionHudEnabled
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorAshGray,
-                      size: 24,
-                    ),
-                    onPressed: _toggleMotionHud,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          if (_showTips)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withAlpha(176),
-                padding: const EdgeInsets.only(bottom: 80),
-                child: Center(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.all(24),
-                    constraints: BoxConstraints(
-                      maxHeight: mediaQuery.size.height * 0.70,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BDDesign.radiusNormal,
-                      border: Border.all(color: Colors.white.withAlpha(20)),
-                      boxShadow: [BDDesign.shadowElevated],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                textLocalize('reco_scan_tip'),
-                                style: TextStyle(
-                                  color: BDDesign.colorPaperWhite,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
+            if (_showTips)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withAlpha(176),
+                  padding: const EdgeInsets.only(bottom: 80),
+                  child: Center(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 32),
+                      padding: const EdgeInsets.all(24),
+                      constraints: BoxConstraints(
+                        maxHeight: mediaQuery.size.height * 0.70,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E1E),
+                        borderRadius: BDDesign.radiusNormal,
+                        border: Border.all(color: Colors.white.withAlpha(20)),
+                        boxShadow: [BDDesign.shadowElevated],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  textLocalize('reco_scan_tip'),
+                                  style: TextStyle(
+                                    color: BDDesign.colorPaperWhite,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
-                            _StatusPill(
-                              label: _isMotionHudEnabled
-                                  ? textLocalize('sensor_on')
-                                  : textLocalize('sensor_off'),
-                              color: _isMotionHudEnabled
-                                  ? BDDesign.colorFadedOlive
-                                  : BDDesign.colorMutedBlueLight,
-                              backgroundColor: const Color(0xFF23232A),
-                              compact: true,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Flexible(
-                          child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title1'),
-                                  body: textLocalize('reco_tip1'),
-                                ),
-                                const SizedBox(height: 12),
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title2'),
-                                  body: textLocalize('reco_tip2'),
-                                ),
-                                const SizedBox(height: 12),
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title3'),
-                                  body: textLocalize('reco_tip3'),
-                                ),
-                              ],
+                              _StatusPill(
+                                label: _isMotionHudEnabled
+                                    ? textLocalize('sensor_on')
+                                    : textLocalize('sensor_off'),
+                                color: _isMotionHudEnabled
+                                    ? BDDesign.colorFadedOlive
+                                    : BDDesign.colorMutedBlueLight,
+                                backgroundColor: const Color(0xFF23232A),
+                                compact: true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title1'),
+                                    body: textLocalize('reco_tip1'),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title2'),
+                                    body: textLocalize('reco_tip2'),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title3'),
+                                    body: textLocalize('reco_tip3'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                textLocalize('reco_scan_before'),
-                                style: TextStyle(
-                                  color: Colors.white.withAlpha(168),
-                                  fontSize: 12.5,
-                                  height: 1.35,
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  textLocalize('reco_scan_before'),
+                                  style: TextStyle(
+                                    color: Colors.white.withAlpha(168),
+                                    fontSize: 12.5,
+                                    height: 1.35,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            TDButton(
-                              onTap: () {
-                                SetConfig.setHasReadRecordTip(true);
-                                setState(() {
-                                  _showTips = false;
-                                });
-                              },
-                              text: textLocalize('reco_scan_ok'),
-                              style: TDButtonStyle(
-                                backgroundColor: BDDesign.colorMutedBlue,
-                                textColor: Colors.white,
-                                radius: BorderRadius.circular(18),
+                              const SizedBox(width: 12),
+                              TDButton(
+                                onTap: () {
+                                  SetConfig.setHasReadRecordTip(true);
+                                  setState(() {
+                                    _showTips = false;
+                                  });
+                                },
+                                text: textLocalize('reco_scan_ok'),
+                                style: TDButtonStyle(
+                                  backgroundColor: BDDesign.colorMutedBlue,
+                                  textColor: Colors.white,
+                                  radius: BorderRadius.circular(18),
+                                ),
+                                type: TDButtonType.fill,
+                                shape: TDButtonShape.rectangle,
+                                theme: TDButtonTheme.primary,
+                                size: TDButtonSize.small,
                               ),
-                              type: TDButtonType.fill,
-                              shape: TDButtonShape.rectangle,
-                              theme: TDButtonTheme.primary,
-                              size: TDButtonSize.small,
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+            const _AccelWarningBanner(),
+            const _SaveFailBubble(),
+            const _TooShortBubble(),
+          ],
+        ),
       ),
-    ),
     );
   }
 }
