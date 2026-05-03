@@ -169,7 +169,7 @@ const syncOrbitFromCamera = () => {
   autoOrbitRadius = Math.sqrt(dx * dx + dz * dz);
 };
 
-// 开启 orbit 模式：从当前相机位置初始化轨道参数并开始旋转
+// 开启 orbit 模式：从当前位置初始化轨道参数并开始旋转
 const startOrbit = () => {
   if (!sceneCenter) return;
   syncOrbitFromCamera();
@@ -181,7 +181,7 @@ const startOrbit = () => {
   orbitEnabled.value = true;
 };
 
-// 关闭 orbit 模式：相机停留在当前位置，恢复原有手动控制
+// 关闭 orbit 模式：相机停在当前位置，恢复原有手动控制
 const stopOrbit = () => {
   orbitEnabled.value = false;
   orbitPaused.value = false;
@@ -191,7 +191,7 @@ const stopOrbit = () => {
 const toggleOrbitPause = () => {
   if (!orbitEnabled.value) return;
   if (orbitPaused.value) {
-    // 恢复时从当前相机位置重新同步轨道参数，确保无缝衔接
+    // 恢复时从当前位置重新同步轨道参数，确保无缝衔接
     syncOrbitFromCamera();
     orbitPaused.value = false;
   } else {
@@ -600,18 +600,15 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     containerRef.value.appendChild(renderer.domElement);
 
     // ===== Orbit 指针事件：检测手动拖拽以临时中断/恢复 orbit 旋转 =====
-    // 按下时标记拖拽状态，暂停 orbit
     renderer.domElement.addEventListener('pointerdown', () => {
       isOrbitDragging = true;
     });
-    // 松手后从当前相机位置重新同步轨道参数，实现无缝恢复
     renderer.domElement.addEventListener('pointerup', () => {
       isOrbitDragging = false;
       if (orbitEnabled.value && !orbitPaused.value) {
         syncOrbitFromCamera();
       }
     });
-    // pointerleave 作为安全兜底，防止拖拽状态卡住
     renderer.domElement.addEventListener('pointerleave', () => {
       if (isOrbitDragging) {
         isOrbitDragging = false;
@@ -663,6 +660,8 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const baseDpr = window.devicePixelRatio || 1;
         renderer.setPixelRatio(cameraRig.getRecommendedDpr(baseDpr));
       }
+
+
       const now = performance.now();
       const orbitDt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
       orbitLastFrameTime = now;
@@ -677,10 +676,8 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
 
       // ===== Orbit 模式：自动旋转相机（非暂停、非手动拖拽时生效） =====
       if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging && orbitDt > 0) {
-        // 根据速度和方向更新旋转角度
         const speedRad = orbitSpeed.value * (Math.PI / 180);
         orbitAngle += speedRad * orbitDt * orbitDirection.value;
-        // 计算圆周位置并应用到相机
         const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
         const x = sceneCenter.x + r * Math.cos(orbitAngle);
         const z = sceneCenter.z + r * Math.sin(orbitAngle);
@@ -689,10 +686,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         camera.updateProjectionMatrix();
       }
 
-      // 始终更新 controls（处理滚轮缩放、手动拖拽等输入）
-      controls?.update(camera);
-
-      // ===== Orbit 模式下重新锁定相机位置，防止 controls 覆盖 orbit 位置 =====
+      // ===== Orbit 模式下重新锁定相机位置，防止 cameraRig 覆盖 orbit 位置 =====
       if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging) {
         const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
         const x = sceneCenter.x + r * Math.cos(orbitAngle);
@@ -1055,151 +1049,157 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <FocalPanel
-      v-if="showFocalSettings"
-      :focal-max="focalMax"
-      :focal-min="focalMin"
-      :manual-focal-px="manualFocalPx"
-      :current-view-fov="currentViewFov"
-      :current-view-focal-px="currentViewFocalPx"
-      @update:manual-focal-px="manualFocalPx = $event"
-      @input-focal="onManualFocalChange"
-      @change-focal="onManualFocalChange"
-      @reset-focal="resetFocalToCapture"
-    />
+    <!-- 右侧面板容器：统一管理堆叠和滚动 -->
+    <div class="right-panels" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+      <StatusRibbon
+        :clip-enabled="clipEnabled"
+        :clip-offset="clipOffset"
+        :current-model-url="currentModelUrl"
+        :current-poses-path="currentPosesPath"
+        :highlight-status="highlightStatus"
+        @toggle-clip="toggleClip"
+        @update:clip-offset="onClipOffsetChange"
+      />
 
-    <StatusRibbon
-      :clip-enabled="clipEnabled"
-      :clip-offset="clipOffset"
-      :current-model-url="currentModelUrl"
-      :current-poses-path="currentPosesPath"
-      :highlight-status="highlightStatus"
-      @toggle-clip="toggleClip"
-      @update:clip-offset="onClipOffsetChange"
-    />
+      <FocalPanel
+        v-if="showFocalSettings"
+        :focal-max="focalMax"
+        :focal-min="focalMin"
+        :manual-focal-px="manualFocalPx"
+        :current-view-fov="currentViewFov"
+        :current-view-focal-px="currentViewFocalPx"
+        @update:manual-focal-px="manualFocalPx = $event"
+        @input-focal="onManualFocalChange"
+        @change-focal="onManualFocalChange"
+        @reset-focal="resetFocalToCapture"
+      />
 
-    <CameraTrack
-      :active-image="activeImage"
-      :filtered-poses="filteredPoses"
-      :search-query="searchQuery"
-      @select-pose="flyToImage"
-    />
+      <ReferenceCard
+        :active-image="activeImage"
+        :active-tag="activeTag"
+        :scene-metadata="sceneMetadata"
+        @close="activeImage = ''; activeTag = ''"
+      />
 
-    <!-- Quality HUD -->
-    <div class="quality-hud">
-      <div class="quality-row">
-        <button
-          v-for="q in [
-            { key: 'smooth', label: '流畅' },
-            { key: 'standard', label: '标准' },
-            { key: 'hd', label: '高清' },
-          ]"
-          :key="q.key"
-          class="quality-btn"
-          :class="{ 'quality-btn--active': qualityMode === q.key }"
-          @click="setQualityMode(q.key)"
-        >
-          {{ q.label }}
-        </button>
-      </div>
-      <div class="quality-row" style="margin-top: 4px">
-        <button
-          v-for="m in [
-            { key: 'recall', label: '回忆' },
-            { key: 'inspect', label: '观察' },
-            { key: 'freeWalk', label: '自由' },
-          ]"
-          :key="m.key"
-          class="quality-btn quality-btn--mode"
-          :class="{ 'quality-btn--active': cameraRig?.mode === m.key }"
-          @click="setInteractionMode(m.key)"
-        >
-          {{ m.label }}
-        </button>
-      </div>
-      <div class="quality-row" style="margin-top: 4px">
-        <button
-          class="quality-btn quality-btn--path"
-          @click="startMemoryPath(filteredPoses)"
-        >
-          ▶ 路径
-        </button>
-        <button
-          class="quality-btn quality-btn--path"
-          @click="isPlayingMemoryPath ? pauseMemoryPath() : resumeMemoryPath()"
-        >
-          {{ isPlayingMemoryPath ? '⏸ 暂停' : '▶ 继续' }}
-        </button>
-        <button
-          class="quality-btn quality-btn--path"
-          @click="stopMemoryPath()"
-        >
-          ⏹ 停止
-        </button>
+      <!-- Orbit 控制面板 -->
+      <div
+        v-if="!isLoading && !loadError"
+        class="orbit-panel panel-card"
+        @mousedown.stop
+        @touchstart.stop
+        @touchmove.stop
+        @touchend.stop
+        @touchcancel.stop
+      >
+        <div class="eyebrow">Orbit Control</div>
+        <div class="panel-title">轨道旋转</div>
+        <div class="orbit-btn-row">
+          <button class="panel-btn panel-btn--solid" @click="orbitEnabled ? stopOrbit() : startOrbit()">
+            {{ orbitEnabled ? '关闭轨道' : '开启轨道' }}
+          </button>
+          <button v-if="orbitEnabled" class="panel-btn panel-btn--ghost" @click="toggleOrbitPause()">
+            {{ orbitPaused ? '恢复' : '暂停' }}
+          </button>
+        </div>
+        <template v-if="orbitEnabled">
+          <!-- 旋转速度控制 -->
+          <div class="focal-row" style="margin-top: 10px;">
+            <span>速度</span>
+            <span>{{ orbitSpeed }} 度/秒</span>
+          </div>
+          <input
+            type="range"
+            :min="1"
+            :max="120"
+            :value="orbitSpeed"
+            step="1"
+            @input="orbitSpeed = Number($event.target.value)"
+          />
+          <!-- 旋转半径控制 -->
+          <div class="focal-row" style="margin-top: 6px;">
+            <span>半径</span>
+            <span>{{ orbitRadius > 0 ? orbitRadius.toFixed(2) : '自动' }}</span>
+          </div>
+          <input
+            type="range"
+            :min="0"
+            :max="20"
+            :value="orbitRadius"
+            step="0.1"
+            @input="orbitRadius = Number($event.target.value)"
+          />
+          <!-- 旋转方向切换 -->
+          <div style="margin-top: 8px;">
+            <button class="panel-btn panel-btn--ghost orbit-dir-btn" @click="toggleOrbitDirection()">
+              {{ orbitDirection === 1 ? '逆时针' : '顺时针' }}
+            </button>
+          </div>
+        </template>
       </div>
     </div>
 
-    <ReferenceCard
-      :active-image="activeImage"
-      :active-tag="activeTag"
-      :scene-metadata="sceneMetadata"
-      @close="activeImage = ''; activeTag = ''"
-    />
+    <!-- 底部区域容器：QualityHUD 和 CameraTrack -->
+    <div class="bottom-area">
+      <CameraTrack
+        :active-image="activeImage"
+        :filtered-poses="filteredPoses"
+        :search-query="searchQuery"
+        @select-pose="flyToImage"
+      />
 
-    <!-- ===== Orbit 控制面板：相机绕模型中心自动旋转 ===== -->
-    <div
-      v-if="!isLoading && !loadError"
-      class="orbit-panel panel-card"
-      @mousedown.stop
-      @touchstart.stop
-      @touchmove.stop
-      @touchend.stop
-      @touchcancel.stop
-    >
-      <div class="eyebrow">Orbit Control</div>
-      <div class="panel-title">轨道旋转</div>
-      <div class="orbit-btn-row">
-        <button class="panel-btn panel-btn--solid" @click="orbitEnabled ? stopOrbit() : startOrbit()">
-          {{ orbitEnabled ? '关闭轨道' : '开启轨道' }}
-        </button>
-        <button v-if="orbitEnabled" class="panel-btn panel-btn--ghost" @click="toggleOrbitPause()">
-          {{ orbitPaused ? '恢复' : '暂停' }}
-        </button>
-      </div>
-      <template v-if="orbitEnabled">
-        <!-- 旋转速度控制 -->
-        <div class="focal-row" style="margin-top: 10px;">
-          <span>速度</span>
-          <span>{{ orbitSpeed }}度/秒</span>
-        </div>
-        <input
-          type="range"
-          :min="1"
-          :max="120"
-          :value="orbitSpeed"
-          step="1"
-          @input="orbitSpeed = Number($event.target.value)"
-        />
-        <!-- 旋转半径控制 -->
-        <div class="focal-row" style="margin-top: 6px;">
-          <span>半径</span>
-          <span>{{ orbitRadius > 0 ? orbitRadius.toFixed(2) : '自动' }}</span>
-        </div>
-        <input
-          type="range"
-          :min="0"
-          :max="20"
-          :value="orbitRadius"
-          step="0.1"
-          @input="orbitRadius = Number($event.target.value)"
-        />
-        <!-- 旋转方向切换 -->
-        <div style="margin-top: 8px;">
-          <button class="panel-btn panel-btn--ghost orbit-dir-btn" @click="toggleOrbitDirection()">
-            {{ orbitDirection === 1 ? '逆时针' : '顺时针' }}
+      <!-- Quality HUD -->
+      <div class="quality-hud">
+        <div class="quality-row">
+          <button
+            v-for="q in [
+              { key: 'smooth', label: '流畅' },
+              { key: 'standard', label: '标准' },
+              { key: 'hd', label: '高清' },
+            ]"
+            :key="q.key"
+            class="quality-btn"
+            :class="{ 'quality-btn--active': qualityMode === q.key }"
+            @click="setQualityMode(q.key)"
+          >
+            {{ q.label }}
           </button>
         </div>
-      </template>
+        <div class="quality-row" style="margin-top: 4px">
+          <button
+            v-for="m in [
+              { key: 'recall', label: '回忆' },
+              { key: 'inspect', label: '观察' },
+              { key: 'freeWalk', label: '自由' },
+            ]"
+            :key="m.key"
+            class="quality-btn quality-btn--mode"
+            :class="{ 'quality-btn--active': cameraRig?.mode === m.key }"
+            @click="setInteractionMode(m.key)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+        <div class="quality-row" style="margin-top: 4px">
+          <button
+            class="quality-btn quality-btn--path"
+            @click="startMemoryPath(filteredPoses)"
+          >
+            ▶ 路径
+          </button>
+          <button
+            class="quality-btn quality-btn--path"
+            @click="isPlayingMemoryPath ? pauseMemoryPath() : resumeMemoryPath()"
+          >
+            {{ isPlayingMemoryPath ? '⏸ 暂停' : '▶ 继续' }}
+          </button>
+          <button
+            class="quality-btn quality-btn--path"
+            @click="stopMemoryPath()"
+          >
+            ⏹ 停止
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -1467,10 +1467,6 @@ onBeforeUnmount(() => {
 }
 
 .camera-track-dock {
-  position: absolute;
-  left: 18px;
-  bottom: 18px;
-  z-index: 55;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1484,13 +1480,9 @@ onBeforeUnmount(() => {
 }
 
 .camera-track {
-  position: absolute;
-  left: 0;
-  bottom: 48px;
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  width: min(540px, calc(100vw - 36px));
   overflow-x: auto;
   padding: 12px 14px;
 }
@@ -1615,6 +1607,147 @@ button {
   }
 }
 
+/* ===== 响应式断点：小屏手机 (≤480px) ===== */
+@media (max-width: 480px) {
+  .hud {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 6px;
+  }
+
+  .toolbar {
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .search-panel {
+    width: 100%;
+    padding: 5px;
+  }
+
+  .search-input {
+    font-size: 11px;
+    padding: 8px 9px;
+  }
+
+  .panel-btn {
+    padding: 8px 9px;
+    font-size: 11px;
+    border-radius: 12px;
+  }
+
+  .right-panels {
+    top: 72px;
+    right: 8px;
+    gap: 12px;
+    max-height: calc(100vh - 140px);
+  }
+
+  .right-panels .status-ribbon {
+    width: min(72vw, 240px);
+    min-width: 180px;
+    padding: 10px 12px;
+  }
+
+  .right-panels .focal-panel {
+    width: min(72vw, 200px);
+    padding: 10px;
+  }
+
+  .right-panels .reference-card {
+    width: 100px;
+    min-width: 100px;
+    padding: 6px;
+  }
+
+  .right-panels .orbit-panel {
+    width: min(72vw, 180px);
+    padding: 10px;
+  }
+
+  .bottom-area {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 8px;
+  }
+
+  .bottom-area .camera-track {
+    max-width: min(360px, 45vw);
+    padding: 10px;
+  }
+
+  .bottom-area .camera-track-dock {
+    gap: 6px;
+  }
+
+  .camera-item {
+    width: 68px;
+    height: 48px;
+  }
+
+  .track-copy {
+    min-width: 80px;
+  }
+
+  .quality-hud {
+    padding: 5px;
+    gap: 2px;
+  }
+
+  .quality-btn {
+    padding: 5px 8px;
+    font-size: 10px;
+    border-radius: 8px;
+  }
+
+  .quality-btn--mode {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .quality-btn--path {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+  }
+
+  .panel-title {
+    font-size: 13px;
+  }
+
+  .status-line {
+    font-size: 12px;
+  }
+
+  .status-subline {
+    font-size: 10px;
+  }
+
+  .focal-row {
+    font-size: 11px;
+  }
+
+  .focal-number {
+    width: 80px;
+    padding: 6px 8px;
+  }
+
+  .meta-chip {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+
+  .reference-hint {
+    font-size: 8px;
+  }
+}
+
+/* ===== 响应式断点：中等屏幕手机 (≤768px) ===== */
 @media (max-width: 768px) {
   .hud {
     top: 12px;
@@ -1643,58 +1776,145 @@ button {
     font-size: 12px;
   }
 
-  .status-ribbon {
-    top: 112px;
+  .right-panels {
+    top: 80px;
     right: 12px;
+    gap: 14px;
+    max-height: calc(100vh - 160px);
+  }
+
+  .right-panels .status-ribbon {
     width: min(68vw, 280px);
+    min-width: 200px;
   }
 
-  .focal-panel {
-    top: 212px;
-    right: 12px;
+  .right-panels .focal-panel {
+    width: min(68vw, 220px);
   }
 
-  .reference-card {
-    top: 412px;
-    right: 12px;
+  .right-panels .reference-card {
     width: 112px;
     min-width: 112px;
   }
 
-  .camera-track-dock {
-    left: 12px;
-    bottom: 12px;
+  .right-panels .orbit-panel {
+    width: min(68vw, 180px);
+    padding: 10px;
   }
 
-  .camera-track {
-    width: min(360px, calc(100vw - 24px));
-    bottom: 44px;
+  .bottom-area {
+    bottom: 12px;
+    left: 12px;
+    right: 12px;
+    gap: 10px;
+  }
+
+  .bottom-area .camera-track {
+    max-width: min(400px, 48vw);
     padding: 12px;
   }
 
-  .track-copy {
-    min-width: 96px;
-  }
-
   .camera-item {
-    width: 78px;
-    height: 56px;
+    width: 74px;
+    height: 52px;
   }
 
-  .orbit-panel {
-    top: 510px;
-    right: 12px;
-    width: 180px;
-    padding: 10px;
+  .track-copy {
+    min-width: 88px;
   }
 }
 
-/* ===== Orbit 控制面板样式 ===== */
-.orbit-panel {
+/* ===== 响应式断点：小平板 (≤1024px) ===== */
+@media (max-width: 1024px) {
+  .right-panels {
+    top: 82px;
+    right: 16px;
+    gap: 15px;
+    max-height: calc(100vh - 170px);
+  }
+
+  .right-panels .status-ribbon {
+    width: min(30vw, 300px);
+    min-width: 210px;
+  }
+
+  .right-panels .focal-panel {
+    width: min(30vw, 230px);
+  }
+
+  .right-panels .reference-card {
+    width: min(25vw, 140px);
+    min-width: 110px;
+  }
+
+  .right-panels .orbit-panel {
+    width: min(30vw, 200px);
+  }
+
+  .bottom-area .camera-track {
+    max-width: min(450px, 50vw);
+  }
+}
+
+/* ===== 右侧面板容器布局 ===== */
+.right-panels {
   position: absolute;
-  top: 370px;
+  top: 86px;
   right: 18px;
   z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  /* 自定义滚动条 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(97, 109, 118, 0.3) transparent;
+}
+
+.right-panels::-webkit-scrollbar {
+  width: 6px;
+}
+
+.right-panels::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.right-panels::-webkit-scrollbar-thumb {
+  background-color: rgba(97, 109, 118, 0.3);
+  border-radius: 3px;
+}
+
+/* 右侧面板内的面板样式调整 */
+.right-panels .status-ribbon {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: min(26vw, 320px);
+  min-width: 220px;
+}
+
+.right-panels .focal-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 240px;
+}
+
+.right-panels .reference-card {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: min(22vw, 152px);
+  min-width: 118px;
+}
+
+.right-panels .orbit-panel {
+  position: relative;
+  top: auto;
+  right: auto;
   width: 210px;
   padding: 14px;
   display: flex;
@@ -1702,6 +1922,40 @@ button {
   gap: 6px;
 }
 
+/* ===== 底部区域容器 ===== */
+.bottom-area {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 55;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.bottom-area .camera-track-dock {
+  position: relative;
+  left: auto;
+  bottom: auto;
+}
+
+.bottom-area .camera-track {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  width: auto;
+  max-width: min(480px, 50vw);
+}
+
+.bottom-area .quality-hud {
+  position: relative;
+  bottom: auto;
+  right: auto;
+}
+
+/* ===== Orbit 控制面板样式 ===== */
 .orbit-btn-row {
   display: flex;
   gap: 8px;
@@ -1710,22 +1964,6 @@ button {
 
 .orbit-dir-btn {
   width: 100%;
-}
-
-.quality-hud {
-  position: absolute;
-  bottom: 18px;
-  right: 18px;
-  z-index: 65;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 16px;
-  background: rgba(250, 248, 243, 0.86);
-  border: 1px solid rgba(97, 109, 118, 0.16);
-  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.07);
-  backdrop-filter: blur(16px);
 }
 
 .quality-row {
@@ -1745,6 +1983,7 @@ button {
   color: rgba(30, 30, 32, 0.62);
   transition: background-color 160ms, color 160ms;
   font-family: inherit;
+  white-space: nowrap;
 }
 
 .quality-btn:hover {
