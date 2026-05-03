@@ -77,17 +77,24 @@ const serializeTrackMap = (value: MediaTrackCapabilities | MediaTrackSettings | 
   )
 )
 
-const buildMainBackConstraints = (constraints: MediaStreamConstraints) => {
+const cameraLabelIndex = (label: string) => {
+  const match = label.match(/camera\s+(\d+)/i)
+  return match ? Number(match[1]) : null
+}
+
+const buildMainBackConstraints = (constraints: MediaStreamConstraints, deviceId?: string) => {
   const video = typeof constraints.video === 'object' && constraints.video !== null
     ? { ...constraints.video }
     : {}
   const advanced = Array.isArray(video.advanced) ? [...video.advanced] : []
+  const deviceConstraint = deviceId ? { deviceId: { exact: deviceId } } : {}
 
   return {
     ...constraints,
     audio: false,
     video: {
       ...video,
+      ...deviceConstraint,
       facingMode: { ideal: 'environment' },
       width: { ideal: 1920 },
       height: { ideal: 1080 },
@@ -100,6 +107,22 @@ const buildMainBackConstraints = (constraints: MediaStreamConstraints) => {
       ],
     },
   } as MediaStreamConstraints
+}
+
+const getVideoInputDevices = async () => {
+  try {
+    const devices = await navigator.mediaDevices?.enumerateDevices?.()
+    return devices
+      ?.filter((device) => device.kind === 'videoinput')
+      .map((device, index) => ({
+        index,
+        label: device.label,
+        deviceId: device.deviceId,
+        groupId: device.groupId,
+      })) ?? []
+  } catch (_) {
+    return []
+  }
 }
 
 const tuneCameraTrack = async (stream: MediaStream) => {
@@ -147,20 +170,74 @@ const tuneCameraTrack = async (stream: MediaStream) => {
   })
 
   try {
-    const devices = await navigator.mediaDevices?.enumerateDevices?.()
+    const devices = await getVideoInputDevices()
     postBridgeMessage({
       status: 'info',
       msg: 'Marker AR camera devices after permission',
-      cameras: devices
-        ?.filter((device) => device.kind === 'videoinput')
-        .map((device, index) => ({
-          index,
-          label: device.label,
-          idPrefix: device.deviceId.slice(0, 8),
-          groupPrefix: device.groupId.slice(0, 8),
-        })) ?? [],
+      cameras: devices.map((device) => ({
+        index: device.index,
+        label: device.label,
+        idPrefix: device.deviceId.slice(0, 8),
+        groupPrefix: device.groupId.slice(0, 8),
+      })),
     })
   } catch (_) {}
+}
+
+const stopCameraStream = (stream: MediaStream) => {
+  stream.getTracks().forEach((track) => track.stop())
+}
+
+const shouldRetryCameraTrack = (stream: MediaStream) => {
+  const [track] = stream.getVideoTracks()
+  const index = cameraLabelIndex(track?.label || '')
+  return index !== null && index >= 3
+}
+
+const openPreferredCameraStream = async (
+  constraints: MediaStreamConstraints,
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+) => {
+  const firstConstraints = buildMainBackConstraints(constraints)
+  postBridgeMessage({
+    status: 'info',
+    msg: 'Marker AR getUserMedia constraints',
+    constraints: firstConstraints,
+  })
+  const firstStream = await getUserMedia(firstConstraints)
+  if (!shouldRetryCameraTrack(firstStream)) return firstStream
+
+  const devices = await getVideoInputDevices()
+  const candidates = devices
+    .filter((device) => {
+      const index = cameraLabelIndex(device.label)
+      return index !== null && index < 3
+    })
+    .sort((a, b) => (cameraLabelIndex(a.label) ?? 99) - (cameraLabelIndex(b.label) ?? 99))
+
+  for (const candidate of candidates) {
+    try {
+      stopCameraStream(firstStream)
+      const retryConstraints = buildMainBackConstraints(constraints, candidate.deviceId)
+      postBridgeMessage({
+        status: 'info',
+        msg: 'Marker AR retry camera device',
+        index: candidate.index,
+        label: candidate.label,
+        idPrefix: candidate.deviceId.slice(0, 8),
+      })
+      return await getUserMedia(retryConstraints)
+    } catch (error) {
+      postBridgeMessage({
+        status: 'info',
+        msg: 'Marker AR retry camera failed',
+        label: candidate.label,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return await getUserMedia(firstConstraints)
 }
 
 const installGetUserMediaDiagnostics = () => {
@@ -169,13 +246,10 @@ const installGetUserMediaDiagnostics = () => {
   const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
   mediaDevices.getUserMedia = async (constraints) => {
     try {
-      const tunedConstraints = buildMainBackConstraints(constraints || { video: true })
-      postBridgeMessage({
-        status: 'info',
-        msg: 'Marker AR getUserMedia constraints',
-        constraints: tunedConstraints,
-      })
-      const stream = await originalGetUserMedia(tunedConstraints)
+      const stream = await openPreferredCameraStream(
+        constraints || { video: true },
+        originalGetUserMedia,
+      )
       await tuneCameraTrack(stream)
       return stream
     } catch (error) {
@@ -272,35 +346,10 @@ const normalizeMindArLayers = () => {
 
   // MindAR 默认把摄像头 video 放到 z-index: -2；在 Android WebView 中会被黑色容器背景盖住。
   // 这里强制把视频放到 WebGL canvas 下方但仍位于容器背景上方，避免 AR 已启动但画面黑屏。
-  let containRect: { left: number, top: number, width: number, height: number } | null = null
   const videos = container.querySelectorAll('video')
   videos.forEach((video) => {
     video.style.zIndex = '0'
-    const videoRatio = video.videoWidth > 0 && video.videoHeight > 0
-      ? video.videoWidth / video.videoHeight
-      : 0
-    const containerRatio = container.clientWidth > 0 && container.clientHeight > 0
-      ? container.clientWidth / container.clientHeight
-      : 0
-    if (videoRatio > 0 && containerRatio > 0) {
-      const widthByContain = videoRatio > containerRatio
-        ? container.clientWidth
-        : container.clientHeight * videoRatio
-      const heightByContain = videoRatio > containerRatio
-        ? container.clientWidth / videoRatio
-        : container.clientHeight
-      containRect = {
-        left: (container.clientWidth - widthByContain) / 2,
-        top: (container.clientHeight - heightByContain) / 2,
-        width: widthByContain,
-        height: heightByContain,
-      }
-      video.style.width = `${widthByContain}px`
-      video.style.height = `${heightByContain}px`
-      video.style.left = `${containRect.left}px`
-      video.style.top = `${containRect.top}px`
-      video.style.objectFit = 'contain'
-    }
+    video.style.objectFit = 'cover'
     video.style.background = 'transparent'
     video.style.pointerEvents = 'none'
   })
@@ -314,12 +363,6 @@ const normalizeMindArLayers = () => {
   canvases.forEach((canvas) => {
     canvas.style.zIndex = canvas === renderer?.domElement ? '1' : '2'
     canvas.style.pointerEvents = 'none'
-    if (containRect) {
-      canvas.style.width = `${containRect.width}px`
-      canvas.style.height = `${containRect.height}px`
-      canvas.style.left = `${containRect.left}px`
-      canvas.style.top = `${containRect.top}px`
-    }
   })
 
   Array.from(container.children).forEach((child) => {
