@@ -48,6 +48,7 @@ class WebGLViewerPage extends StatefulWidget {
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
   static const int _downloadProgressThrottleMs = 100;
   static const String _defaultMarkerTargetPath = '/targets/braindance-card.mind';
+  static const String _markerArDebugVersion = 'marker-ar-debug-20260503-3';
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -55,6 +56,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isOpeningExternalViewer = false;
   bool _didAttemptExternalOpen = false;
   String? _externalViewerUrl;
+  String? _lastLoadedViewerUrl;
   HttpServer? _localServer;
   int _localPort = 0;
   bool _isDownloading = false;
@@ -684,7 +686,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (String url) {
+            debugPrint('WebView page started: $url marker=$_isMarkerArMode');
+          },
           onPageFinished: (String url) {
+            debugPrint('WebView page finished: $url marker=$_isMarkerArMode');
             // 注入 overscroll 防护脚本：在 Android/iOS WebView 层面强化禁用弹性边界效果，
             // 防止拖动 WebGL canvas 时出现浏览器特征的画面拉伸（overscroll bounce）。
             // canvas 上的 touchmove 已由 GestureHandler（gestures.ts）调用 e.preventDefault() 处理，
@@ -705,7 +711,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
-                  'WebView: no ready signal received, triggering manually',
+                  'WebView: no ready signal received, triggering manually ($_markerArDebugVersion)',
+                );
+                debugPrint(
+                  'WebView fallback detail: marker=$_isMarkerArMode url=$_lastLoadedViewerUrl',
                 );
                 setState(() => _isWebReady = true);
                 if (!_isMarkerArMode) {
@@ -723,6 +732,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final platformController = _controller?.platform;
     if (platformController is AndroidWebViewController) {
       platformController.setMediaPlaybackRequiresUserGesture(false);
+      platformController.setOnConsoleMessage((message) {
+        debugPrint('WebView console [${message.level.name}]: ${message.message}');
+      });
       platformController.setOnPlatformPermissionRequest((request) {
         if (!_isMarkerArMode) {
           request.deny();
@@ -746,6 +758,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       await _controller?.clearCache();
       final cacheBust = DateTime.now().millisecondsSinceEpoch;
       final url = _buildViewerUrl(cacheBust);
+      _lastLoadedViewerUrl = url;
       debugPrint('Loading WebGL viewer URL: $url');
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
@@ -765,7 +778,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           'mode': 'marker-ar',
           'model': payload['ply']?.toString() ?? '',
           'target': _defaultMarkerTargetPath,
-          'v': 'marker-ar-$cacheBust',
+          'v': '$_markerArDebugVersion-$cacheBust',
         },
       ).toString();
     }
