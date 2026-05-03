@@ -1,0 +1,3 @@
+[submodule "ai_engine/demo/4DGS-Video-Generator"]
+	path = ai_engine/demo/4DGS-Video-Generator
+	url = https://github.com/tianxingleo/4DGS-Video-Generator.git
