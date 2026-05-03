@@ -359,15 +359,27 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
   }
 }
 
-// ===== Recording Too Short Bubble (center) =====
-class _TooShortBubble extends ConsumerStatefulWidget {
-  const _TooShortBubble();
+// ===== Center Bubble (reusable) =====
+class _CenterBubble extends ConsumerStatefulWidget {
+  final StateProvider<bool> provider;
+  final String message;
+  final IconData icon;
+  final Color iconColor;
+  final int durationSeconds;
+
+  _CenterBubble({
+    required this.provider,
+    required this.message,
+    required this.icon,
+    required this.iconColor,
+    this.durationSeconds = 3,
+  });
 
   @override
-  ConsumerState<_TooShortBubble> createState() => _TooShortBubbleState();
+  ConsumerState<_CenterBubble> createState() => _CenterBubbleState();
 }
 
-class _TooShortBubbleState extends ConsumerState<_TooShortBubble>
+class _CenterBubbleState extends ConsumerState<_CenterBubble>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _fade;
@@ -388,8 +400,8 @@ class _TooShortBubbleState extends ConsumerState<_TooShortBubble>
       CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
     );
     _ctrl.addStatusListener((s) {
-      if (s == AnimationStatus.dismissed) {
-        ref.read(showTooShortBubbleProvider.notifier).state = false;
+      if (s == AnimationStatus.dismissed && mounted) {
+        ref.read(widget.provider.notifier).state = false;
       }
     });
   }
@@ -403,11 +415,11 @@ class _TooShortBubbleState extends ConsumerState<_TooShortBubble>
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(showTooShortBubbleProvider, (prev, next) {
+    ref.listen(widget.provider, (prev, next) {
       if (next) {
         _dismissTimer?.cancel();
         _ctrl.forward();
-        _dismissTimer = Timer(const Duration(seconds: 3), () {
+        _dismissTimer = Timer(Duration(seconds: widget.durationSeconds), () {
           if (mounted) _ctrl.reverse();
         });
       }
@@ -444,15 +456,11 @@ class _TooShortBubbleState extends ConsumerState<_TooShortBubble>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.info_outline_rounded,
-                          color: Colors.white.withAlpha(180),
-                          size: 20,
-                        ),
+                        Icon(widget.icon, color: widget.iconColor, size: 20),
                         const SizedBox(width: 10),
                         Flexible(
                           child: Text(
-                            textLocalize('reco_record_too_short'),
+                            widget.message,
                             style: TextStyle(
                               color: Colors.white.withAlpha(220),
                               fontSize: 13,

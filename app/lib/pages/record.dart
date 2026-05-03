@@ -42,6 +42,9 @@ final saveFailBubbleProvider = StateProvider<String?>((ref) => null);
 /// 录制时间过短 → 中央气泡
 final showTooShortBubbleProvider = StateProvider<bool>((ref) => false);
 
+/// 录制完成 → 中央气泡
+final showRecoDoneBubbleProvider = StateProvider<bool>((ref) => false);
+
 enum _MotionState { steady, ideal, caution, danger }
 
 class RecordPage extends ConsumerStatefulWidget {
@@ -278,7 +281,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     if (showToast && mounted) {
-      TDToast.showText(textLocalize('reco_done'), context: context);
+      ref.read(showRecoDoneBubbleProvider.notifier).state = true;
     }
 
     if (navigateToSubmit && mounted) {
@@ -1008,7 +1011,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
               ),
             const _AccelWarningBanner(),
             const _SaveFailBubble(),
-            const _TooShortBubble(),
+            _CenterBubble(
+              provider: showTooShortBubbleProvider,
+              message: textLocalize('reco_record_too_short'),
+              icon: Icons.info_outline_rounded,
+              iconColor: Colors.white.withAlpha(180),
+            ),
+            _CenterBubble(
+              provider: showRecoDoneBubbleProvider,
+              message: textLocalize('reco_done'),
+              icon: Icons.check_circle_outline_rounded,
+              iconColor: BDDesign.colorFadedOlive,
+              durationSeconds: 2,
+            ),
           ],
         ),
       ),
