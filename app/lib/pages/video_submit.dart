@@ -36,6 +36,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   double _uploadProgress = 0.0;
   int _uploadedBytes = 0;
   int _totalFileSize = 0;
+  CancelToken? _cancelToken;
+  bool _dialogShowing = false;
+  bool _shouldClosePage = false;
 
   static final Random _rdg = Random();
 
@@ -47,6 +50,45 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         '${DateFormat.format(time.day, 2)}'
         '_'
         '${DateFormat.format(_rdg.nextInt(1000000), 6)}';
+  }
+
+  Future<bool> _showCancelUploadDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          title: Text(
+            textLocalize('video_upload_cancel_title'),
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Text(
+            textLocalize('video_upload_cancel_message'),
+            style: TextStyle(
+              color: isDark ? Colors.white70 : Colors.black54,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(textLocalize('video_upload_cancel_continue')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.redAccent,
+              ),
+              child: Text(textLocalize('video_upload_cancel_confirm')),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
   }
 
   Future<void> _submit() async {
@@ -79,6 +121,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
     }
 
+    _cancelToken = CancelToken();
+
     setState(() {
       _isUploading = true;
     });
@@ -110,6 +154,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             'Content-Length': fileSize.toString(),
           },
         ),
+        cancelToken: _cancelToken,
         onSendProgress: (count, total) {
           if (mounted) {
             setState(() {
@@ -139,7 +184,23 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
-        Navigator.of(context).pushNamed('/tasks');
+        if (_dialogShowing) {
+          _shouldClosePage = true;
+          Navigator.of(context).pop(); // dismiss dialog, callback handles page pop
+        } else {
+          Navigator.of(context).pop(); // pop page directly
+        }
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        return;
+      }
+      if (mounted) {
+        debugPrint('[VideoSubmit] error: $e');
+        TDToast.showText(
+          textLocalize('gen_submit_fail'),
+          context: context,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -150,6 +211,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         );
       }
     } finally {
+      _cancelToken = null;
       if (mounted) {
         setState(() {
           _isUploading = false;
@@ -175,95 +237,117 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(textLocalize('video_submit_title'))),
-      body: Stack(
-        children: [
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  textLocalize('video_submit_name'),
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: nameController,
-                  decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
-                    hintText: textLocalize('video_submit_name_hint'),
+    return PopScope(
+      canPop: !_isUploading,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (!didPop && _isUploading) {
+          final navigator = Navigator.of(context);
+          _dialogShowing = true;
+          final shouldCancel = await _showCancelUploadDialog();
+          if (!mounted) return;
+          _dialogShowing = false;
+          if (shouldCancel) {
+            _cancelToken?.cancel();
+            setState(() {
+              _isUploading = false;
+            });
+            navigator.pop();
+          } else if (_shouldClosePage) {
+            _shouldClosePage = false;
+            navigator.pop();
+          }
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(textLocalize('video_submit_title'))),
+        body: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    textLocalize('video_submit_name'),
+                    style: const TextStyle(fontSize: 16),
                   ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  textLocalize('video_submit_thumbnail'),
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Image.file(
-                    File(widget.thumbnailPath),
-                    width: 180,
-                    height: 120,
-                    fit: BoxFit.cover,
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameController,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      hintText: textLocalize('video_submit_name_hint'),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 48),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isUploading ? null : _submit,
-                    child: Text(textLocalize('video_submit_btn')),
+                  const SizedBox(height: 24),
+                  Text(
+                    textLocalize('video_submit_thumbnail'),
+                    style: const TextStyle(fontSize: 16),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Image.file(
+                      File(widget.thumbnailPath),
+                      width: 180,
+                      height: 120,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isUploading ? null : _submit,
+                      child: Text(textLocalize('video_submit_btn')),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          if (_isUploading)
-            Container(
-              color: Colors.black45,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: _uploadProgress,
-                          minHeight: 6,
-                          backgroundColor: Colors.white.withAlpha(40),
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF7AA2FF),
+            if (_isUploading)
+              Container(
+                color: Colors.black45,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                        style: TextStyle(
-                          color: Colors.white.withAlpha(200),
-                          fontSize: 13,
+                        const SizedBox(height: 16),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: _uploadProgress,
+                            minHeight: 6,
+                            backgroundColor: Colors.white.withAlpha(40),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                              Color(0xFF7AA2FF),
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 10),
+                        Text(
+                          '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                          style: TextStyle(
+                            color: Colors.white.withAlpha(200),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
