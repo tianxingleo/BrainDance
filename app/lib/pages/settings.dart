@@ -15,7 +15,7 @@ import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../main.dart' show overviewLocalIndexingProvider, overviewStatsProvider;
+import '../main.dart' show overviewStatsProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -120,15 +120,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                 Consumer(
                   builder: (context, ref, _) {
                     final stats = ref.watch(overviewStatsProvider);
-                    final isIndexing = ref.watch(overviewLocalIndexingProvider);
                     return RecallOverviewCard(
                       isDark: isDark,
                       textColor: textColor,
                       recentCount: stats['recentCount'] ?? 0,
                       allModelCount: stats['allModelCount'] ?? 0,
                       processingTaskCount: stats['processingTaskCount'] ?? 0,
-                      ragCount: stats['ragCount'] ?? 0,
-                      isLocalIndexing: isIndexing,
                       onOpenTasks: () {
                         Navigator.push(
                           context,

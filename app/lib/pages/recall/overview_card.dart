@@ -9,8 +9,6 @@ class RecallOverviewCard extends StatelessWidget {
   final int recentCount;
   final int allModelCount;
   final int processingTaskCount;
-  final int ragCount;
-  final bool isLocalIndexing;
   final VoidCallback onOpenTasks;
 
   const RecallOverviewCard({
@@ -20,8 +18,6 @@ class RecallOverviewCard extends StatelessWidget {
     required this.recentCount,
     required this.allModelCount,
     required this.processingTaskCount,
-    required this.ragCount,
-    required this.isLocalIndexing,
     required this.onOpenTasks,
   });
 
@@ -59,13 +55,6 @@ class RecallOverviewCard extends StatelessWidget {
                   child: _RecallMetric(
                     label: textLocalize('recall_label_processing'),
                     value: processingTaskCount.toString(),
-                  ),
-                ),
-                Expanded(
-                  child: _RecallMetric(
-                    label: textLocalize('recall_label_rag'),
-                    value: isLocalIndexing ? '...' : ragCount.toString(),
-                    accent: textColor,
                   ),
                 ),
               ],
@@ -187,9 +176,8 @@ class _OverviewChip extends StatelessWidget {
 class _RecallMetric extends StatelessWidget {
   final String label;
   final String value;
-  final Color? accent;
 
-  const _RecallMetric({required this.label, required this.value, this.accent});
+  const _RecallMetric({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -214,9 +202,7 @@ class _RecallMetric extends StatelessWidget {
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
-            color:
-                accent ??
-                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
+            color: isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack,
           ),
         ),
       ],
