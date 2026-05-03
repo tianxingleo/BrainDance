@@ -27,6 +27,12 @@ type MindARInstance = {
   stop?: () => void
 }
 
+type MediaDeviceLike = {
+  deviceId: string
+  label: string
+  kind: string
+}
+
 const containerRef = ref<HTMLDivElement | null>(null)
 const status = ref('准备启动 AR...')
 
@@ -45,6 +51,9 @@ let camera: CameraInstance | null = null
 let spark: SparkRendererInstance | null = null
 let splatMesh: SplatMeshInstance | null = null
 let arRoot: GroupInstance | null = null
+
+const preferredMainBackCameraPattern = /back|rear|environment|wide|main|0|后|后置|主|广角/i
+const rejectedAuxCameraPattern = /tele|zoom|macro|depth|ultra|front|长焦|微距|景深|前置|超广角/i
 
 const postBridgeMessage = (payload: Record<string, unknown>) => {
   window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
@@ -69,6 +78,47 @@ const installGetUserMediaDiagnostics = () => {
       })
       throw error
     }
+  }
+}
+
+const pickMainBackCamera = async () => {
+  if (params.camera !== 'main-back') return null
+  const mediaDevices = navigator.mediaDevices
+  if (!mediaDevices?.enumerateDevices) return null
+
+  try {
+    const devices = await mediaDevices.enumerateDevices()
+    const videoInputs = devices
+      .filter((device) => device.kind === 'videoinput')
+      .map((device) => ({
+        deviceId: device.deviceId,
+        label: device.label || '',
+        kind: device.kind,
+      })) as MediaDeviceLike[]
+
+    const preferred = videoInputs.find((device) => (
+      preferredMainBackCameraPattern.test(device.label) &&
+      !rejectedAuxCameraPattern.test(device.label)
+    ))
+
+    postBridgeMessage({
+      status: 'info',
+      msg: 'Marker AR camera candidates',
+      selected: preferred?.label || preferred?.deviceId || null,
+      cameras: videoInputs.map((device) => ({
+        label: device.label,
+        idPrefix: device.deviceId.slice(0, 8),
+      })),
+    })
+
+    return preferred?.deviceId || null
+  } catch (error) {
+    postBridgeMessage({
+      status: 'info',
+      msg: 'Marker AR camera enumeration skipped',
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
   }
 }
 
@@ -206,7 +256,14 @@ onMounted(async () => {
       uiLoading: boolean
       uiScanning: boolean
       uiError: boolean
+      environmentDeviceId?: string | null
+      filterMinCF?: number
+      filterBeta?: number
+      warmupTolerance?: number
+      missTolerance?: number
     }) => MindARInstance
+
+    const environmentDeviceId = await pickMainBackCamera()
 
     mindarThree = new MindARThree({
       container: containerRef.value,
@@ -215,13 +272,18 @@ onMounted(async () => {
       uiLoading: false,
       uiScanning: false,
       uiError: false,
+      environmentDeviceId,
+      filterMinCF: params.filterMinCF,
+      filterBeta: params.filterBeta,
+      warmupTolerance: params.warmupTolerance,
+      missTolerance: params.missTolerance,
     })
 
     renderer = mindarThree.renderer
     scene = mindarThree.scene
     camera = mindarThree.camera
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, params.pixelRatio))
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
     status.value = '模型加载中...'
@@ -262,6 +324,15 @@ onMounted(async () => {
       status: 'ready',
       msg: 'Marker AR started',
       video: getVideoDiagnostics(),
+      arTuning: {
+        scale: params.scale,
+        pixelRatio: params.pixelRatio,
+        filterMinCF: params.filterMinCF,
+        filterBeta: params.filterBeta,
+        warmupTolerance: params.warmupTolerance,
+        missTolerance: params.missTolerance,
+        camera: environmentDeviceId ? 'main-back-device' : 'environment-fallback',
+      },
     })
 
     renderer.setAnimationLoop(() => {

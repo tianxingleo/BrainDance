@@ -10,6 +10,12 @@ export type ArViewerParams = ArTransform & {
   mode: ArMode
   modelUrl: string
   targetUrl: string
+  camera: string
+  pixelRatio: number
+  filterMinCF: number
+  filterBeta: number
+  warmupTolerance: number
+  missTolerance: number
 }
 
 export type ArStatus =
