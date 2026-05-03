@@ -89,9 +89,10 @@ const buildMainBackConstraints = (constraints: MediaStreamConstraints) => {
     video: {
       ...video,
       facingMode: { ideal: 'environment' },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
       aspectRatio: { ideal: 1.7777777778 },
+      resizeMode: 'none',
       zoom: { ideal: 1 },
       advanced: [
         { zoom: 1, focusMode: 'continuous' },
@@ -144,6 +145,22 @@ const tuneCameraTrack = async (stream: MediaStream) => {
     settingsBefore: serializeTrackMap(settingsBefore),
     settingsAfter: serializeTrackMap(settingsAfter),
   })
+
+  try {
+    const devices = await navigator.mediaDevices?.enumerateDevices?.()
+    postBridgeMessage({
+      status: 'info',
+      msg: 'Marker AR camera devices after permission',
+      cameras: devices
+        ?.filter((device) => device.kind === 'videoinput')
+        .map((device, index) => ({
+          index,
+          label: device.label,
+          idPrefix: device.deviceId.slice(0, 8),
+          groupPrefix: device.groupId.slice(0, 8),
+        })) ?? [],
+    })
+  } catch (_) {}
 }
 
 const installGetUserMediaDiagnostics = () => {
@@ -255,10 +272,35 @@ const normalizeMindArLayers = () => {
 
   // MindAR 默认把摄像头 video 放到 z-index: -2；在 Android WebView 中会被黑色容器背景盖住。
   // 这里强制把视频放到 WebGL canvas 下方但仍位于容器背景上方，避免 AR 已启动但画面黑屏。
+  let containRect: { left: number, top: number, width: number, height: number } | null = null
   const videos = container.querySelectorAll('video')
   videos.forEach((video) => {
     video.style.zIndex = '0'
-    video.style.objectFit = 'cover'
+    const videoRatio = video.videoWidth > 0 && video.videoHeight > 0
+      ? video.videoWidth / video.videoHeight
+      : 0
+    const containerRatio = container.clientWidth > 0 && container.clientHeight > 0
+      ? container.clientWidth / container.clientHeight
+      : 0
+    if (videoRatio > 0 && containerRatio > 0) {
+      const widthByContain = videoRatio > containerRatio
+        ? container.clientWidth
+        : container.clientHeight * videoRatio
+      const heightByContain = videoRatio > containerRatio
+        ? container.clientWidth / videoRatio
+        : container.clientHeight
+      containRect = {
+        left: (container.clientWidth - widthByContain) / 2,
+        top: (container.clientHeight - heightByContain) / 2,
+        width: widthByContain,
+        height: heightByContain,
+      }
+      video.style.width = `${widthByContain}px`
+      video.style.height = `${heightByContain}px`
+      video.style.left = `${containRect.left}px`
+      video.style.top = `${containRect.top}px`
+      video.style.objectFit = 'contain'
+    }
     video.style.background = 'transparent'
     video.style.pointerEvents = 'none'
   })
@@ -272,6 +314,12 @@ const normalizeMindArLayers = () => {
   canvases.forEach((canvas) => {
     canvas.style.zIndex = canvas === renderer?.domElement ? '1' : '2'
     canvas.style.pointerEvents = 'none'
+    if (containRect) {
+      canvas.style.width = `${containRect.width}px`
+      canvas.style.height = `${containRect.height}px`
+      canvas.style.left = `${containRect.left}px`
+      canvas.style.top = `${containRect.top}px`
+    }
   })
 
   Array.from(container.children).forEach((child) => {
