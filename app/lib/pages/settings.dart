@@ -76,8 +76,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       if (boundary != null) {
                         try {
                           final image = await boundary.toImage(
-                              pixelRatio:
-                                  MediaQuery.of(context).devicePixelRatio);
+                              pixelRatio: 1.0);
 
                           final RenderBox? buttonBox =
                               _themeSwitchKey.currentContext?.findRenderObject()
@@ -99,8 +98,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       }
 
                       SetConfig.setNightMode(!AppConfig.isNightMode, ref);
-                      SetConfig.saveMsgToFile();
-                      onUpdate();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        SetConfig.saveMsgToFile();
+                      });
                     },
                     child: BDStatusPill(
                       key: _themeSwitchKey,
@@ -166,12 +166,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         ),
       ),
     );
-  }
-
-  void onUpdate() {
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   void _handleTabChange() {

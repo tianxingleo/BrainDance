@@ -105,27 +105,18 @@ class _ScreenshotPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    
-    // 使用离屏渲染层来做遮罩，相比复杂的 clipPath 更能够利用硬件加速，极大提升帧率
-    canvas.saveLayer(dst, Paint());
-    
-    // 绘制旧主题的截屏，降低 filterQuality 到 low，避免缩放时过度消耗 GPU
-    final paint = Paint()..filterQuality = FilterQuality.low;
-    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    canvas.drawImageRect(image, src, dst, paint);
-    
     final double maxRadius = _maxDistance(center, size);
     final double specificRadius = maxRadius * radiusValid;
 
-    // 用 BlendMode.clear '挖' 出一个不断扩大的圆洞，露出底层的新主题
-    final clearPaint = Paint()
-      ..blendMode = BlendMode.clear
-      ..style = PaintingStyle.fill;
-    
-    canvas.drawCircle(center, specificRadius, clearPaint);
-    
-    // 合成图层
-    canvas.restore();
+    final holePath = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(dst)
+      ..addOval(Rect.fromCircle(center: center, radius: specificRadius));
+
+    canvas.clipPath(holePath);
+
+    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    canvas.drawImageRect(image, src, dst, Paint()..filterQuality = FilterQuality.low);
   }
 
   double _maxDistance(Offset p, Size size) {
