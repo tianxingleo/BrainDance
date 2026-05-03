@@ -65,6 +65,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _recordTimer;
   int _recordSeconds = 0;
   bool _isToggling = false;
+  DateTime? _recordingStartTime;
+  static const _minRecordingMs = 500;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -192,6 +194,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _recordTimer?.cancel();
     _recordTimer = null;
     _recordSeconds = 0;
+    _recordingStartTime = null;
     _setGlobalRecording(false);
     if (updateUi && mounted) {
       setState(() {});
@@ -203,11 +206,24 @@ class _RecordPageState extends ConsumerState<RecordPage>
     bool showToast = true,
     bool navigateToSubmit = true,
   }) async {
+    final startTime = _recordingStartTime;
     _resetRecordingState(updateUi: true);
 
     if (!controller.value.isRecordingVideo) {
       return;
     }
+
+    if (startTime != null) {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      if (elapsed < _minRecordingMs) {
+        _isToggling = true;
+        await Future.delayed(
+          Duration(milliseconds: _minRecordingMs - elapsed),
+        );
+        _isToggling = false;
+      }
+    }
+
     XFile file;
     try {
       file = await controller.stopVideoRecording();
@@ -309,6 +325,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
     } catch (_) {}
     _recordSeconds = 0;
+    _recordingStartTime = DateTime.now();
 
     _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _recordSeconds++;
