@@ -24,7 +24,8 @@ import '../main.dart'
     show
         overviewStatsProvider,
         overviewLocalIndexingProvider,
-        pageIndexProvider;
+        pageIndexProvider,
+        recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
 import '../services/local_rag_index.dart';
@@ -86,7 +87,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;
-  RecallSearchMode _searchMode = RecallSearchMode.cloud;
+  RecallSearchMode _searchMode = RecallSearchMode.local;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   StreamSubscription<String>? _agentStreamSubscription;

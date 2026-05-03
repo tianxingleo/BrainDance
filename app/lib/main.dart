@@ -32,7 +32,7 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
-final recallScrollToTopSignal = StateProvider<bool>((ref) => false);
+final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(
@@ -489,7 +489,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) {
       if (newIndex == 0) {
-        ref.read(recallScrollToTopSignal.notifier).update((s) => !s);
+        ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
       }
       return;
     }
