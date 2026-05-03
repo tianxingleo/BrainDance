@@ -281,17 +281,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
       1 => _textEditingController.text.trim().isEmpty ? 0 : 1,
       _ => GenConfig.uploadedVideos.length,
     };
-    final modeLabel = switch (_tabController.index) {
-      0 => textLocalize('gen_pic'),
-      1 => textLocalize('gen_text'),
-      _ => textLocalize('gen_video'),
-    };
     final uploadLabel = _isGenerating
         ? textLocalize('gen_text_generating')
         : _isUploading
-        ? textLocalize(
-            'gen_upload_progress',
-          ).replaceAll('%s', (_uploadProgress * 100).toStringAsFixed(0))
+        ? textLocalize('gen_uploading')
         : currentSelectionCount == 0
         ? textLocalize('gen_waiting_material')
         : textLocalize('gen_ready_submit');
@@ -667,35 +660,6 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                             : BDDesign.colorMutedBlue,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: BDPanelCard(
-                        padding: const EdgeInsets.all(18),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _GenerateMetric(
-                                label: textLocalize('gen_label_mode'),
-                                value: modeLabel,
-                              ),
-                            ),
-                            Expanded(
-                              child: _GenerateMetric(
-                                label: textLocalize('gen_label_material'),
-                                value: currentSelectionCount.toString(),
-                              ),
-                            ),
-                            Expanded(
-                              child: _GenerateMetric(
-                                label: textLocalize('gen_label_status'),
-                                value: uploadLabel,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     if (_isUploading)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
