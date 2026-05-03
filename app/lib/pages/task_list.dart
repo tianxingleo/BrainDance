@@ -338,6 +338,21 @@ class _TaskListPageState extends State<TaskListPage> {
     }).toList();
   }
 
+  String _resolveDisplayName(Map<String, dynamic> task, String fallback) {
+    final displayName = task['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) return displayName;
+
+    final tags = task['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) return value;
+      }
+    }
+
+    return fallback;
+  }
+
   Future<void> _onTaskTap(Map<String, dynamic> task) async {
     final status = task['status']?.toString();
     final sceneId = task['scene_id']?.toString();
@@ -372,7 +387,7 @@ class _TaskListPageState extends State<TaskListPage> {
     }
 
     if (!mounted) return;
-    final displayName = task['display_name']?.toString() ?? sceneId;
+    final displayName = _resolveDisplayName(task, sceneId);
     await openViewer(
       context,
       initialModelUrl: modelUrl,
