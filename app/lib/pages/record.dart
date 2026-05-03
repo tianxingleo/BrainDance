@@ -217,9 +217,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       final elapsed = DateTime.now().difference(startTime).inMilliseconds;
       if (elapsed < _minRecordingMs) {
         _isToggling = true;
-        await Future.delayed(
-          Duration(milliseconds: _minRecordingMs - elapsed),
-        );
+        await Future.delayed(Duration(milliseconds: _minRecordingMs - elapsed));
         _isToggling = false;
       }
     }
@@ -325,7 +323,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _recordSeconds++;
-      if (_recordSeconds >= 180) {
+      if (_recordSeconds >= 600) {
         _stopVideoRecording(controller);
       } else if (mounted) {
         setState(() {});
