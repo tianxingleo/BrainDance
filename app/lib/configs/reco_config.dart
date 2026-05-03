@@ -100,13 +100,14 @@ class RecoConfig {
     cameraInitialize();
   }
 
-  static void disposeCamera() {
+  static Future<void> disposeCamera() async {
     if ((cameraController == null) ||
         (!cameraController!.value.isInitialized)) {
       return;
     }
-    cameraController?.dispose();
+    final controller = cameraController;
     cameraController = null;
+    await controller?.dispose();
   }
 
   //获取图标

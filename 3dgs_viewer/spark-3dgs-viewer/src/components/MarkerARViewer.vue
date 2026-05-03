@@ -50,6 +50,28 @@ const postBridgeMessage = (payload: Record<string, unknown>) => {
   window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
 }
 
+const installGetUserMediaDiagnostics = () => {
+  const mediaDevices = navigator.mediaDevices
+  if (!mediaDevices?.getUserMedia) return
+  const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
+  mediaDevices.getUserMedia = async (constraints) => {
+    try {
+      return await originalGetUserMedia(constraints)
+    } catch (error) {
+      const domError = error as DOMException
+      postBridgeMessage({
+        status: 'error',
+        msg: 'getUserMedia failed',
+        name: domError?.name,
+        message: domError?.message,
+        constraint: (domError as DOMException & { constraint?: string })?.constraint,
+        constraints,
+      })
+      throw error
+    }
+  }
+}
+
 watch(
   transform,
   (value) => {
@@ -119,6 +141,7 @@ onMounted(async () => {
 
     status.value = 'AR 引擎加载中...'
     postBridgeMessage({ status: 'info', msg: 'Marker AR loading runtime modules' })
+    installGetUserMediaDiagnostics()
     const [threeModule, sparkModule, mindarModule] = await Promise.all([
       import('three'),
       import('@sparkjsdev/spark'),

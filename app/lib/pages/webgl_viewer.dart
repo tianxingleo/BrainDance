@@ -12,7 +12,6 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../services/download_event_bus.dart';
-import '../configs/reco_config.dart';
 
 // ============================================================
 // Dev/prod mode notes
@@ -49,6 +48,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   static const int _downloadProgressThrottleMs = 100;
   static const String _defaultMarkerTargetPath = '/targets/braindance-card.mind';
   static const String _markerArDebugVersion = 'marker-ar-debug-20260503-3';
+  static const MethodChannel _cameraPermissionChannel = MethodChannel(
+    'braindance/camera_permission',
+  );
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -71,11 +73,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   Future<bool> _ensureRuntimeCameraPermission() async {
     // Android WebView getUserMedia 依赖宿主 App 已拿到运行时 CAMERA 权限。
-    // 这里复用现有相机初始化链路主动触发系统授权，再立即释放，避免占用摄像头。
+    // 这里只请求权限，不再预打开 CameraX；否则部分 Oplus/Chromium 相机栈会在
+    // 原生相机刚释放后立即 getUserMedia 时触发 cameraDevice encountered an error。
     try {
-      final granted = await RecoConfig.cameraInitialize();
-      RecoConfig.disposeCamera();
-      return granted;
+      if (defaultTargetPlatform != TargetPlatform.android) {
+        return true;
+      }
+      return await _cameraPermissionChannel.invokeMethod<bool>(
+            'ensureCameraPermission',
+          ) ??
+          false;
     } catch (error) {
       debugPrint('Request runtime camera permission failed: $error');
       return false;

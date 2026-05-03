@@ -118,7 +118,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _buttonAnimController.dispose();
     _hudAnimController.dispose();
     RecoConfig.onUpdate = () {};
-    RecoConfig.disposeCamera();
+    unawaited(RecoConfig.disposeCamera());
     super.dispose();
   }
 
@@ -140,7 +140,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             showToast: false,
             navigateToSubmit: true,
           ).whenComplete(() {
-            RecoConfig.disposeCamera();
+            unawaited(RecoConfig.disposeCamera());
             if (mounted) {
               setState(() {});
               TDToast.showText(
@@ -150,7 +150,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             }
           });
         } else {
-          RecoConfig.disposeCamera();
+          unawaited(RecoConfig.disposeCamera());
           if (mounted) {
             setState(() {});
           }
