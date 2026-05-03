@@ -724,7 +724,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             });
           },
           onWebResourceError: (WebResourceError error) {
-            debugPrint('WebView error: ${error.description}');
+            debugPrint(
+              'WebView error: code=${error.errorCode} type=${error.errorType} main=${error.isForMainFrame} url=${error.url} desc=${error.description}',
+            );
           },
         ),
       );

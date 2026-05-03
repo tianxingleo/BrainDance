@@ -7,10 +7,21 @@
     <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
     <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
     <title>BrainDance Generative 3DGS Engine</title>
+    <style>
+      /* 全局禁用弹性滚动/overscroll，防止 WebView 拖动时出现浏览器特征的画面拉伸 */
+      html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: auto;
+        touch-action: none;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
     <script>window.setModelListForTimePeeling=function(){};window.loadModelFromFlutter=function(){};</script>
-    <script type="module" src="/src/engine/brainDance-engine.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

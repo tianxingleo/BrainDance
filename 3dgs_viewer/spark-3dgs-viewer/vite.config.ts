@@ -10,9 +10,10 @@ export default defineConfig({
   ],
   base: './', 
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      { find: /^three$/, replacement: fileURLToPath(new URL('./src/vendor/three-compat.ts', import.meta.url)) },
+    ],
   },
   build: {
     rollupOptions: {

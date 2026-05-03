@@ -8,4 +8,27 @@ import App from './App.vue'
 window.setModelListForTimePeeling = window.setModelListForTimePeeling || function() {}
 window.loadModelFromFlutter = window.loadModelFromFlutter || function() {}
 
+const postBridgeMessage = (payload: Record<string, unknown>) => {
+  window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
+}
+
+window.addEventListener('error', (event) => {
+  postBridgeMessage({
+    status: 'error',
+    msg: event.message || 'WebGL viewer script error',
+    source: event.filename,
+    line: event.lineno,
+    column: event.colno,
+  })
+})
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason
+  postBridgeMessage({
+    status: 'error',
+    msg: reason instanceof Error ? reason.message : String(reason),
+    source: 'unhandledrejection',
+  })
+})
+
 createApp(App).mount('#app')

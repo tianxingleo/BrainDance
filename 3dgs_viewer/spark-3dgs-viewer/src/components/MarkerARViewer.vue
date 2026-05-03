@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as THREE from 'three'
-import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import ArControlPanel from './ArControlPanel.vue'
 import { applyArTransform, cloneArTransform } from '../ar/arTransform'
 import { parseArParams } from '../ar/parseArParams'
 import type { ArTransform } from '../types/ar'
 
+type ThreeModule = typeof import('three')
+type SparkModule = typeof import('@sparkjsdev/spark')
+type WebGLRendererInstance = InstanceType<ThreeModule['WebGLRenderer']>
+type SceneInstance = InstanceType<ThreeModule['Scene']>
+type CameraInstance = InstanceType<ThreeModule['Camera']>
+type GroupInstance = InstanceType<ThreeModule['Group']>
+type SparkRendererInstance = InstanceType<SparkModule['SparkRenderer']>
+type SplatMeshInstance = InstanceType<SparkModule['SplatMesh']>
+
 type MindARInstance = {
-  renderer: THREE.WebGLRenderer
-  scene: THREE.Scene
-  camera: THREE.Camera
+  renderer: WebGLRendererInstance
+  scene: SceneInstance
+  camera: CameraInstance
   addAnchor: (index: number) => {
-    group: THREE.Group
+    group: GroupInstance
     onTargetFound?: () => void
     onTargetLost?: () => void
   }
@@ -32,12 +39,12 @@ const initialTransform: ArTransform = {
 const transform = ref<ArTransform>(cloneArTransform(initialTransform))
 
 let mindarThree: MindARInstance | null = null
-let renderer: THREE.WebGLRenderer | null = null
-let scene: THREE.Scene | null = null
-let camera: THREE.Camera | null = null
-let spark: SparkRenderer | null = null
-let splatMesh: SplatMesh | null = null
-let arRoot: THREE.Group | null = null
+let renderer: WebGLRendererInstance | null = null
+let scene: SceneInstance | null = null
+let camera: CameraInstance | null = null
+let spark: SparkRendererInstance | null = null
+let splatMesh: SplatMeshInstance | null = null
+let arRoot: GroupInstance | null = null
 
 const postBridgeMessage = (payload: Record<string, unknown>) => {
   window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
@@ -110,9 +117,18 @@ onMounted(async () => {
       throw new Error(`Marker 目标文件不存在或不可访问：${params.targetUrl}`)
     }
 
-    status.value = '模型加载中...'
-    const module = await import('mind-ar/dist/mindar-image-three.prod.js')
-    const MindARThree = module.MindARThree as new (options: {
+    status.value = 'AR 引擎加载中...'
+    postBridgeMessage({ status: 'info', msg: 'Marker AR loading runtime modules' })
+    const [threeModule, sparkModule, mindarModule] = await Promise.all([
+      import('three'),
+      import('@sparkjsdev/spark'),
+      import('mind-ar/dist/mindar-image-three.prod.js'),
+    ])
+    const THREE = threeModule
+    const { SparkRenderer, SplatMesh } = sparkModule
+    postBridgeMessage({ status: 'info', msg: 'Marker AR runtime modules loaded' })
+
+    const MindARThree = mindarModule.MindARThree as new (options: {
       container: HTMLElement
       imageTargetSrc: string
       maxTrack: number
@@ -137,6 +153,7 @@ onMounted(async () => {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
+    status.value = '模型加载中...'
     spark = new SparkRenderer({
       renderer,
       maxStdDev: Math.sqrt(7),
