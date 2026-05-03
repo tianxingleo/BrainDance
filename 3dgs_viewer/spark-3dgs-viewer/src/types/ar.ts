@@ -11,6 +11,7 @@ export type ArViewerParams = ArTransform & {
   modelUrl: string
   targetUrl: string
   camera: string
+  cameraIndex: number
   pixelRatio: number
   filterMinCF: number
   filterBeta: number

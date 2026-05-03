@@ -2,8 +2,14 @@ import { DEFAULT_MARKER_TARGET, DEFAULT_MODEL_URL } from './markerTargets'
 import type { ArViewerParams } from '../types/ar'
 
 const parseNumber = (value: string | null, fallback: number) => {
+  if (value == null || value.trim().length === 0) return fallback
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const parsePositiveNumber = (value: string | null, fallback: number) => {
+  const parsed = parseNumber(value, fallback)
+  return parsed > 0 ? parsed : fallback
 }
 
 const parseText = (value: string | null, fallback: string) => {
@@ -19,12 +25,13 @@ export function parseArParams(): ArViewerParams {
     modelUrl: parseText(params.get('model'), DEFAULT_MODEL_URL),
     targetUrl: parseText(params.get('target'), DEFAULT_MARKER_TARGET),
     camera: parseText(params.get('camera'), 'main-back'),
-    pixelRatio: parseNumber(params.get('pixelRatio'), 1),
-    filterMinCF: parseNumber(params.get('filterMinCF'), 0.0008),
-    filterBeta: parseNumber(params.get('filterBeta'), 400),
-    warmupTolerance: parseNumber(params.get('warmupTolerance'), 8),
-    missTolerance: parseNumber(params.get('missTolerance'), 12),
-    scale: parseNumber(params.get('scale'), 0.5),
+    cameraIndex: Math.max(0, Math.floor(parseNumber(params.get('cameraIndex'), 0))),
+    pixelRatio: parsePositiveNumber(params.get('pixelRatio'), 1),
+    filterMinCF: parsePositiveNumber(params.get('filterMinCF'), 0.0008),
+    filterBeta: parsePositiveNumber(params.get('filterBeta'), 400),
+    warmupTolerance: parsePositiveNumber(params.get('warmupTolerance'), 8),
+    missTolerance: parsePositiveNumber(params.get('missTolerance'), 12),
+    scale: parsePositiveNumber(params.get('scale'), 0.5),
     rotation: [
       parseNumber(params.get('rx'), -Math.PI / 2),
       parseNumber(params.get('ry'), 0),

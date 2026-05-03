@@ -31,6 +31,7 @@ type MediaDeviceLike = {
   deviceId: string
   label: string
   kind: string
+  index: number
 }
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -90,22 +91,30 @@ const pickMainBackCamera = async () => {
     const devices = await mediaDevices.enumerateDevices()
     const videoInputs = devices
       .filter((device) => device.kind === 'videoinput')
-      .map((device) => ({
+      .map((device, index) => ({
         deviceId: device.deviceId,
         label: device.label || '',
         kind: device.kind,
+        index,
       })) as MediaDeviceLike[]
 
-    const preferred = videoInputs.find((device) => (
+    // 部分 Android WebView 不暴露摄像头 label，且 environment 默认可能映射到长焦。
+    // 因此优先用 label 命中主摄/广角；若 label 不可用，则按常见 Camera2 顺序选择第一个 videoinput。
+    const preferredByIndex = videoInputs[params.cameraIndex]
+    const preferredByLabel = videoInputs.find((device) => (
       preferredMainBackCameraPattern.test(device.label) &&
       !rejectedAuxCameraPattern.test(device.label)
     ))
+    const preferred = preferredByIndex ?? preferredByLabel ?? videoInputs[0] ?? null
 
     postBridgeMessage({
       status: 'info',
       msg: 'Marker AR camera candidates',
       selected: preferred?.label || preferred?.deviceId || null,
+      selectedIndex: preferred?.index ?? null,
+      selectedBy: preferredByIndex ? 'url-index' : preferredByLabel ? 'label' : 'first-videoinput',
       cameras: videoInputs.map((device) => ({
+        index: device.index,
         label: device.label,
         idPrefix: device.deviceId.slice(0, 8),
       })),
@@ -120,6 +129,15 @@ const pickMainBackCamera = async () => {
     })
     return null
   }
+}
+
+const switchCamera = () => {
+  const url = new URL(window.location.href)
+  const current = Number(url.searchParams.get('cameraIndex') || params.cameraIndex || 0)
+  const next = Number.isFinite(current) ? current + 1 : 1
+  url.searchParams.set('camera', 'main-back')
+  url.searchParams.set('cameraIndex', String(next))
+  window.location.href = url.toString()
 }
 
 const getVideoDiagnostics = () => {
@@ -332,6 +350,7 @@ onMounted(async () => {
         warmupTolerance: params.warmupTolerance,
         missTolerance: params.missTolerance,
         camera: environmentDeviceId ? 'main-back-device' : 'environment-fallback',
+        cameraIndex: params.cameraIndex,
       },
     })
 
@@ -363,6 +382,7 @@ onBeforeUnmount(() => {
   <div class="ar-page">
     <div ref="containerRef" class="ar-container"></div>
     <div class="ar-header">BrainDance Marker AR</div>
+    <button type="button" class="ar-camera-button" @click="switchCamera">切换镜头</button>
     <ArControlPanel v-model="transform" @reset="resetTransform" />
     <div class="ar-status">{{ status }}</div>
   </div>
@@ -404,5 +424,19 @@ onBeforeUnmount(() => {
   font-size: 14px;
   width: min(92vw, 560px);
   text-align: center;
+}
+
+.ar-camera-button {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 22;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: #fff;
+  background: rgba(12, 18, 30, 0.76);
+  backdrop-filter: blur(8px);
+  font-size: 14px;
 }
 </style>
