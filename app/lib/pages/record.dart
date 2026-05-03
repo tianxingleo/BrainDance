@@ -64,6 +64,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
   Timer? _recordTimer;
   int _recordSeconds = 0;
+  bool _isToggling = false;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -207,10 +208,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (!controller.value.isRecordingVideo) {
       return;
     }
-    var file = await controller.stopVideoRecording();
-
-    if (showToast && mounted) {
-      TDToast.showText(textLocalize('reco_done'), context: context);
+    XFile file;
+    try {
+      file = await controller.stopVideoRecording();
+    } catch (_) {
+      if (showToast && mounted) {
+        ref.read(showTooShortBubbleProvider.notifier).state = true;
+      }
+      return;
     }
 
     final permissionState = await PhotoManager.requestPermissionExtend();
@@ -250,10 +255,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
     } catch (_) {}
 
     if (thumbPath.startsWith('assets/')) {
-      if (mounted) {
+      if (showToast && mounted) {
         ref.read(showTooShortBubbleProvider.notifier).state = true;
       }
       return;
+    }
+
+    if (showToast && mounted) {
+      TDToast.showText(textLocalize('reco_done'), context: context);
     }
 
     if (navigateToSubmit && mounted) {
@@ -268,14 +277,22 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 
   Future<void> _toggleVideoRecording() async {
+    if (_isToggling) return;
+    _isToggling = true;
+
     final controller = RecoConfig.cameraController;
     if (controller == null || !controller.value.isInitialized) {
+      _isToggling = false;
       return;
     }
 
     final isVideoRecording = ref.read(isRecordingProvider);
     if (isVideoRecording) {
-      await _stopVideoRecording(controller);
+      try {
+        await _stopVideoRecording(controller);
+      } finally {
+        _isToggling = false;
+      }
       return;
     }
 
@@ -285,6 +302,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       await controller.startVideoRecording();
     } catch (_) {
       _resetRecordingState(updateUi: true);
+      _isToggling = false;
       rethrow;
     }
     try {
@@ -300,6 +318,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
         setState(() {});
       }
     });
+
+    _isToggling = false;
   }
 
   void _computeOrientation() {
