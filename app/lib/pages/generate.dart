@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
@@ -47,7 +48,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     fontFamily: AppConfig.fontFamily,
   );
   static const int maxImageCount = 1;
-  static const int sizeLimit = 40960;
+  static const int imageSizeLimitBytes = 20 * 1024 * 1024; // 20 MB
+  static const int videoSizeLimitBytes = 1610612736; // 1.5 GB
+  static const int videoDurationLimitSeconds = 10 * 60; // 10 min
   static bool firstCheck = false;
   static final Random _rdg = Random();
 
@@ -231,9 +234,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.redAccent,
-              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               child: Text(textLocalize('gen_cancel_confirm')),
             ),
           ],
@@ -338,223 +339,291 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
     // 构建三个 tab 内容，供 BDTabSwitcher 使用
     Widget buildTabContent(int idx) {
-        switch (idx) {
-          case 0:
-            final upload0 = TDUpload(
-              key: _uploadKey,
-              files: GenConfig.uploadedImages,
-              multiple: true,
-              max: maxImageCount,
-              onUploadTap: () => _showActionSheet(context, true),
-              onChange: (files, type) {
-                switch (type) {
-                  case TDUploadType.add:
-                    GenConfig.uploadedImages = [...GenConfig.uploadedImages, ...files];
-                    break;
-                  case TDUploadType.remove:
-                    for (final f in files) {
-                      GenConfig.uploadedImages.remove(f);
-                    }
-                    break;
-                  case TDUploadType.replace:
-                    break;
-                }
-                setState(() { _uploadKey = UniqueKey(); });
-              },
-              mediaType: const [TDUploadMediaType.image],
-              width: 150,
-              height: 150,
-            );
-            return Scrollbar(
-              key: const ValueKey<int>(0),
+      switch (idx) {
+        case 0:
+          final upload0 = TDUpload(
+            key: _uploadKey,
+            files: GenConfig.uploadedImages,
+            multiple: true,
+            max: maxImageCount,
+            onUploadTap: () => _showActionSheet(context, true),
+            onChange: (files, type) {
+              switch (type) {
+                case TDUploadType.add:
+                  GenConfig.uploadedImages = [
+                    ...GenConfig.uploadedImages,
+                    ...files,
+                  ];
+                  break;
+                case TDUploadType.remove:
+                  for (final f in files) {
+                    GenConfig.uploadedImages.remove(f);
+                  }
+                  break;
+                case TDUploadType.replace:
+                  break;
+              }
+              setState(() {
+                _uploadKey = UniqueKey();
+              });
+            },
+            mediaType: const [TDUploadMediaType.image],
+            width: 150,
+            height: 150,
+          );
+          return Scrollbar(
+            key: const ValueKey<int>(0),
+            controller: _scrollController,
+            child: SingleChildScrollView(
               controller: _scrollController,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _GenerateSectionHeading(
-                      title: textLocalize('gen_section_image'),
-                      description: textLocalize('gen_tip_pic').replaceAll('[FILE_SIZE]', _formatBytes(sizeLimit * 1024)),
-                    ),
-                    const SizedBox(height: 18),
-                    BDPanelCard(
-                      padding: const EdgeInsets.all(20),
-                      child: Container(
-                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
-                        child: upload0,
-                      ),
-                    ),
-                  ],
-                ),
+              padding: const EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                contentBottomPadding,
               ),
-            );
-          case 1:
-            _textEditingController.text = GenConfig.uploadedText;
-            return Scrollbar(
-              key: const ValueKey<int>(1),
-              controller: _scrollController,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _GenerateSectionHeading(
-                      title: textLocalize('gen_section_text'),
-                      description: textLocalize('gen_tip_text'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _GenerateSectionHeading(
+                    title: textLocalize('gen_section_image'),
+                    description: textLocalize('gen_tip_pic').replaceAll(
+                      '[FILE_SIZE]',
+                      _formatBytes(imageSizeLimitBytes),
                     ),
-                    const SizedBox(height: 18),
-                    BDPanelCard(
-                      child: Container(
-                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
-                        child: TDTextarea(
-                          controller: _textEditingController,
-                          hintText: textLocalize('gen_tip_textbox'),
-                          minLines: 8,
-                          maxLines: 20,
-                          onChanged: (value) {
-                            GenConfig.uploadedText = value;
-                            setState(() {});
-                          },
-                          decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BDDesign.radiusNormal,
-                            border: Border.all(color: Colors.transparent),
-                          ),
-                          textStyle: TextStyle(color: textColor, fontSize: 16),
+                  ),
+                  const SizedBox(height: 18),
+                  BDPanelCard(
+                    padding: const EdgeInsets.all(20),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: bgCardColor,
+                        borderRadius: BDDesign.radiusNormal,
+                      ),
+                      child: upload0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        case 1:
+          _textEditingController.text = GenConfig.uploadedText;
+          return Scrollbar(
+            key: const ValueKey<int>(1),
+            controller: _scrollController,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                contentBottomPadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _GenerateSectionHeading(
+                    title: textLocalize('gen_section_text'),
+                    description: textLocalize('gen_tip_text'),
+                  ),
+                  const SizedBox(height: 18),
+                  BDPanelCard(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: bgCardColor,
+                        borderRadius: BDDesign.radiusNormal,
+                      ),
+                      child: TDTextarea(
+                        controller: _textEditingController,
+                        hintText: textLocalize('gen_tip_textbox'),
+                        minLines: 8,
+                        maxLines: 20,
+                        onChanged: (value) {
+                          GenConfig.uploadedText = value;
+                          setState(() {});
+                        },
+                        decoration: BoxDecoration(
+                          color: Colors.transparent,
+                          borderRadius: BDDesign.radiusNormal,
+                          border: Border.all(color: Colors.transparent),
                         ),
+                        textStyle: TextStyle(color: textColor, fontSize: 16),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    BDPanelCard(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.info_outline_rounded,
-                            size: 18,
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.52)
-                                : BDDesign.colorMutedBlue,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              textLocalize('gen_text_pipeline_hint'),
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                height: 1.45,
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.58)
-                                    : BDDesign.colorMutedBlue,
-                              ),
+                  ),
+                  const SizedBox(height: 16),
+                  BDPanelCard(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 18,
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.52)
+                              : BDDesign.colorMutedBlue,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            textLocalize('gen_text_pipeline_hint'),
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              height: 1.45,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.58)
+                                  : BDDesign.colorMutedBlue,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          default:
-            final upload2 = TDUpload(
-              type: TDUploadBoxType.circle,
-              key: _uploadKey2,
-              files: GenConfig.uploadedVideos,
-              multiple: false,
-              onUploadTap: () => _showActionSheet(context, false),
-              onChange: (files, type) {
-                switch (type) {
-                  case TDUploadType.add:
-                    GenConfig.uploadedVideos = [...GenConfig.uploadedVideos, ...files];
-                    break;
-                  case TDUploadType.remove:
-                    for (final f in files) {
-                      GenConfig.uploadedVideos.remove(f);
-                      if (GenConfig.uploadedVideos.isEmpty) _selectedVideoTaskType = 'video_3dgs';
-                    }
-                    break;
-                  case TDUploadType.replace:
-                    break;
-                }
-                setState(() { _uploadKey2 = UniqueKey(); });
-              },
-              mediaType: const [TDUploadMediaType.video],
-              width: 150,
-              height: 150,
-            );
-            return Scrollbar(
-              key: const ValueKey<int>(2),
+            ),
+          );
+        default:
+          final upload2 = TDUpload(
+            type: TDUploadBoxType.circle,
+            key: _uploadKey2,
+            files: GenConfig.uploadedVideos,
+            multiple: false,
+            onUploadTap: () => _showActionSheet(context, false),
+            onChange: (files, type) {
+              switch (type) {
+                case TDUploadType.add:
+                  GenConfig.uploadedVideos = [
+                    ...GenConfig.uploadedVideos,
+                    ...files,
+                  ];
+                  break;
+                case TDUploadType.remove:
+                  for (final f in files) {
+                    GenConfig.uploadedVideos.remove(f);
+                    if (GenConfig.uploadedVideos.isEmpty)
+                      _selectedVideoTaskType = 'video_3dgs';
+                  }
+                  break;
+                case TDUploadType.replace:
+                  break;
+              }
+              setState(() {
+                _uploadKey2 = UniqueKey();
+              });
+            },
+            mediaType: const [TDUploadMediaType.video],
+            width: 150,
+            height: 150,
+          );
+          return Scrollbar(
+            key: const ValueKey<int>(2),
+            controller: _scrollController,
+            child: SingleChildScrollView(
               controller: _scrollController,
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, contentBottomPadding),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _GenerateSectionHeading(
-                      title: textLocalize('gen_section_video'),
-                      description: textLocalize('gen_tip_video'),
+              padding: const EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                contentBottomPadding,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _GenerateSectionHeading(
+                    title: textLocalize('gen_section_video'),
+                    description: textLocalize('gen_tip_video'),
+                  ),
+                  const SizedBox(height: 18),
+                  BDPanelCard(
+                    padding: const EdgeInsets.all(20),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: bgCardColor,
+                        borderRadius: BDDesign.radiusNormal,
+                      ),
+                      child: upload2,
                     ),
+                  ),
+                  if (GenConfig.uploadedVideos.isNotEmpty) ...[
                     const SizedBox(height: 18),
                     BDPanelCard(
-                      padding: const EdgeInsets.all(20),
-                      child: Container(
-                        decoration: BoxDecoration(color: bgCardColor, borderRadius: BDDesign.radiusNormal),
-                        child: upload2,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 16,
                       ),
-                    ),
-                    if (GenConfig.uploadedVideos.isNotEmpty) ...[
-                      const SizedBox(height: 18),
-                      BDPanelCard(
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(18),
-                          onTap: _showVideoTaskTypeSheet,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(textLocalize('gen_video_task_title'), style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w700)),
-                                    const SizedBox(height: 6),
-                                    Text(_videoTaskTypeLabel(_selectedVideoTaskType), style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w600)),
-                                    const SizedBox(height: 4),
-                                    Text(_videoTaskTypeHint(_selectedVideoTaskType), style: TextStyle(color: isDark ? Colors.white.withValues(alpha: 0.62) : theme.fontGyColor3, fontSize: 12.5)),
-                                  ],
-                                ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _showVideoTaskTypeSheet,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    textLocalize('gen_video_task_title'),
+                                    style: TextStyle(
+                                      color: textColor,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    _videoTaskTypeLabel(_selectedVideoTaskType),
+                                    style: TextStyle(
+                                      color: textColor,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _videoTaskTypeHint(_selectedVideoTaskType),
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.62)
+                                          : theme.fontGyColor3,
+                                      fontSize: 12.5,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              Icon(Icons.tune_rounded, color: isDark ? Colors.white.withValues(alpha: 0.72) : BDDesign.colorMutedBlue),
-                            ],
-                          ),
+                            ),
+                            Icon(
+                              Icons.tune_rounded,
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.72)
+                                  : BDDesign.colorMutedBlue,
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ],
-                ),
+                ],
               ),
-            );
-        }
+            ),
+          );
       }
+    }
 
-      tabContents.add(
-        Expanded(
-          child: BDTabSwitcher(
-            index: _tabController.index,
-            duration: BDMotion.durationNormal,
-            children: [
-              buildTabContent(0),
-              buildTabContent(1),
-              buildTabContent(2),
-            ],
-          ),
+    tabContents.add(
+      Expanded(
+        child: BDTabSwitcher(
+          index: _tabController.index,
+          duration: BDMotion.durationNormal,
+          children: [
+            buildTabContent(0),
+            buildTabContent(1),
+            buildTabContent(2),
+          ],
         ),
-      );
+      ),
+    );
 
     return PopScope(
       canPop: !_isUploading && !_isGenerating,
@@ -582,157 +651,156 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
         body: BDPageBackdrop(
           child: SafeArea(
             child: Stack(
-            children: [
-              Column(
-                children: [
-                  BDPageHeader(
-                    title: textLocalize('gen_top'),
-                    //subtitle: textLocalize('gen_subtitle'),
-                    trailing: BDStatusPill(
-                      label: uploadLabel,
-                      icon: _isUploading || _isGenerating
-                          ? Icons.sync_rounded
-                          : Icons.layers_outlined,
-                      color: _isUploading || _isGenerating
-                          ? BDDesign.colorFadedOlive
-                          : BDDesign.colorMutedBlue,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: BDPanelCard(
-                      padding: const EdgeInsets.all(18),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _GenerateMetric(
-                              label: textLocalize('gen_label_mode'),
-                              value: modeLabel,
-                            ),
-                          ),
-                          Expanded(
-                            child: _GenerateMetric(
-                              label: textLocalize('gen_label_material'),
-                              value: currentSelectionCount.toString(),
-                            ),
-                          ),
-                          Expanded(
-                            child: _GenerateMetric(
-                              label: textLocalize('gen_label_status'),
-                              value: uploadLabel,
-                            ),
-                          ),
-                        ],
+              children: [
+                Column(
+                  children: [
+                    BDPageHeader(
+                      title: textLocalize('gen_top'),
+                      //subtitle: textLocalize('gen_subtitle'),
+                      trailing: BDStatusPill(
+                        label: uploadLabel,
+                        icon: _isUploading || _isGenerating
+                            ? Icons.sync_rounded
+                            : Icons.layers_outlined,
+                        color: _isUploading || _isGenerating
+                            ? BDDesign.colorFadedOlive
+                            : BDDesign.colorMutedBlue,
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_isUploading)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: BDPanelCard(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 14,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        padding: const EdgeInsets.all(18),
+                        child: Row(
                           children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.cloud_upload_outlined,
-                                  size: 14,
-                                  color: isDark
-                                      ? const Color(0xFFFFB74D)
-                                      : const Color(0xFFF57C00),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _tabController.index == 1
-                                      ? textLocalize('gen_text_generating')
-                                      : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? const Color(0xFFFFB74D)
-                                        : const Color(0xFFF57C00),
-                                  ),
-                                ),
-                                if (_tabController.index != 1) ...[
-                                  const Spacer(),
-                                  Text(
-                                    '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.58)
-                                          : BDDesign.colorMutedBlue,
-                                    ),
-                                  ),
-                                ],
-                              ],
+                            Expanded(
+                              child: _GenerateMetric(
+                                label: textLocalize('gen_label_mode'),
+                                value: modeLabel,
+                              ),
                             ),
-                            const SizedBox(height: 8),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(3),
-                              child: LinearProgressIndicator(
-                                value: _tabController.index == 1 ? null : _uploadProgress,
-                                minHeight: 5,
-                                backgroundColor: isDark
-                                    ? Colors.white.withAlpha(20)
-                                    : Colors.black.withAlpha(15),
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  isDark
-                                      ? const Color(0xFFFFB74D)
-                                      : const Color(0xFFF57C00),
-                                ),
+                            Expanded(
+                              child: _GenerateMetric(
+                                label: textLocalize('gen_label_material'),
+                                value: currentSelectionCount.toString(),
+                              ),
+                            ),
+                            Expanded(
+                              child: _GenerateMetric(
+                                label: textLocalize('gen_label_status'),
+                                value: uploadLabel,
                               ),
                             ),
                           ],
                         ),
                       ),
                     ),
-                  Expanded(child: Column(children: tabContents)),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      20,
-                      8,
-                      20,
-                      0,
-                    ),
-                    child: TDButton(
-                      onTap: (_isUploading || _isGenerating)
-                          ? () {}
-                          : () => _submit(),
-                      style: TDButtonStyle(
-                        backgroundColor: isDark
-                            ? const Color(0xFF2A2A2E)
-                            : BDDesign.colorMutedBlue,
-                        textColor: Colors.white,
-                        radius: BorderRadius.circular(22),
+                    const SizedBox(height: 12),
+                    if (_isUploading)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: BDPanelCard(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 14,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.cloud_upload_outlined,
+                                    size: 14,
+                                    color: isDark
+                                        ? const Color(0xFFFFB74D)
+                                        : const Color(0xFFF57C00),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    _tabController.index == 1
+                                        ? textLocalize('gen_text_generating')
+                                        : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark
+                                          ? const Color(0xFFFFB74D)
+                                          : const Color(0xFFF57C00),
+                                    ),
+                                  ),
+                                  if (_tabController.index != 1) ...[
+                                    const Spacer(),
+                                    Text(
+                                      '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? Colors.white.withValues(
+                                                alpha: 0.58,
+                                              )
+                                            : BDDesign.colorMutedBlue,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(3),
+                                child: LinearProgressIndicator(
+                                  value: _tabController.index == 1
+                                      ? null
+                                      : _uploadProgress,
+                                  minHeight: 5,
+                                  backgroundColor: isDark
+                                      ? Colors.white.withAlpha(20)
+                                      : Colors.black.withAlpha(15),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    isDark
+                                        ? const Color(0xFFFFB74D)
+                                        : const Color(0xFFF57C00),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      type: TDButtonType.fill,
-                      shape: TDButtonShape.rectangle,
-                      theme: TDButtonTheme.primary,
-                      size: TDButtonSize.large,
-                      width: double.infinity,
-                      text: (_isUploading || _isGenerating)
-                          ? (_isGenerating
-                                ? textLocalize('gen_text_generating')
-                                : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%')
-                          : textLocalize('gen_button'),
+                    Expanded(child: Column(children: tabContents)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      child: TDButton(
+                        onTap: (_isUploading || _isGenerating)
+                            ? () {}
+                            : () => _submit(),
+                        style: TDButtonStyle(
+                          backgroundColor: isDark
+                              ? const Color(0xFF2A2A2E)
+                              : BDDesign.colorMutedBlue,
+                          textColor: Colors.white,
+                          radius: BorderRadius.circular(22),
+                        ),
+                        type: TDButtonType.fill,
+                        shape: TDButtonShape.rectangle,
+                        theme: TDButtonTheme.primary,
+                        size: TDButtonSize.large,
+                        width: double.infinity,
+                        text: (_isUploading || _isGenerating)
+                            ? (_isGenerating
+                                  ? textLocalize('gen_text_generating')
+                                  : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%')
+                            : textLocalize('gen_button'),
+                      ),
                     ),
-                  ),
-                  SizedBox(height: submitBottomPadding),
-                ],
-              ),
-            ],
+                    SizedBox(height: submitBottomPadding),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 }
