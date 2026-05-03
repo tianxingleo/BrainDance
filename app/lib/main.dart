@@ -20,8 +20,10 @@ import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
 import 'services/task_notification_service.dart';
+import 'services/network_service.dart';
 import 'floating_nav_bar.dart';
 import 'widgets/bd_surfaces.dart';
+import 'widgets/network_bubble.dart';
 import 'widgets/theme_animation_overlay.dart';
 
 //App Data
@@ -30,6 +32,7 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+final recallScrollToTopSignal = StateProvider<bool>((ref) => false);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(
@@ -65,6 +68,10 @@ void main() async {
   // 初始化全局任务通知服务
   taskNotificationService.setNavigatorKey(navigatorKey);
   await taskNotificationService.init();
+
+  // 初始化全局网络状态监测服务
+  networkService.setNavigatorKey(navigatorKey);
+  await networkService.init();
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
@@ -184,6 +191,7 @@ class Home extends ConsumerWidget {
                 child!,
                 // 语言切换时一并重建全局通知和页面树，避免旧文案残留
                 const GlobalNotificationOverlay(),
+                const NetworkBubbleOverlay(),
               ],
             ),
           ),
@@ -479,7 +487,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   void _switchToPage(int newIndex) {
     final oldIndex = ref.read(pageIndexProvider);
-    if (newIndex == oldIndex) return;
+    if (newIndex == oldIndex) {
+      if (newIndex == 0) {
+        ref.read(recallScrollToTopSignal.notifier).update((s) => !s);
+      }
+      return;
+    }
 
     setState(() {
       _slideDirection = newIndex > oldIndex ? 1 : -1;

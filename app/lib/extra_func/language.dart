@@ -191,6 +191,9 @@ enum Language {
       "gen_cancel_message": "当前正在处理中，退出页面将丢失进度。\n确定要退出吗？",
       "gen_cancel_confirm": "确认退出",
       "gen_cancel_continue": "继续操作",
+      "gen_video_too_large": "视频文件过大（最大 1.5 GB），请重新选择。",
+      "gen_video_too_long": "视频时长过长（最长 10 分钟），请重新选择。",
+      "gen_image_too_large": "图片文件过大（最大 20 MB），请重新选择。",
       // Login page
       "login_signup_success": "注册成功！请检查邮箱完成验证。",
       "login_success": "登录成功",
@@ -351,6 +354,8 @@ enum Language {
       "video_exit_delete_checkbox": "删除刚拍摄的视频文件",
       "video_exit_confirm": "确认退出",
       "video_exit_cancel": "取消",
+      "network_disconnected": "互联网已断开，请检查网络连接",
+      "network_session_expired": "登录已过期，请重新登录",
       // Common/shared
       "admin_mode_msg": "当前为管理员浏览模式，未绑定用户，暂不支持上传任务。",
       "not_logged_in": "未登录，即将跳转登录页面...",
@@ -607,6 +612,9 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_cancel_message": "Processing is underway. Exiting will lose progress.\nAre you sure you want to exit?",
       "gen_cancel_confirm": "Exit",
       "gen_cancel_continue": "Continue",
+      "gen_video_too_large": "Video file is too large (max 1.5 GB). Please select another one.",
+      "gen_video_too_long": "Video duration is too long (max 10 min). Please select another one.",
+      "gen_image_too_large": "Image file is too large (max 20 MB). Please select another one.",
       // Login page
       "login_signup_success":
           "Registration successful! Please check your email to verify.",
@@ -782,6 +790,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_exit_delete_checkbox": "Delete the recorded video file",
       "video_exit_confirm": "Exit",
       "video_exit_cancel": "Cancel",
+      "network_disconnected": "Internet disconnected. Please check your network connection.",
+      "network_session_expired": "Session expired. Please re-login.",
       // Common/shared
       "admin_mode_msg":
           "Admin browse mode, no user bound. Upload not supported.",
