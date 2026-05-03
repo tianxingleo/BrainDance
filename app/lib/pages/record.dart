@@ -42,9 +42,6 @@ final saveFailBubbleProvider = StateProvider<String?>((ref) => null);
 /// 录制时间过短 → 中央气泡
 final showTooShortBubbleProvider = StateProvider<bool>((ref) => false);
 
-/// 录制完成 → 中央气泡
-final showRecoDoneBubbleProvider = StateProvider<bool>((ref) => false);
-
 enum _MotionState { steady, ideal, caution, danger }
 
 class RecordPage extends ConsumerStatefulWidget {
@@ -227,10 +224,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
     }
 
-    if (showToast && mounted) {
-      ref.read(showRecoDoneBubbleProvider.notifier).state = true;
-    }
-
     XFile file;
     try {
       file = await controller.stopVideoRecording();
@@ -279,7 +272,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (thumbPath.startsWith('assets/')) {
       if (showToast && mounted) {
-        ref.read(showRecoDoneBubbleProvider.notifier).state = false;
         ref.read(showTooShortBubbleProvider.notifier).state = true;
       }
       return;
@@ -1017,13 +1009,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
               message: textLocalize('reco_record_too_short'),
               icon: Icons.info_outline_rounded,
               iconColor: Colors.white.withAlpha(180),
-            ),
-            _CenterBubble(
-              provider: showRecoDoneBubbleProvider,
-              message: textLocalize('reco_done'),
-              icon: Icons.check_circle_outline_rounded,
-              iconColor: BDDesign.colorFadedOlive,
-              durationSeconds: 2,
             ),
           ],
         ),
