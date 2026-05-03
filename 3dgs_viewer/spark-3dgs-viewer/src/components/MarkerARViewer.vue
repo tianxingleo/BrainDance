@@ -72,6 +72,54 @@ const installGetUserMediaDiagnostics = () => {
   }
 }
 
+const getVideoDiagnostics = () => {
+  const video = containerRef.value?.querySelector('video')
+  if (!video) return null
+  return {
+    readyState: video.readyState,
+    videoWidth: video.videoWidth,
+    videoHeight: video.videoHeight,
+    clientWidth: video.clientWidth,
+    clientHeight: video.clientHeight,
+    paused: video.paused,
+    muted: video.muted,
+    zIndex: video.style.zIndex,
+  }
+}
+
+const normalizeMindArLayers = () => {
+  const container = containerRef.value
+  if (!container) return
+
+  // MindAR 默认把摄像头 video 放到 z-index: -2；在 Android WebView 中会被黑色容器背景盖住。
+  // 这里强制把视频放到 WebGL canvas 下方但仍位于容器背景上方，避免 AR 已启动但画面黑屏。
+  const videos = container.querySelectorAll('video')
+  videos.forEach((video) => {
+    video.style.zIndex = '0'
+    video.style.objectFit = 'cover'
+    video.style.background = 'transparent'
+    video.style.pointerEvents = 'none'
+  })
+
+  if (renderer?.domElement) {
+    renderer.domElement.style.zIndex = '1'
+    renderer.domElement.style.pointerEvents = 'none'
+  }
+
+  const canvases = container.querySelectorAll('canvas')
+  canvases.forEach((canvas) => {
+    canvas.style.zIndex = canvas === renderer?.domElement ? '1' : '2'
+    canvas.style.pointerEvents = 'none'
+  })
+
+  Array.from(container.children).forEach((child) => {
+    if (child instanceof HTMLElement && child.tagName !== 'VIDEO' && child.tagName !== 'CANVAS') {
+      child.style.zIndex = child.style.zIndex || '2'
+      child.style.pointerEvents = 'none'
+    }
+  })
+}
+
 watch(
   transform,
   (value) => {
@@ -206,10 +254,19 @@ onMounted(async () => {
     }
 
     status.value = '请允许摄像头权限，并将纸板放入画面'
+    postBridgeMessage({ status: 'info', msg: 'Marker AR starting camera' })
     await mindarThree.start()
+    normalizeMindArLayers()
+    status.value = '请将纸板放入画面'
+    postBridgeMessage({
+      status: 'ready',
+      msg: 'Marker AR started',
+      video: getVideoDiagnostics(),
+    })
 
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return
+      normalizeMindArLayers()
       renderer.render(scene, camera)
     })
   } catch (error) {
