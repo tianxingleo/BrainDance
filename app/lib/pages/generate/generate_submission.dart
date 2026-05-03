@@ -383,6 +383,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
       return;
     }
 
+    _cancelToken = CancelToken();
+
     _refresh(() {
       _isUploading = true;
     });
@@ -395,6 +397,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         localPath: GenConfig.uploadedImages[0].assetPath!,
         storageFileName: 'image.png',
         contentType: 'image/png',
+        cancelToken: _cancelToken!,
       );
 
       await client.from("processing_tasks").insert({
@@ -409,11 +412,21 @@ extension _GenerateSubmissionX on _GeneratePageState {
         GenConfig.uploadedImages.clear();
         _openTaskListAfterSubmit();
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        return;
+      }
+      if (mounted) {
+        debugPrint('[GenerateSubmission] image upload error: $e');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+      }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('gen_submit_fail')}: $e', context: context);
+        debugPrint('[GenerateSubmission] image submit error: $e');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
       }
     } finally {
+      _cancelToken = null;
       if (mounted) {
         _refresh(() {
           _isUploading = false;
@@ -428,6 +441,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
       if (mounted) TDToast.showText(textLocalize('gen_enter_text'), context: context);
       return;
     }
+
+    FocusManager.instance.primaryFocus?.unfocus();
 
     _refresh(() {
       _isGenerating = true;
@@ -486,6 +501,8 @@ extension _GenerateSubmissionX on _GeneratePageState {
       return;
     }
 
+    _cancelToken = CancelToken();
+
     _refresh(() {
       _isUploading = true;
     });
@@ -500,6 +517,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         localPath: GenConfig.uploadedVideos[0].assetPath!,
         storageFileName: 'video.mp4',
         contentType: 'video/mp4',
+        cancelToken: _cancelToken!,
       );
 
       await client.from("processing_tasks").insert({
@@ -516,12 +534,21 @@ extension _GenerateSubmissionX on _GeneratePageState {
         _selectedVideoTaskType = 'video_3dgs';
         _openTaskListAfterSubmit();
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        return;
+      }
+      if (mounted) {
+        debugPrint('[GenerateSubmission] video upload error: $e');
+        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+      }
     } catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] video submit error: $e');
         TDToast.showText(textLocalize('gen_submit_fail'), context: context);
       }
     } finally {
+      _cancelToken = null;
       if (mounted) {
         _refresh(() {
           _isUploading = false;
@@ -571,6 +598,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
     required String localPath,
     required String storageFileName,
     required String contentType,
+    required CancelToken cancelToken,
   }) async {
     final client = Supabase.instance.client;
     final file = File(localPath);
@@ -596,6 +624,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
           'Content-Length': fileSize.toString(),
         },
       ),
+      cancelToken: cancelToken,
       onSendProgress: (count, total) {
         if (mounted) {
           _refresh(() {

@@ -58,6 +58,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   String? _generatedImageUrl;
   bool _isGenerating = false;
   String _selectedVideoTaskType = 'video_3dgs';
+  CancelToken? _cancelToken;
   bool _wasGeneratePageActive = false;
 
   static String _generateSceneId() {
@@ -191,6 +192,55 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
         _selectedVideoTaskType = selected;
       });
     }
+  }
+
+  Future<bool> _showCancelDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            textLocalize('gen_cancel_title'),
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Text(
+            textLocalize('gen_cancel_message'),
+            style: TextStyle(
+              color: isDark ? Colors.white70 : Colors.black54,
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(
+                textLocalize('gen_cancel_continue'),
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : BDDesign.colorMutedBlue,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.redAccent,
+              ),
+              child: Text(textLocalize('gen_cancel_confirm')),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
   }
 
   @override
@@ -377,6 +427,35 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                         ),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    BDPanelCard(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 18,
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.52)
+                                : BDDesign.colorMutedBlue,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              textLocalize('gen_text_pipeline_hint'),
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.45,
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.58)
+                                    : BDDesign.colorMutedBlue,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -478,8 +557,25 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
       );
 
     return PopScope(
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) FocusManager.instance.primaryFocus?.unfocus();
+      canPop: !_isUploading && !_isGenerating,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          return;
+        }
+        if (_isUploading || _isGenerating) {
+          final shouldExit = await _showCancelDialog();
+          if (shouldExit && mounted) {
+            _cancelToken?.cancel();
+            _refresh(() {
+              _isUploading = false;
+              _isGenerating = false;
+            });
+            if (mounted) {
+              Navigator.of(context).pop();
+            }
+          }
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -553,7 +649,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
-                                  '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                                  _tabController.index == 1
+                                      ? textLocalize('gen_text_generating')
+                                      : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -562,23 +660,25 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                                         : const Color(0xFFF57C00),
                                   ),
                                 ),
-                                const Spacer(),
-                                Text(
-                                  '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.58)
-                                        : BDDesign.colorMutedBlue,
+                                if (_tabController.index != 1) ...[
+                                  const Spacer(),
+                                  Text(
+                                    '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.58)
+                                          : BDDesign.colorMutedBlue,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ],
                             ),
                             const SizedBox(height: 8),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(3),
                               child: LinearProgressIndicator(
-                                value: _uploadProgress,
+                                value: _tabController.index == 1 ? null : _uploadProgress,
                                 minHeight: 5,
                                 backgroundColor: isDark
                                     ? Colors.white.withAlpha(20)
