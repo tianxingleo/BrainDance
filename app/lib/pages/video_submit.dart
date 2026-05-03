@@ -39,6 +39,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   CancelToken? _cancelToken;
   bool _dialogShowing = false;
   bool _shouldClosePage = false;
+  bool _deleteVideo = true;
 
   static final Random _rdg = Random();
 
@@ -89,6 +90,106 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       },
     );
     return result ?? false;
+  }
+
+  Future<bool> _showExitConfirmDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (builderContext, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                textLocalize('video_exit_title'),
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    textLocalize('video_exit_message'),
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: _deleteVideo,
+                          onChanged: (v) {
+                            _deleteVideo = v ?? true;
+                            setDialogState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        textLocalize('video_exit_delete_checkbox'),
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(textLocalize('video_exit_cancel')),
+                ),
+                TextButton(
+                  onPressed: () {
+                    debugPrint('[VideoSubmit] exit confirmed, deleteVideo=$_deleteVideo');
+                    Navigator.of(ctx).pop(true);
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
+                  child: Text(textLocalize('video_exit_confirm')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  void _deleteRecordedVideo() {
+    if (!_deleteVideo) {
+      debugPrint('[VideoSubmit] keeping video files (deleteVideo=false)');
+      return;
+    }
+    debugPrint('[VideoSubmit] deleting video: ${widget.videoPath}');
+    try {
+      final videoFile = File(widget.videoPath);
+      if (videoFile.existsSync()) {
+        videoFile.deleteSync();
+        debugPrint('[VideoSubmit] deleted video file');
+      } else {
+        debugPrint('[VideoSubmit] video file not found at path');
+      }
+      final thumbFile = File(widget.thumbnailPath);
+      if (thumbFile.existsSync()) {
+        thumbFile.deleteSync();
+        debugPrint('[VideoSubmit] deleted thumbnail file');
+      }
+    } catch (e) {
+      debugPrint('[VideoSubmit] file deletion error: $e');
+    }
   }
 
   Future<void> _submit() async {
@@ -238,15 +339,18 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_isUploading,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
-        if (!didPop && _isUploading) {
-          final navigator = Navigator.of(context);
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        if (_isUploading) {
+          debugPrint('[VideoSubmit] back intercepted while uploading, showing upload cancel dialog');
           _dialogShowing = true;
           final shouldCancel = await _showCancelUploadDialog();
           if (!mounted) return;
           _dialogShowing = false;
           if (shouldCancel) {
+            debugPrint('[VideoSubmit] upload cancelled by user');
             _cancelToken?.cancel();
             setState(() {
               _isUploading = false;
@@ -254,6 +358,14 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             navigator.pop();
           } else if (_shouldClosePage) {
             _shouldClosePage = false;
+            navigator.pop();
+          }
+        } else {
+          debugPrint('[VideoSubmit] back intercepted before upload, showing exit confirm dialog');
+          final shouldExit = await _showExitConfirmDialog();
+          if (!mounted) return;
+          if (shouldExit) {
+            _deleteRecordedVideo();
             navigator.pop();
           }
         }

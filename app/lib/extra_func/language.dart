@@ -44,6 +44,7 @@ enum Language {
       "reco_tip3": """如视频使用手机自带相机软件拍摄，请用剪辑软件（如剪映）检查视频，剪掉抖动、模糊或过曝的片段。
 最终导出时，确认参数为 1080p 和 30fps。""",
       "reco_camun": "相机访问被拒绝。\n请在系统设置中启用相机权限。",
+      "set_open_settings": "前往设置",
       "reco_wait": "相机初始化中...",
       "recall": "回忆",
       "record": "相机记录",
@@ -345,6 +346,11 @@ enum Language {
       "video_upload_cancel_message": "视频正在上传中，是否取消上传？",
       "video_upload_cancel_confirm": "取消上传",
       "video_upload_cancel_continue": "继续上传",
+      "video_exit_title": "退出视频提交",
+      "video_exit_message": "即将退出视频提交界面。",
+      "video_exit_delete_checkbox": "删除刚拍摄的视频文件",
+      "video_exit_confirm": "确认退出",
+      "video_exit_cancel": "取消",
       // Common/shared
       "admin_mode_msg": "当前为管理员浏览模式，未绑定用户，暂不支持上传任务。",
       "not_logged_in": "未登录，即将跳转登录页面...",
@@ -433,6 +439,7 @@ Content: Plan diverse shooting content and angles to avoid repetitive footage.""
 When finally exporting, confirm the settings are 1080p and 30fps.""",
       "reco_camun":
           "Cannot access the camera.\nPlease check and grant the camera permission in your device settings to continue.",
+      "set_open_settings": "Open Settings",
       "reco_wait": "Initializing the camera...",
       "recall": "Recall",
       "record": "Record",
@@ -770,6 +777,11 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_upload_cancel_message": "Video upload is in progress. Do you want to cancel?",
       "video_upload_cancel_confirm": "Cancel Upload",
       "video_upload_cancel_continue": "Continue Upload",
+      "video_exit_title": "Exit Video Submission",
+      "video_exit_message": "You are about to leave the video submission page.",
+      "video_exit_delete_checkbox": "Delete the recorded video file",
+      "video_exit_confirm": "Exit",
+      "video_exit_cancel": "Cancel",
       // Common/shared
       "admin_mode_msg":
           "Admin browse mode, no user bound. Upload not supported.",
