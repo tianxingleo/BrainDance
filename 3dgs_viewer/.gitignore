@@ -1,0 +1,40 @@
+# =========================
+# 3dgs_viewer/.gitignore
+# 3DGS WebGL 查看器专用忽略规则
+# =========================
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 测试媒体文件
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.bak
+
+# 日志
+*.log
+*.pid
+
+# Python 工具运行时
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.mypy_cache/
+.pytest_cache/
+
+# 3D 模型输出 (大型文件)
+*.ply
+*.splat
+*.obj
+*.glb
+*.gltf
+
+# Vue 子项目构建产物
+my-3dgs-viewer/node_modules/
+my-3dgs-viewer/dist/
+my-3dgs-viewer/dist-ssr/

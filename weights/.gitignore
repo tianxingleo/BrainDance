@@ -1,0 +1,19 @@
+# =========================
+# weights/.gitignore
+# 模型权重缓存目录
+# =========================
+
+# 忽略所有缓存文件（HuggingFace / PyTorch Hub 等）
+.cache/
+
+# 忽略模型权重文件（由 .gitattributes LFS 管理或完全忽略）
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+
+# 忽略临时下载文件
+*.tmp
+*.partial

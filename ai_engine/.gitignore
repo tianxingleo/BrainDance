@@ -1,0 +1,79 @@
+# =========================
+# ai_engine/.gitignore
+# AI 引擎专用忽略规则
+# =========================
+
+# Python 运行时
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# 类型检查 / Lint
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+*.pid
+*.tmp
+temp_workspace/
+test_workspace/
+log/
+
+# AI/ML 输出 (Nerfstudio / COLMAP / 3DGS)
+outputs/
+exports/
+data_cache/
+datasets/
+checkpoints/
+runs/
+
+# COLMAP 数据库
+*.db
+*.bin
+
+# 3D 模型与媒体文件
+*.ply
+*.splat
+*.obj
+*.glb
+*.gltf
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# 子仓库运行时产物
+demo/4DGS-Video-Generator/.venv/
+demo/4DGS-Video-Generator/output_*/
+demo/4DGS-Video-Generator/gsplay/.venv/
+demo/4DGS-Video-Generator/gsplay/gsplay.egg-info/
+demo/4DGS-Video-Generator/gsplay/__pycache__/
+
+# 向量数据库
+chroma_db/
+chroma/
+*.faiss
+faiss_index/
+.lancedb/
+*.lance/
+*.sqlite3
