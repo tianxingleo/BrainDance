@@ -234,3 +234,32 @@ docs/old/idea.pdf
 *.mp4.bak
 3dgs_viewer/test.mp4.bak
 3dgs_viewer/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
+
+# =========================
+# 11. Python 全局补充 (Python 补充规则)
+# =========================
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# =========================
+# 12. 日志与临时文件 (全局日志)
+# =========================
+*.log
+*.pid
+*.tmp
+
+# =========================
+# 13. Node.js 全局 (Node.js 补充)
+# =========================
+**/node_modules/
+
+# =========================
+# 14. 临时文件补充
+# =========================
+dummy.jpg
+repomix-output.xml
+ai_engine/**/temp_workspace/
+ai_engine/**/test_workspace/
+ai_engine/**/worker.log
+ai_engine/**/worker.pid
