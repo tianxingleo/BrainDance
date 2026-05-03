@@ -278,9 +278,23 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (navigateToSubmit && mounted) {
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) =>
+        PageRouteBuilder(
+          transitionDuration: BDMotion.durationNormal,
+          reverseTransitionDuration: BDMotion.durationNormal,
+          opaque: true,
+          pageBuilder: (_, __, ___) =>
               VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
+          transitionsBuilder: (_, animation, __, child) {
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, -1),
+                end: Offset.zero,
+              ).animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
+              ),
+              child: child,
+            );
+          },
         ),
       );
     }
