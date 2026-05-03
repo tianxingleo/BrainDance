@@ -262,9 +262,10 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
       duration: const Duration(milliseconds: 280),
       vsync: this,
     );
-    _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _slide = Tween<Offset>(
       begin: const Offset(0, 0.15),
       end: Offset.zero,
@@ -393,12 +394,14 @@ class _CenterBubbleState extends ConsumerState<_CenterBubble>
       duration: const Duration(milliseconds: 250),
       vsync: this,
     );
-    _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
-    _scale = Tween<double>(begin: 0.88, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _scale = Tween<double>(
+      begin: 0.88,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.addStatusListener((s) {
       if (s == AnimationStatus.dismissed && mounted) {
         ref.read(widget.provider.notifier).state = false;
@@ -422,6 +425,9 @@ class _CenterBubbleState extends ConsumerState<_CenterBubble>
         _dismissTimer = Timer(Duration(seconds: widget.durationSeconds), () {
           if (mounted) _ctrl.reverse();
         });
+      } else if ((prev == true) && !next) {
+        _dismissTimer?.cancel();
+        if (mounted) _ctrl.reverse();
       }
     });
 

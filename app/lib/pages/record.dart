@@ -227,6 +227,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
     }
 
+    if (showToast && mounted) {
+      ref.read(showRecoDoneBubbleProvider.notifier).state = true;
+    }
+
     XFile file;
     try {
       file = await controller.stopVideoRecording();
@@ -275,13 +279,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (thumbPath.startsWith('assets/')) {
       if (showToast && mounted) {
+        ref.read(showRecoDoneBubbleProvider.notifier).state = false;
         ref.read(showTooShortBubbleProvider.notifier).state = true;
       }
       return;
-    }
-
-    if (showToast && mounted) {
-      ref.read(showRecoDoneBubbleProvider.notifier).state = true;
     }
 
     if (navigateToSubmit && mounted) {
