@@ -60,13 +60,107 @@ const postBridgeMessage = (payload: Record<string, unknown>) => {
   window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))
 }
 
+const serializeTrackValue = (value: unknown): unknown => {
+  if (value == null) return value
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.slice(0, 8)
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return Object.fromEntries(Object.entries(record).slice(0, 12))
+  }
+  return String(value)
+}
+
+const serializeTrackMap = (value: MediaTrackCapabilities | MediaTrackSettings | MediaTrackConstraints) => (
+  Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, serializeTrackValue(entry)]),
+  )
+)
+
+const buildMainBackConstraints = (constraints: MediaStreamConstraints) => {
+  const video = typeof constraints.video === 'object' && constraints.video !== null
+    ? { ...constraints.video }
+    : {}
+  const advanced = Array.isArray(video.advanced) ? [...video.advanced] : []
+
+  return {
+    ...constraints,
+    audio: false,
+    video: {
+      ...video,
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      aspectRatio: { ideal: 1.7777777778 },
+      zoom: { ideal: 1 },
+      advanced: [
+        { zoom: 1, focusMode: 'continuous' },
+        ...advanced,
+      ],
+    },
+  } as MediaStreamConstraints
+}
+
+const tuneCameraTrack = async (stream: MediaStream) => {
+  const [track] = stream.getVideoTracks()
+  if (!track) return
+  const capabilities = typeof track.getCapabilities === 'function'
+    ? track.getCapabilities()
+    : {}
+  const settingsBefore = typeof track.getSettings === 'function'
+    ? track.getSettings()
+    : {}
+
+  const advanced: MediaTrackConstraintSet[] = []
+  const zoomCapability = (capabilities as MediaTrackCapabilities & { zoom?: { min?: number, max?: number } }).zoom
+  if (zoomCapability) {
+    advanced.push({ zoom: Math.max(1, zoomCapability.min ?? 1) } as MediaTrackConstraintSet)
+  }
+  const focusModes = (capabilities as MediaTrackCapabilities & { focusMode?: string[] }).focusMode
+  if (Array.isArray(focusModes) && focusModes.includes('continuous')) {
+    advanced.push({ focusMode: 'continuous' } as MediaTrackConstraintSet)
+  }
+
+  if (advanced.length > 0) {
+    try {
+      await track.applyConstraints({ advanced })
+    } catch (error) {
+      postBridgeMessage({
+        status: 'info',
+        msg: 'Marker AR track tuning skipped',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  const settingsAfter = typeof track.getSettings === 'function'
+    ? track.getSettings()
+    : {}
+  postBridgeMessage({
+    status: 'info',
+    msg: 'Marker AR camera track',
+    label: track.label,
+    capabilities: serializeTrackMap(capabilities),
+    settingsBefore: serializeTrackMap(settingsBefore),
+    settingsAfter: serializeTrackMap(settingsAfter),
+  })
+}
+
 const installGetUserMediaDiagnostics = () => {
   const mediaDevices = navigator.mediaDevices
   if (!mediaDevices?.getUserMedia) return
   const originalGetUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
   mediaDevices.getUserMedia = async (constraints) => {
     try {
-      return await originalGetUserMedia(constraints)
+      const tunedConstraints = buildMainBackConstraints(constraints || { video: true })
+      postBridgeMessage({
+        status: 'info',
+        msg: 'Marker AR getUserMedia constraints',
+        constraints: tunedConstraints,
+      })
+      const stream = await originalGetUserMedia(tunedConstraints)
+      await tuneCameraTrack(stream)
+      return stream
     } catch (error) {
       const domError = error as DOMException
       postBridgeMessage({
