@@ -2,9 +2,7 @@ part of '../generate.dart';
 
 extension _GenerateSubmissionX on _GeneratePageState {
   void _openTaskListAfterSubmit() {
-    final navigator = Navigator.of(context);
-    // 统一收敛为一次导航，避免先 pop 再 push 导致交互式返回期间路由树抖动。
-    navigator.pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
+    Navigator.of(context).pushNamed('/tasks');
   }
 
   Map<String, dynamic>? _videoTaskParamsFor(String taskType) {
@@ -324,7 +322,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
       if (data is Map && data['success'] == true) {
         if (mounted) {
           TDToast.showText(textLocalize('gen_submit_success'), context: context);
-          ref.read(pageIndexProvider.notifier).state = 0;
           _generatedImageUrl = null;
           _textEditingController.clear();
           GenConfig.uploadedText = '';
@@ -409,7 +406,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
-        ref.read(pageIndexProvider.notifier).state = 0;
         GenConfig.uploadedImages.clear();
         _openTaskListAfterSubmit();
       }
@@ -516,7 +512,6 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
-        ref.read(pageIndexProvider.notifier).state = 0;
         GenConfig.uploadedVideos.clear();
         _selectedVideoTaskType = 'video_3dgs';
         _openTaskListAfterSubmit();

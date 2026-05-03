@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/main.dart' show pageIndexProvider;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -140,11 +139,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       if (mounted) {
         TDToast.showText(textLocalize('gen_submit_success'), context: context);
-        ref.read(pageIndexProvider.notifier).state = 0;
-        // 统一收敛为一次导航，避免先 pop 再 push 导致返回手势期间路由栈抖动。
-        Navigator.of(
-          context,
-        ).pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
+        Navigator.of(context).pushNamed('/tasks');
       }
     } catch (e) {
       if (mounted) {
