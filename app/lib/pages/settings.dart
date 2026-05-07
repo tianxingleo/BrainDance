@@ -71,12 +71,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   trailing: GestureDetector(
                     onTap: () async {
                       // 1. Capture the UI before changing theme
-                      final boundary = themeAnimationKey.currentContext
-                          ?.findRenderObject() as RenderRepaintBoundary?;
+                      final boundary =
+                          themeAnimationKey.currentContext?.findRenderObject()
+                              as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final image = await boundary.toImage(
-                              pixelRatio: 1.0);
+                          final image = await boundary.toImage(pixelRatio: 1.0);
 
                           final RenderBox? buttonBox =
                               _themeSwitchKey.currentContext?.findRenderObject()
@@ -84,9 +84,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
 
                           if (buttonBox != null) {
                             final offset = buttonBox.localToGlobal(Offset.zero);
-                            final center = offset +
-                                Offset(buttonBox.size.width / 2,
-                                    buttonBox.size.height / 2);
+                            final center =
+                                offset +
+                                Offset(
+                                  buttonBox.size.width / 2,
+                                  buttonBox.size.height / 2,
+                                );
 
                             ref
                                 .read(themeAnimationProvider.notifier)
@@ -130,8 +133,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                         Navigator.push(
                           context,
                           PageRouteBuilder(
-                            transitionDuration: const Duration(milliseconds: 320),
-                            reverseTransitionDuration: const Duration(milliseconds: 320),
+                            transitionDuration: const Duration(
+                              milliseconds: 320,
+                            ),
+                            reverseTransitionDuration: const Duration(
+                              milliseconds: 320,
+                            ),
                             opaque: true,
                             pageBuilder: (_, __, ___) => const TaskListPage(),
                             transitionsBuilder: (_, animation, __, child) {
@@ -148,7 +155,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               );
                             },
                           ),
-                        );
+                        ).then((_) {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                        });
                       },
                     );
                   },
@@ -180,16 +189,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       width: double.infinity,
       child: BDTabSwitcher(
         index: _currentTabIndex,
-        children: [
-          setTab1(context, ref),
-          setTab3(context),
-        ],
+        children: [setTab1(context, ref), setTab3(context)],
       ),
     );
   }
 }
-
-
 
 class _SettingsTabSwitch extends StatelessWidget {
   final TabController controller;
@@ -266,10 +270,18 @@ class _SettingsTabSwitch extends StatelessWidget {
                     ),
                     Row(
                       children: [
-                        _buildTabItem(0, textLocalize('set_tab1'),
-                            selectedColor, unselectedColor),
-                        _buildTabItem(1, textLocalize('set_tab3'),
-                            selectedColor, unselectedColor),
+                        _buildTabItem(
+                          0,
+                          textLocalize('set_tab1'),
+                          selectedColor,
+                          unselectedColor,
+                        ),
+                        _buildTabItem(
+                          1,
+                          textLocalize('set_tab3'),
+                          selectedColor,
+                          unselectedColor,
+                        ),
                       ],
                     ),
                   ],
@@ -282,8 +294,12 @@ class _SettingsTabSwitch extends StatelessWidget {
     );
   }
 
-  Widget _buildTabItem(int index, String label,
-      Color selectedColor, Color unselectedColor) {
+  Widget _buildTabItem(
+    int index,
+    String label,
+    Color selectedColor,
+    Color unselectedColor,
+  ) {
     return Expanded(
       child: GestureDetector(
         onTap: () => controller.animateTo(index),
