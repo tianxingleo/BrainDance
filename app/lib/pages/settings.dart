@@ -113,9 +113,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       icon: isDark
                           ? Icons.dark_mode_rounded
                           : Icons.wb_sunny_rounded,
-                      color: isDark
-                          ? BDDesign.colorMutedBlueLight
-                          : BDDesign.colorMutedBlue,
+                      color: textColor,
                     ),
                   ),
                 ),
