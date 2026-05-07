@@ -13,9 +13,6 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 Widget setTab1(BuildContext context, WidgetRef ref) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
-  final hintColor = isDark
-      ? Colors.white.withValues(alpha: 0.62)
-      : BDDesign.colorMutedBlue;
 
   return Padding(
     padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
@@ -24,21 +21,7 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
       children: [
         BDPanelCard(
           padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                textLocalize('set_label_lang'),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: BDDesign.colorInkBlack,
-                ),
-              ),
-              const SizedBox(height: 14),
-              _LanguageTabSwitch(ref: ref),
-            ],
-          ),
+          child: _LanguageRow(isDark: isDark, ref: ref),
         ),
         if (SupabaseConfig.isAdminMode) ...[
           const SizedBox(height: 12),
@@ -59,6 +42,36 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
       ],
     ),
   );
+}
+
+class _LanguageRow extends StatelessWidget {
+  final bool isDark;
+  final WidgetRef ref;
+  const _LanguageRow({required this.isDark, required this.ref});
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final actionColor = isDark ? BDDesign.colorMutedBlueLight : BDDesign.colorMutedBlue;
+
+    return Row(
+      children: [
+        Text(
+          textLocalize('set_label_lang'),
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
+        ),
+        const Spacer(),
+        SizedBox(
+          width: 160,
+          child: _LanguageTabSwitch(ref: ref),
+        ),
+      ],
+    );
+  }
 }
 
 class _LanguageTabSwitch extends StatefulWidget {
@@ -122,13 +135,13 @@ class _LanguageTabSwitchState extends State<_LanguageTabSwitch>
         : const Color(0xFF9AA3AD);
 
     return Container(
-      height: 48,
+      height: 40,
       child: ClipRRect(
         borderRadius: BDDesign.radiusLarge,
         child: BackdropFilter(
           filter: ui.ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
           child: Container(
-            padding: const EdgeInsets.all(4.0),
+            padding: const EdgeInsets.all(3.0),
             decoration: BoxDecoration(
               color: navBackground,
               borderRadius: BDDesign.radiusLarge,
@@ -136,8 +149,8 @@ class _LanguageTabSwitchState extends State<_LanguageTabSwitch>
               boxShadow: [
                 BoxShadow(
                   color: navShadow,
-                  blurRadius: 28,
-                  offset: const Offset(0, 8),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
@@ -159,7 +172,7 @@ class _LanguageTabSwitchState extends State<_LanguageTabSwitch>
                           child: Container(
                             decoration: BoxDecoration(
                               color: selectedBackground,
-                              borderRadius: BorderRadius.circular(22),
+                              borderRadius: BorderRadius.circular(20),
                             ),
                           ),
                         );
@@ -212,7 +225,7 @@ class _LanguageTabSwitchState extends State<_LanguageTabSwitch>
                 style: TextStyle(
                   color: selected ? selectedColor : unselectedColor,
                   fontWeight: FontWeight.w600,
-                  fontSize: 14,
+                  fontSize: 13,
                 ),
               );
             },
