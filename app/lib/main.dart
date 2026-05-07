@@ -16,6 +16,7 @@ import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
+import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
@@ -171,15 +172,49 @@ class Home extends ConsumerWidget {
       initialRoute: canEnterApp
           ? '/'
           : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
-      routes: {
-        // 路由表：路径 -> 页面构建器
-        '/': (context) {
-          loadSettings(ref);
-          return MainScreen();
-        }, // 根路径对应主屏幕
-        '/login': (context) => const LoginPage(), // 登录页
-        '/example': (context) => RecallPage(), // "/example"路径对应....
-        '/tasks': (context) => const TaskListPage(), // 任务列表页
+      onGenerateRoute: (settings) {
+        WidgetBuilder builder;
+        bool useSlide = false;
+        switch (settings.name) {
+          case '/':
+            builder = (context) {
+              loadSettings(ref);
+              return MainScreen();
+            };
+          case '/login':
+            builder = (_) => const LoginPage();
+          case '/example':
+            builder = (_) => RecallPage();
+          case '/tasks':
+            builder = (_) => const TaskListPage();
+            useSlide = true;
+          default:
+            return null;
+        }
+        if (useSlide) {
+          return PageRouteBuilder(
+            settings: settings,
+            transitionDuration: BDMotion.durationNormal,
+            reverseTransitionDuration: BDMotion.durationNormal,
+            opaque: true,
+            pageBuilder: (ctx, _, _) => builder(ctx),
+            transitionsBuilder: (_, animation, _a, child) {
+              return SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, -1),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
+                ),
+                child: child,
+              );
+            },
+          );
+        }
+        return MaterialPageRoute(
+          settings: settings,
+          builder: builder,
+        );
       },
       // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
       builder: (context, child) {
