@@ -263,8 +263,8 @@ enum Language {
       "set_lang_en": "English",
       "set_current_language": "当前语言",
       "set_current_theme": "当前模式",
-      "set_theme_day": "DAY",
-      "set_theme_night": "NIGHT",
+      "set_theme_day": "日间",
+      "set_theme_night": "夜间",
       "set_theme_day_cn": "日间模式",
       "set_theme_night_cn": "夜间模式",
       // Recall page

@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -338,6 +340,13 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue;
+    final inputBg = isDark ? const Color(0xFF23232A) : const Color(0xFFF6F8FC);
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -371,94 +380,201 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(textLocalize('video_submit_title'))),
-        body: Stack(
-          children: [
-            SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    textLocalize('video_submit_name'),
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: nameController,
-                    decoration: InputDecoration(
-                      border: const OutlineInputBorder(),
-                      hintText: textLocalize('video_submit_name_hint'),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    textLocalize('video_submit_thumbnail'),
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                  const SizedBox(height: 8),
-                  Center(
-                    child: Image.file(
-                      File(widget.thumbnailPath),
-                      width: 180,
-                      height: 120,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isUploading ? null : _submit,
-                      child: Text(textLocalize('video_submit_btn')),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_isUploading)
-              Container(
-                color: Colors.black45,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+        backgroundColor: Colors.transparent,
+        body: BDPageBackdrop(
+          child: SafeArea(
+            child: Stack(
+              children: [
+                SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 52),
+                      Text(
+                        textLocalize('video_submit_title'),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
                         ),
-                        const SizedBox(height: 16),
+                      ),
+                      if (_isUploading) ...[
+                        const SizedBox(height: 14),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(4),
                           child: LinearProgressIndicator(
                             value: _uploadProgress,
-                            minHeight: 6,
-                            backgroundColor: Colors.white.withAlpha(40),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              Color(0xFF7AA2FF),
+                            minHeight: 5,
+                            backgroundColor: isDark
+                                ? Colors.white.withAlpha(20)
+                                : Colors.black.withAlpha(15),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              isDark
+                                  ? const Color(0xFFFFB74D)
+                                  : const Color(0xFFF57C00),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                          style: TextStyle(
-                            color: Colors.white.withAlpha(200),
-                            fontSize: 13,
-                          ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.cloud_upload_outlined, size: 12, color: hintColor),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                              style: TextStyle(fontSize: 12, color: hintColor),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                              style: TextStyle(fontSize: 11, color: hintColor),
+                            ),
+                          ],
                         ),
                       ],
+                      const SizedBox(height: 20),
+                      Text(
+                        textLocalize('video_submit_name'),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: nameController,
+                        style: TextStyle(color: textColor, fontSize: 15),
+                        decoration: InputDecoration(
+                          hintText: textLocalize('video_submit_name_hint'),
+                          hintStyle: TextStyle(
+                            color: hintColor,
+                            fontSize: 15,
+                          ),
+                          filled: true,
+                          fillColor: inputBg,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 16,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                              color: BDDesign.colorMutedBlue.withValues(
+                                alpha: 0.4,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        textLocalize('video_submit_thumbnail'),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.file(
+                          File(widget.thumbnailPath),
+                          width: 200,
+                          height: 128,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      TDButton(
+                        onTap: _isUploading ? () {} : _submit,
+                        style: TDButtonStyle(
+                          backgroundColor: _isUploading
+                              ? (isDark ? const Color(0xFF1A1A1E) : const Color(0xFFD8D8DF))
+                              : (isDark ? const Color(0xFF2A2A2E) : BDDesign.colorMutedBlue),
+                          textColor: _isUploading
+                              ? (isDark ? Colors.white.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.45))
+                              : Colors.white,
+                          radius: BorderRadius.circular(18),
+                        ),
+                        type: TDButtonType.fill,
+                        shape: TDButtonShape.rectangle,
+                        theme: TDButtonTheme.primary,
+                        size: TDButtonSize.large,
+                        width: double.infinity,
+                        text: _isUploading
+                            ? '${textLocalize('gen_uploading')}...'
+                            : textLocalize('video_submit_btn'),
+                      ),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  left: 16,
+                  top: 4,
+                  child: GestureDetector(
+                    onTap: () {
+                      if (_isUploading) {
+                        _dialogShowing = true;
+                        _showCancelUploadDialog().then((shouldCancel) {
+                          if (!mounted) return;
+                          _dialogShowing = false;
+                          if (shouldCancel) {
+                            _cancelToken?.cancel();
+                            setState(() {
+                              _isUploading = false;
+                            });
+                            Navigator.of(context).pop();
+                          }
+                        });
+                      } else {
+                        _showExitConfirmDialog().then((shouldExit) {
+                          if (!mounted) return;
+                          if (shouldExit) {
+                            _deleteRecordedVideo();
+                            Navigator.of(context).pop();
+                          }
+                        });
+                      }
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? BDDesign.colorInkBlack.withAlpha(216)
+                            : Colors.white.withAlpha(230),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withAlpha(28)
+                              : Colors.black.withAlpha(12),
+                        ),
+                        boxShadow: [BDDesign.shadowElevated],
+                      ),
+                      child: Icon(
+                        Icons.close_rounded,
+                        color: isDark
+                            ? BDDesign.colorAshGray
+                            : BDDesign.colorInkBlack,
+                        size: 22,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
