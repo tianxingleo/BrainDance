@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -59,7 +60,7 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showText(textLocalize('login_signup_success'), context: context);
+          showAppToast(context, textLocalize('login_signup_success'));
           setState(() {
             _isSignUp = false; // 注册成功后切回登录界面
           });
@@ -71,19 +72,19 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showSuccess(textLocalize('login_success'), context: context);
+          showAppToast(context, textLocalize('login_success'));
           Navigator.of(context).pushReplacementNamed('/'); // 回到首页
         }
       }
     } on AuthException catch (e) {
       if (mounted) {
         debugPrint('[Login] auth error: $e');
-        TDToast.showText(textLocalize('login_auth_fail'), context: context);
+        showAppToast(context, textLocalize('login_auth_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[Login] error: $e');
-        TDToast.showText(textLocalize('login_error'), context: context);
+        showAppToast(context, textLocalize('login_error'));
       }
     } finally {
       if (mounted) {

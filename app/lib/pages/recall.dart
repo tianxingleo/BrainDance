@@ -33,6 +33,7 @@ import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
+import '../widgets/app_toast.dart';
 import 'community/composer_sheet.dart';
 import 'community/models.dart';
 import 'community/repository.dart';

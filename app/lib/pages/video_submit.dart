@@ -6,6 +6,7 @@ import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -202,26 +203,23 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     if (user == null) {
       if (SupabaseConfig.isAdminMode) {
         if (mounted) {
-          TDToast.showText(textLocalize('admin_mode_msg'), context: context);
+          showAppToast(context, textLocalize('admin_mode_msg'));
         }
         return;
       }
       if (mounted) {
-        TDToast.showText(textLocalize('not_logged_in'), context: context);
+        showAppToast(context, textLocalize('not_logged_in'));
         await Navigator.pushNamed(context, '/login');
       }
       user = client.auth.currentUser;
       if (user == null) {
         if (mounted) {
-          TDToast.showText(textLocalize('login_cancelled'), context: context);
+          showAppToast(context, textLocalize('login_cancelled'));
         }
         return;
       } else {
         if (mounted) {
-          TDToast.showText(
-            textLocalize('login_success_upload'),
-            context: context,
-          );
+          showAppToast(context, textLocalize('login_success_upload'));
         }
       }
     }
@@ -288,7 +286,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       });
 
       if (mounted) {
-        TDToast.showText(textLocalize('gen_submit_success'), context: context);
+        showAppToast(context, textLocalize('gen_submit_success'));
         if (_dialogShowing) {
           _shouldClosePage = true;
           Navigator.of(context).pop(); // dismiss dialog, callback handles page pop
@@ -302,18 +300,12 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
       if (mounted) {
         debugPrint('[VideoSubmit] error: $e');
-        TDToast.showText(
-          textLocalize('gen_submit_fail'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[VideoSubmit] error: $e');
-        TDToast.showText(
-          textLocalize('gen_submit_fail'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } finally {
       _cancelToken = null;

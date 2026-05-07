@@ -211,18 +211,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
                                               data['image_url'] as String;
                                         });
                                       } else if (mounted) {
-                                        TDToast.showText(
-                                          textLocalize('gen_regenerate_fail'),
-                                          context: context,
-                                        );
+                                        showAppToast(context, textLocalize('gen_regenerate_fail'));
                                       }
                                     } catch (e) {
                                       if (mounted) {
                                         debugPrint('[GenerateSubmission] regenerate error: $e');
-                                        TDToast.showText(
-                                          textLocalize('gen_regenerate_fail'),
-                                          context: context,
-                                        );
+                                        showAppToast(context, textLocalize('gen_regenerate_fail'));
                                       }
                                     } finally {
                                       _refresh(() {
@@ -293,17 +287,17 @@ extension _GenerateSubmissionX on _GeneratePageState {
     if (user == null) {
       if (SupabaseConfig.isAdminMode) {
         if (mounted) {
-          TDToast.showText('当前为管理员浏览模式，未绑定用户，暂不支持直接提交生成任务。', context: context);
+          showAppToast(context, '当前为管理员浏览模式，未绑定用户，暂不支持直接提交生成任务。');
         }
         return;
       }
       if (mounted) {
-        TDToast.showText(textLocalize('not_logged_in'), context: context);
+        showAppToast(context, textLocalize('not_logged_in'));
         await Navigator.pushNamed(context, '/login');
       }
       user = client.auth.currentUser;
       if (user == null) {
-        if (mounted) TDToast.showText('登录已取消或未完成', context: context);
+        if (mounted) showAppToast(context, '登录已取消或未完成');
         return;
       }
     }
@@ -321,7 +315,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       final data = response.data;
       if (data is Map && data['success'] == true) {
         if (mounted) {
-          TDToast.showText(textLocalize('gen_submit_success'), context: context);
+          showAppToast(context, textLocalize('gen_submit_success'));
           _generatedImageUrl = null;
           _textEditingController.clear();
           GenConfig.uploadedText = '';
@@ -334,12 +328,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
     } on FunctionException catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] submit FunctionException: ${e.details}');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] submit error: $e');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } finally {
       if (mounted) {
@@ -366,7 +360,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitImageTask() async {
     if (GenConfig.uploadedImages.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_select_image'), context: context);
+      if (mounted) showAppToast(context, textLocalize('gen_select_image'));
       return;
     }
 
@@ -408,7 +402,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       });
 
       if (mounted) {
-        TDToast.showText(textLocalize('gen_submit_success'), context: context);
+        showAppToast(context, textLocalize('gen_submit_success'));
         GenConfig.uploadedImages.clear();
         _openTaskListAfterSubmit();
       }
@@ -418,12 +412,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
       if (mounted) {
         debugPrint('[GenerateSubmission] image upload error: $e');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] image submit error: $e');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } finally {
       _cancelToken = null;
@@ -438,7 +432,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
   Future<void> _submitTextTask() async {
     final prompt = _textEditingController.text.trim();
     if (prompt.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_enter_text'), context: context);
+      if (mounted) showAppToast(context, textLocalize('gen_enter_text'));
       return;
     }
 
@@ -471,12 +465,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
     } on FunctionException catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] generate FunctionException: ${e.details}');
-        TDToast.showText(textLocalize('gen_generate_fail'), context: context);
+        showAppToast(context, textLocalize('gen_generate_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] generate error: $e');
-        TDToast.showText(textLocalize('gen_generate_fail'), context: context);
+        showAppToast(context, textLocalize('gen_generate_fail'));
       }
     } finally {
       if (mounted) {
@@ -489,7 +483,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
   Future<void> _submitVideoTask() async {
     if (GenConfig.uploadedVideos.isEmpty) {
-      if (mounted) TDToast.showText(textLocalize('gen_select_video'), context: context);
+      if (mounted) showAppToast(context, textLocalize('gen_select_video'));
       return;
     }
 
@@ -529,7 +523,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
       });
 
       if (mounted) {
-        TDToast.showText(textLocalize('gen_submit_success'), context: context);
+        showAppToast(context, textLocalize('gen_submit_success'));
         GenConfig.uploadedVideos.clear();
         _selectedVideoTaskType = 'video_3dgs';
         _openTaskListAfterSubmit();
@@ -540,12 +534,12 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
       if (mounted) {
         debugPrint('[GenerateSubmission] video upload error: $e');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[GenerateSubmission] video submit error: $e');
-        TDToast.showText(textLocalize('gen_submit_fail'), context: context);
+        showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } finally {
       _cancelToken = null;
@@ -568,26 +562,26 @@ extension _GenerateSubmissionX on _GeneratePageState {
 
     if (SupabaseConfig.isAdminMode) {
       if (mounted) {
-        TDToast.showText(adminModeMessage, context: context);
+        showAppToast(context, adminModeMessage);
       }
       return null;
     }
 
     if (mounted) {
-      TDToast.showText(textLocalize('not_logged_in'), context: context);
+      showAppToast(context, textLocalize('not_logged_in'));
       await Navigator.pushNamed(context, '/login');
     }
 
     user = client.auth.currentUser;
     if (user == null) {
       if (mounted) {
-        TDToast.showText(textLocalize('login_cancelled'), context: context);
+        showAppToast(context, textLocalize('login_cancelled'));
       }
       return null;
     }
 
     if (mounted) {
-      TDToast.showText(textLocalize('login_success_upload'), context: context);
+      showAppToast(context, textLocalize('login_success_upload'));
     }
     return user;
   }

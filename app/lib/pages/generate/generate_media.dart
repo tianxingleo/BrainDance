@@ -289,12 +289,12 @@ extension _GenerateMediaX on _GeneratePageState {
                 ? await _uploadImages([savedXFile])
                 : await _uploadVideo(savedXFile);
             if (msg.isNotEmpty && context.mounted) {
-              TDToast.showText(msg, context: context);
+              showAppToast(context, msg);
             }
             shouldShowVideoTaskTypeSheet = !isImage && msg.isEmpty;
           } catch (_) {
             if (context.mounted) {
-              TDToast.showText(textLocalize("tip_fail"), context: context);
+              showAppToast(context, textLocalize("tip_fail"));
             }
           }
         } else {
@@ -304,7 +304,7 @@ extension _GenerateMediaX on _GeneratePageState {
                   await _picker.pickVideo(source: ImageSource.gallery),
                 );
           if (msg.isNotEmpty && context.mounted) {
-            TDToast.showText(msg, context: context);
+            showAppToast(context, msg);
           }
           shouldShowVideoTaskTypeSheet = !isImage && msg.isEmpty;
         }

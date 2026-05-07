@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:braindance/configs/app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -366,7 +367,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText(textLocalize('viewer_download_fail'), context: context);
+          showAppToast(context, textLocalize('viewer_download_fail'));
           _launchViewer();
         }
       }
@@ -472,7 +473,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           } else if (data['status'] == 'error') {
             debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
-              TDToast.showText(textLocalize('viewer_spark_error'), context: context);
+              showAppToast(context, textLocalize('viewer_spark_error'));
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');

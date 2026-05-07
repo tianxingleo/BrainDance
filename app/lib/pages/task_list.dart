@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
@@ -195,10 +196,7 @@ class _TaskListPageState extends State<TaskListPage> {
           _isLoading = false;
           _error = textLocalize('error_unknown');
         });
-        TDToast.showText(
-          textLocalize('error_fetch_tasks'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('error_fetch_tasks'));
       }
     }
   }
@@ -359,10 +357,7 @@ class _TaskListPageState extends State<TaskListPage> {
 
     // 只有completed状态的任务才能查看
     if (status != 'completed' || sceneId == null) {
-      TDToast.showText(
-        textLocalize('task_status_${status ?? 'unknown'}'),
-        context: context,
-      );
+      showAppToast(context, textLocalize('task_status_${status ?? 'unknown'}'));
       return;
     }
 

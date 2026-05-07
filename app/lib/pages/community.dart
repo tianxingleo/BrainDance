@@ -9,6 +9,7 @@ import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 class CommunityPage extends StatefulWidget {
@@ -97,7 +98,7 @@ class _CommunityPageState extends State<CommunityPage>
       _selectedMapIndex = 0;
     });
 
-    TDToast.showText(context: context, textLocalize('community_joined'));
+    showAppToast(context, textLocalize('community_joined'));
   }
 
   void _openViewer(CommunityPost post) {

@@ -11,6 +11,7 @@ import 'package:braindance/main.dart' show isRecordingProvider;
 import 'package:braindance/pages/video_submit.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -158,10 +159,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             RecoConfig.disposeCamera();
             if (mounted) {
               setState(() {});
-              TDToast.showText(
-                context: context,
-                textLocalize('reco_app_switch'),
-              );
+              showAppToast(context, textLocalize('reco_app_switch'));
             }
           });
         } else {
@@ -603,7 +601,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (targetIndex == null || targetIndex == RecoConfig.camNum) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+        showAppToast(context, textLocalize('reco_no_switch'));
       }
       return;
     }
@@ -620,7 +618,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
     } catch (_) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+        showAppToast(context, textLocalize('reco_no_switch'));
       }
     }
   }
