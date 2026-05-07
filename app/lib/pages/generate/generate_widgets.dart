@@ -37,7 +37,9 @@ class _VideoTaskTypeSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = AppConfig.isNightMode;
-    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
@@ -64,8 +66,8 @@ class _VideoTaskTypeSheet extends StatelessWidget {
               color: selected
                   ? BDDesign.colorMutedBlue
                   : (isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : BDDesign.colorMutedBlue.withValues(alpha: 0.14)),
             ),
           ),
           child: Row(
@@ -77,8 +79,8 @@ class _VideoTaskTypeSheet extends StatelessWidget {
                   color: selected
                       ? BDDesign.colorMutedBlue.withValues(alpha: 0.18)
                       : (isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.white),
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.white),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(icon, color: textColor, size: 20),
@@ -148,14 +150,141 @@ class _VideoTaskTypeSheet extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                ...options.map((taskType) => Padding(
-                      padding: EdgeInsets.only(
-                        bottom: taskType == options.last ? 0 : 10,
-                      ),
-                      child: modeTile(taskType),
-                    )),
+                ...options.map(
+                  (taskType) => Padding(
+                    padding: EdgeInsets.only(
+                      bottom: taskType == options.last ? 0 : 10,
+                    ),
+                    child: modeTile(taskType),
+                  ),
+                ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GenerateTabBar extends StatefulWidget {
+  final TabController controller;
+  final List<String> labels;
+  final VoidCallback onChanged;
+
+  const _GenerateTabBar({
+    required this.controller,
+    required this.labels,
+    required this.onChanged,
+  });
+
+  @override
+  State<_GenerateTabBar> createState() => _GenerateTabBarState();
+}
+
+class _GenerateTabBarState extends State<_GenerateTabBar> {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = AppConfig.isNightMode;
+
+    final navBackground = isDark
+        ? AppTheme.darkSurface.withValues(alpha: 0.55)
+        : BDDesign.colorPaperWhite.withValues(alpha: 0.52);
+    final navBorder = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.10);
+    final navShadow = Colors.black.withValues(alpha: isDark ? 0.22 : 0.05);
+
+    final selectedBackground = isDark
+        ? const Color(0xFFAEBAC7).withValues(alpha: 0.14)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.09);
+    final selectedColor = isDark
+        ? const Color(0xFFF4F7FA)
+        : BDDesign.colorInkBlack;
+    final unselectedColor = isDark
+        ? const Color(0xFFB4BEC9)
+        : const Color(0xFF9AA3AD);
+
+    return ClipRRect(
+      borderRadius: BDDesign.radiusLarge,
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.all(4.0),
+          decoration: BoxDecoration(
+            color: navBackground,
+            borderRadius: BDDesign.radiusLarge,
+            border: Border.all(color: navBorder, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: navShadow,
+                blurRadius: 28,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final tabWidth = constraints.maxWidth / widget.labels.length;
+              return Stack(
+                children: [
+                  AnimatedBuilder(
+                    animation: widget.controller.animation!,
+                    builder: (context, child) {
+                      final double offset =
+                          widget.controller.animation!.value * tabWidth;
+                      return Positioned(
+                        left: offset,
+                        width: tabWidth,
+                        top: 0,
+                        bottom: 0,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: selectedBackground,
+                            borderRadius: BorderRadius.circular(22),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Row(
+                    children: List.generate(widget.labels.length, (index) {
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            if (widget.controller.index != index) {
+                              widget.controller.animateTo(index);
+                              widget.onChanged();
+                            }
+                          },
+                          behavior: HitTestBehavior.opaque,
+                          child: Center(
+                            child: AnimatedBuilder(
+                              animation: widget.controller.animation!,
+                              builder: (ctx, child) {
+                                final selected =
+                                    index == widget.controller.index;
+                                return Text(
+                                  widget.labels[index],
+                                  style: TextStyle(
+                                    color: selected
+                                        ? selectedColor
+                                        : unselectedColor,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

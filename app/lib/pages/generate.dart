@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
@@ -43,10 +44,6 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
 
   static Key _uploadKey = UniqueKey();
   static Key _uploadKey2 = UniqueKey();
-  static const TextStyle tabTextStyle = TextStyle(
-    fontSize: 16,
-    fontFamily: AppConfig.fontFamily,
-  );
   static const int maxImageCount = 1;
   static const int imageSizeLimitBytes = 20 * 1024 * 1024; // 20 MB
   static const int videoSizeLimitBytes = 1610612736; // 1.5 GB
@@ -58,6 +55,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   double _uploadProgress = 0.0;
   int _uploadedBytes = 0;
   int _totalFileSize = 0;
+  bool _isTextFocused = false;
+  late final FocusNode _textFocusNode;
   String? _generatedImageUrl;
   bool _isGenerating = false;
   String _selectedVideoTaskType = 'video_3dgs';
@@ -90,6 +89,12 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   @override
   void initState() {
     super.initState();
+    _textFocusNode = FocusNode()
+      ..addListener(() {
+        if (mounted) {
+          setState(() => _isTextFocused = _textFocusNode.hasFocus);
+        }
+      });
     _tabController = TabController(
       length: 3,
       vsync: this,
@@ -108,6 +113,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   @override
   void dispose() {
     FocusManager.instance.primaryFocus?.unfocus();
+    _textFocusNode.dispose();
     _clearGenerateDraft();
     _tabController.dispose();
     _scrollController.dispose();
@@ -292,40 +298,14 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final List<Widget> tabContents = [
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: BDPanelCard(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: ClipRRect(
-            borderRadius: BDDesign.radiusNormal,
-            child: TDTabBar(
-              tabs: [
-                TDTab(text: textLocalize('gen_pic')),
-                TDTab(text: textLocalize('gen_text')),
-                TDTab(text: textLocalize('gen_video')),
-              ],
-              controller: _tabController,
-              outlineType: TDTabBarOutlineType.capsule,
-              showIndicator: false,
-              backgroundColor: Colors.transparent,
-              selectedBgColor: isDark
-                  ? Colors.white.withValues(alpha: 0.10)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.14),
-              unSelectedBgColor: Colors.transparent,
-              labelPadding: const EdgeInsets.all(4),
-              onTap: (index) {
-                setState(() {});
-              },
-              labelStyle: tabTextStyle.copyWith(
-                fontWeight: FontWeight.w600,
-                color: isDark
-                    ? BDDesign.colorPaperWhite
-                    : BDDesign.colorMutedBlue,
-              ),
-              unselectedLabelStyle: tabTextStyle.copyWith(
-                fontWeight: FontWeight.w400,
-                color: isDark ? const Color(0xFF888888) : theme.fontGyColor3,
-              ),
-            ),
-          ),
+        child: _GenerateTabBar(
+          controller: _tabController,
+          labels: [
+            textLocalize('gen_pic'),
+            textLocalize('gen_text'),
+            textLocalize('gen_video'),
+          ],
+          onChanged: () => setState(() {}),
         ),
       ),
     ];
@@ -388,13 +368,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                   const SizedBox(height: 18),
                   BDPanelCard(
                     padding: const EdgeInsets.all(20),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: bgCardColor,
-                        borderRadius: BDDesign.radiusNormal,
-                      ),
-                      child: upload0,
-                    ),
+                    child: upload0,
                   ),
                 ],
               ),
@@ -421,28 +395,36 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                     description: textLocalize('gen_tip_text'),
                   ),
                   const SizedBox(height: 18),
-                  BDPanelCard(
-                    child: Container(
+                  AnimatedContainer(
+                    duration: BDMotion.durationFast,
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      color: bgCardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _isTextFocused
+                            ? BDDesign.colorMutedBlue
+                            : (isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
+                        width: _isTextFocused ? 1.5 : 1,
+                      ),
+                    ),
+                    child: TDTextarea(
+                      focusNode: _textFocusNode,
+                      controller: _textEditingController,
+                      hintText: textLocalize('gen_tip_textbox'),
+                      minLines: 8,
+                      maxLines: 20,
+                      onChanged: (value) {
+                        GenConfig.uploadedText = value;
+                        setState(() {});
+                      },
                       decoration: BoxDecoration(
-                        color: bgCardColor,
-                        borderRadius: BDDesign.radiusNormal,
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: TDTextarea(
-                        controller: _textEditingController,
-                        hintText: textLocalize('gen_tip_textbox'),
-                        minLines: 8,
-                        maxLines: 20,
-                        onChanged: (value) {
-                          GenConfig.uploadedText = value;
-                          setState(() {});
-                        },
-                        decoration: BoxDecoration(
-                          color: Colors.transparent,
-                          borderRadius: BDDesign.radiusNormal,
-                          border: Border.all(color: Colors.transparent),
-                        ),
-                        textStyle: TextStyle(color: textColor, fontSize: 16),
-                      ),
+                      textStyle: TextStyle(color: textColor, fontSize: 16),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -532,13 +514,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                   const SizedBox(height: 18),
                   BDPanelCard(
                     padding: const EdgeInsets.all(20),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: bgCardColor,
-                        borderRadius: BDDesign.radiusNormal,
-                      ),
-                      child: upload2,
-                    ),
+                    child: upload2,
                   ),
                   if (GenConfig.uploadedVideos.isNotEmpty) ...[
                     const SizedBox(height: 18),
@@ -657,7 +633,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                             : Icons.layers_outlined,
                         color: _isUploading || _isGenerating
                             ? BDDesign.colorFadedOlive
-                            : BDDesign.colorMutedBlue,
+                            : textColor,
                       ),
                     ),
                     if (_isUploading)
