@@ -34,6 +34,8 @@ class VideoSubmitPage extends ConsumerStatefulWidget {
 
 class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final TextEditingController nameController = TextEditingController();
+  final FocusNode _nameFocusNode = FocusNode();
+  bool _nameFocused = false;
   bool _isUploading = false;
   double _uploadProgress = 0.0;
   int _uploadedBytes = 0;
@@ -333,7 +335,19 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _nameFocusNode.addListener(() {
+      if (!mounted) return;
+      setState(() {
+        _nameFocused = _nameFocusNode.hasFocus;
+      });
+    });
+  }
+
+  @override
   void dispose() {
+    _nameFocusNode.dispose();
     nameController.dispose();
     super.dispose();
   }
@@ -346,6 +360,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
     final inputBg = isDark ? const Color(0xFF23232A) : const Color(0xFFF6F8FC);
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final submitBottomPadding = keyboardInset > 0 ? keyboardInset + 8.0 : 32.0;
 
     return PopScope(
       canPop: false,
@@ -381,199 +397,252 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        extendBody: true,
+        resizeToAvoidBottomInset: false,
         body: BDPageBackdrop(
           child: SafeArea(
-            child: Stack(
+            child: Column(
               children: [
-                SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: Stack(
                     children: [
-                      const SizedBox(height: 52),
-                      Text(
-                        textLocalize('video_submit_title'),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: textColor,
-                        ),
-                      ),
-                      if (_isUploading) ...[
-                        const SizedBox(height: 14),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: _uploadProgress,
-                            minHeight: 5,
-                            backgroundColor: isDark
-                                ? Colors.white.withAlpha(20)
-                                : Colors.black.withAlpha(15),
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              isDark
-                                  ? const Color(0xFFFFB74D)
-                                  : const Color(0xFFF57C00),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
+                      SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(Icons.cloud_upload_outlined, size: 12, color: hintColor),
-                            const SizedBox(width: 4),
+                            const SizedBox(height: 52),
                             Text(
-                              '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                              style: TextStyle(fontSize: 12, color: hintColor),
+                              textLocalize('video_submit_title'),
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
                             ),
-                            const Spacer(),
+                            if (_isUploading) ...[
+                              const SizedBox(height: 14),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: _uploadProgress,
+                                  minHeight: 5,
+                                  backgroundColor: isDark
+                                      ? Colors.white.withAlpha(20)
+                                      : Colors.black.withAlpha(15),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    isDark
+                                        ? const Color(0xFFFFB74D)
+                                        : const Color(0xFFF57C00),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.cloud_upload_outlined, size: 12, color: hintColor),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                                    style: TextStyle(fontSize: 12, color: hintColor),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                    style: TextStyle(fontSize: 11, color: hintColor),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            const SizedBox(height: 20),
                             Text(
-                              '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                              style: TextStyle(fontSize: 11, color: hintColor),
+                              textLocalize('video_submit_name'),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _NameTextField(
+                              controller: nameController,
+                              focusNode: _nameFocusNode,
+                              focused: _nameFocused,
+                              textColor: textColor,
+                              hintColor: hintColor,
+                              inputBg: inputBg,
+                              isDark: isDark,
+                            ),
+                            const SizedBox(height: 24),
+                            Text(
+                              textLocalize('video_submit_thumbnail'),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: Image.file(
+                                File(widget.thumbnailPath),
+                                width: 200,
+                                height: 128,
+                                fit: BoxFit.cover,
+                              ),
                             ),
                           ],
                         ),
-                      ],
-                      const SizedBox(height: 20),
-                      Text(
-                        textLocalize('video_submit_name'),
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: textColor,
-                        ),
                       ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: nameController,
-                        style: TextStyle(color: textColor, fontSize: 15),
-                        decoration: InputDecoration(
-                          hintText: textLocalize('video_submit_name_hint'),
-                          hintStyle: TextStyle(
-                            color: hintColor,
-                            fontSize: 15,
-                          ),
-                          filled: true,
-                          fillColor: inputBg,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 16,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide(
-                              color: BDDesign.colorMutedBlue.withValues(
-                                alpha: 0.4,
+                      Positioned(
+                        left: 16,
+                        top: 4,
+                        child: GestureDetector(
+                          onTap: () {
+                            if (_isUploading) {
+                              _dialogShowing = true;
+                              _showCancelUploadDialog().then((shouldCancel) {
+                                if (!mounted) return;
+                                _dialogShowing = false;
+                                if (shouldCancel) {
+                                  _cancelToken?.cancel();
+                                  setState(() {
+                                    _isUploading = false;
+                                  });
+                                  Navigator.of(context).pop();
+                                }
+                              });
+                            } else {
+                              _showExitConfirmDialog().then((shouldExit) {
+                                if (!mounted) return;
+                                if (shouldExit) {
+                                  _deleteRecordedVideo();
+                                  Navigator.of(context).pop();
+                                }
+                              });
+                            }
+                          },
+                          child: Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? BDDesign.colorInkBlack.withAlpha(216)
+                                  : Colors.white.withAlpha(230),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.white.withAlpha(28)
+                                    : Colors.black.withAlpha(12),
                               ),
+                              boxShadow: [BDDesign.shadowElevated],
+                            ),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: isDark
+                                  ? BDDesign.colorAshGray
+                                  : BDDesign.colorInkBlack,
+                              size: 22,
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        textLocalize('video_submit_thumbnail'),
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: textColor,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(
-                          File(widget.thumbnailPath),
-                          width: 200,
-                          height: 128,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                      TDButton(
-                        onTap: _isUploading ? () {} : _submit,
-                        style: TDButtonStyle(
-                          backgroundColor: _isUploading
-                              ? (isDark ? const Color(0xFF1A1A1E) : const Color(0xFFD8D8DF))
-                              : (isDark ? const Color(0xFF2A2A2E) : BDDesign.colorMutedBlue),
-                          textColor: _isUploading
-                              ? (isDark ? Colors.white.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.45))
-                              : Colors.white,
-                          radius: BorderRadius.circular(18),
-                        ),
-                        type: TDButtonType.fill,
-                        shape: TDButtonShape.rectangle,
-                        theme: TDButtonTheme.primary,
-                        size: TDButtonSize.large,
-                        width: double.infinity,
-                        text: _isUploading
-                            ? '${textLocalize('gen_uploading')}...'
-                            : textLocalize('video_submit_btn'),
                       ),
                     ],
                   ),
                 ),
-                Positioned(
-                  left: 16,
-                  top: 4,
-                  child: GestureDetector(
-                    onTap: () {
-                      if (_isUploading) {
-                        _dialogShowing = true;
-                        _showCancelUploadDialog().then((shouldCancel) {
-                          if (!mounted) return;
-                          _dialogShowing = false;
-                          if (shouldCancel) {
-                            _cancelToken?.cancel();
-                            setState(() {
-                              _isUploading = false;
-                            });
-                            Navigator.of(context).pop();
-                          }
-                        });
-                      } else {
-                        _showExitConfirmDialog().then((shouldExit) {
-                          if (!mounted) return;
-                          if (shouldExit) {
-                            _deleteRecordedVideo();
-                            Navigator.of(context).pop();
-                          }
-                        });
-                      }
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? BDDesign.colorInkBlack.withAlpha(216)
-                            : Colors.white.withAlpha(230),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.white.withAlpha(28)
-                              : Colors.black.withAlpha(12),
-                        ),
-                        boxShadow: [BDDesign.shadowElevated],
-                      ),
-                      child: Icon(
-                        Icons.close_rounded,
-                        color: isDark
-                            ? BDDesign.colorAshGray
-                            : BDDesign.colorInkBlack,
-                        size: 22,
-                      ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                  child: TDButton(
+                    onTap: _isUploading ? () {} : _submit,
+                    style: TDButtonStyle(
+                      backgroundColor: _isUploading
+                          ? (isDark ? const Color(0xFF1A1A1E) : const Color(0xFFD8D8DF))
+                          : (isDark ? const Color(0xFF2A2A2E) : BDDesign.colorMutedBlue),
+                      textColor: _isUploading
+                          ? (isDark ? Colors.white.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.45))
+                          : Colors.white,
+                      radius: BorderRadius.circular(18),
                     ),
+                    type: TDButtonType.fill,
+                    shape: TDButtonShape.rectangle,
+                    theme: TDButtonTheme.primary,
+                    size: TDButtonSize.large,
+                    width: double.infinity,
+                    text: _isUploading
+                        ? '${textLocalize('gen_uploading')}...'
+                        : textLocalize('video_submit_btn'),
                   ),
                 ),
+                SizedBox(height: submitBottomPadding),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NameTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool focused;
+  final Color textColor;
+  final Color hintColor;
+  final Color inputBg;
+  final bool isDark;
+
+  const _NameTextField({
+    required this.controller,
+    required this.focusNode,
+    required this.focused,
+    required this.textColor,
+    required this.hintColor,
+    required this.inputBg,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: focused
+              ? BDDesign.colorMutedBlue
+              : (isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
+          width: focused ? 1.5 : 1,
+        ),
+      ),
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        style: TextStyle(color: textColor, fontSize: 15),
+        decoration: InputDecoration(
+          hintText: textLocalize('video_submit_name_hint'),
+          hintStyle: TextStyle(color: hintColor, fontSize: 15),
+          filled: true,
+          fillColor: inputBg,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 16,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
           ),
         ),
       ),
