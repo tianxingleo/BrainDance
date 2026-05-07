@@ -114,6 +114,7 @@ class _NetworkBubbleOverlayState extends State<NetworkBubbleOverlay>
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
                                   height: 1.35,
+                                  decoration: TextDecoration.none,
                                 ),
                               ),
                             ),
