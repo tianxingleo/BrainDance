@@ -381,6 +381,8 @@ const interruptCameraFlightFromUserInput = () => {
   interruptCameraFlight();
 };
 
+const isCameraFlightLocked = () => Boolean(activeCameraTween);
+
 const setActivePosePresentation = (poseData) => {
   setActivePosePresentationState(poseData);
 };
@@ -854,6 +856,7 @@ const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
 
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
   if (viewer.controls) viewer.controls.enabled = false;
@@ -867,6 +870,7 @@ const manualMove = (axis, dist) => {
 
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
 
@@ -2012,6 +2016,7 @@ const renderCameraUpdate = () => {
 
 const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   interruptCameraFlightFromUserInput();
   const cam = viewer.camera;
   reusableYawQuat.setFromAxisAngle(centerModeUp, deltaYaw);
@@ -2186,6 +2191,7 @@ const stopInteractionInertia = () => {
 
 const orbitRotate = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   interactionState.orbitVelocityYaw = deltaYaw;
@@ -2198,6 +2204,7 @@ const orbitRotate = (deltaYaw, deltaPitch) => {
 
 const orbitRoll = (deltaAngleRad) => {
   if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
+  if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   viewer.camera.rotateOnWorldAxis(centerModeUp, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
@@ -2207,6 +2214,7 @@ const orbitRoll = (deltaAngleRad) => {
 
 const orbitZoom = (zoomFactor) => {
   if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
+  if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   const delta = -Math.log(zoomFactor);
@@ -2321,6 +2329,14 @@ const getTouchDistance = (touchA, touchB) => {
   return Math.hypot(dx, dy);
 };
 
+const resetManualCameraInputState = () => {
+  isDragging.value = false;
+  pinchState.active = false;
+  pinchState.distance = 0;
+  orbitTouchState.active = false;
+  orbitTouchState.angle = 0;
+};
+
 const handleFreePinchMove = (touches) => {
   if (!touches || touches.length < 2) return false;
 
@@ -2348,6 +2364,10 @@ const handleFreePinchMove = (touches) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
   if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
@@ -2368,6 +2388,7 @@ const onMouseDown = (e) => {
 };
 
 const onMouseMove = (e) => {
+  if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!isDragging.value || !viewer || !viewer.camera) return;
@@ -2394,6 +2415,10 @@ const onMouseMove = (e) => {
 };
 
 const onMouseUp = () => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
   if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (isDragging.value) {
@@ -2415,6 +2440,7 @@ const onMouseUp = () => {
 
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
@@ -2431,6 +2457,10 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
   if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
@@ -2470,6 +2500,7 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
+  if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!viewer || !viewer.camera || e.touches.length === 0) return;
@@ -2528,6 +2559,10 @@ const onTouchMove = (e) => {
 };
 
 const onTouchEnd = (e) => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
   if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     const wasPinching = pinchState.active;
@@ -2584,6 +2619,10 @@ const onTouchEnd = (e) => {
 };
 
 const onCapturedUserCameraInput = () => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
 };
