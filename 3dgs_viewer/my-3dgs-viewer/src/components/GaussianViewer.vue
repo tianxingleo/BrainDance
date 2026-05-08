@@ -57,6 +57,7 @@ const CINEMATIC_CAMERA_DAMPING_SLOW = 0.1;
 const CINEMATIC_MAX_KEYFRAMES = 18;
 const CINEMATIC_MIN_KEYFRAMES = 6;
 const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
+const ORBIT_RECENTER_DURATION = 1.5;
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -90,6 +91,7 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
 let activeCameraFlightId = 0;
+let isOrbitRecenterFlightActive = false;
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
@@ -127,6 +129,7 @@ const orbitState = {
   targetPitch: 0,
   targetRadius: 3,
 };
+let orbitNeedsRecenterAfterPoseFlight = false;
 
 const reusableYawQuat = new THREE.Quaternion();
 const reusablePitchQuat = new THREE.Quaternion();
@@ -311,6 +314,36 @@ const syncOrbitTarget = (center = getModelWorldCenter()) => {
   orbitState.targetPitch = orbitState.pitch;
 };
 
+const getOrbitCameraState = () => {
+  const cosPitch = Math.cos(orbitState.targetPitch);
+  const position = orbitState.center.clone().add(new THREE.Vector3(
+    Math.cos(orbitState.targetYaw) * cosPitch * orbitState.targetRadius,
+    Math.sin(orbitState.targetYaw) * cosPitch * orbitState.targetRadius,
+    Math.sin(orbitState.targetPitch) * orbitState.targetRadius,
+  ));
+  const lookMatrix = new THREE.Matrix4().lookAt(position, orbitState.center, centerModeUp);
+  return {
+    position,
+    quaternion: new THREE.Quaternion().setFromRotationMatrix(lookMatrix),
+  };
+};
+
+const buildCameraBezierCurve = (startPos, endPos, targetCenter) => {
+  const sceneRadius = getSceneRadius();
+  const distance = startPos.distanceTo(endPos);
+  const lift = centerModeUp.clone().multiplyScalar(Math.max(sceneRadius * 0.18, distance * 0.14, 0.08));
+  const startForward = targetCenter.clone().sub(startPos).normalize();
+  const endBack = endPos.clone().sub(targetCenter).normalize();
+  const handleDistance = Math.max(distance * 0.35, sceneRadius * 0.35, 0.15);
+
+  return new THREE.CubicBezierCurve3(
+    startPos.clone(),
+    startPos.clone().add(startForward.multiplyScalar(handleDistance)).add(lift),
+    endPos.clone().add(endBack.multiplyScalar(handleDistance * 0.28)).add(lift.multiplyScalar(0.45)),
+    endPos.clone()
+  );
+};
+
 const cancelCinematicFrame = () => {
   if (cinematicFrameHandle) {
     cancelAnimationFrame(cinematicFrameHandle);
@@ -325,6 +358,8 @@ const stopCameraTweens = () => {
     activeCameraTween.kill();
     activeCameraTween = null;
   }
+  isOrbitRecenterFlightActive = false;
+  orbitNeedsRecenterAfterPoseFlight = false;
   gsap.killTweensOf(viewer.camera.position);
   gsap.killTweensOf(viewer.camera.quaternion);
   gsap.killTweensOf(viewer.camera);
@@ -1634,6 +1669,9 @@ const flyToImage = (poseData, options = {}) => {
       };
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
       orbitTouchState.roll = 0;
+      if (isOrbitMode.value) {
+        orbitNeedsRecenterAfterPoseFlight = true;
+      }
       updateDebugInfo();
 
       if (viewer.controls) viewer.controls.enabled = true;
@@ -1984,6 +2022,54 @@ const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
   renderCameraUpdate();
 };
 
+const startOrbitRecenterFlight = () => {
+  if (!viewer || !viewer.camera || !isOrbitMode.value || !orbitNeedsRecenterAfterPoseFlight) return false;
+
+  interruptCinematicPlayback();
+  stopInteractionInertia();
+  orbitNeedsRecenterAfterPoseFlight = false;
+  if (viewer.controls) viewer.controls.enabled = false;
+
+  const cam = viewer.camera;
+  const targetCenter = orbitState.center.clone();
+  const targetState = getOrbitCameraState();
+  const startPos = cam.position.clone();
+  const startQuat = cam.quaternion.clone();
+  const curve = buildCameraBezierCurve(startPos, targetState.position, targetCenter);
+  const animState = { t: 0 };
+
+  stopCameraTweens();
+  isOrbitRecenterFlightActive = true;
+  orbitNeedsRecenterAfterPoseFlight = false;
+  activeCameraFlightId += 1;
+  const flightId = activeCameraFlightId;
+
+  activeCameraTween = gsap.to(animState, {
+    t: 1,
+    duration: ORBIT_RECENTER_DURATION,
+    ease: 'power3.inOut',
+    onUpdate: () => {
+      if (flightId !== activeCameraFlightId) return;
+      cam.position.copy(curve.getPoint(animState.t));
+      cam.quaternion.slerpQuaternions(startQuat, targetState.quaternion, animState.t).normalize();
+      renderCameraUpdate();
+    },
+    onComplete: () => {
+      if (flightId !== activeCameraFlightId) return;
+      activeCameraTween = null;
+      isOrbitRecenterFlightActive = false;
+      cam.position.copy(targetState.position);
+      cam.quaternion.copy(targetState.quaternion);
+      syncOrbitTarget(targetCenter);
+      applyOrbitCamera(true);
+      orbitTouchState.roll = 0;
+      if (viewer.controls) viewer.controls.enabled = true;
+    }
+  });
+
+  return true;
+};
+
 const applyOrbitCamera = (immediate = false) => {
   if (!viewer || !viewer.camera) return;
 
@@ -2100,6 +2186,7 @@ const stopInteractionInertia = () => {
 
 const orbitRotate = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
+  if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   interactionState.orbitVelocityYaw = deltaYaw;
   interactionState.orbitVelocityPitch = deltaPitch;
@@ -2111,6 +2198,7 @@ const orbitRotate = (deltaYaw, deltaPitch) => {
 
 const orbitRoll = (deltaAngleRad) => {
   if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
+  if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   viewer.camera.rotateOnWorldAxis(centerModeUp, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
   syncOrbitTarget();
@@ -2119,6 +2207,7 @@ const orbitRoll = (deltaAngleRad) => {
 
 const orbitZoom = (zoomFactor) => {
   if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
+  if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   const delta = -Math.log(zoomFactor);
   interactionState.orbitZoomVelocity = delta;
@@ -2151,6 +2240,7 @@ const setupOrbitControls = () => {
   if (!viewer) return;
   disposeControls();
   orbitTouchState.roll = 0;
+  orbitNeedsRecenterAfterPoseFlight = false;
   syncOrbitTarget();
   applyOrbitCamera(true);
 };
@@ -2258,6 +2348,7 @@ const handleFreePinchMove = (touches) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
   stopInteractionInertia();
@@ -2277,6 +2368,7 @@ const onMouseDown = (e) => {
 };
 
 const onMouseMove = (e) => {
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!isDragging.value || !viewer || !viewer.camera) return;
     const dx = e.clientX - lastMouse.x;
@@ -2302,6 +2394,7 @@ const onMouseMove = (e) => {
 };
 
 const onMouseUp = () => {
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (isDragging.value) {
       interactionState.orbitInertiaActive = true;
@@ -2322,6 +2415,7 @@ const onMouseUp = () => {
 
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
   if (isOrbitMode.value) {
@@ -2337,6 +2431,7 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
   interruptCameraFlight();
   stopInteractionInertia();
@@ -2375,8 +2470,10 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!viewer || !viewer.camera || e.touches.length === 0) return;
+    if (isOrbitRecenterFlightActive || startOrbitRecenterFlight()) return;
 
     if (e.touches.length >= 2) {
       const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
@@ -2431,6 +2528,7 @@ const onTouchMove = (e) => {
 };
 
 const onTouchEnd = (e) => {
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     const wasPinching = pinchState.active;
     if (e.touches.length >= 2) {
@@ -2486,6 +2584,7 @@ const onTouchEnd = (e) => {
 };
 
 const onCapturedUserCameraInput = () => {
+  if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
 };
 
