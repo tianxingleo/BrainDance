@@ -43,14 +43,12 @@ const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbi
 const hasModelTab = computed(() => modelList.value.length > 1);
 const hasPoseTab = computed(() => !isOrbitMode.value && filteredPoses.value.length > 0);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
-const DRAG_ROTATE_SENSITIVITY = 0.065;
-const DRAG_PAN_SENSITIVITY = 0.0022;
+const FREE_LOOK_SENSITIVITY = 0.0048;
 const WHEEL_ZOOM_STEP = 0.08;
 const PINCH_ZOOM_STEP = 1.0;
-const ORBIT_YAW_SENSITIVITY = 0.0055;
-const ORBIT_PITCH_SENSITIVITY = 0.0042;
+const ORBIT_YAW_SENSITIVITY = 0.0048;
+const ORBIT_PITCH_SENSITIVITY = 0.0048;
 const ORBIT_ROLL_SENSITIVITY = 1.0;
-const ORBIT_DOLLY_FACTOR = 0.35;
 const CINEMATIC_MIN_LOOK_AHEAD = 1.2;
 const CINEMATIC_MAX_LOOK_AHEAD = 8.0;
 const CINEMATIC_PATH_BLEND = 0.72;
@@ -94,6 +92,7 @@ let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
 let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
+let interactionFrameHandle = 0;
 
 const cinematicState = {
   trajectory: null,
@@ -103,6 +102,31 @@ const cinematicState = {
   lastNearestPoseIndex: -1,
   filteredSample: null,
 };
+
+const interactionState = {
+  freeVelocityYaw: 0,
+  freeVelocityPitch: 0,
+  orbitVelocityYaw: 0,
+  orbitVelocityPitch: 0,
+  orbitZoomVelocity: 0,
+  freeInertiaActive: false,
+  orbitInertiaActive: false,
+  zoomInertiaActive: false,
+  lastFrameTime: 0,
+};
+
+const orbitState = {
+  center: new THREE.Vector3(0, 0, 0),
+  yaw: 0,
+  pitch: 0,
+  radius: 3,
+  targetYaw: 0,
+  targetPitch: 0,
+  targetRadius: 3,
+};
+
+const reusableYawQuat = new THREE.Quaternion();
+const reusablePitchQuat = new THREE.Quaternion();
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
 const canPlayCinematic = computed(() => cameraPoses.value.length >= 2);
@@ -256,7 +280,33 @@ const getSceneRadius = () => {
   return radius > 0 ? radius : 1;
 };
 
-const syncOrbitTarget = () => {};
+const clampOrbitPitch = (pitch) => THREE.MathUtils.clamp(
+  pitch,
+  THREE.MathUtils.degToRad(-86),
+  THREE.MathUtils.degToRad(86)
+);
+
+const getOrbitMinRadius = () => Math.max(getSceneRadius() * 0.18, 0.08);
+const getOrbitMaxRadius = () => Math.max(getSceneRadius() * 12, getOrbitMinRadius() * 6);
+
+const syncOrbitTarget = (center = getModelWorldCenter()) => {
+  if (!viewer || !viewer.camera) return;
+
+  orbitState.center.copy(center);
+  const offset = viewer.camera.position.clone().sub(orbitState.center);
+  let radius = offset.length();
+  if (!Number.isFinite(radius) || radius < getOrbitMinRadius()) {
+    radius = Math.max(getSceneRadius() * 2.6, 1.5);
+    offset.set(0, 0, radius);
+  }
+
+  orbitState.radius = THREE.MathUtils.clamp(radius, getOrbitMinRadius(), getOrbitMaxRadius());
+  orbitState.targetRadius = orbitState.radius;
+  orbitState.yaw = Math.atan2(offset.x, offset.z);
+  orbitState.pitch = clampOrbitPitch(Math.asin(THREE.MathUtils.clamp(offset.y / radius, -1, 1)));
+  orbitState.targetYaw = orbitState.yaw;
+  orbitState.targetPitch = orbitState.pitch;
+};
 
 const cancelCinematicFrame = () => {
   if (cinematicFrameHandle) {
@@ -313,6 +363,7 @@ const stopCinematicPlayback = (options = {}) => {
 const interruptCinematicPlayback = () => {
   if (!isCinematicPlaying.value && !isCinematicPaused.value) return;
   stopCinematicPlayback({ resetProgress: false });
+  stopInteractionInertia();
 };
 
 const smoothVectorSeries = (vectors, amount) => {
@@ -1500,6 +1551,7 @@ const flyToImage = (poseData, options = {}) => {
     return;
   }
   if (!options.keepCinematic) interruptCinematicPlayback();
+  stopInteractionInertia();
 
   const cam = viewer.camera;
   const targetPosition = targetCameraState.position;
@@ -1889,11 +1941,138 @@ const renderCameraUpdate = () => {
   try { viewer.update(); viewer.render(); } catch (_) {}
 };
 
+const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
+  if (!viewer || !viewer.camera) return;
+  const cam = viewer.camera;
+  reusableYawQuat.setFromAxisAngle(worldUp, deltaYaw);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
+  reusablePitchQuat.setFromAxisAngle(right, deltaPitch);
+  // 自由模式只改变相机朝向，不改变相机位置和模型姿态，符合第一人称查看手感。
+  cam.quaternion.premultiply(reusableYawQuat).premultiply(reusablePitchQuat).normalize();
+  renderCameraUpdate();
+};
+
+const applyOrbitCamera = (immediate = false) => {
+  if (!viewer || !viewer.camera) return;
+
+  if (immediate) {
+    orbitState.yaw = orbitState.targetYaw;
+    orbitState.pitch = orbitState.targetPitch;
+    orbitState.radius = orbitState.targetRadius;
+  }
+
+  const cosPitch = Math.cos(orbitState.pitch);
+  const offset = new THREE.Vector3(
+    Math.sin(orbitState.yaw) * cosPitch * orbitState.radius,
+    Math.sin(orbitState.pitch) * orbitState.radius,
+    Math.cos(orbitState.yaw) * cosPitch * orbitState.radius,
+  );
+
+  viewer.camera.position.copy(orbitState.center).add(offset);
+  viewer.camera.lookAt(orbitState.center);
+  renderCameraUpdate();
+};
+
+const scheduleInteractionFrame = () => {
+  if (interactionFrameHandle) return;
+  interactionState.lastFrameTime = performance.now();
+  interactionFrameHandle = requestAnimationFrame(stepInteractionInertia);
+};
+
+const stepInteractionInertia = (now) => {
+  interactionFrameHandle = 0;
+  if (!viewer || !viewer.camera) return;
+
+  const dt = Math.min(Math.max((now - interactionState.lastFrameTime) / 1000, 1 / 120), 0.05);
+  interactionState.lastFrameTime = now;
+  let needsNextFrame = false;
+
+  if (interactionState.freeInertiaActive) {
+    if (
+      Math.abs(interactionState.freeVelocityYaw) > 0.00001 ||
+      Math.abs(interactionState.freeVelocityPitch) > 0.00001
+    ) {
+      applyFreeLookDelta(interactionState.freeVelocityYaw, interactionState.freeVelocityPitch);
+      needsNextFrame = true;
+    } else {
+      interactionState.freeInertiaActive = false;
+    }
+  }
+
+  if (interactionState.orbitInertiaActive) {
+    if (
+      Math.abs(interactionState.orbitVelocityYaw) > 0.00001 ||
+      Math.abs(interactionState.orbitVelocityPitch) > 0.00001
+    ) {
+      orbitState.targetYaw += interactionState.orbitVelocityYaw;
+      orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + interactionState.orbitVelocityPitch);
+      needsNextFrame = true;
+    } else {
+      interactionState.orbitInertiaActive = false;
+    }
+  }
+
+  if (interactionState.zoomInertiaActive) {
+    if (Math.abs(interactionState.orbitZoomVelocity) > 0.0002) {
+      orbitState.targetRadius = THREE.MathUtils.clamp(
+        orbitState.targetRadius * Math.exp(interactionState.orbitZoomVelocity),
+        getOrbitMinRadius(),
+        getOrbitMaxRadius()
+      );
+      needsNextFrame = true;
+    } else {
+      interactionState.zoomInertiaActive = false;
+    }
+  }
+
+  if (isOrbitMode.value) {
+    const alpha = 1 - Math.exp(-dt * 18);
+    orbitState.yaw = THREE.MathUtils.lerp(orbitState.yaw, orbitState.targetYaw, alpha);
+    orbitState.pitch = THREE.MathUtils.lerp(orbitState.pitch, orbitState.targetPitch, alpha);
+    orbitState.radius = THREE.MathUtils.lerp(orbitState.radius, orbitState.targetRadius, alpha);
+    applyOrbitCamera();
+    if (
+      Math.abs(orbitState.yaw - orbitState.targetYaw) > 0.00001 ||
+      Math.abs(orbitState.pitch - orbitState.targetPitch) > 0.00001 ||
+      Math.abs(orbitState.radius - orbitState.targetRadius) > 0.0002
+    ) {
+      needsNextFrame = true;
+    }
+  }
+
+  const decay = Math.exp(-dt * 7.5);
+  interactionState.freeVelocityYaw *= decay;
+  interactionState.freeVelocityPitch *= decay;
+  interactionState.orbitVelocityYaw *= decay;
+  interactionState.orbitVelocityPitch *= decay;
+  interactionState.orbitZoomVelocity *= decay;
+
+  if (needsNextFrame) scheduleInteractionFrame();
+};
+
+const stopInteractionInertia = () => {
+  interactionState.freeInertiaActive = false;
+  interactionState.orbitInertiaActive = false;
+  interactionState.zoomInertiaActive = false;
+  interactionState.freeVelocityYaw = 0;
+  interactionState.freeVelocityPitch = 0;
+  interactionState.orbitVelocityYaw = 0;
+  interactionState.orbitVelocityPitch = 0;
+  interactionState.orbitZoomVelocity = 0;
+  if (interactionFrameHandle) {
+    cancelAnimationFrame(interactionFrameHandle);
+    interactionFrameHandle = 0;
+  }
+};
+
 const orbitRotate = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
-  viewer.camera.rotateOnWorldAxis(worldUp, -deltaYaw);
-  viewer.camera.rotateX(-deltaPitch);
-  renderCameraUpdate();
+  interactionState.orbitVelocityYaw = deltaYaw;
+  interactionState.orbitVelocityPitch = deltaPitch;
+  interactionState.orbitInertiaActive = false;
+  orbitState.targetYaw += deltaYaw;
+  orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + deltaPitch);
+  scheduleInteractionFrame();
 };
 
 const orbitRoll = (deltaAngleRad) => {
@@ -1904,14 +2083,15 @@ const orbitRoll = (deltaAngleRad) => {
 
 const orbitZoom = (zoomFactor) => {
   if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
-  const sceneDistance = Math.max(0.3, viewer.camera.position.distanceTo(getModelWorldCenter()));
-  const deltaZ = THREE.MathUtils.clamp(
-    (1 - zoomFactor) * sceneDistance * ORBIT_DOLLY_FACTOR,
-    -sceneDistance * 0.25,
-    sceneDistance * 0.25
+  const delta = -Math.log(zoomFactor);
+  interactionState.orbitZoomVelocity = delta;
+  interactionState.zoomInertiaActive = false;
+  orbitState.targetRadius = THREE.MathUtils.clamp(
+    orbitState.targetRadius * Math.exp(delta),
+    getOrbitMinRadius(),
+    getOrbitMaxRadius()
   );
-  viewer.camera.translateZ(deltaZ);
-  renderCameraUpdate();
+  scheduleInteractionFrame();
 };
 
 const getTouchAngle = (touchA, touchB) => {
@@ -1933,6 +2113,8 @@ const setupOrbitControls = () => {
   if (!viewer) return;
   disposeControls();
   orbitTouchState.roll = 0;
+  syncOrbitTarget();
+  applyOrbitCamera(true);
 };
 
 const applyViewMode = () => {
@@ -1949,6 +2131,7 @@ const switchViewMode = (mode) => {
   if (mode !== VIEW_MODE.FREE && mode !== VIEW_MODE.ORBIT) return;
   if (currentViewMode.value === mode) return;
 
+  stopInteractionInertia();
   currentViewMode.value = mode;
   applyViewMode();
 
@@ -2012,6 +2195,7 @@ const getTouchDistance = (touchA, touchB) => {
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
   interruptCinematicPlayback();
+  stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
     isDragging.value = true;
@@ -2042,17 +2226,11 @@ const onMouseMove = (e) => {
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
 
-  // 计算增量
-  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
-
-  // X轴旋转 (俯仰) - 本地轴
-  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
-
-  // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
-
-  viewer.camera.updateProjectionMatrix();
-  updateDebugInfo();
+  const deltaYaw = -dx * FREE_LOOK_SENSITIVITY;
+  const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
+  interactionState.freeVelocityYaw = deltaYaw;
+  interactionState.freeVelocityPitch = deltaPitch;
+  applyFreeLookDelta(deltaYaw, deltaPitch);
 
   lastMouse.x = e.clientX;
   lastMouse.y = e.clientY;
@@ -2060,10 +2238,18 @@ const onMouseMove = (e) => {
 
 const onMouseUp = () => {
   if (isOrbitMode.value) {
+    if (isDragging.value) {
+      interactionState.orbitInertiaActive = true;
+      scheduleInteractionFrame();
+    }
     isDragging.value = false;
     pinchState.active = false;
     orbitTouchState.active = false;
     return;
+  }
+  if (isDragging.value) {
+    interactionState.freeInertiaActive = true;
+    scheduleInteractionFrame();
   }
   isDragging.value = false;
   pinchState.active = false;
@@ -2075,6 +2261,8 @@ const onWheel = (e) => {
   if (isOrbitMode.value) {
     const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
     orbitZoom(zoomFactor);
+    interactionState.zoomInertiaActive = true;
+    scheduleInteractionFrame();
     return;
   }
   const direction = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
@@ -2084,6 +2272,7 @@ const onWheel = (e) => {
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
   interruptCinematicPlayback();
+  stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.touches.length >= 2) {
       isDragging.value = false;
@@ -2169,16 +2358,13 @@ const onTouchMove = (e) => {
   const dx = e.touches[0].clientX - lastMouse.x;
   const dy = e.touches[0].clientY - lastMouse.y;
 
-  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
-
-  rotationDelta.value.x += deltaPitch;
-
-  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
-  // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
-
-  viewer.camera.updateProjectionMatrix();
-  updateDebugInfo();
+  const deltaYaw = -dx * FREE_LOOK_SENSITIVITY;
+  const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
+  interactionState.freeVelocityYaw = deltaYaw;
+  interactionState.freeVelocityPitch = deltaPitch;
+  rotationDelta.value.x += THREE.MathUtils.radToDeg(deltaPitch);
+  rotationDelta.value.y += THREE.MathUtils.radToDeg(deltaYaw);
+  applyFreeLookDelta(deltaYaw, deltaPitch);
 
   lastMouse.x = e.touches[0].clientX;
   lastMouse.y = e.touches[0].clientY;
@@ -2186,6 +2372,7 @@ const onTouchMove = (e) => {
 
 const onTouchEnd = (e) => {
   if (isOrbitMode.value) {
+    const wasPinching = pinchState.active;
     if (e.touches.length >= 2) {
       pinchState.active = true;
       pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
@@ -2199,6 +2386,14 @@ const onTouchEnd = (e) => {
     pinchState.distance = 0;
     orbitTouchState.active = false;
     orbitTouchState.angle = 0;
+    if (isDragging.value) {
+      interactionState.orbitInertiaActive = true;
+      scheduleInteractionFrame();
+    }
+    if (wasPinching) {
+      interactionState.zoomInertiaActive = true;
+      scheduleInteractionFrame();
+    }
     isDragging.value = false;
 
     if (e.touches.length === 1) {
@@ -2217,6 +2412,10 @@ const onTouchEnd = (e) => {
 
   pinchState.active = false;
   pinchState.distance = 0;
+  if (isDragging.value) {
+    interactionState.freeInertiaActive = true;
+    scheduleInteractionFrame();
+  }
   isDragging.value = false;
 
   if (e.touches.length === 1) {
@@ -2309,6 +2508,7 @@ onBeforeUnmount(async () => {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
+  stopInteractionInertia();
   stopCinematicPlayback();
 
   if (viewer) {
