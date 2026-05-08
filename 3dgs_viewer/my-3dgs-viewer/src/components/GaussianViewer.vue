@@ -89,6 +89,7 @@ let particleSystem;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
+let activeCameraFlightId = 0;
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
@@ -319,6 +320,7 @@ const cancelCinematicFrame = () => {
 
 const stopCameraTweens = () => {
   if (!viewer || !viewer.camera) return;
+  activeCameraFlightId += 1;
   if (activeCameraTween) {
     activeCameraTween.kill();
     activeCameraTween = null;
@@ -337,6 +339,11 @@ const interruptCameraFlight = () => {
   if (viewer.controls) viewer.controls.enabled = true;
   if (isOrbitMode.value) syncOrbitTarget();
   renderCameraUpdate();
+};
+
+const interruptCameraFlightFromUserInput = () => {
+  if (!activeCameraTween) return;
+  interruptCameraFlight();
 };
 
 const setActivePosePresentation = (poseData) => {
@@ -1602,6 +1609,8 @@ const flyToImage = (poseData, options = {}) => {
 
   stopCameraTweens();
   gsap.killTweensOf(animState);
+  activeCameraFlightId += 1;
+  const flightId = activeCameraFlightId;
 
   // 开始丝滑运镜
   activeCameraTween = gsap.to(animState, {
@@ -1609,10 +1618,12 @@ const flyToImage = (poseData, options = {}) => {
     duration: 1.5,
     ease: "power3.inOut",
     onUpdate: () => {
+      if (flightId !== activeCameraFlightId) return;
       cam.position.lerpVectors(startPos, targetPosition, animState.t);
       cam.quaternion.slerpQuaternions(startQuat, targetQuaternion, animState.t);
     },
     onComplete: () => {
+      if (flightId !== activeCameraFlightId) return;
       activeCameraTween = null;
       // 记录初始飞到后的欧拉角
       const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
@@ -1963,6 +1974,7 @@ const renderCameraUpdate = () => {
 
 const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
+  interruptCameraFlightFromUserInput();
   const cam = viewer.camera;
   reusableYawQuat.setFromAxisAngle(centerModeUp, deltaYaw);
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
@@ -2088,6 +2100,7 @@ const stopInteractionInertia = () => {
 
 const orbitRotate = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
+  interruptCameraFlightFromUserInput();
   interactionState.orbitVelocityYaw = deltaYaw;
   interactionState.orbitVelocityPitch = deltaPitch;
   interactionState.orbitInertiaActive = false;
@@ -2098,6 +2111,7 @@ const orbitRotate = (deltaYaw, deltaPitch) => {
 
 const orbitRoll = (deltaAngleRad) => {
   if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
+  interruptCameraFlightFromUserInput();
   viewer.camera.rotateOnWorldAxis(centerModeUp, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
   syncOrbitTarget();
   renderCameraUpdate();
@@ -2105,6 +2119,7 @@ const orbitRoll = (deltaAngleRad) => {
 
 const orbitZoom = (zoomFactor) => {
   if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
+  interruptCameraFlightFromUserInput();
   const delta = -Math.log(zoomFactor);
   interactionState.orbitZoomVelocity = delta;
   interactionState.zoomInertiaActive = false;
@@ -2452,6 +2467,10 @@ const onTouchEnd = (e) => {
   }
 };
 
+const onCapturedUserCameraInput = () => {
+  interruptCameraFlightFromUserInput();
+};
+
 function onTimePeelingSelect(model) {
   activeModelId.value = model.id;
   // 通知 Flutter 切换模型（Flutter 负责下载后回调 loadModelFromFlutter）
@@ -2528,6 +2547,11 @@ onMounted(() => {
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointerdown', onCapturedUserCameraInput, true);
+    window.addEventListener('pointermove', onCapturedUserCameraInput, true);
+    window.addEventListener('touchstart', onCapturedUserCameraInput, true);
+    window.addEventListener('touchmove', onCapturedUserCameraInput, true);
+    window.addEventListener('wheel', onCapturedUserCameraInput, true);
   }
 });
 
@@ -2535,6 +2559,11 @@ onBeforeUnmount(async () => {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('pointerdown', onCapturedUserCameraInput, true);
+  window.removeEventListener('pointermove', onCapturedUserCameraInput, true);
+  window.removeEventListener('touchstart', onCapturedUserCameraInput, true);
+  window.removeEventListener('touchmove', onCapturedUserCameraInput, true);
+  window.removeEventListener('wheel', onCapturedUserCameraInput, true);
   stopInteractionInertia();
   stopCinematicPlayback();
 
