@@ -45,7 +45,7 @@ const hasPoseTab = computed(() => !isOrbitMode.value && filteredPoses.value.leng
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
 const FREE_LOOK_SENSITIVITY = 0.0048;
 const WHEEL_ZOOM_STEP = 0.08;
-const PINCH_ZOOM_STEP = 1.0;
+const PINCH_ZOOM_STEP = 1.8;
 const ORBIT_YAW_SENSITIVITY = 0.0048;
 const ORBIT_PITCH_SENSITIVITY = 0.0048;
 const ORBIT_ROLL_SENSITIVITY = 1.0;
@@ -2231,7 +2231,7 @@ const onMouseMove = (e) => {
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
 
-  const deltaYaw = -dx * FREE_LOOK_SENSITIVITY;
+  const deltaYaw = dx * FREE_LOOK_SENSITIVITY;
   const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
   interactionState.freeVelocityYaw = deltaYaw;
   interactionState.freeVelocityPitch = deltaPitch;
@@ -2363,7 +2363,7 @@ const onTouchMove = (e) => {
   const dx = e.touches[0].clientX - lastMouse.x;
   const dy = e.touches[0].clientY - lastMouse.y;
 
-  const deltaYaw = -dx * FREE_LOOK_SENSITIVITY;
+  const deltaYaw = dx * FREE_LOOK_SENSITIVITY;
   const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
   interactionState.freeVelocityYaw = deltaYaw;
   interactionState.freeVelocityPitch = deltaPitch;
