@@ -2231,6 +2231,31 @@ const getTouchDistance = (touchA, touchB) => {
   return Math.hypot(dx, dy);
 };
 
+const handleFreePinchMove = (touches) => {
+  if (!touches || touches.length < 2) return false;
+
+  const nextDistance = getTouchDistance(touches[0], touches[1]);
+  if (!Number.isFinite(nextDistance) || nextDistance <= 0) return true;
+
+  if (pinchState.active && pinchState.distance > 0) {
+    const distanceDelta = nextDistance - pinchState.distance;
+    const normalizedDelta = distanceDelta / Math.max(pinchState.distance, 80);
+    const scaleFactor = THREE.MathUtils.clamp(
+      Math.exp(normalizedDelta * PINCH_ZOOM_STEP),
+      0.72,
+      1.38
+    );
+    zoomByFocalScale(scaleFactor);
+  }
+
+  // Flutter WebView 有时不会可靠派发“第二根手指按下”的 touchstart，
+  // 因此双指 touchmove 必须也能兜底进入 pinch 状态。
+  pinchState.active = true;
+  pinchState.distance = nextDistance;
+  isDragging.value = false;
+  return true;
+};
+
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
   interruptCinematicPlayback();
@@ -2384,14 +2409,7 @@ const onTouchMove = (e) => {
   if (!viewer || !viewer.camera || e.touches.length === 0) return;
 
   if (e.touches.length >= 2) {
-    const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
-    if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
-      const scale = nextDistance / pinchState.distance;
-      zoomByFocalScale(1 + ((scale - 1) * PINCH_ZOOM_STEP));
-    }
-    pinchState.active = true;
-    pinchState.distance = nextDistance;
-    isDragging.value = false;
+    handleFreePinchMove(e.touches);
     return;
   }
 
