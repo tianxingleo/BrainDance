@@ -88,6 +88,7 @@ let viewer;
 let particleSystem;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
+let activeCameraTween = null;
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
@@ -318,9 +319,24 @@ const cancelCinematicFrame = () => {
 
 const stopCameraTweens = () => {
   if (!viewer || !viewer.camera) return;
+  if (activeCameraTween) {
+    activeCameraTween.kill();
+    activeCameraTween = null;
+  }
   gsap.killTweensOf(viewer.camera.position);
   gsap.killTweensOf(viewer.camera.quaternion);
   gsap.killTweensOf(viewer.camera);
+};
+
+const interruptCameraFlight = () => {
+  const hadActiveFlight = Boolean(activeCameraTween);
+  stopCameraTweens();
+  if (!hadActiveFlight || !viewer || !viewer.camera) return;
+
+  // 用户输入优先级高于自动飞行，取消后保留当前帧姿态作为新的交互起点。
+  if (viewer.controls) viewer.controls.enabled = true;
+  if (isOrbitMode.value) syncOrbitTarget();
+  renderCameraUpdate();
 };
 
 const setActivePosePresentation = (poseData) => {
@@ -797,6 +813,7 @@ const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
   if (viewer.controls) viewer.controls.enabled = false;
 
   if (axis === 'x') viewer.camera.translateX(dist);
@@ -809,6 +826,7 @@ const manualMove = (axis, dist) => {
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
 
   if (viewer.controls) viewer.controls.enabled = false;
 
@@ -1586,7 +1604,7 @@ const flyToImage = (poseData, options = {}) => {
   gsap.killTweensOf(animState);
 
   // 开始丝滑运镜
-  gsap.to(animState, {
+  activeCameraTween = gsap.to(animState, {
     t: 1.0,
     duration: 1.5,
     ease: "power3.inOut",
@@ -1595,6 +1613,7 @@ const flyToImage = (poseData, options = {}) => {
       cam.quaternion.slerpQuaternions(startQuat, targetQuaternion, animState.t);
     },
     onComplete: () => {
+      activeCameraTween = null;
       // 记录初始飞到后的欧拉角
       const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
       arrivalEuler.value = {
@@ -2200,6 +2219,7 @@ const getTouchDistance = (touchA, touchB) => {
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
   interruptCinematicPlayback();
+  interruptCameraFlight();
   stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
@@ -2263,6 +2283,7 @@ const onMouseUp = () => {
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
   if (isOrbitMode.value) {
     const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
     orbitZoom(zoomFactor);
@@ -2277,6 +2298,7 @@ const onWheel = (e) => {
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
   interruptCinematicPlayback();
+  interruptCameraFlight();
   stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.touches.length >= 2) {
