@@ -87,6 +87,7 @@ const searchAndFly = () => {
 let viewer;
 let particleSystem;
 const worldUp = new THREE.Vector3(0, 1, 0);
+const centerModeUp = new THREE.Vector3(0, 0, 1);
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
@@ -302,8 +303,8 @@ const syncOrbitTarget = (center = getModelWorldCenter()) => {
 
   orbitState.radius = THREE.MathUtils.clamp(radius, getOrbitMinRadius(), getOrbitMaxRadius());
   orbitState.targetRadius = orbitState.radius;
-  orbitState.yaw = Math.atan2(offset.x, offset.z);
-  orbitState.pitch = clampOrbitPitch(Math.asin(THREE.MathUtils.clamp(offset.y / radius, -1, 1)));
+  orbitState.yaw = Math.atan2(offset.y, offset.x);
+  orbitState.pitch = clampOrbitPitch(Math.asin(THREE.MathUtils.clamp(offset.z / radius, -1, 1)));
   orbitState.targetYaw = orbitState.yaw;
   orbitState.targetPitch = orbitState.pitch;
 };
@@ -1944,7 +1945,7 @@ const renderCameraUpdate = () => {
 const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
   const cam = viewer.camera;
-  reusableYawQuat.setFromAxisAngle(worldUp, deltaYaw);
+  reusableYawQuat.setFromAxisAngle(centerModeUp, deltaYaw);
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
   reusablePitchQuat.setFromAxisAngle(right, deltaPitch);
   // 自由模式只改变相机朝向，不改变相机位置和模型姿态，符合第一人称查看手感。
@@ -1963,12 +1964,13 @@ const applyOrbitCamera = (immediate = false) => {
 
   const cosPitch = Math.cos(orbitState.pitch);
   const offset = new THREE.Vector3(
+    Math.cos(orbitState.yaw) * cosPitch * orbitState.radius,
     Math.sin(orbitState.yaw) * cosPitch * orbitState.radius,
     Math.sin(orbitState.pitch) * orbitState.radius,
-    Math.cos(orbitState.yaw) * cosPitch * orbitState.radius,
   );
 
   viewer.camera.position.copy(orbitState.center).add(offset);
+  viewer.camera.up.copy(centerModeUp);
   viewer.camera.lookAt(orbitState.center);
   renderCameraUpdate();
 };
@@ -2077,7 +2079,8 @@ const orbitRotate = (deltaYaw, deltaPitch) => {
 
 const orbitRoll = (deltaAngleRad) => {
   if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
-  viewer.camera.rotateZ(deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  viewer.camera.rotateOnWorldAxis(centerModeUp, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  syncOrbitTarget();
   renderCameraUpdate();
 };
 
@@ -2107,6 +2110,7 @@ const normalizeTouchAngleDelta = (delta) => {
 const setupFreeControls = () => {
   if (!viewer) return;
   disposeControls();
+  if (viewer.camera) viewer.camera.up.copy(worldUp);
 };
 
 const setupOrbitControls = () => {
@@ -2150,6 +2154,7 @@ const adjustControlsToModel = () => {
   const distance = maxDim * 2.0;
 
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
+  viewer.camera.up.copy(centerModeUp);
   viewer.camera.lookAt(worldCenter);
   syncOrbitTarget(worldCenter);
   refreshCurrentFocalInfo();
@@ -2560,7 +2565,7 @@ onBeforeUnmount(async () => {
           </button>
           <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
             @click="switchViewMode(VIEW_MODE.ORBIT)">
-            Orbit 模式
+            中心模式
           </button>
         </div>
         <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
