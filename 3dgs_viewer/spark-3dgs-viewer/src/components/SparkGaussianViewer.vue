@@ -1671,15 +1671,39 @@ button {
     left: 8px;
     right: 8px;
     gap: 8px;
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .bottom-area .quality-hud {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    gap: 4px;
+    margin-top: 4px;
   }
 
   .bottom-area .camera-track {
-    max-width: min(360px, 45vw);
+    max-width: 100%;
     padding: 10px;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
   }
 
   .bottom-area .camera-track-dock {
     gap: 6px;
+    width: 100%;
   }
 
   .camera-item {
@@ -1691,9 +1715,8 @@ button {
     min-width: 80px;
   }
 
-  .quality-hud {
-    padding: 5px;
-    gap: 2px;
+  .quality-row {
+    margin-top: 0 !important;
   }
 
   .quality-btn {
@@ -1807,11 +1830,37 @@ button {
     left: 12px;
     right: 12px;
     gap: 10px;
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .bottom-area .quality-hud {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    gap: 6px;
   }
 
   .bottom-area .camera-track {
-    max-width: min(400px, 48vw);
+    max-width: 100%;
     padding: 12px;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+  }
+
+  .bottom-area .camera-track-dock {
+    width: 100%;
   }
 
   .camera-item {
@@ -2006,5 +2055,4 @@ button {
   padding: 5px 7px;
 }
 </style>
-
 
