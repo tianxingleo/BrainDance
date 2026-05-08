@@ -180,12 +180,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0;
   pointer-events: auto;
-  background: rgba(249, 249, 248, 0.88);
+  background: var(--card-bg, rgba(249, 249, 248, 0.88));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-radius: 20px;
-  border: 1px solid rgba(107, 122, 143, 0.16);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
+  box-shadow: 0 8px 24px var(--card-shadow, rgba(0, 0, 0, 0.1));
   padding: 10px 0 10px 12px;
 }
 
@@ -206,8 +206,8 @@ onBeforeUnmount(() => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(107, 122, 143, 0.1);
-  color: rgba(30, 30, 32, 0.5);
+  background: var(--chip-hover-bg, rgba(107, 122, 143, 0.1));
+  color: var(--text-muted, rgba(30, 30, 32, 0.5));
   white-space: nowrap;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
@@ -219,8 +219,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 10px rgba(204, 154, 92, 0.3);
 }
 .bs-tab:hover:not(.bs-tab--active) {
-  background: rgba(107, 122, 143, 0.18);
-  color: rgba(30, 30, 32, 0.75);
+  background: var(--chip-hover-bg, rgba(107, 122, 143, 0.18));
+  color: var(--text-secondary, rgba(30, 30, 32, 0.75));
 }
 
 /* 缩略图滚动区 */
@@ -260,9 +260,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  border: 2px solid rgba(107, 122, 143, 0.12);
+  border: 2px solid var(--card-border, rgba(107, 122, 143, 0.12));
   opacity: 0.7;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
 }
 .bs-item--active {
   width: 96px;
@@ -273,7 +273,7 @@ onBeforeUnmount(() => {
 }
 .bs-item:hover:not(.bs-item--active) {
   opacity: 0.88;
-  border-color: rgba(107, 122, 143, 0.25);
+  border-color: var(--input-focus-border, rgba(107, 122, 143, 0.25));
 }
 
 .bs-thumb {
@@ -338,13 +338,13 @@ onBeforeUnmount(() => {
 .bs-fade--left {
   left: 0;
   background: linear-gradient(to right,
-    rgba(249, 249, 248, 0.95) 0%,
-    rgba(249, 249, 248, 0) 100%);
+    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
+    transparent 100%);
 }
 .bs-fade--right {
   right: 0;
   background: linear-gradient(to left,
-    rgba(249, 249, 248, 0.95) 0%,
-    rgba(249, 249, 248, 0) 100%);
+    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
+    transparent 100%);
 }
 </style>

@@ -807,6 +807,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     // 发送 TimePeeling 模型列表（无条件发送，空列表时 JS 端显示空态）
     _sendTimePeelingList();
+
+    // 同步当前主题到 WebView
+    _sendThemeToVue();
+  }
+
+  void _sendThemeToVue() {
+    final theme = AppConfig.isNightMode ? 'dark' : 'light';
+    _controller?.runJavaScript("window.setThemeFromFlutter('$theme')");
   }
 
   void _sendTimePeelingList() {

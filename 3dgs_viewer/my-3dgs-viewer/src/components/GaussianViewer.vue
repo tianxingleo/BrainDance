@@ -2682,6 +2682,14 @@ onMounted(() => {
       }
     };
 
+    // 注册供Flutter调用的主题切换函数
+    window.setThemeFromFlutter = (theme) => {
+      const container = document.querySelector('.app-container');
+      if (container) {
+        container.setAttribute('data-theme', theme);
+      }
+    };
+
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -2955,16 +2963,95 @@ onBeforeUnmount(async () => {
   --flutter-safe-top: 92px;
   --flutter-safe-left: 14px;
   --flutter-safe-right: 154px;
+
+  --bg-gradient-1: rgba(228, 232, 237, 0.16);
+  --bg-gradient-2: rgba(107, 122, 143, 0.14);
+  --bg-start: #f4f3ee;
+  --bg-end: #e6e3db;
+  --text-primary: #1e1e20;
+  --text-secondary: rgba(30, 30, 32, 0.72);
+  --text-muted: rgba(30, 30, 32, 0.48);
+  --card-bg: rgba(249, 249, 248, 0.84);
+  --card-border: rgba(107, 122, 143, 0.16);
+  --card-shadow: rgba(0, 0, 0, 0.06);
+  --input-bg: rgba(255, 255, 255, 0.72);
+  --input-border: rgba(107, 122, 143, 0.14);
+  --input-focus-border: rgba(107, 122, 143, 0.5);
+  --input-focus-ring: rgba(107, 122, 143, 0.08);
+  --btn-ghost-bg: rgba(249, 249, 248, 0.84);
+  --btn-solid-bg: #6b7a8f;
+  --btn-solid-hover: #5e6d81;
+  --btn-solid-text: #f9f9f8;
+  --chip-active-bg: #1e1e20;
+  --chip-active-text: #f5f4ef;
+  --chip-hover-bg: rgba(107, 122, 143, 0.12);
+  --chip-hover-text: #273142;
+  --eyebrow-color: #6b7a8f;
+  --accent: #6d8260;
+  --accent-ring: rgba(109, 130, 96, 0.12);
+  --error-title: #8b4747;
+  --overlay-bg: rgba(30, 30, 32, 0.24);
+  --range-accent: #6b7a8f;
+  --vignette-color: rgba(30, 30, 32, 0.12);
+  --info-tag-bg: rgba(228, 232, 237, 0.78);
+  --fps-bg: rgba(249, 249, 248, 0.84);
+  --close-btn-bg: rgba(107, 122, 143, 0.1);
+  --cinematic-loop-text: rgba(30, 30, 32, 0.7);
+  --cinematic-focus-text: rgba(30, 30, 32, 0.78);
+  --loading-copy-text: rgba(30, 30, 32, 0.66);
+  --error-msg-text: rgba(30, 30, 32, 0.68);
+  --chip-inactive-text: #6b7280;
+
   position: relative;
   width: 100vw;
   height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(228, 232, 237, 0.16), transparent 24%),
-    radial-gradient(circle at top right, rgba(107, 122, 143, 0.14), transparent 28%),
-    linear-gradient(180deg, #f4f3ee 0%, #e6e3db 100%);
+    radial-gradient(circle at top left, var(--bg-gradient-1), transparent 24%),
+    radial-gradient(circle at top right, var(--bg-gradient-2), transparent 28%),
+    linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
   overflow: hidden;
-  color: #1e1e20;
+  color: var(--text-primary);
   font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+}
+
+.app-container[data-theme="dark"] {
+  --bg-gradient-1: rgba(30, 35, 45, 0.3);
+  --bg-gradient-2: rgba(50, 60, 80, 0.2);
+  --bg-start: #101014;
+  --bg-end: #18181c;
+  --text-primary: #f5f7fa;
+  --text-secondary: rgba(245, 247, 250, 0.72);
+  --text-muted: rgba(245, 247, 250, 0.48);
+  --card-bg: rgba(30, 30, 34, 0.84);
+  --card-border: rgba(174, 186, 204, 0.12);
+  --card-shadow: rgba(0, 0, 0, 0.22);
+  --input-bg: rgba(35, 35, 42, 0.72);
+  --input-border: rgba(174, 186, 204, 0.14);
+  --input-focus-border: rgba(174, 186, 204, 0.5);
+  --input-focus-ring: rgba(174, 186, 204, 0.08);
+  --btn-ghost-bg: rgba(30, 30, 34, 0.84);
+  --btn-solid-bg: #aebacc;
+  --btn-solid-hover: #9aa8bc;
+  --btn-solid-text: #101014;
+  --chip-active-bg: #f5f7fa;
+  --chip-active-text: #101014;
+  --chip-hover-bg: rgba(174, 186, 204, 0.12);
+  --chip-hover-text: #d0d8e4;
+  --eyebrow-color: #aebacc;
+  --accent: #8fae7f;
+  --accent-ring: rgba(143, 174, 127, 0.12);
+  --error-title: #ff6b6b;
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --range-accent: #aebacc;
+  --vignette-color: rgba(0, 0, 0, 0.2);
+  --info-tag-bg: rgba(50, 55, 65, 0.78);
+  --fps-bg: rgba(30, 30, 34, 0.84);
+  --close-btn-bg: rgba(174, 186, 204, 0.12);
+  --cinematic-loop-text: rgba(245, 247, 250, 0.7);
+  --cinematic-focus-text: rgba(245, 247, 250, 0.78);
+  --loading-copy-text: rgba(245, 247, 250, 0.66);
+  --error-msg-text: rgba(245, 247, 250, 0.68);
+  --chip-inactive-text: #9ca3af;
 }
 
 .viewer-container {
@@ -2977,8 +3064,8 @@ onBeforeUnmount(async () => {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(30, 30, 32, 0.12), transparent 18%, transparent 78%, rgba(30, 30, 32, 0.2)),
-    radial-gradient(circle at center, transparent 55%, rgba(30, 30, 32, 0.14) 100%);
+    linear-gradient(180deg, var(--vignette-color), transparent 18%, transparent 78%, var(--vignette-color)),
+    radial-gradient(circle at center, transparent 55%, var(--vignette-color) 100%);
   z-index: 1;
 }
 
@@ -2987,14 +3074,14 @@ onBeforeUnmount(async () => {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #6b7a8f;
+  color: var(--eyebrow-color);
 }
 
 .archive-card {
-  background: rgba(249, 249, 248, 0.84);
-  border: 1px solid rgba(107, 122, 143, 0.16);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 22px;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 10px 26px var(--card-shadow);
   backdrop-filter: blur(18px);
 }
 
@@ -3041,9 +3128,9 @@ onBeforeUnmount(async () => {
 }
 
 .cinematic-trigger.active {
-  background: #1e1e20;
-  color: #f5f4ef;
-  border-color: rgba(30, 30, 32, 0.2);
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+  border-color: var(--card-border);
 }
 
 .cinematic-trigger-icon {
@@ -3089,14 +3176,14 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(30, 30, 32, 0.7);
+  color: var(--cinematic-loop-text);
 }
 
 .cinematic-close {
   appearance: none;
   border: 0;
-  background: rgba(107, 122, 143, 0.1);
-  color: #1e1e20;
+  background: var(--close-btn-bg);
+  color: var(--text-primary);
   width: 26px;
   height: 26px;
   border-radius: 999px;
@@ -3109,7 +3196,7 @@ onBeforeUnmount(async () => {
 }
 
 .cinematic-close:hover {
-  background: rgba(107, 122, 143, 0.18);
+  background: var(--chip-hover-bg);
 }
 
 .cinematic-focus-toggle {
@@ -3117,7 +3204,7 @@ onBeforeUnmount(async () => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(30, 30, 32, 0.78);
+  color: var(--cinematic-focus-text);
 }
 
 .cinematic-actions {
@@ -3136,13 +3223,13 @@ onBeforeUnmount(async () => {
   align-items: center;
   justify-content: space-between;
   font-size: 12px;
-  color: rgba(30, 30, 32, 0.72);
+  color: var(--text-secondary);
 }
 
 .cinematic-progress,
 .cinematic-speed {
   width: 100%;
-  accent-color: #6d8260;
+  accent-color: var(--accent);
 }
 
 .cinematic-progress[disabled] {
@@ -3153,7 +3240,7 @@ onBeforeUnmount(async () => {
   appearance: none;
   border: 0;
   background: transparent;
-  color: #6b7280;
+  color: var(--chip-inactive-text);
   padding: 8px 12px;
   border-radius: 12px;
   font-size: 13px;
@@ -3163,20 +3250,20 @@ onBeforeUnmount(async () => {
 }
 
 .mode-chip.active {
-  background: #1e1e20;
-  color: #f5f4ef;
-  box-shadow: 0 8px 18px rgba(30, 30, 32, 0.16);
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+  box-shadow: 0 8px 18px var(--card-shadow);
 }
 
 .mode-chip:not(.active):hover {
-  background: rgba(107, 122, 143, 0.12);
-  color: #273142;
+  background: var(--chip-hover-bg);
+  color: var(--chip-hover-text);
 }
 
 .archive-btn {
   appearance: none;
   border-radius: 14px;
-  border: 1px solid rgba(107, 122, 143, 0.2);
+  border: 1px solid var(--card-border);
   padding: 10px 14px;
   cursor: pointer;
   transition:
@@ -3190,23 +3277,23 @@ onBeforeUnmount(async () => {
 
 .archive-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 18px var(--card-shadow);
 }
 
 .archive-btn--ghost {
-  background: rgba(249, 249, 248, 0.84);
-  color: #1e1e20;
+  background: var(--btn-ghost-bg);
+  color: var(--text-primary);
 }
 
 .archive-btn--solid {
-  background: #6b7a8f;
-  border-color: #6b7a8f;
-  color: #f9f9f8;
+  background: var(--btn-solid-bg);
+  border-color: var(--btn-solid-bg);
+  color: var(--btn-solid-text);
 }
 
 .archive-btn--solid:hover {
-  background: #5e6d81;
-  border-color: #5e6d81;
+  background: var(--btn-solid-hover);
+  border-color: var(--btn-solid-hover);
 }
 
 .controls-ui {
@@ -3222,7 +3309,7 @@ onBeforeUnmount(async () => {
 .loading-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(30, 30, 32, 0.24);
+  background: var(--overlay-bg);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -3235,9 +3322,9 @@ onBeforeUnmount(async () => {
   min-width: min(84vw, 320px);
   padding: 22px 20px;
   border-radius: 24px;
-  background: rgba(249, 249, 248, 0.92);
-  border: 1px solid rgba(107, 122, 143, 0.18);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.08);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 18px 34px var(--card-shadow);
   text-align: center;
 }
 
@@ -3246,8 +3333,8 @@ onBeforeUnmount(async () => {
   height: 12px;
   margin: 0 auto 14px;
   border-radius: 999px;
-  background: #6d8260;
-  box-shadow: 0 0 0 10px rgba(109, 130, 96, 0.12);
+  background: var(--accent);
+  box-shadow: 0 0 0 10px var(--accent-ring);
   animation: pulse 1.8s ease-in-out infinite;
 }
 
@@ -3259,13 +3346,13 @@ onBeforeUnmount(async () => {
 .loading-copy {
   margin-top: 6px;
   font-size: 13px;
-  color: rgba(30, 30, 32, 0.66);
+  color: var(--loading-copy-text);
 }
 
 .error-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(30, 30, 32, 0.18);
+  background: var(--overlay-bg);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -3278,12 +3365,12 @@ onBeforeUnmount(async () => {
   font-size: 20px;
   font-weight: 600;
   margin: 8px 0;
-  color: #8b4747;
+  color: var(--error-title);
 }
 
 .error-msg {
   font-size: 13px;
-  color: rgba(30, 30, 32, 0.68);
+  color: var(--error-msg-text);
   max-width: 320px;
   word-break: break-all;
   margin-bottom: 20px;
@@ -3294,8 +3381,8 @@ button {
 }
 
 button.active {
-  background: #71838F;
-  border-color: #71838F;
+  background: var(--btn-solid-bg);
+  border-color: var(--btn-solid-bg);
 }
 
 /* 搜索栏样式 */
@@ -3319,17 +3406,17 @@ button.active {
   width: auto;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid rgba(107, 122, 143, 0.14);
+  border: 1px solid var(--input-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--input-bg);
   outline: none;
   font-size: 13px;
-  color: #1e1e20;
+  color: var(--text-primary);
 }
 
 .search-input:focus {
-  border-color: rgba(107, 122, 143, 0.5);
-  box-shadow: 0 0 0 4px rgba(107, 122, 143, 0.08);
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 4px var(--input-focus-ring);
 }
 
 .search-btn {
@@ -3350,15 +3437,15 @@ button.active {
   right: var(--flutter-safe-right);
   z-index: 120;
   width: 236px;
-  background: rgba(249, 249, 248, 0.9);
-  color: #1e1e20;
-  border: 1px solid rgba(107, 122, 143, 0.16);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
   border-radius: 20px;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 16px 28px var(--card-shadow);
   backdrop-filter: blur(16px);
 }
 
@@ -3373,15 +3460,15 @@ button.active {
   justify-content: space-between;
   gap: 6px;
   font-size: 12px;
-  color: rgba(30, 30, 32, 0.72);
+  color: var(--text-secondary);
 }
 
 .focal-number-input {
   width: 100px;
   border-radius: 10px;
-  border: 1px solid rgba(107, 122, 143, 0.16);
+  border: 1px solid var(--card-border);
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--input-bg);
 }
 
 .focal-reset-btn {
@@ -3395,19 +3482,19 @@ button.active {
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
-  background: rgba(249, 249, 248, 0.9);
+  background: var(--card-bg);
   padding: 8px;
   border-radius: 16px;
-  border: 1px solid rgba(107, 122, 143, 0.14);
+  border: 1px solid var(--card-border);
   z-index: 150;
   cursor: pointer;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 12px 24px var(--card-shadow);
   backdrop-filter: blur(16px);
 }
 
 .ref-title {
   font-size: 12px;
-  color: #1e1e20;
+  color: var(--text-primary);
   margin: 2px 0 6px;
   font-weight: 600;
 }
@@ -3415,13 +3502,13 @@ button.active {
 .ref-img {
   width: 100%;
   border-radius: 10px;
-  border: 1px solid rgba(107, 122, 143, 0.12);
+  border: 1px solid var(--card-border);
   margin-bottom: 6px;
 }
 
 .ref-info {
   font-size: 9px;
-  color: rgba(30, 30, 32, 0.7);
+  color: var(--text-secondary);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -3429,18 +3516,18 @@ button.active {
 }
 
 .info-tag {
-  background: rgba(228, 232, 237, 0.78);
+  background: var(--info-tag-bg);
   padding: 3px 6px;
   border-radius: 999px;
 }
 
 .info-tag--accent {
-  color: #6d8260;
+  color: var(--accent);
 }
 
 .ref-hint {
   font-size: 9px;
-  color: rgba(30, 30, 32, 0.48);
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -3493,9 +3580,9 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
-  color: #1e1e20;
-  background: rgba(249, 249, 248, 0.84);
-  border: 1px solid rgba(107, 122, 143, 0.16);
+  color: var(--text-primary);
+  background: var(--fps-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 8px 10px;
   font-family: monospace;
@@ -3504,7 +3591,7 @@ button.active {
 }
 
 input[type='range'] {
-  accent-color: #6b7a8f;
+  accent-color: var(--range-accent);
 }
 
 @keyframes pulse {
@@ -3585,6 +3672,48 @@ input[type='range'] {
 
   .focal-settings-panel {
     top: calc(var(--flutter-safe-top) + 122px);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-container:not([data-theme]) {
+    --bg-gradient-1: rgba(30, 35, 45, 0.3);
+    --bg-gradient-2: rgba(50, 60, 80, 0.2);
+    --bg-start: #101014;
+    --bg-end: #18181c;
+    --text-primary: #f5f7fa;
+    --text-secondary: rgba(245, 247, 250, 0.72);
+    --text-muted: rgba(245, 247, 250, 0.48);
+    --card-bg: rgba(30, 30, 34, 0.84);
+    --card-border: rgba(174, 186, 204, 0.12);
+    --card-shadow: rgba(0, 0, 0, 0.22);
+    --input-bg: rgba(35, 35, 42, 0.72);
+    --input-border: rgba(174, 186, 204, 0.14);
+    --input-focus-border: rgba(174, 186, 204, 0.5);
+    --input-focus-ring: rgba(174, 186, 204, 0.08);
+    --btn-ghost-bg: rgba(30, 30, 34, 0.84);
+    --btn-solid-bg: #aebacc;
+    --btn-solid-hover: #9aa8bc;
+    --btn-solid-text: #101014;
+    --chip-active-bg: #f5f7fa;
+    --chip-active-text: #101014;
+    --chip-hover-bg: rgba(174, 186, 204, 0.12);
+    --chip-hover-text: #d0d8e4;
+    --eyebrow-color: #aebacc;
+    --accent: #8fae7f;
+    --accent-ring: rgba(143, 174, 127, 0.12);
+    --error-title: #ff6b6b;
+    --overlay-bg: rgba(0, 0, 0, 0.5);
+    --range-accent: #aebacc;
+    --vignette-color: rgba(0, 0, 0, 0.2);
+    --info-tag-bg: rgba(50, 55, 65, 0.78);
+    --fps-bg: rgba(30, 30, 34, 0.84);
+    --close-btn-bg: rgba(174, 186, 204, 0.12);
+    --cinematic-loop-text: rgba(245, 247, 250, 0.7);
+    --cinematic-focus-text: rgba(245, 247, 250, 0.78);
+    --loading-copy-text: rgba(245, 247, 250, 0.66);
+    --error-msg-text: rgba(245, 247, 250, 0.68);
+    --chip-inactive-text: #9ca3af;
   }
 }
 </style>
