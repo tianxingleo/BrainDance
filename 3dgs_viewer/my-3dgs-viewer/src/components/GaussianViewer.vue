@@ -1051,7 +1051,7 @@ const globalUniforms = {
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
   uParticleProgress: { value: 0 },
   uRevealProgress: { value: 0 },
-  uRevealFeather: { value: 0.12 },
+  uRevealFeather: { value: 0.22 },
   uIntroSplatAlpha: { value: 0 },
 };
 
@@ -1270,6 +1270,30 @@ const applyAdvancedShader = (mesh) => {
     uniform float uIntroSplatAlpha;
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
+
+    float introHash(vec3 p) {
+      return fract(sin(dot(p, vec3(17.13, 43.71, 91.17))) * 43758.5453);
+    }
+
+    float introValueNoise(vec3 p) {
+      vec3 i = floor(p);
+      vec3 f = smoothstep(vec3(0.0), vec3(1.0), fract(p));
+      float n000 = introHash(i + vec3(0.0, 0.0, 0.0));
+      float n100 = introHash(i + vec3(1.0, 0.0, 0.0));
+      float n010 = introHash(i + vec3(0.0, 1.0, 0.0));
+      float n110 = introHash(i + vec3(1.0, 1.0, 0.0));
+      float n001 = introHash(i + vec3(0.0, 0.0, 1.0));
+      float n101 = introHash(i + vec3(1.0, 0.0, 1.0));
+      float n011 = introHash(i + vec3(0.0, 1.0, 1.0));
+      float n111 = introHash(i + vec3(1.0, 1.0, 1.0));
+      float nx00 = mix(n000, n100, f.x);
+      float nx10 = mix(n010, n110, f.x);
+      float nx01 = mix(n001, n101, f.x);
+      float nx11 = mix(n011, n111, f.x);
+      float nxy0 = mix(nx00, nx10, f.y);
+      float nxy1 = mix(nx01, nx11, f.y);
+      return mix(nxy0, nxy1, f.z);
+    }
   `;
   material.fragmentShader = commonFragment + material.fragmentShader;
 
@@ -1277,14 +1301,18 @@ const applyAdvancedShader = (mesh) => {
   if (fsEndIndex !== -1) {
     const originalContent = material.fragmentShader.substring(0, fsEndIndex);
     const visualLogic = `
-      float distFromCenter = distance(vWorldPosition, uCenter);
+      vec3 centeredPos = vWorldPosition - uCenter;
+      float distFromCenter = length(centeredPos);
       float normalizedOrder = clamp(distFromCenter / max(uMaxRadius, 0.0001), 0.0, 1.0);
-      float revealT = smoothstep(normalizedOrder, normalizedOrder + uRevealFeather, uRevealProgress);
+      float waveNoise = introValueNoise(centeredPos * 2.2);
+      float fineNoise = introValueNoise(centeredPos * 7.5 + 19.0);
+      float noisyOrder = clamp(normalizedOrder + (waveNoise - 0.5) * 0.18 + (fineNoise - 0.5) * 0.06, 0.0, 1.0);
+      float revealT = smoothstep(noisyOrder, noisyOrder + uRevealFeather, uRevealProgress);
 
       if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
 
-      // 入场阶段只收窄椭球边缘透明度，不覆盖原始 splat 颜色。
-      float alphaClip = mix(0.92, 0.02, revealT);
+      // 带噪声的空间波前让高斯从中心向外逐片恢复，而不是全局同时变形。
+      float alphaClip = mix(0.95, 0.02, revealT);
       if (gl_FragColor.a < alphaClip) discard;
       gl_FragColor.a *= revealT * uIntroSplatAlpha;
     `;
@@ -1366,33 +1394,33 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = nu
   const center = getModelWorldCenter();
   const radius = getSceneRadius();
   const farthestStartState = getFarthestIntroStartPose(targetPosition, targetPose);
+  let startPosition;
+  let startQuaternion;
 
   if (farthestStartState) {
-    return {
-      center,
-      startPosition: farthestStartState.position.clone(),
-      startQuaternion: makeLookQuaternion(farthestStartState.position, center),
-      targetPosition: targetPosition.clone(),
-      targetQuaternion: targetQuaternion.clone(),
-    };
+    startPosition = farthestStartState.position.clone();
+    startQuaternion = makeLookQuaternion(startPosition, center);
+  } else {
+    const targetOffset = targetPosition.clone().sub(center);
+    if (targetOffset.lengthSq() < 1e-8) targetOffset.set(Math.max(radius * 2.5, 1), 0, 0);
+
+    const orbitAxis = INTRO_ORBIT_AXIS.clone().normalize();
+    const startOffset = targetOffset.clone()
+      .applyAxisAngle(orbitAxis, THREE.MathUtils.degToRad(115))
+      .multiplyScalar(1.18);
+    const lift = Math.max(radius * 0.22, targetOffset.length() * 0.08, 0.08);
+    startOffset.z += lift;
+
+    startPosition = center.clone().add(startOffset);
+    startQuaternion = makeLookQuaternion(startPosition, center);
   }
 
-  const targetOffset = targetPosition.clone().sub(center);
-  if (targetOffset.lengthSq() < 1e-8) targetOffset.set(Math.max(radius * 2.5, 1), 0, 0);
-
-  const orbitAxis = INTRO_ORBIT_AXIS.clone().normalize();
-  const startOffset = targetOffset.clone()
-    .applyAxisAngle(orbitAxis, THREE.MathUtils.degToRad(115))
-    .multiplyScalar(1.18);
-  const lift = Math.max(radius * 0.22, targetOffset.length() * 0.08, 0.08);
-  startOffset.z += lift;
-
-  const startPosition = center.clone().add(startOffset);
-  const startQuaternion = makeLookQuaternion(startPosition, center);
+  const curve = buildCameraBezierCurve(startPosition, targetPosition, center);
 
   return {
     center,
-    startPosition,
+    curve,
+    startPosition: startPosition.clone(),
     startQuaternion,
     targetPosition: targetPosition.clone(),
     targetQuaternion: targetQuaternion.clone(),
@@ -2275,15 +2303,19 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const introCamera = animationState.introCamera;
 
         if (introCamera) {
-          viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
+          if (introCamera.curve) {
+            viewer.camera.position.copy(introCamera.curve.getPoint(t));
+          } else {
+            viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
+          }
           viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
 
         const pointT = smoothstep01(rawT / 0.45);
-        const revealT = smoothstep01((rawT - 0.25) / 0.75);
-        const splatAlpha = smoothstep01((rawT - 0.42) / 0.58);
+        const revealT = smoothstep01((rawT - 0.24) / 0.72);
+        const splatAlpha = smoothstep01((rawT - 0.30) / 0.56);
         globalUniforms.uParticleProgress.value = pointT;
-        globalUniforms.uRevealProgress.value = revealT * 1.5;
+        globalUniforms.uRevealProgress.value = revealT * 1.22;
         globalUniforms.uIntroSplatAlpha.value = splatAlpha;
         globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
