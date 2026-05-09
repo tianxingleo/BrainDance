@@ -64,6 +64,8 @@ class VideoPreprocessResult {
 
 class VideoPreprocessor {
   static bool _initialized = false;
+  static final _durationRe = RegExp(r'Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})');
+  static final _timeRe = RegExp(r'time=(\d{2}):(\d{2}):(\d{2}\.\d{2})');
 
   static Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -129,6 +131,7 @@ class VideoPreprocessor {
 
     final startMs = DateTime.now().millisecondsSinceEpoch;
     String? failOutput;
+    double? totalDurationSec;
 
     final session = await FFmpegKit.executeAsync(
       command,
@@ -136,10 +139,34 @@ class VideoPreprocessor {
         // completion handled below via session
       },
       onLog: (log) {
+        final msg = log.message;
         if (failOutput == null) {
-          failOutput = log.message;
+          failOutput = msg;
         } else {
-          failOutput = '${failOutput!}\n${log.message}';
+          failOutput = '${failOutput!}\n$msg';
+        }
+
+        if (onProgress == null) return;
+
+        // Parse total duration from early log lines: Duration: 00:01:23.45
+        if (totalDurationSec == null) {
+          final durMatch = _durationRe.firstMatch(msg);
+          if (durMatch != null) {
+            totalDurationSec = int.parse(durMatch.group(1)!) * 3600.0 +
+                int.parse(durMatch.group(2)!) * 60.0 +
+                double.parse(durMatch.group(3)!);
+          }
+        }
+
+        // Parse current encoding time: time=00:00:12.34
+        final timeMatch = _timeRe.firstMatch(msg);
+        if (timeMatch != null) {
+          final currentSec = int.parse(timeMatch.group(1)!) * 3600.0 +
+              int.parse(timeMatch.group(2)!) * 60.0 +
+              double.parse(timeMatch.group(3)!);
+          if (totalDurationSec != null && totalDurationSec! > 0) {
+            onProgress((currentSec / totalDurationSec!).clamp(0.0, 1.0));
+          }
         }
       },
     );
