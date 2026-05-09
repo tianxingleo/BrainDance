@@ -216,60 +216,79 @@ class _TaskListPageState extends State<TaskListPage> {
         ? const Color(0xFFFFFFFF)
         : const Color(0xFF333333);
 
+    final header = BDPageHeader(
+      title: textLocalize('task_list_title'),
+      trailing: IconButton(
+        icon: AnimatedRotation(
+          turns: _isLoading ? 1 : 0,
+          duration: const Duration(milliseconds: 600),
+          child: Icon(
+            Icons.refresh,
+            color: isDark
+                ? BDDesign.colorPaperWhite
+                : BDDesign.colorInkBlack,
+            size: 20,
+          ),
+        ),
+        tooltip: textLocalize('refresh'),
+        onPressed: _isLoading ? null : _fetchTasks,
+      ),
+    );
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
           bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              BDPageHeader(
-                title: textLocalize('task_list_title'),
-                trailing: IconButton(
-                  icon: AnimatedRotation(
-                    turns: _isLoading ? 1 : 0,
-                    duration: const Duration(milliseconds: 600),
-                    child: Icon(
-                      Icons.refresh,
-                      color: isDark
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorInkBlack,
-                      size: 20,
-                    ),
-                  ),
-                  tooltip: textLocalize('refresh'),
-                  onPressed: _isLoading ? null : _fetchTasks,
-                ),
-              ),
-              Expanded(child: _buildBody(theme, isDark, textColor)),
-            ],
-          ),
+          child: _buildBody(theme, isDark, textColor, header),
         ),
       ),
     );
   }
 
-  Widget _buildBody(TDThemeData theme, bool isDark, Color textColor) {
+  Widget _buildBody(TDThemeData theme, bool isDark, Color textColor, Widget header) {
     if (_isLoading) {
-      return const Center(
-        child: TDLoading(size: TDLoadingSize.large, icon: TDLoadingIcon.circle),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const Expanded(
+            child: Center(
+              child: TDLoading(size: TDLoadingSize.large, icon: TDLoadingIcon.circle),
+            ),
+          ),
+        ],
       );
     }
 
     if (_error != null) {
-      return _buildErrorState(theme, isDark, textColor);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          Expanded(child: _buildErrorState(theme, isDark, textColor)),
+        ],
+      );
     }
 
     if (_tasksByStatus.isEmpty) {
-      return _buildEmptyState(theme, isDark, textColor);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          Expanded(child: _buildEmptyState(theme, isDark, textColor)),
+        ],
+      );
     }
 
     return RefreshIndicator(
       onRefresh: _fetchTasks,
       child: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 100),
-        children: _buildCategorySections(theme, isDark, textColor),
+        padding: const EdgeInsets.only(bottom: 100),
+        children: [
+          header,
+          ..._buildCategorySections(theme, isDark, textColor),
+        ],
       ),
     );
   }
