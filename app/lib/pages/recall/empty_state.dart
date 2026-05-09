@@ -89,7 +89,7 @@ class EmptyState extends StatelessWidget {
               onTap: () {
                 openViewer(
                   context,
-                  initialModelUrl: './models/scene_auto_sync_raw.ply',
+                  initialModelUrl: '',
                   sceneId: textLocalize("recall_demo_title"),
                 );
               },

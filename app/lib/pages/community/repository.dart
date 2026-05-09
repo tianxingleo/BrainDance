@@ -64,9 +64,7 @@ class CommunityRepository {
               model['display_name']?.toString() ??
               model['scene_id']?.toString() ??
               '3D 模型',
-          modelUrl: modelUrl.isEmpty
-              ? './models/scene_auto_sync_raw.ply'
-              : modelUrl,
+          modelUrl: modelUrl,
           posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
           coverUrl: previewUrl,
           createdAt:
@@ -112,9 +110,7 @@ class CommunityRepository {
               map['scene_id']?.toString() ??
               textLocalize('community_unnamed_model'),
           description: map['description']?.toString() ?? '',
-          modelUrl: publicUrl.isEmpty
-              ? './models/scene_auto_sync_raw.ply'
-              : publicUrl,
+          modelUrl: publicUrl,
           posesUrl: _posesUrlFromPath(path),
           coverUrl: map['preview_img_path']?.toString(),
         );
@@ -223,7 +219,7 @@ final List<CommunityModelOption> _demoModels = [
     id: 'demo-1',
     sceneId: '西湖断桥晨雾',
     description: '湖面、柳树、桥面和低雾一起形成了安静的晨间空间。',
-    modelUrl: './models/scene_auto_sync_raw.ply',
+    modelUrl: '',
     posesUrl: null,
     coverUrl: null,
   ),
@@ -231,7 +227,7 @@ final List<CommunityModelOption> _demoModels = [
     id: 'demo-2',
     sceneId: '东京塔夜色',
     description: '夜间城市灯光包围着塔体，适合做高对比空间浏览。',
-    modelUrl: './models/scene_auto_sync_raw.ply',
+    modelUrl: '',
     posesUrl: null,
     coverUrl: null,
   ),
@@ -247,7 +243,7 @@ final List<CommunityPost> _demoPosts = [
     longitude: 120.140,
     authorName: 'Lin',
     modelName: '西湖断桥晨雾',
-    modelUrl: './models/scene_auto_sync_raw.ply',
+    modelUrl: '',
     posesUrl: null,
     coverUrl: null,
     createdAt: DateTime.now().subtract(const Duration(hours: 2)),
@@ -262,7 +258,7 @@ final List<CommunityPost> _demoPosts = [
     longitude: 139.745,
     authorName: 'Aoi',
     modelName: '东京塔夜色',
-    modelUrl: './models/scene_auto_sync_raw.ply',
+    modelUrl: '',
     posesUrl: null,
     coverUrl: null,
     createdAt: DateTime.now().subtract(const Duration(hours: 6)),

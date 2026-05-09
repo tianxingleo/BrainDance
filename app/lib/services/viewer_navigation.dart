@@ -121,8 +121,11 @@ Future<void> openViewer(
   if (!context.mounted) return;
 
   Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => WebGLViewerPage(
+    PageRouteBuilder(
+      transitionDuration: const Duration(milliseconds: 320),
+      reverseTransitionDuration: const Duration(milliseconds: 320),
+      opaque: true,
+      pageBuilder: (_, __, ___) => WebGLViewerPage(
         initialModelUrl: initialModelUrl,
         posesUrl: posesUrl,
         sceneId: sceneId,
@@ -130,6 +133,19 @@ Future<void> openViewer(
         initialPoseId: initialPoseId,
         timePeelingModels: siblings,
       ),
+      transitionsBuilder: (_, animation, __, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeInOutCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, -1),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
     ),
   );
 }

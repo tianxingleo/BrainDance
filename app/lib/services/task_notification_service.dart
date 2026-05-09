@@ -78,9 +78,7 @@ class TaskNotificationService extends ChangeNotifier {
       if (route?.settings.name == '/tasks') {
         return;
       }
-      Navigator.of(
-        context,
-      ).pushNamedAndRemoveUntil('/tasks', (route) => route.isFirst);
+      Navigator.of(context).pushNamed('/tasks');
     }
   }
 

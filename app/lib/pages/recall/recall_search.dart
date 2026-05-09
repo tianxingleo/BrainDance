@@ -124,10 +124,8 @@ extension _RecallPageSearch on _RecallPageState {
         setState(() {
           _isLoading = false;
         });
-        TDToast.showText(
-          '${textLocalize("recall_error_search")}$e',
-          context: context,
-        );
+        debugPrint('[RecallSearch] search error: $e');
+        showAppToast(context, textLocalize("recall_error_search"));
       }
     }
   }
@@ -205,10 +203,8 @@ extension _RecallPageSearch on _RecallPageState {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
-        TDToast.showText(
-          '${textLocalize('agent_search_failed')}: $ex',
-          context: context,
-        );
+        debugPrint('[RecallSearch] agent search error: $ex');
+        showAppToast(context, textLocalize('agent_search_failed'));
       }
     }
 
@@ -253,14 +249,12 @@ extension _RecallPageSearch on _RecallPageState {
           });
           _agentBootstrapTimer?.cancel();
           _agentBootstrapTimer = null;
+          debugPrint('[RecallSearch] agent stream error: $e');
           _updateAgentLiveStatus(
             textLocalize('agent_status_stream_fallback'),
             detail: '$e',
           );
-          TDToast.showText(
-            '${textLocalize('agent_stream_failed')}: $e',
-            context: context,
-          );
+          showAppToast(context, textLocalize('agent_stream_failed'));
           fallback();
         },
         onDone: () {
@@ -284,14 +278,12 @@ extension _RecallPageSearch on _RecallPageState {
       });
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
+      debugPrint('[RecallSearch] agent stream start error: $e');
       _updateAgentLiveStatus(
         textLocalize('agent_status_stream_start_fallback'),
         detail: '$e',
       );
-      TDToast.showText(
-        '${textLocalize('agent_stream_start_failed')}: $e',
-        context: context,
-      );
+      showAppToast(context, textLocalize('agent_stream_start_failed'));
       fallback();
     }
   }
@@ -307,7 +299,7 @@ extension _RecallPageSearch on _RecallPageState {
         .firstOrNull;
 
     if (openScene == null || openScene.ply == null || openScene.ply!.isEmpty) {
-      TDToast.showText('缺少 open_scene.ply，无法打开 Viewer', context: context);
+      showAppToast(context, '缺少 open_scene.ply，无法打开 Viewer');
       return;
     }
 
@@ -1044,7 +1036,7 @@ extension _RecallPageSearch on _RecallPageState {
                 unawaited(
                   openViewer(
                     context,
-                    initialModelUrl: './models/scene_auto_sync_raw.ply',
+                    initialModelUrl: '',
                     sceneId: textLocalize("recall_demo_title"),
                   ),
                 );

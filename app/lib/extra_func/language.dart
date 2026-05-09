@@ -24,7 +24,7 @@ enum Language {
       "gen_video": "视频",
       "gen_tip_pic": "请选择图片文件 (小于[FILE_SIZE])",
       "gen_tip_text": "请输入描述文本",
-      "gen_tip_video": "请选择视频文件\n(清晰度小于等于 1080p 30fps，\n拍摄时长 3min 以内)",
+      "gen_tip_video": "请选择视频文件\n(大小 1.5 GB 以内，\n拍摄时长 10min 以内)",
       "gen_tip_textbox": "在此处键入文本",
       "gen_button": "生成记忆",
       "gen_shot": "拍照",
@@ -44,6 +44,7 @@ enum Language {
       "reco_tip3": """如视频使用手机自带相机软件拍摄，请用剪辑软件（如剪映）检查视频，剪掉抖动、模糊或过曝的片段。
 最终导出时，确认参数为 1080p 和 30fps。""",
       "reco_camun": "相机访问被拒绝。\n请在系统设置中启用相机权限。",
+      "set_open_settings": "前往设置",
       "reco_wait": "相机初始化中...",
       "recall": "回忆",
       "record": "相机记录",
@@ -76,7 +77,8 @@ enum Language {
       "recall_local_indexing": "正在本地建立向量索引…",
       "recall_local_scope": "搜索词不会上传到云端",
       "recall_local_ai_scope": "问题先检索本地记忆，再交给端侧模型回答",
-      "recall_agent_scope": "连接 Supabase Deno LangChain 工具链，对三维记忆进行检索、定位、分析与后续操作",
+      "recall_agent_scope":
+          "连接 Supabase Deno LangChain 工具链，对三维记忆进行检索、定位、分析与后续操作",
       "recall_local_empty": "本地索引中没有命中结果",
       "recall_cloud_scope": "搜索词将发送到云端大模型",
       "recall_cloud_empty": "云端语义检索没有命中结果",
@@ -117,8 +119,10 @@ enum Language {
       "agent_error_empty_query": "查询语句不能为空",
       "agent_error_missing_supabase_url": "未配置 SUPABASE_URL，无法建立 Agent 流式连接",
       "agent_error_bad_response": "agent-recall 返回格式错误",
-      "agent_error_unavailable": "agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。",
-      "agent_error_upstream": "agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置",
+      "agent_error_unavailable":
+          "agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。",
+      "agent_error_upstream":
+          "agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置",
       "agent_error_http": "agent-recall 调用失败（HTTP {status}）",
       // 任务列表页面
       "task_list_title": "记忆任务",
@@ -185,6 +189,14 @@ enum Language {
       "gen_video_task_2dgs_hint": "输出 2DGS 路线",
       "gen_video_task_sparse2dgs": "视频Sparse2DGS",
       "gen_video_task_sparse2dgs_hint": "抽帧后走 Sparse2DGS",
+      "gen_text_pipeline_hint": "文字将先通过 AI 生成图片，再将生成的图片转化为三维记忆模型。",
+      "gen_cancel_title": "操作进行中",
+      "gen_cancel_message": "当前正在处理中，退出页面将丢失进度。\n确定要退出吗？",
+      "gen_cancel_confirm": "确认退出",
+      "gen_cancel_continue": "继续操作",
+      "gen_video_too_large": "视频文件过大（最大 1.5 GB），请重新选择。",
+      "gen_video_too_long": "视频时长过长（最长 10 分钟），请重新选择。",
+      "gen_image_too_large": "图片文件过大（最大 20 MB），请重新选择。",
       // Login page
       "login_signup_success": "注册成功！请检查邮箱完成验证。",
       "login_success": "登录成功",
@@ -254,8 +266,8 @@ enum Language {
       "set_lang_en": "English",
       "set_current_language": "当前语言",
       "set_current_theme": "当前模式",
-      "set_theme_day": "DAY",
-      "set_theme_night": "NIGHT",
+      "set_theme_day": "日间",
+      "set_theme_night": "夜间",
       "set_theme_day_cn": "日间模式",
       "set_theme_night_cn": "夜间模式",
       // Recall page
@@ -286,6 +298,10 @@ enum Language {
       "recall_download_model_success": "模型已保存",
       "recall_download_model_fail": "下载模型失败",
       "recall_download_model_unavailable": "当前模型暂不可下载",
+      "recall_delete_confirm_title": "删除模型",
+      "recall_delete_confirm_message": "此操作将永久删除该模型，删除后不可撤销。\n确定要删除吗？",
+      "recall_delete_confirm_yes": "确认删除",
+      "recall_delete_confirm_cancel": "取消",
       "recall_delete_local": "删除本地模型",
       "recall_delete_local_subtitle": "删除已下载的模型文件，释放存储空间",
       "recall_delete_local_success": "本地模型已删除",
@@ -336,6 +352,17 @@ enum Language {
       "video_submit_name_hint": "请输入视频名称",
       "video_submit_thumbnail": "视频缩略图",
       "video_submit_btn": "提交并上传",
+      "video_upload_cancel_title": "正在上传",
+      "video_upload_cancel_message": "视频正在上传中，是否取消上传？",
+      "video_upload_cancel_confirm": "取消上传",
+      "video_upload_cancel_continue": "继续上传",
+      "video_exit_title": "退出视频提交",
+      "video_exit_message": "即将退出视频提交界面。",
+      "video_exit_delete_checkbox": "删除刚拍摄的视频文件",
+      "video_exit_confirm": "确认退出",
+      "video_exit_cancel": "取消",
+      "network_disconnected": "互联网已断开，请检查网络连接",
+      "network_session_expired": "登录已过期，请重新登录",
       // Common/shared
       "admin_mode_msg": "当前为管理员浏览模式，未绑定用户，暂不支持上传任务。",
       "not_logged_in": "未登录，即将跳转登录页面...",
@@ -348,13 +375,33 @@ enum Language {
       "create": "创作",
       "create_guide_subtitle": "选择一种方式开始创建新的记忆。",
       "create_record_desc": "使用相机拍摄并记录空间场景。",
-      "create_generate_desc": "通过图片、文本或视频生成记忆模型。",
+      "create_generate_desc": "通过素材生成记忆模型。",
       "timepeeling": "时间切片",
       "coming_soon": "即将推出",
       "gen_text_generating": "正在生成中",
       "gen_text_preview_title": "文本生成结果预览",
       "gen_text_regenerate": "重新生成",
       "gen_text_confirm": "确认",
+      // Local model
+      "local_model_download_fail": "模型下载失败，请检查网络后重试",
+      "local_model_load_fail": "模型加载失败，请重新尝试",
+      "local_model_qa_fail": "问答失败，请重新提问",
+      "local_model_download_success": "模型已下载到应用私有目录",
+      "local_model_fill_url": "请先填写模型下载链接",
+      "local_model_fill_path": "请先填写模型路径",
+      "local_model_fill_question": "请输入要提问的问题",
+      "local_model_load_first": "请先加载本地模型",
+      // Cloud model
+      "cloud_model_delete_success": "云端模型删除成功",
+      "cloud_model_delete_fail": "云端模型删除失败，请重试",
+      "cloud_model_missing_id": "模型数据异常，无法删除",
+      "cloud_model_no_permission": "只能删除自己的云端模型",
+      // Viewer
+      "viewer_download_fail": "模型下载失败，请重试",
+      "viewer_spark_error": "渲染服务异常，请稍后重试",
+      "recall_info": "查看详情",
+      "recall_rename": "重命名",
+      "recall_share_community": "分享到社区",
     },
   ),
   en(
@@ -383,7 +430,7 @@ enum Language {
       "gen_tip_pic": "Please select an image file (less than [FILE_SIZE])",
       "gen_tip_text": "Please enter a description text",
       "gen_tip_video":
-          "Please select a video file\n(Resolution ≤ 1080p 30fps,\nDuration within 3 minutes)",
+          "Please select a video file\n(Size ≤ 1.5 GB,\nDuration within 10 minutes)",
       "gen_tip_textbox": "Type text here",
       "gen_button": "Generate Memory",
       "gen_shot": "Use Camera",
@@ -407,6 +454,7 @@ Content: Plan diverse shooting content and angles to avoid repetitive footage.""
 When finally exporting, confirm the settings are 1080p and 30fps.""",
       "reco_camun":
           "Cannot access the camera.\nPlease check and grant the camera permission in your device settings to continue.",
+      "set_open_settings": "Open Settings",
       "reco_wait": "Initializing the camera...",
       "recall": "Recall",
       "record": "Record",
@@ -490,8 +538,7 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "agent_elapsed_finished": "Total agent duration {duration}",
       "agent_search_failed": "Agent operation failed",
       "agent_stream_failed": "Agent streaming failed (falling back)",
-      "agent_stream_start_failed":
-          "Agent stream startup failed (falling back)",
+      "agent_stream_start_failed": "Agent stream startup failed (falling back)",
       "agent_error_empty_query": "Query cannot be empty",
       "agent_error_missing_supabase_url":
           "SUPABASE_URL is not configured, so the agent stream cannot be opened",
@@ -569,6 +616,19 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_video_task_2dgs_hint": "2DGS output pipeline",
       "gen_video_task_sparse2dgs": "Video Sparse2DGS",
       "gen_video_task_sparse2dgs_hint": "Sample frames into Sparse2DGS",
+      "gen_text_pipeline_hint":
+          "Text will first generate an image via AI, then the image will be converted into a 3D memory model.",
+      "gen_cancel_title": "Operation in Progress",
+      "gen_cancel_message":
+          "Processing is underway. Exiting will lose progress.\nAre you sure you want to exit?",
+      "gen_cancel_confirm": "Exit",
+      "gen_cancel_continue": "Continue",
+      "gen_video_too_large":
+          "Video file is too large (max 1.5 GB). Please select another one.",
+      "gen_video_too_long":
+          "Video duration is too long (max 10 min). Please select another one.",
+      "gen_image_too_large":
+          "Image file is too large (max 20 MB). Please select another one.",
       // Login page
       "login_signup_success":
           "Registration successful! Please check your email to verify.",
@@ -599,7 +659,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
           "Move the phone like a slider, along the target's outer edge",
       "reco_app_switch": "Recording interrupted by app switch, content saved",
       "reco_done": "Recording completed",
-      "reco_record_too_short": "Recording failed, possible reason: recording too short",
+      "reco_record_too_short":
+          "Recording failed, possible reason: recording too short",
       "reco_save_fail":
           "Cannot save video to gallery. Video is temporarily cached.",
       "reco_save_error": "Error saving video to gallery",
@@ -683,6 +744,11 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "recall_download_model_fail": "Failed to download model",
       "recall_download_model_unavailable": "This model is not downloadable yet",
       "recall_delete_local": "Delete Local Model",
+      "recall_delete_confirm_title": "Delete Model",
+      "recall_delete_confirm_message":
+          "This will permanently delete the model. This action cannot be undone.\nAre you sure?",
+      "recall_delete_confirm_yes": "Delete",
+      "recall_delete_confirm_cancel": "Cancel",
       "recall_delete_local_subtitle":
           "Remove downloaded model files to free storage",
       "recall_delete_local_success": "Local model deleted",
@@ -735,6 +801,19 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_submit_name_hint": "Enter video name",
       "video_submit_thumbnail": "Video Thumbnail",
       "video_submit_btn": "Submit & Upload",
+      "video_upload_cancel_title": "Uploading",
+      "video_upload_cancel_message":
+          "Video upload is in progress. Do you want to cancel?",
+      "video_upload_cancel_confirm": "Cancel Upload",
+      "video_upload_cancel_continue": "Continue Upload",
+      "video_exit_title": "Exit Video Submission",
+      "video_exit_message": "You are about to leave the video submission page.",
+      "video_exit_delete_checkbox": "Delete the recorded video file",
+      "video_exit_confirm": "Exit",
+      "video_exit_cancel": "Cancel",
+      "network_disconnected":
+          "Internet disconnected. Please check your network connection.",
+      "network_session_expired": "Session expired. Please re-login.",
       // Common/shared
       "admin_mode_msg":
           "Admin browse mode, no user bound. Upload not supported.",
@@ -758,6 +837,28 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_text_preview_title": "Text Generation Preview",
       "gen_text_regenerate": "Regenerate",
       "gen_text_confirm": "Confirm",
+      // Local model
+      "local_model_download_fail":
+          "Model download failed. Please check your network and retry.",
+      "local_model_load_fail": "Model loading failed. Please try again.",
+      "local_model_qa_fail": "Q&A failed. Please try again.",
+      "local_model_download_success": "Model downloaded to app storage.",
+      "local_model_fill_url": "Please enter the model download URL first.",
+      "local_model_fill_path": "Please enter the model file path first.",
+      "local_model_fill_question": "Please enter your question.",
+      "local_model_load_first": "Please load a local model first.",
+      // Cloud model
+      "cloud_model_delete_success": "Cloud model deleted.",
+      "cloud_model_delete_fail":
+          "Failed to delete cloud model. Please try again.",
+      "cloud_model_missing_id": "Model data is invalid, cannot delete.",
+      "cloud_model_no_permission": "You can only delete your own cloud models.",
+      // Viewer
+      "viewer_download_fail": "Model download failed. Please try again.",
+      "viewer_spark_error": "Rendering service error. Please try again later.",
+      "recall_info": "Info",
+      "recall_rename": "Rename",
+      "recall_share_community": "Share to Community",
     },
   );
 

@@ -3,6 +3,7 @@ import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import 'models.dart';
@@ -310,7 +311,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
         title.isEmpty ||
         caption.isEmpty ||
         place.isEmpty) {
-      TDToast.showText(context: context, textLocalize('community_fill_all'));
+      showAppToast(context, textLocalize('community_fill_all'));
       return;
     }
 

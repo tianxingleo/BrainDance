@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
@@ -190,14 +191,12 @@ class _TaskListPageState extends State<TaskListPage> {
       }
     } catch (e) {
       if (mounted) {
+        debugPrint('[TaskList] fetch error: $e');
         setState(() {
           _isLoading = false;
-          _error = e.toString();
+          _error = textLocalize('error_unknown');
         });
-        TDToast.showText(
-          '${textLocalize('error_fetch_tasks')}: $e',
-          context: context,
-        );
+        showAppToast(context, textLocalize('error_fetch_tasks'));
       }
     }
   }
@@ -217,60 +216,79 @@ class _TaskListPageState extends State<TaskListPage> {
         ? const Color(0xFFFFFFFF)
         : const Color(0xFF333333);
 
+    final header = BDPageHeader(
+      title: textLocalize('task_list_title'),
+      trailing: IconButton(
+        icon: AnimatedRotation(
+          turns: _isLoading ? 1 : 0,
+          duration: const Duration(milliseconds: 600),
+          child: Icon(
+            Icons.refresh,
+            color: isDark
+                ? BDDesign.colorPaperWhite
+                : BDDesign.colorInkBlack,
+            size: 20,
+          ),
+        ),
+        tooltip: textLocalize('refresh'),
+        onPressed: _isLoading ? null : _fetchTasks,
+      ),
+    );
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
           bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              BDPageHeader(
-                title: textLocalize('task_list_title'),
-                trailing: IconButton(
-                  icon: AnimatedRotation(
-                    turns: _isLoading ? 1 : 0,
-                    duration: const Duration(milliseconds: 600),
-                    child: Icon(
-                      Icons.refresh,
-                      color: isDark
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorInkBlack,
-                      size: 20,
-                    ),
-                  ),
-                  tooltip: textLocalize('refresh'),
-                  onPressed: _isLoading ? null : _fetchTasks,
-                ),
-              ),
-              Expanded(child: _buildBody(theme, isDark, textColor)),
-            ],
-          ),
+          child: _buildBody(theme, isDark, textColor, header),
         ),
       ),
     );
   }
 
-  Widget _buildBody(TDThemeData theme, bool isDark, Color textColor) {
+  Widget _buildBody(TDThemeData theme, bool isDark, Color textColor, Widget header) {
     if (_isLoading) {
-      return const Center(
-        child: TDLoading(size: TDLoadingSize.large, icon: TDLoadingIcon.circle),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const Expanded(
+            child: Center(
+              child: TDLoading(size: TDLoadingSize.large, icon: TDLoadingIcon.circle),
+            ),
+          ),
+        ],
       );
     }
 
     if (_error != null) {
-      return _buildErrorState(theme, isDark, textColor);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          Expanded(child: _buildErrorState(theme, isDark, textColor)),
+        ],
+      );
     }
 
     if (_tasksByStatus.isEmpty) {
-      return _buildEmptyState(theme, isDark, textColor);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          Expanded(child: _buildEmptyState(theme, isDark, textColor)),
+        ],
+      );
     }
 
     return RefreshIndicator(
       onRefresh: _fetchTasks,
       child: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 100),
-        children: _buildCategorySections(theme, isDark, textColor),
+        padding: const EdgeInsets.only(bottom: 100),
+        children: [
+          header,
+          ..._buildCategorySections(theme, isDark, textColor),
+        ],
       ),
     );
   }
@@ -337,21 +355,33 @@ class _TaskListPageState extends State<TaskListPage> {
     }).toList();
   }
 
+  String _resolveDisplayName(Map<String, dynamic> task, String fallback) {
+    final displayName = task['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) return displayName;
+
+    final tags = task['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) return value;
+      }
+    }
+
+    return fallback;
+  }
+
   Future<void> _onTaskTap(Map<String, dynamic> task) async {
     final status = task['status']?.toString();
     final sceneId = task['scene_id']?.toString();
 
     // 只有completed状态的任务才能查看
     if (status != 'completed' || sceneId == null) {
-      TDToast.showText(
-        textLocalize('task_status_${status ?? 'unknown'}'),
-        context: context,
-      );
+      showAppToast(context, textLocalize('task_status_${status ?? 'unknown'}'));
       return;
     }
 
     // 查询 model_assets 获取 ply_path，确保 Viewer 能触发下载
-    String modelUrl = './models/scene_auto_sync_raw.ply';
+    String modelUrl = '';
     String? posesUrl;
     try {
       final asset = await Supabase.instance.client
@@ -371,7 +401,7 @@ class _TaskListPageState extends State<TaskListPage> {
     }
 
     if (!mounted) return;
-    final displayName = task['display_name']?.toString() ?? sceneId;
+    final displayName = _resolveDisplayName(task, sceneId);
     await openViewer(
       context,
       initialModelUrl: modelUrl,
