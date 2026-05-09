@@ -62,8 +62,8 @@ const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 const ORBIT_RECENTER_DURATION = 1.5;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
-const DESKTOP_INTRO_PARTICLE_BUDGET = 65000;
-const MOBILE_INTRO_PARTICLE_BUDGET = 26000;
+const DESKTOP_INTRO_PARTICLE_BUDGET = 52000;
+const MOBILE_INTRO_PARTICLE_BUDGET = 22000;
 const INTRO_DURATION_MS = 6500;
 const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -1133,7 +1133,7 @@ const createParticleSystem = (splatMesh) => {
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
-  const flyRadiusBase = maxDim * 1.0;
+  const flyRadiusBase = maxDim * 1.12;
 
   console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${sampledCount}, Size: ${adaptiveSize.toFixed(2)}`);
 
@@ -1168,7 +1168,7 @@ const createParticleSystem = (splatMesh) => {
     }
 
     // 随机分布在远处 (基于自适应的 maxDim)
-    const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
+    const r = flyRadiusBase + Math.random() * (maxDim * 0.65);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
 
@@ -2296,9 +2296,9 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
 
-        const pointT = smoothstep01(rawT / 0.45);
-        const revealT = smoothstep01((rawT - 0.18) / 0.78);
-        const splatAlpha = smoothstep01((rawT - 0.24) / 0.64);
+        const pointT = smoothstep01(rawT / 0.30);
+        const revealT = smoothstep01((rawT - 0.08) / 0.70);
+        const splatAlpha = smoothstep01((rawT - 0.12) / 0.58);
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = revealT;
         globalUniforms.uIntroSplatAlpha.value = splatAlpha;
@@ -2306,10 +2306,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
-        if (splatMesh && rawT >= 0.25) splatMesh.visible = true;
+        if (splatMesh && rawT >= 0.14) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.38) / 0.34), 0, 1);
-          particleSystem.visible = rawT < 0.78;
+          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.22) / 0.20), 0, 1);
+          particleSystem.visible = rawT < 0.62;
         }
 
         if (rawT >= 1) {
