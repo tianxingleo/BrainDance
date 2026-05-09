@@ -134,21 +134,11 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
           children: [
             AnimatedBuilder(
               animation: _blurOpacityAnimation,
+              child: const _OverlayBlurScrim(),
               builder: (context, child) {
-                final value = _blurOpacityAnimation.value;
                 return Opacity(
-                  opacity: value,
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: ui.ImageFilter.blur(
-                        sigmaX: 10 * value,
-                        sigmaY: 10 * value,
-                      ),
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.12 * value),
-                      ),
-                    ),
-                  ),
+                  opacity: _blurOpacityAnimation.value,
+                  child: child,
                 );
               },
             ),
@@ -168,26 +158,29 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                       scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
                       child: GestureDetector(
-                  onTap: () => widget.onNavigateToViewer(widget.model, null),
-                  onLongPress: widget.onDismiss,
-                  child: RecallModelTile(
-                    model: widget.model,
-                    theme: widget.theme,
-                    isDark: widget.isDark,
-                    darkCard: widget.darkCard,
-                    darkInput: widget.darkInput,
-                    textColor: widget.isDark
-                        ? const Color(0xFFFFFFFF)
-                        : BDDesign.colorInkBlack,
-                    hintTextColor: widget.isDark
-                        ? const Color(0xFF888888)
-                        : widget.theme.fontGyColor3,
-                    elevated: true,
-                    elevationProgress: sValue,
-                    toPublicUrl: widget.toPublicUrl,
-                    imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
-                  ),
-                ),
+                        onTap: () =>
+                            widget.onNavigateToViewer(widget.model, null),
+                        onLongPress: widget.onDismiss,
+                        child: RepaintBoundary(
+                          child: RecallModelTile(
+                            model: widget.model,
+                            theme: widget.theme,
+                            isDark: widget.isDark,
+                            darkCard: widget.darkCard,
+                            darkInput: widget.darkInput,
+                            textColor: widget.isDark
+                                ? const Color(0xFFFFFFFF)
+                                : BDDesign.colorInkBlack,
+                            hintTextColor: widget.isDark
+                                ? const Color(0xFF888888)
+                                : widget.theme.fontGyColor3,
+                            elevated: true,
+                            elevationProgress: sValue,
+                            toPublicUrl: widget.toPublicUrl,
+                            imageOnly: widget.model['_imageOnly'] == true,
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -205,7 +198,9 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              widget.theme.brandColor4.withValues(alpha: widget.isDark ? 0.25 : 0.15),
+                              widget.theme.brandColor4.withValues(
+                                alpha: widget.isDark ? 0.25 : 0.15,
+                              ),
                               Colors.transparent,
                             ],
                             begin: Alignment.centerLeft,
@@ -329,6 +324,22 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OverlayBlurScrim extends StatelessWidget {
+  const _OverlayBlurScrim();
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: ColoredBox(color: Color(0x1F000000)),
         ),
       ),
     );

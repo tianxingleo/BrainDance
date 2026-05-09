@@ -58,6 +58,8 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
     final animationState = ref.watch(themeAnimationProvider);
     final isAnimating = animationState.isAnimating;
     final screenshot = animationState.screenshot;
+    final screenSize = MediaQuery.sizeOf(context);
+    final maxRadius = _maxDistance(animationState.center, screenSize);
 
     return Stack(
       children: [
@@ -78,6 +80,7 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
                     painter: _ScreenshotPainter(
                       image: screenshot,
                       center: animationState.center,
+                      maxRadius: maxRadius,
                       radiusValid: _animation.value,
                     ),
                   );
@@ -88,29 +91,38 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
       ],
     );
   }
+
+  double _maxDistance(Offset center, Size size) {
+    final topLeft = center.distance;
+    final topRight = (center - Offset(size.width, 0)).distance;
+    final bottomLeft = (center - Offset(0, size.height)).distance;
+    final bottomRight = (center - Offset(size.width, size.height)).distance;
+    return max(max(topLeft, topRight), max(bottomLeft, bottomRight));
+  }
 }
 
 class _ScreenshotPainter extends CustomPainter {
   final ui.Image image;
   final Offset center;
+  final double maxRadius;
   final double radiusValid; // 0.0 to 1.0
 
   _ScreenshotPainter({
     required this.image,
     required this.center,
+    required this.maxRadius,
     required this.radiusValid,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    final outer = Path()..addRect(dst);
     final paint = Paint()..filterQuality = FilterQuality.low;
-    final double maxRadius = _maxDistance(center, size);
     final double specificRadius = maxRadius * radiusValid;
-    final hole = Path()
+    final clip = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(dst)
       ..addOval(Rect.fromCircle(center: center, radius: specificRadius));
-    final clip = Path.combine(PathOperation.difference, outer, hole);
     canvas.save();
     canvas.clipPath(clip);
     final src = Rect.fromLTWH(
@@ -123,20 +135,11 @@ class _ScreenshotPainter extends CustomPainter {
     canvas.restore();
   }
 
-  double _maxDistance(Offset p, Size size) {
-    double dist(Offset a, Offset b) =>
-        sqrt(pow(a.dx - b.dx, 2) + pow(a.dy - b.dy, 2));
-    final tl = Offset(0, 0);
-    final tr = Offset(size.width, 0);
-    final bl = Offset(0, size.height);
-    final br = Offset(size.width, size.height);
-    return [dist(p, tl), dist(p, tr), dist(p, bl), dist(p, br)].reduce(max);
-  }
-
   @override
   bool shouldRepaint(covariant _ScreenshotPainter oldDelegate) {
     return oldDelegate.image != image ||
         oldDelegate.center != center ||
+        oldDelegate.maxRadius != maxRadius ||
         oldDelegate.radiusValid != radiusValid;
   }
 }

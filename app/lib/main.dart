@@ -63,8 +63,10 @@ void installFrameTimingLogger() {
       final rasterMs = t.rasterDuration.inMicroseconds / 1000.0;
       final totalMs = buildMs + rasterMs;
       if (totalMs > 16.6) {
+        final currentRoute = taskNotificationService.currentRoute ?? '';
         debugPrint(
-          '[JANK] build=${buildMs.toStringAsFixed(1)}ms '
+          '[JANK][${currentRoute.isEmpty ? 'unknown' : currentRoute}] '
+          'build=${buildMs.toStringAsFixed(1)}ms '
           'raster=${rasterMs.toStringAsFixed(1)}ms '
           'total=${totalMs.toStringAsFixed(1)}ms',
         );
@@ -301,6 +303,8 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
   Timer? _autoHideTimer;
+  TaskNotificationData? _activeNotification;
+  bool _isNotificationVisible = false;
 
   @override
   void initState() {
@@ -334,53 +338,64 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
         taskNotificationService.hideNotification();
       }
     });
+
+    taskNotificationService.addListener(_handleNotificationChanged);
   }
 
   @override
   void dispose() {
+    taskNotificationService.removeListener(_handleNotificationChanged);
     _autoHideTimer?.cancel();
     _showController.dispose();
     _hideController.dispose();
     super.dispose();
   }
 
+  void _handleNotificationChanged() {
+    final notification = taskNotificationService.currentNotification;
+    final currentRoute = taskNotificationService.currentRoute;
+    final canShow =
+        notification != null &&
+        taskNotificationService.isNotificationEnabledForRoute(currentRoute);
+
+    if (!canShow) {
+      _autoHideTimer?.cancel();
+      _activeNotification = null;
+      _isNotificationVisible = false;
+      _showController.reset();
+      _hideController.reset();
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+
+    final isSameNotification = identical(notification, _activeNotification);
+    _activeNotification = notification;
+    _isNotificationVisible = true;
+
+    if (!isSameNotification) {
+      _autoHideTimer?.cancel();
+      _hideController.reset();
+      _showController.forward(from: 0);
+      _autoHideTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted && taskNotificationService.currentNotification != null) {
+          _hideController.forward(from: 0);
+        }
+      });
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: taskNotificationService,
-      builder: (context, child) {
-        final notification = taskNotificationService.currentNotification;
-        if (notification == null) {
-          // 重置动画控制器
-          _showController.reset();
-          _hideController.reset();
-          _autoHideTimer?.cancel();
-          return const SizedBox.shrink();
-        }
-
-        // 检查当前路由是否允许显示通知
-        final currentRoute = taskNotificationService.currentRoute;
-        if (!taskNotificationService.isNotificationEnabledForRoute(
-          currentRoute,
-        )) {
-          return const SizedBox.shrink();
-        }
-
-        // 显示动画：滑入
-        _showController.forward();
-
-        // 启动1秒后开始淡出动画（总显示时间约2秒）
-        _autoHideTimer?.cancel();
-        _autoHideTimer = Timer(const Duration(seconds: 1), () {
-          // 等待显示动画完成后，开始1秒淡出动画
-          if (mounted && taskNotificationService.currentNotification != null) {
-            _hideController.forward(from: 0);
-          }
-        });
-
-        return _buildNotificationWidget(notification);
-      },
-    );
+    if (!_isNotificationVisible || _activeNotification == null) {
+      return const SizedBox.shrink();
+    }
+    return _buildNotificationWidget(_activeNotification!);
   }
 
   Widget _buildNotificationWidget(TaskNotificationData notification) {

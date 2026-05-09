@@ -39,7 +39,8 @@ class TimePeelingList extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
@@ -128,7 +129,8 @@ class TimePeelingSlot extends StatefulWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingSlot({
@@ -156,7 +158,7 @@ class TimePeelingSlot extends StatefulWidget {
 
 class TimePeelingSlotState extends State<TimePeelingSlot> {
   late PageController _pageController;
-  double _currentPage = 1.0; // matches initialPage: 1 (first model card)
+  late final ValueNotifier<double> _pagePosition;
 
   /// Total items: create button first, then models (newest->oldest).
   int get _totalCount => widget.models.length + 1;
@@ -168,6 +170,7 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
       viewportFraction: kViewportFraction,
       initialPage: 1, // index 0 is create card, 1 is newest model
     );
+    _pagePosition = ValueNotifier<double>(1.0);
     _pageController.addListener(_onScroll);
   }
 
@@ -175,12 +178,14 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
   void dispose() {
     _pageController.removeListener(_onScroll);
     _pageController.dispose();
+    _pagePosition.dispose();
     super.dispose();
   }
 
   void _onScroll() {
-    if (_pageController.page != null) {
-      setState(() => _currentPage = _pageController.page!);
+    final page = _pageController.page;
+    if (page != null && (page - _pagePosition.value).abs() > 0.001) {
+      _pagePosition.value = page;
     }
   }
 
@@ -203,12 +208,11 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
     final slotBorder = widget.isDark
         ? Colors.white.withValues(alpha: 0.07)
         : Colors.black.withValues(alpha: 0.06);
-
-    // Current selected page index (rounded page)
-    final selectedPage = _currentPage.round().clamp(0, _totalCount - 1);
-    // index 0 = create card, index 1+ = model cards
-    final isModelSelected = selectedPage >= 1;
-    final timeLabel = isModelSelected ? _timeLabelFor(selectedPage - 1) : '';
+    final timeLabels = List<String>.generate(
+      widget.models.length,
+      _timeLabelFor,
+      growable: false,
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
@@ -270,145 +274,119 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
               ),
             ),
             const SizedBox(height: 10),
-            // Carousel with ShaderMask edge fade
             SizedBox(
               height: kCarouselHeight,
-              child: ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: const [
-                      Colors.transparent,
-                      Colors.white,
-                      Colors.white,
-                      Colors.transparent,
-                    ],
-                    stops: [
-                      0.0,
-                      kEdgeFadeWidth / bounds.width,
-                      1.0 - kEdgeFadeWidth / bounds.width,
-                      1.0,
-                    ],
-                  ).createShader(bounds);
-                },
-                blendMode: BlendMode.dstIn,
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: _totalCount,
-                  clipBehavior: Clip.hardEdge,
-                  itemBuilder: (context, index) {
-                    final distance = (index - _currentPage).abs().clamp(
-                      0.0,
-                      1.0,
-                    );
-                    final scale = ui.lerpDouble(1.0, 0.82, distance)!;
-                    final opacity = ui.lerpDouble(1.0, 0.5, distance)!;
+              child: Stack(
+                children: [
+                  RepaintBoundary(
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: _totalCount,
+                      clipBehavior: Clip.hardEdge,
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return _TimePeelingCarouselItem(
+                            pagePosition: _pagePosition,
+                            index: index,
+                            child: _buildCreateCard(),
+                          );
+                        }
 
-                    // First item is the create button
-                    if (index == 0) {
-                      return _buildCarouselItem(
-                        scale: scale,
-                        opacity: opacity,
-                        isSelected: selectedPage == index,
-                        child: _buildCreateCard(),
-                      );
-                    }
+                        final model = widget.models[index - 1];
+                        final cardKey = widget.modelCardKeyFor(model);
+                        final isActionTarget = widget.isSameModel(
+                          widget.activeModelAction,
+                          model,
+                        );
 
-                    final model = widget.models[index - 1];
-                    final cardKey = widget.modelCardKeyFor(model);
-                    final isActionTarget = widget.isSameModel(
-                      widget.activeModelAction,
-                      model,
-                    );
-
-                    return _buildCarouselItem(
-                      scale: scale,
-                      opacity: isActionTarget ? 0.0 : opacity,
-                      isSelected: selectedPage == index,
-                      child: IgnorePointer(
-                        ignoring: isActionTarget,
-                        child: GestureDetector(
-                          onTap: () => widget.onNavigateToViewer(model, null),
-                          onLongPressStart: (_) =>
-                              widget.onShowModelActions(model, imageOnly: true),
-                          child: Container(
-                            key: cardKey,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(28),
-                              border: Border.all(
-                                color: widget.isDark
-                                    ? Colors.white.withValues(alpha: 0.08)
-                                    : Colors.black.withValues(alpha: 0.06),
-                                width: 1,
+                        return _TimePeelingCarouselItem(
+                          pagePosition: _pagePosition,
+                          index: index,
+                          forceHidden: isActionTarget,
+                          child: IgnorePointer(
+                            ignoring: isActionTarget,
+                            child: GestureDetector(
+                              onTap: () =>
+                                  widget.onNavigateToViewer(model, null),
+                              onLongPressStart: (_) => widget
+                                  .onShowModelActions(model, imageOnly: true),
+                              child: Container(
+                                key: cardKey,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(
+                                    color: widget.isDark
+                                        ? Colors.white.withValues(alpha: 0.08)
+                                        : Colors.black.withValues(alpha: 0.06),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: RepaintBoundary(
+                                  child: RecallModelTile(
+                                    model: model,
+                                    theme: widget.theme,
+                                    isDark: widget.isDark,
+                                    darkCard: widget.darkCard,
+                                    darkInput: widget.darkInput,
+                                    textColor: widget.textColor,
+                                    hintTextColor: widget.hintTextColor,
+                                    imageOnly: true,
+                                  ),
+                                ),
                               ),
                             ),
-                            child: RecallModelTile(
-                              model: model,
-                              theme: widget.theme,
-                              isDark: widget.isDark,
-                              darkCard: widget.darkCard,
-                              darkInput: widget.darkInput,
-                              textColor: widget.textColor,
-                              hintTextColor: widget.hintTextColor,
-                              imageOnly: true,
-                            ),
                           ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                        );
+                      },
+                    ),
+                  ),
+                  const Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      child: _HorizontalEdgeFade(isLeft: true),
+                    ),
+                  ),
+                  const Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      child: _HorizontalEdgeFade(isLeft: false),
+                    ),
+                  ),
+                ],
               ),
             ),
-            // Timeline with connected nodes
             SizedBox(
               height: 48,
-              child: ClipRect(
-                child: CustomPaint(
-                  painter: TimelinePainter(
-                    modelCount: widget.models.length,
-                    currentPage: _currentPage,
-                    timeLabel: timeLabel,
-                    color: kTimelineColor,
-                    viewportFraction: kViewportFraction,
-                  ),
-                  size: Size.infinite,
-                ),
+              child: ValueListenableBuilder<double>(
+                valueListenable: _pagePosition,
+                builder: (context, currentPage, _) {
+                  final selectedPage = currentPage.round().clamp(
+                    0,
+                    _totalCount - 1,
+                  );
+                  final timeLabel = selectedPage >= 1
+                      ? timeLabels[selectedPage - 1]
+                      : '';
+                  return ClipRect(
+                    child: CustomPaint(
+                      painter: TimelinePainter(
+                        modelCount: widget.models.length,
+                        currentPage: currentPage,
+                        timeLabel: timeLabel,
+                        color: kTimelineColor,
+                        viewportFraction: kViewportFraction,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  );
+                },
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCarouselItem({
-    required double scale,
-    required double opacity,
-    required bool isSelected,
-    required Widget child,
-  }) {
-    return Center(
-      child: Transform.scale(
-        scale: scale,
-        child: Opacity(
-          opacity: opacity.clamp(0.0, 1.0),
-          child: Container(
-            decoration: isSelected
-                ? BoxDecoration(
-                    borderRadius: BorderRadius.circular(30),
-                    boxShadow: [
-                      BoxShadow(
-                        color: kTimelineColor.withValues(alpha: 0.18),
-                        blurRadius: 18,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  )
-                : null,
-            child: child,
-          ),
         ),
       ),
     );
@@ -447,6 +425,87 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TimePeelingCarouselItem extends StatelessWidget {
+  final ValueNotifier<double> pagePosition;
+  final int index;
+  final Widget child;
+  final bool forceHidden;
+
+  const _TimePeelingCarouselItem({
+    required this.pagePosition,
+    required this.index,
+    required this.child,
+    this.forceHidden = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<double>(
+      valueListenable: pagePosition,
+      child: child,
+      builder: (context, currentPage, child) {
+        final distance = (index - currentPage).abs().clamp(0.0, 1.0);
+        final scale = ui.lerpDouble(1.0, 0.82, distance)!;
+        final opacity = forceHidden
+            ? 0.0
+            : ui.lerpDouble(1.0, 0.5, distance)!.clamp(0.0, 1.0);
+        final shadowAlpha = ui.lerpDouble(0.18, 0.0, distance)!;
+
+        return Center(
+          child: Transform.scale(
+            scale: scale,
+            child: Opacity(
+              opacity: opacity,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(30),
+                  boxShadow: shadowAlpha <= 0.01
+                      ? const []
+                      : [
+                          BoxShadow(
+                            color: kTimelineColor.withValues(
+                              alpha: shadowAlpha,
+                            ),
+                            blurRadius: ui.lerpDouble(18, 6, distance)!,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                ),
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HorizontalEdgeFade extends StatelessWidget {
+  final bool isLeft;
+
+  const _HorizontalEdgeFade({required this.isLeft});
+
+  @override
+  Widget build(BuildContext context) {
+    final background = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF11161D)
+        : const Color(0xFFF4F6F8);
+    return SizedBox(
+      width: kEdgeFadeWidth,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+            end: isLeft ? Alignment.centerRight : Alignment.centerLeft,
+            colors: [background, background.withValues(alpha: 0.0)],
           ),
         ),
       ),

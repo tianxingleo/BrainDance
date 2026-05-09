@@ -34,6 +34,32 @@ const double _kFloatingNavReservedHeight = 112.0;
 
 enum _MotionState { steady, ideal, caution, danger }
 
+class _MotionHudViewData {
+  const _MotionHudViewData({
+    required this.motionMeter,
+    required this.motionState,
+    required this.motionHint,
+    required this.motionDetail,
+    required this.isWarning,
+    required this.isCaution,
+  });
+
+  const _MotionHudViewData.initial()
+    : motionMeter = 0,
+      motionState = _MotionState.steady,
+      motionHint = '',
+      motionDetail = '',
+      isWarning = false,
+      isCaution = false;
+
+  final double motionMeter;
+  final _MotionState motionState;
+  final String motionHint;
+  final String motionDetail;
+  final bool isWarning;
+  final bool isCaution;
+}
+
 class RecordPage extends ConsumerStatefulWidget {
   const RecordPage({super.key});
 
@@ -70,8 +96,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _smoothedLinearAccel = 0;
   double _peakLinearAccel = 0;
   double _motionMeter = 0;
-  String _motionHint = textLocalize('reco_motion_steady');
-  String _motionDetail = textLocalize('reco_motion_detail');
   int _lastFastToastTime = 0;
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
@@ -79,6 +103,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
   int _lastMotionUiUpdateTime = 0;
 
   final List<double> _accelHistory = [];
+  late final ValueNotifier<_MotionHudViewData> _motionHudNotifier;
 
   @override
   void initState() {
@@ -99,6 +124,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
       vsync: this,
       duration: const Duration(seconds: 1),
     );
+    _motionHudNotifier = ValueNotifier<_MotionHudViewData>(
+      const _MotionHudViewData.initial(),
+    );
 
     RecoConfig.onUpdate = () {
       if (mounted) {
@@ -117,6 +145,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _setGlobalRecording(false);
     _buttonAnimController.dispose();
     _hudAnimController.dispose();
+    _motionHudNotifier.dispose();
     RecoConfig.onUpdate = () {};
     unawaited(RecoConfig.disposeCamera());
     super.dispose();
@@ -383,26 +412,23 @@ class _RecordPageState extends ConsumerState<RecordPage>
             currentWarning != _isMovingTooFast ||
             nowMs - _lastMotionUiUpdateTime >= _motionUiThrottleMs);
 
-    if (shouldRefreshUi && mounted) {
+    if (shouldRefreshUi) {
       _lastMotionUiUpdateTime = nowMs;
-      setState(() {
-        _linearAccel = linearAccel;
-        _smoothedLinearAccel = smoothedAccel;
-        _peakLinearAccel = nextPeak;
-        _motionMeter = displayMotionMeter;
-        _motionHint = nextHint;
-        _motionDetail = nextDetail;
-        _motionState = effectiveState;
-      });
-    } else {
-      _linearAccel = linearAccel;
-      _smoothedLinearAccel = smoothedAccel;
-      _peakLinearAccel = nextPeak;
-      _motionMeter = displayMotionMeter;
-      _motionHint = nextHint;
-      _motionDetail = nextDetail;
-      _motionState = effectiveState;
+      _motionHudNotifier.value = _MotionHudViewData(
+        motionMeter: displayMotionMeter,
+        motionState: effectiveState,
+        motionHint: nextHint,
+        motionDetail: nextDetail,
+        isWarning: currentWarning,
+        isCaution: effectiveState == _MotionState.caution,
+      );
     }
+
+    _linearAccel = linearAccel;
+    _smoothedLinearAccel = smoothedAccel;
+    _peakLinearAccel = nextPeak;
+    _motionMeter = displayMotionMeter;
+    _motionState = effectiveState;
   }
 
   void _syncMotionHaptics(_MotionState state) {
@@ -454,13 +480,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _smoothedLinearAccel = 0;
     _peakLinearAccel = 0;
     _motionMeter = 0;
-    _motionHint = textLocalize('reco_motion_steady');
-    _motionDetail = textLocalize('reco_motion_detail');
     _motionState = _MotionState.steady;
     _isMovingTooFast = false;
     _warningEndTime = 0;
     _lastMotionUiUpdateTime = 0;
     _accelHistory.clear();
+    _motionHudNotifier.value = _MotionHudViewData(
+      motionMeter: 0,
+      motionState: _MotionState.steady,
+      motionHint: textLocalize('reco_motion_steady'),
+      motionDetail: textLocalize('reco_motion_detail'),
+      isWarning: false,
+      isCaution: false,
+    );
   }
 
   Future<void> _initializeCamera() async {
@@ -627,7 +659,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
       cameraView = Transform.scale(
         scale: scale,
-        child: Center(child: CameraPreview(controller)),
+        child: RepaintBoundary(child: Center(child: CameraPreview(controller))),
       );
     }
 
@@ -650,15 +682,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
           Positioned.fill(child: cameraView),
           if (_isMotionHudEnabled)
             Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: RecordHUDPainter(
-                    isWarning: _isMovingTooFast,
-                    isCaution: _motionState == _MotionState.caution,
-                    motionValue: _motionMeter,
-                    animation: _hudAnimController,
-                  ),
-                ),
+              child: ValueListenableBuilder<_MotionHudViewData>(
+                valueListenable: _motionHudNotifier,
+                builder: (context, hud, _) {
+                  return RepaintBoundary(
+                    child: CustomPaint(
+                      painter: RecordHUDPainter(
+                        isWarning: hud.isWarning,
+                        isCaution: hud.isCaution,
+                        motionValue: hud.motionMeter,
+                        animation: _hudAnimController,
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           Positioned(
@@ -670,11 +707,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
               switchOutCurve: BDMotion.curveExit,
               child: !_isMotionHudEnabled
                   ? const SizedBox.shrink()
-                  : _SimpleMotionGuidanceCard(
-                      motionMeter: _motionMeter,
-                      motionState: _motionState,
-                      motionHint: _motionHint,
-                      motionDetail: _motionDetail,
+                  : ValueListenableBuilder<_MotionHudViewData>(
+                      key: const ValueKey<String>('motion-guidance-enabled'),
+                      valueListenable: _motionHudNotifier,
+                      builder: (context, hud, _) {
+                        return RepaintBoundary(
+                          child: _SimpleMotionGuidanceCard(
+                            motionMeter: hud.motionMeter,
+                            motionState: hud.motionState,
+                            motionHint: hud.motionHint,
+                            motionDetail: hud.motionDetail,
+                          ),
+                        );
+                      },
                     ),
             ),
           ),

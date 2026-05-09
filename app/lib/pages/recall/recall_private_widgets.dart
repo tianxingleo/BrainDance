@@ -248,55 +248,65 @@ class _AgentStepTimeline extends StatelessWidget {
     final fadeBase = isDark ? const Color(0xFF10161F) : const Color(0xFFF6F9FC);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 220),
-      child: ShaderMask(
-        shaderCallback: (bounds) {
-          return LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [fadeBase.withValues(alpha: 0), fadeBase, fadeBase],
-            stops: const [0, 0.18, 1],
-          ).createShader(bounds);
-        },
-        blendMode: BlendMode.dstIn,
-        child: ListView.separated(
-          controller: scrollController,
-          padding: EdgeInsets.zero,
-          itemCount: steps.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final step = steps[index];
-            return ListenableBuilder(
-              listenable: step,
-              builder: (context, _) {
-                switch (step.type) {
-                  case 'status':
-                    return _AgentStatusStepTile(
-                      step: step,
-                      isDark: isDark,
-                      textColor: textColor,
-                      hintColor: hintColor,
-                    );
-                  case 'tool_call':
-                    return _AgentStepTile(
-                      step: step,
-                      isDark: isDark,
-                      textColor: textColor,
-                    );
-                  case 'thought':
-                    return _AgentThoughtStepTile(
-                      step: step,
-                      isDark: isDark,
-                      hintColor: hintColor,
-                    );
-                  case 'error':
-                    return _AgentErrorStepTile(step: step, onRetry: onRetry);
-                  default:
-                    return const SizedBox.shrink();
-                }
-              },
-            );
-          },
-        ),
+      child: Stack(
+        children: [
+          ListView.separated(
+            controller: scrollController,
+            padding: EdgeInsets.zero,
+            itemCount: steps.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final step = steps[index];
+              return ListenableBuilder(
+                listenable: step,
+                builder: (context, _) {
+                  switch (step.type) {
+                    case 'status':
+                      return _AgentStatusStepTile(
+                        step: step,
+                        isDark: isDark,
+                        textColor: textColor,
+                        hintColor: hintColor,
+                      );
+                    case 'tool_call':
+                      return _AgentStepTile(
+                        step: step,
+                        isDark: isDark,
+                        textColor: textColor,
+                      );
+                    case 'thought':
+                      return _AgentThoughtStepTile(
+                        step: step,
+                        isDark: isDark,
+                        hintColor: hintColor,
+                      );
+                    case 'error':
+                      return _AgentErrorStepTile(step: step, onRetry: onRetry);
+                    default:
+                      return const SizedBox.shrink();
+                  }
+                },
+              );
+            },
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 36,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [fadeBase, fadeBase.withValues(alpha: 0.0)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
