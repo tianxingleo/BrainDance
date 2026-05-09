@@ -18,6 +18,7 @@ const currentViewMode = ref(VIEW_MODE.FREE);
 const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
+const loadedRefImages = ref({}); // 记录已加载的参考图
 const activeTag = ref(''); // 当前激活的标签
 const activePoseId = ref(''); // 当前高亮的镜头项，不一定同步刷新右侧参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
@@ -3264,21 +3265,28 @@ onBeforeUnmount(async () => {
     -->
 
     <!-- 参考图对比悬浮窗 -->
-    <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
-      <div class="eyebrow">Reference Still</div>
-      <div class="ref-title">参考原图</div>
-      <img :src="activeImage" class="ref-img" />
-      <div class="ref-info" v-if="activeTag">
-        <span class="info-tag info-tag--accent">{{ activeTag }}</span>
+    <transition name="ref-fade">
+      <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
+        <div class="eyebrow">Reference Still</div>
+        <div class="ref-title">参考原图</div>
+        <img 
+          :src="activeImage" 
+          class="ref-img" 
+          :class="{ 'ref-img--loaded': loadedRefImages[activeImage] }"
+          @load="loadedRefImages[activeImage] = true"
+        />
+        <div class="ref-info" v-if="activeTag">
+          <span class="info-tag info-tag--accent">{{ activeTag }}</span>
+        </div>
+        <div class="ref-info" v-if="sceneMetadata.fl_y">
+          <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
+          <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
+            Math.PI)).toFixed(1) }}°</span>
+          <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
+        </div>
+        <div class="ref-hint">点击关闭对比</div>
       </div>
-      <div class="ref-info" v-if="sceneMetadata.fl_y">
-        <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
-        <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
-          Math.PI)).toFixed(1) }}°</span>
-        <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
-      </div>
-      <div class="ref-hint">点击关闭对比</div>
-    </div>
+    </transition>
   </div>
 </template>
 
@@ -3847,11 +3855,31 @@ button.active {
   font-weight: 600;
 }
 
+/* 浮窗过渡动画 */
+.ref-fade-enter-active,
+.ref-fade-leave-active {
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ref-fade-enter-from,
+.ref-fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+
 .ref-img {
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--card-border);
   margin-bottom: 6px;
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: scale(0.95);
+  filter: blur(4px);
+}
+.ref-img.ref-img--loaded {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0px);
 }
 
 .ref-info {

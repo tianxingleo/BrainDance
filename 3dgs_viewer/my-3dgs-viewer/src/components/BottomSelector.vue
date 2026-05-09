@@ -16,6 +16,7 @@ const emit = defineEmits(['selectModel', 'selectPose']);
 
 const mode = ref('pose'); // 'pose' | 'model'
 const scrollRef = ref(null);
+const loadedThumbs = ref({});
 
 // 拖拽滚动状态
 let isDragging = false;
@@ -149,6 +150,8 @@ onBeforeUnmount(() => {
               v-if="pose.image_url"
               :src="pose.image_url"
               class="bs-thumb"
+              :class="{ 'bs-thumb--loaded': loadedThumbs[pose.image_url] }"
+              @load="loadedThumbs[pose.image_url] = true"
               draggable="false"
               loading="lazy"
               decoding="async"
@@ -175,6 +178,8 @@ onBeforeUnmount(() => {
               v-if="model.previewImg"
               :src="model.previewImg"
               class="bs-thumb"
+              :class="{ 'bs-thumb--loaded': loadedThumbs[model.previewImg] }"
+              @load="loadedThumbs[model.previewImg] = true"
               draggable="false"
               loading="lazy"
               decoding="async"
@@ -319,8 +324,19 @@ onBeforeUnmount(() => {
   background: rgba(30, 30, 32, 0.5);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: scale(0.95);
+  filter: blur(4px);
+}
+.bs-thumb.bs-thumb--loaded {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0px);
 }
 .bs-thumb--empty {
+  opacity: 1;
+  transform: scale(1);
   display: flex;
   align-items: center;
   justify-content: center;
