@@ -131,35 +131,98 @@ class _AppBootstrapState extends State<_AppBootstrap> {
   }
 }
 
-class _SplashScreen extends StatelessWidget {
+class _SplashScreen extends StatefulWidget {
   const _SplashScreen();
+
+  @override
+  State<_SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<_SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    // 档案系统风格：缓慢、克制的进场
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1200));
+    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _scaleAnim = Tween<double>(begin: 0.95, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF101014), // AppTheme.darkBackground
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.auto_awesome,
-              size: 64,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Brain Dance',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 32),
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            ),
-          ],
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            return Opacity(
+              opacity: _fadeAnim.value,
+              child: Transform.scale(
+                scale: _scaleAnim.value,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.view_in_ar_outlined,
+                      size: 48,
+                      color: AppConfig.primaryColor,
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'BRAIN DANCE',
+                      style: TextStyle(
+                        fontFamily: AppConfig.fontFamily,
+                        fontSize: 20,
+                        letterSpacing: 8.0,
+                        fontWeight: FontWeight.w600,
+                        color: AppConfig.accentColor,
+                      ),
+                    ),
+                    const SizedBox(height: 48),
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.0,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          AppConfig.primaryColor.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'INITIALIZING ARCHIVE...',
+                      style: TextStyle(
+                        fontFamily: AppConfig.fontFamily,
+                        fontSize: 10,
+                        letterSpacing: 2.0,
+                        fontWeight: FontWeight.w500,
+                        color: AppConfig.primaryColor.withValues(alpha: 0.6),
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
