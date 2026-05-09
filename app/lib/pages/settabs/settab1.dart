@@ -36,7 +36,7 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
         ],
         const SizedBox(height: 12),
         BDPanelCard(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: EdgeInsets.zero,
           child: _ClearCacheRow(context: context),
         ),
       ],
@@ -245,9 +245,12 @@ class _ClearCacheRow extends StatelessWidget {
     final isDark = Theme.of(ctx).brightness == Brightness.dark;
     final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
     final actionColor = isDark ? BDDesign.colorMutedBlueLight : BDDesign.colorMutedBlue;
+    const radius = BorderRadius.all(Radius.circular(28));
 
     return Material(
       color: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: radius,
       child: InkWell(
         onTap: () async {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -255,7 +258,7 @@ class _ClearCacheRow extends StatelessWidget {
           );
           await DirSystem.deleteDir(await DirFinder.cacheDir());
         },
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: radius,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           child: Row(
