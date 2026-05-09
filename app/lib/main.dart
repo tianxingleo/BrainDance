@@ -34,6 +34,7 @@ final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
 final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
+final pageAnimatingProvider = StateProvider<bool>((ref) => false);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(
@@ -199,13 +200,18 @@ class Home extends ConsumerWidget {
             opaque: true,
             pageBuilder: (ctx, _, _) => builder(ctx),
             transitionsBuilder: (_, animation, _a, child) {
-              return SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, -1),
-                  end: Offset.zero,
-                ).animate(
-                  CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
-                ),
+              final curved = animation.drive(
+                CurveTween(curve: Curves.easeInOutCubic),
+              );
+              return AnimatedBuilder(
+                animation: curved,
+                builder: (ctx, child) {
+                  final screenHeight = MediaQuery.of(ctx).size.height;
+                  return Transform.translate(
+                    offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                    child: child,
+                  );
+                },
                 child: child,
               );
             },
@@ -469,9 +475,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
   static const int _pageCount = 3;
 
   int _previousIndex = 0;
+  int _lastTabIndex = 0; // 上次不同的 tab，用于同 tab 重复点击时回退
   int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
 
   late final AnimationController _animController;
+  late final Animation<double> _curvedAnimation;
   bool _isAnimating = false;
 
   /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
@@ -483,10 +491,11 @@ class _MainScreenState extends ConsumerState<MainScreen>
     super.initState();
     _animController =
         AnimationController(
-          duration: const Duration(milliseconds: 360),
+          duration: BDMotion.durationNormal,
           vsync: this,
         )..addStatusListener((status) {
           if (status == AnimationStatus.completed) {
+            ref.read(pageAnimatingProvider.notifier).state = false;
             if (mounted) {
               setState(() {
                 _isAnimating = false;
@@ -495,6 +504,9 @@ class _MainScreenState extends ConsumerState<MainScreen>
             }
           }
         });
+    _curvedAnimation = _animController.drive(
+      CurveTween(curve: Curves.easeInOutCubic),
+    );
 
     // 首帧只渲染当前页，首帧结束后立即预热其余 Tab 页面（Offstage），消除首次切换掉帧
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -529,12 +541,16 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void _switchToPage(int newIndex) {
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) {
-      if (newIndex == 0) {
+      if (newIndex == 1 && _lastTabIndex != oldIndex) {
+        _switchToPage(_lastTabIndex);
+      } else if (newIndex == 0) {
         ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
       }
       return;
     }
 
+    _lastTabIndex = oldIndex;
+    ref.read(pageAnimatingProvider.notifier).state = true;
     setState(() {
       _slideDirection = newIndex > oldIndex ? 1 : -1;
       _previousIndex = oldIndex;
@@ -555,6 +571,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     if (pageIndex != _previousIndex && !_isAnimating) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        ref.read(pageAnimatingProvider.notifier).state = true;
         setState(() {
           _slideDirection = pageIndex > _previousIndex ? 1 : -1;
           _builtPages.add(pageIndex);
@@ -578,17 +595,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
                     }
 
                     return AnimatedBuilder(
-                      animation: _animController,
+                      animation: _curvedAnimation,
                       builder: (context, child) {
                         final bool isActive = i == pageIndex;
                         final bool isLeaving = _isAnimating && i == _previousIndex && i != pageIndex;
-                        Offset translation = Offset.zero;
-                        final double t = Curves.easeInOutCubic.transform(_animController.value);
+                        final double t = _curvedAnimation.value;
+                        double dx = 0;
 
                         if (_isAnimating && isActive) {
-                          translation = Offset(_slideDirection * (1.0 - t), 0);
+                          dx = _slideDirection * (1.0 - t) * MediaQuery.of(context).size.width;
                         } else if (isLeaving) {
-                          translation = Offset(-_slideDirection * t, 0);
+                          dx = -_slideDirection * t * MediaQuery.of(context).size.width;
                         }
 
                         final bool isVisible = isActive || isLeaving;
@@ -596,8 +613,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           offstage: !isVisible,
                           child: IgnorePointer(
                             ignoring: !isActive,
-                            child: FractionalTranslation(
-                              translation: translation,
+                            child: Transform.translate(
+                              offset: Offset(dx, 0),
                               child: child,
                             ),
                           ),
@@ -608,6 +625,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   }),
                   if (!isRecording)
                     FloatingNavBar(
+                      skipBlur: _isAnimating,
                       currentIndex: pageIndex,
                       onTap: _switchToPage,
                       items: [
