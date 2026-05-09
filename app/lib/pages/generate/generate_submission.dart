@@ -150,26 +150,27 @@ extension _GenerateSubmissionX on _GeneratePageState {
                             padding: const EdgeInsets.all(16),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(20),
-                              child: Image.network(
-                                _generatedImageUrl!,
-                                fit: BoxFit.contain,
-                                loadingBuilder:
-                                    (context, child, loadingProgress) {
-                                      if (loadingProgress == null) {
-                                        return child;
-                                      }
-                                      return const Center(
-                                        child: CircularProgressIndicator(),
-                                      );
-                                    },
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Center(
-                                    child: Text(
-                                      textLocalize('gen_image_load_fail'),
-                                      style: TextStyle(color: hintColor),
+                              child: BDFadeInNetworkImage(
+                                imageUrl: _generatedImageUrl!,
+                                placeholder: const Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
                                     ),
-                                  );
-                                },
+                                  ),
+                                ),
+                                errorWidget: Center(
+                                  child: Text(
+                                    textLocalize('gen_image_load_fail'),
+                                    style: TextStyle(color: hintColor),
+                                  ),
+                                ),
+                                fit: BoxFit.contain,
+                                backgroundColor: panelColor,
+                                duration: BDMotion.durationSlow,
+                                curve: BDMotion.curveEnter,
                               ),
                             ),
                           )

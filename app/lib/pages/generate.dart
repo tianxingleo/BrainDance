@@ -10,6 +10,7 @@ import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
 import 'package:braindance/main.dart' show pageIndexProvider;
 import 'package:braindance/services/chunked_upload.dart';
+import 'package:braindance/widgets/animated_network_image.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../configs/motion_tokens.dart';
 import 'model_grid_helpers.dart';
 
 /// 自适应帧缩略图
@@ -140,33 +141,49 @@ class AdaptiveFrameThumbnailState extends State<AdaptiveFrameThumbnail>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            ColoredBox(
-              color: widget.backgroundColor,
-              child: img != null
-                  ? FittedBox(
-                      fit: BoxFit.cover,
-                      clipBehavior: Clip.hardEdge,
-                      child: SizedBox(
-                        width: img.width.toDouble(),
-                        height: img.height.toDouble(),
-                        child: RawImage(
-                          image: img,
-                          filterQuality: FilterQuality.low,
-                        ),
-                      ),
-                    )
-                  : lastError != null
-                  ? const Center(
-                      child: Icon(Icons.broken_image, color: Colors.grey),
-                    )
-                  : const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+            ColoredBox(color: widget.backgroundColor),
+            if (img != null)
+              TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                duration: BDMotion.durationSlow,
+                curve: BDMotion.curveEnter,
+                builder: (context, value, child) {
+                  return Opacity(
+                    opacity: value,
+                    child: Transform.translate(
+                      offset: Offset(0, 8 * (1 - value)),
+                      child: Transform.scale(
+                        scale: 0.985 + 0.015 * value,
+                        child: child,
                       ),
                     ),
-            ),
+                  );
+                },
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: img.width.toDouble(),
+                    height: img.height.toDouble(),
+                    child: RawImage(
+                      image: img,
+                      filterQuality: FilterQuality.low,
+                    ),
+                  ),
+                ),
+              )
+            else if (lastError != null)
+              const Center(
+                child: Icon(Icons.broken_image, color: Colors.grey),
+              )
+            else
+              const Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
             if (widget.frameSim != null)
               Positioned(
                 bottom: 4,
@@ -225,22 +242,42 @@ class CoverNetworkImageState extends State<CoverNetworkImage>
 
   @override
   Widget build(BuildContext context) {
-    final img = resolvedImage;
     if (lastError != null) {
       return widget.errorWidget;
     }
 
+    final img = resolvedImage;
     return ColoredBox(
       color: widget.backgroundColor,
       child: img != null
-          ? ClipRect(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: img.width.toDouble(),
-                  height: img.height.toDouble(),
-                  child: RawImage(image: img, filterQuality: FilterQuality.low),
+          ? TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              duration: BDMotion.durationSlow,
+              curve: BDMotion.curveEnter,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, 6 * (1 - value)),
+                    child: Transform.scale(
+                      scale: 0.985 + 0.015 * value,
+                      child: child,
+                    ),
+                  ),
+                );
+              },
+              child: ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: img.width.toDouble(),
+                    height: img.height.toDouble(),
+                    child: RawImage(
+                      image: img,
+                      filterQuality: FilterQuality.low,
+                    ),
+                  ),
                 ),
               ),
             )
