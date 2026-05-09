@@ -62,8 +62,8 @@ const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 const ORBIT_RECENTER_DURATION = 1.5;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
-const DESKTOP_INTRO_PARTICLE_BUDGET = 52000;
-const MOBILE_INTRO_PARTICLE_BUDGET = 22000;
+const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
+const MOBILE_INTRO_PARTICLE_BUDGET = 18000;
 const INTRO_DURATION_MS = 6500;
 const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -1271,9 +1271,6 @@ const applyAdvancedShader = (mesh) => {
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
 
-    float introHash(vec3 p) {
-      return fract(sin(dot(p, vec3(17.13, 43.71, 91.17))) * 43758.5453);
-    }
   `;
   material.fragmentShader = commonFragment + material.fragmentShader;
 
@@ -1282,22 +1279,18 @@ const applyAdvancedShader = (mesh) => {
     const originalContent = material.fragmentShader.substring(0, fsEndIndex);
     const visualLogic = `
       vec3 centeredPos = vWorldPosition - uCenter;
-      float distFromCenter = length(centeredPos);
-      float normalizedOrder = clamp(distFromCenter / max(uMaxRadius, 0.0001), 0.0, 1.0);
-      float directionalRipple = dot(normalize(centeredPos + vec3(0.0001)), normalize(vec3(0.37, 0.59, 0.71)));
-      float waveNoise = introHash(floor(centeredPos * 4.0));
-      float noisyOrder = clamp(
-        normalizedOrder + (waveNoise - 0.5) * 0.045 + directionalRipple * 0.025,
-        0.0,
-        1.0
-      );
-      float revealT = smoothstep(noisyOrder, noisyOrder + uRevealFeather, uRevealProgress);
-
-      if (uRevealProgress + uRevealFeather * 0.35 < noisyOrder) discard;
+      float distSq = dot(centeredPos, centeredPos);
+      float radius = max(uGeoRadius, 0.0001);
+      float feather = max(uRevealFeather * max(uMaxRadius, 0.0001), 0.0001);
+      float innerRadius = max(radius - feather, 0.0);
+      float innerSq = innerRadius * innerRadius;
+      float outerSq = radius * radius;
+      if (distSq > outerSq) discard;
+      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
       if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
 
-      // 带噪声的空间波前让高斯从中心向外逐片恢复，而不是全局同时变形。
-      float alphaClip = mix(0.95, 0.02, revealT);
+      // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
+      float alphaClip = mix(0.96, 0.02, revealT);
       if (gl_FragColor.a < alphaClip) discard;
       gl_FragColor.a *= revealT * uIntroSplatAlpha;
     `;
@@ -2308,8 +2301,8 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const splatMesh = viewer.getSplatMesh();
         if (splatMesh && rawT >= 0.14) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.22) / 0.20), 0, 1);
-          particleSystem.visible = rawT < 0.62;
+          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.18) / 0.18), 0, 1);
+          particleSystem.visible = rawT < 0.40;
         }
 
         if (rawT >= 1) {
