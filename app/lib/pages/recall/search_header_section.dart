@@ -432,7 +432,7 @@ class RecallSearchModeSheet extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
       child: BDPanelCard(
-        glass: true,
+        glass: false,
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
         child: SafeArea(
           top: false,
