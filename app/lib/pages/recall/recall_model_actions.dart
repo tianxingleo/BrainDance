@@ -74,7 +74,7 @@ extension _RecallPageModelActions on _RecallPageState {
     if (!mounted) {
       return;
     }
-    TDToast.showText(context: context, textLocalize('recall_published'));
+    showAppToast(context, textLocalize('recall_published'));
   }
 
   Future<String> _getLocalModelSizeLabel(Map<String, dynamic> model) async {
@@ -134,6 +134,7 @@ extension _RecallPageModelActions on _RecallPageState {
       _activeModelAction = {
         ...model,
         if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
+        '_is_own_model': _isOwnModel(model),
         '_imageOnly': imageOnly,
       };
       _activeModelActionRect = rect;
@@ -238,18 +239,26 @@ extension _RecallPageModelActions on _RecallPageState {
     if (newName == null || newName.isEmpty || !mounted) return;
 
     try {
+      // Update display_name on model_assets (source of truth)
       await Supabase.instance.client
-          .from('processing_tasks')
+          .from('model_assets')
           .update({'display_name': newName})
           .eq('scene_id', sceneId)
           .select();
 
+      // Also update processing_tasks so the name appears in task list
+      try {
+        await Supabase.instance.client
+            .from('processing_tasks')
+            .update({'display_name': newName})
+            .eq('scene_id', sceneId);
+      } catch (_) {
+        // processing_tasks rows may not exist for all models
+      }
+
       // 立即更新本地数据
       if (mounted) {
-        TDToast.showText(
-          textLocalize('recall_rename_success'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_rename_success'));
         final targetKey = _modelKey(model);
         setState(() {
           for (final m in _allModels) {
@@ -274,10 +283,43 @@ extension _RecallPageModelActions on _RecallPageState {
     } catch (e) {
       if (mounted) {
         debugPrint('[RecallModelActions] rename error: $e');
-        TDToast.showText(
-          textLocalize('recall_rename_fail'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_rename_fail'));
+      }
+    }
+  }
+
+  bool _isOwnModel(Map<String, dynamic> model) {
+    final currentUserId =
+        Supabase.instance.client.auth.currentUser?.id.trim() ?? '';
+    if (currentUserId.isEmpty) return false;
+    return (model['user_id']?.toString().trim() ?? '') == currentUserId;
+  }
+
+  Future<void> _deleteLocalModel(Map<String, dynamic> model) async {
+    final plyPath = model['ply_path']?.toString() ?? '';
+    if (plyPath.isEmpty) return;
+
+    try {
+      final modelUrl = _toPublicUrl(plyPath);
+      if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
+        return;
+      }
+      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+      final uri = Uri.parse(encodedUrl);
+      final sanitizedFileName = uri.path
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_');
+      final dir = await getApplicationDocumentsDirectory();
+      final localFile = File('${dir.path}/$sanitizedFileName');
+      if (await localFile.exists()) {
+        await localFile.delete();
+        if (mounted) {
+          showAppToast(context, textLocalize('recall_delete_local_success'));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        debugPrint('[RecallModelActions] delete local model error: $e');
       }
     }
   }
@@ -286,10 +328,7 @@ extension _RecallPageModelActions on _RecallPageState {
     final plyPath = model['ply_path']?.toString() ?? '';
     if (plyPath.isEmpty) {
       if (mounted) {
-        TDToast.showText(
-          textLocalize('recall_download_model_unavailable'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_download_model_unavailable'));
       }
       return;
     }
@@ -297,10 +336,7 @@ extension _RecallPageModelActions on _RecallPageState {
     final modelUrl = _toPublicUrl(plyPath);
     if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
       if (mounted) {
-        TDToast.showText(
-          textLocalize('recall_download_model_unavailable'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_download_model_unavailable'));
       }
       return;
     }
@@ -309,19 +345,13 @@ extension _RecallPageModelActions on _RecallPageState {
       final targetPath = await _buildRecallDownloadTargetPath(modelUrl, model);
       if (targetPath.isEmpty) {
         if (mounted) {
-          TDToast.showText(
-            textLocalize('recall_download_model_fail'),
-            context: context,
-          );
+          showAppToast(context, textLocalize('recall_download_model_fail'));
         }
         return;
       }
 
       if (mounted) {
-        TDToast.showText(
-          textLocalize('recall_download_model_start'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_download_model_start'));
       }
 
       await Dio().download(
@@ -337,18 +367,12 @@ extension _RecallPageModelActions on _RecallPageState {
       );
 
       if (mounted) {
-        TDToast.showText(
-          '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}',
-          context: context,
-        );
+        showAppToast(context, '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}');
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[RecallModelActions] download error: $e');
-        TDToast.showText(
-          textLocalize('recall_download_model_fail'),
-          context: context,
-        );
+        showAppToast(context, textLocalize('recall_download_model_fail'));
       }
     }
   }
@@ -473,13 +497,13 @@ extension _RecallPageModelActions on _RecallPageState {
     final modelUserId = model['user_id']?.toString().trim() ?? '';
     if (modelId.isEmpty) {
       if (mounted) {
-        TDToast.showText(textLocalize('cloud_model_missing_id'), context: context);
+        showAppToast(context, textLocalize('cloud_model_missing_id'));
       }
       return;
     }
     if (currentUserId.isEmpty || modelUserId != currentUserId) {
       if (mounted) {
-        TDToast.showText(textLocalize('cloud_model_no_permission'), context: context);
+        showAppToast(context, textLocalize('cloud_model_no_permission'));
       }
       return;
     }
@@ -501,11 +525,19 @@ extension _RecallPageModelActions on _RecallPageState {
         }
       }
 
-      await Supabase.instance.client
+      final deleteResult = await Supabase.instance.client
           .from('model_assets')
           .delete()
           .eq('id', modelId)
-          .eq('user_id', currentUserId);
+          .eq('user_id', currentUserId)
+          .select('id');
+
+      if (deleteResult == null || (deleteResult is List && deleteResult.isEmpty)) {
+        if (mounted) {
+          showAppToast(context, textLocalize('cloud_model_delete_fail'));
+        }
+        return;
+      }
 
       await _localRagIndex.deleteByModelId(modelId);
 
@@ -541,11 +573,11 @@ extension _RecallPageModelActions on _RecallPageState {
       });
       _updateOverviewProvider();
 
-      TDToast.showText(textLocalize('cloud_model_delete_success'), context: context);
+      showAppToast(context, textLocalize('cloud_model_delete_success'));
     } catch (e) {
       if (mounted) {
         debugPrint('[RecallModelActions] delete cloud model error: $e');
-        TDToast.showText(textLocalize('cloud_model_delete_fail'), context: context);
+        showAppToast(context, textLocalize('cloud_model_delete_fail'));
       }
     }
   }
