@@ -102,23 +102,22 @@ class _BDTabSwitcherState extends State<BDTabSwitcher>
                 ],
               );
             } else {
-              // 无界高度（ScrollView 内）：入场页撑开高度，离场页用 OverflowBox 叠在上面不影响布局
+              // 无界高度（ScrollView 内）：两页均参与 Stack 布局，
+              // 容器高度取两者的最大值，避免高度不同时切换过程中截断。
               return ClipRect(
                 child: Stack(
+                  clipBehavior: Clip.hardEdge,
                   children: [
-                    // 入场页：正常流，决定容器高度
+                    // 入场页：正常流
                     FractionalTranslation(
                       translation: enterOffset,
                       child: widget.children[_currentIndex],
                     ),
-                    // 离场页：OverflowBox 使其不参与父布局尺寸计算
-                    Positioned(
-                      top: 0, left: 0, right: 0,
-                      child: IgnorePointer(
-                        child: FractionalTranslation(
-                          translation: leaveOffset,
-                          child: widget.children[_previousIndex],
-                        ),
+                    // 离场页：正常流（参与布局→保证容器高度 ≥ 离场页高度）
+                    IgnorePointer(
+                      child: FractionalTranslation(
+                        translation: leaveOffset,
+                        child: widget.children[_previousIndex],
                       ),
                     ),
                   ],
