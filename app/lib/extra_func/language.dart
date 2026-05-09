@@ -77,7 +77,8 @@ enum Language {
       "recall_local_indexing": "正在本地建立向量索引…",
       "recall_local_scope": "搜索词不会上传到云端",
       "recall_local_ai_scope": "问题先检索本地记忆，再交给端侧模型回答",
-      "recall_agent_scope": "连接 Supabase Deno LangChain 工具链，对三维记忆进行检索、定位、分析与后续操作",
+      "recall_agent_scope":
+          "连接 Supabase Deno LangChain 工具链，对三维记忆进行检索、定位、分析与后续操作",
       "recall_local_empty": "本地索引中没有命中结果",
       "recall_cloud_scope": "搜索词将发送到云端大模型",
       "recall_cloud_empty": "云端语义检索没有命中结果",
@@ -118,8 +119,10 @@ enum Language {
       "agent_error_empty_query": "查询语句不能为空",
       "agent_error_missing_supabase_url": "未配置 SUPABASE_URL，无法建立 Agent 流式连接",
       "agent_error_bad_response": "agent-recall 返回格式错误",
-      "agent_error_unavailable": "agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。",
-      "agent_error_upstream": "agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置",
+      "agent_error_unavailable":
+          "agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。",
+      "agent_error_upstream":
+          "agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置",
       "agent_error_http": "agent-recall 调用失败（HTTP {status}）",
       // 任务列表页面
       "task_list_title": "记忆任务",
@@ -396,6 +399,9 @@ enum Language {
       // Viewer
       "viewer_download_fail": "模型下载失败，请重试",
       "viewer_spark_error": "渲染服务异常，请稍后重试",
+      "recall_info": "查看详情",
+      "recall_rename": "重命名",
+      "recall_share_community": "分享到社区",
     },
   ),
   en(
@@ -532,8 +538,7 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "agent_elapsed_finished": "Total agent duration {duration}",
       "agent_search_failed": "Agent operation failed",
       "agent_stream_failed": "Agent streaming failed (falling back)",
-      "agent_stream_start_failed":
-          "Agent stream startup failed (falling back)",
+      "agent_stream_start_failed": "Agent stream startup failed (falling back)",
       "agent_error_empty_query": "Query cannot be empty",
       "agent_error_missing_supabase_url":
           "SUPABASE_URL is not configured, so the agent stream cannot be opened",
@@ -611,14 +616,19 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_video_task_2dgs_hint": "2DGS output pipeline",
       "gen_video_task_sparse2dgs": "Video Sparse2DGS",
       "gen_video_task_sparse2dgs_hint": "Sample frames into Sparse2DGS",
-      "gen_text_pipeline_hint": "Text will first generate an image via AI, then the image will be converted into a 3D memory model.",
+      "gen_text_pipeline_hint":
+          "Text will first generate an image via AI, then the image will be converted into a 3D memory model.",
       "gen_cancel_title": "Operation in Progress",
-      "gen_cancel_message": "Processing is underway. Exiting will lose progress.\nAre you sure you want to exit?",
+      "gen_cancel_message":
+          "Processing is underway. Exiting will lose progress.\nAre you sure you want to exit?",
       "gen_cancel_confirm": "Exit",
       "gen_cancel_continue": "Continue",
-      "gen_video_too_large": "Video file is too large (max 1.5 GB). Please select another one.",
-      "gen_video_too_long": "Video duration is too long (max 10 min). Please select another one.",
-      "gen_image_too_large": "Image file is too large (max 20 MB). Please select another one.",
+      "gen_video_too_large":
+          "Video file is too large (max 1.5 GB). Please select another one.",
+      "gen_video_too_long":
+          "Video duration is too long (max 10 min). Please select another one.",
+      "gen_image_too_large":
+          "Image file is too large (max 20 MB). Please select another one.",
       // Login page
       "login_signup_success":
           "Registration successful! Please check your email to verify.",
@@ -649,7 +659,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
           "Move the phone like a slider, along the target's outer edge",
       "reco_app_switch": "Recording interrupted by app switch, content saved",
       "reco_done": "Recording completed",
-      "reco_record_too_short": "Recording failed, possible reason: recording too short",
+      "reco_record_too_short":
+          "Recording failed, possible reason: recording too short",
       "reco_save_fail":
           "Cannot save video to gallery. Video is temporarily cached.",
       "reco_save_error": "Error saving video to gallery",
@@ -734,7 +745,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "recall_download_model_unavailable": "This model is not downloadable yet",
       "recall_delete_local": "Delete Local Model",
       "recall_delete_confirm_title": "Delete Model",
-      "recall_delete_confirm_message": "This will permanently delete the model. This action cannot be undone.\nAre you sure?",
+      "recall_delete_confirm_message":
+          "This will permanently delete the model. This action cannot be undone.\nAre you sure?",
       "recall_delete_confirm_yes": "Delete",
       "recall_delete_confirm_cancel": "Cancel",
       "recall_delete_local_subtitle":
@@ -790,7 +802,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_submit_thumbnail": "Video Thumbnail",
       "video_submit_btn": "Submit & Upload",
       "video_upload_cancel_title": "Uploading",
-      "video_upload_cancel_message": "Video upload is in progress. Do you want to cancel?",
+      "video_upload_cancel_message":
+          "Video upload is in progress. Do you want to cancel?",
       "video_upload_cancel_confirm": "Cancel Upload",
       "video_upload_cancel_continue": "Continue Upload",
       "video_exit_title": "Exit Video Submission",
@@ -798,7 +811,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_exit_delete_checkbox": "Delete the recorded video file",
       "video_exit_confirm": "Exit",
       "video_exit_cancel": "Cancel",
-      "network_disconnected": "Internet disconnected. Please check your network connection.",
+      "network_disconnected":
+          "Internet disconnected. Please check your network connection.",
       "network_session_expired": "Session expired. Please re-login.",
       // Common/shared
       "admin_mode_msg":
@@ -824,7 +838,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "gen_text_regenerate": "Regenerate",
       "gen_text_confirm": "Confirm",
       // Local model
-      "local_model_download_fail": "Model download failed. Please check your network and retry.",
+      "local_model_download_fail":
+          "Model download failed. Please check your network and retry.",
       "local_model_load_fail": "Model loading failed. Please try again.",
       "local_model_qa_fail": "Q&A failed. Please try again.",
       "local_model_download_success": "Model downloaded to app storage.",
@@ -834,12 +849,16 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "local_model_load_first": "Please load a local model first.",
       // Cloud model
       "cloud_model_delete_success": "Cloud model deleted.",
-      "cloud_model_delete_fail": "Failed to delete cloud model. Please try again.",
+      "cloud_model_delete_fail":
+          "Failed to delete cloud model. Please try again.",
       "cloud_model_missing_id": "Model data is invalid, cannot delete.",
       "cloud_model_no_permission": "You can only delete your own cloud models.",
       // Viewer
       "viewer_download_fail": "Model download failed. Please try again.",
       "viewer_spark_error": "Rendering service error. Please try again later.",
+      "recall_info": "Info",
+      "recall_rename": "Rename",
+      "recall_share_community": "Share to Community",
     },
   );
 

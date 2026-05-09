@@ -323,7 +323,7 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _downloadModelToPrivateDir() async {
     final modelUrl = _localModelUrlController.text.trim();
     if (modelUrl.isEmpty) {
-      TDToast.showText(context: context, textLocalize('local_model_fill_url'));
+      showAppToast(context, textLocalize('local_model_fill_url'));
       return;
     }
 
@@ -373,7 +373,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         _localAnswerStatus =
             '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
-      TDToast.showText(context: context, textLocalize('local_model_download_success'));
+      showAppToast(context, textLocalize('local_model_download_success'));
     } catch (e) {
       if (!mounted) return;
       debugPrint('[RecallLocalAI] model download error: $e');
@@ -384,7 +384,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         _modelDownloadTotalBytes = null;
         _localAnswerStatus = textLocalize('local_model_download_fail');
       });
-      TDToast.showText(context: context, textLocalize('local_model_download_fail'));
+      showAppToast(context, textLocalize('local_model_download_fail'));
     }
   }
 
@@ -413,7 +413,7 @@ extension _RecallPageLocalAi on _RecallPageState {
           modelPath.isEmpty ? _RecallPageState._defaultModelFileName : modelPath,
         );
     if (modelPath.isEmpty) {
-      TDToast.showText(context: context, textLocalize('local_model_fill_path'));
+      showAppToast(context, textLocalize('local_model_fill_path'));
       return;
     }
 
@@ -516,7 +516,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         _localAnswerStatus = textLocalize('local_model_load_fail');
       });
       debugPrint('[RecallLocalAI] model load error: $e');
-      TDToast.showText(context: context, textLocalize('local_model_load_fail'));
+      showAppToast(context, textLocalize('local_model_load_fail'));
     }
   }
 
@@ -533,11 +533,11 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
-      TDToast.showText(context: context, textLocalize('local_model_fill_question'));
+      showAppToast(context, textLocalize('local_model_fill_question'));
       return;
     }
     if (_localQnaModel == null || !_isLocalModelReady) {
-      TDToast.showText(context: context, textLocalize('local_model_load_first'));
+      showAppToast(context, textLocalize('local_model_load_first'));
       return;
     }
 
@@ -641,7 +641,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       setState(() {
         _localAnswerStatus = textLocalize('local_model_qa_fail');
       });
-      TDToast.showText(context: context, textLocalize('local_model_qa_fail'));
+      showAppToast(context, textLocalize('local_model_qa_fail'));
     }
   }
 

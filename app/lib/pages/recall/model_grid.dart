@@ -63,7 +63,8 @@ class RecallModelGrid extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final String Function(String) toPublicUrl;
 
   const RecallModelGrid({
@@ -130,7 +131,10 @@ class RecallModelGrid extends StatelessWidget {
                         children: [
                           GestureDetector(
                             onTap: () => onNavigateToViewer(model, null),
-                            onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
+                            onLongPressStart: (_) => onShowModelActions(
+                              model,
+                              imageOnly: false,
+                            ), // Here we are sending false for standard view cards
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Row(
@@ -261,7 +265,10 @@ class RecallModelGrid extends StatelessWidget {
                   opacity: isActionTarget ? 0.0 : 1.0,
                   child: GestureDetector(
                     onTap: () => onNavigateToViewer(model, null),
-                    onLongPressStart: (_) => onShowModelActions(model, imageOnly: false), // Here we are sending false for standard view cards
+                    onLongPressStart: (_) => onShowModelActions(
+                      model,
+                      imageOnly: false,
+                    ), // Here we are sending false for standard view cards
                     child: Container(
                       key: cardKey,
                       child: RecallModelTile(
@@ -305,10 +312,13 @@ class RecallModelActionOverlay extends StatefulWidget {
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final Future<void> Function(Map<String, dynamic>) onShowModelDetails;
   final Future<void> Function(Map<String, dynamic>) onDownloadModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
   final Future<void> Function(Map<String, dynamic>) onRenameModel;
   final Future<void> Function(Map<String, dynamic>) onDeleteCloudModel;
   final String Function(String) toPublicUrl;
+  final bool isLocalCached;
+  final bool isOwnModel;
 
   const RecallModelActionOverlay({
     super.key,
@@ -322,10 +332,13 @@ class RecallModelActionOverlay extends StatefulWidget {
     required this.onNavigateToViewer,
     required this.onShowModelDetails,
     required this.onDownloadModel,
+    required this.onDeleteLocalModel,
     required this.onShareModelToCommunity,
     required this.onRenameModel,
     required this.onDeleteCloudModel,
     required this.toPublicUrl,
+    required this.isLocalCached,
+    required this.isOwnModel,
   });
 
   @override
@@ -398,7 +411,6 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
 
   @override
   Widget build(BuildContext context) {
-    const deleteLabel = '删除云端模型';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
@@ -450,26 +462,29 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                       scale: 1 + (0.045 * sValue),
                       alignment: Alignment.center,
                       child: GestureDetector(
-                  onTap: () => widget.onNavigateToViewer(widget.model, null),
-                  onLongPress: widget.onDismiss,
-                  child: RecallModelTile(
-                    model: widget.model,
-                    theme: widget.theme,
-                    isDark: widget.isDark,
-                    darkCard: widget.darkCard,
-                    darkInput: widget.darkInput,
-                    textColor: widget.isDark
-                        ? const Color(0xFFFFFFFF)
-                        : BDDesign.colorInkBlack,
-                    hintTextColor: widget.isDark
-                        ? const Color(0xFF888888)
-                        : widget.theme.fontGyColor3,
-                    elevated: true,
-                    elevationProgress: sValue,
-                    toPublicUrl: widget.toPublicUrl,
-                    imageOnly: widget.model['_imageOnly'] == true, // Correctly read boolean
-                  ),
-                ),
+                        onTap: () =>
+                            widget.onNavigateToViewer(widget.model, null),
+                        onLongPress: widget.onDismiss,
+                        child: RecallModelTile(
+                          model: widget.model,
+                          theme: widget.theme,
+                          isDark: widget.isDark,
+                          darkCard: widget.darkCard,
+                          darkInput: widget.darkInput,
+                          textColor: widget.isDark
+                              ? const Color(0xFFFFFFFF)
+                              : BDDesign.colorInkBlack,
+                          hintTextColor: widget.isDark
+                              ? const Color(0xFF888888)
+                              : widget.theme.fontGyColor3,
+                          elevated: true,
+                          elevationProgress: sValue,
+                          toPublicUrl: widget.toPublicUrl,
+                          imageOnly:
+                              widget.model['_imageOnly'] ==
+                              true, // Correctly read boolean
+                        ),
+                      ),
                     ),
                   );
                 },
@@ -487,7 +502,9 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              widget.theme.brandColor4.withValues(alpha: widget.isDark ? 0.25 : 0.15),
+                              widget.theme.brandColor4.withValues(
+                                alpha: widget.isDark ? 0.25 : 0.15,
+                              ),
                               Colors.transparent,
                             ],
                             begin: Alignment.centerLeft,
@@ -553,7 +570,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         children: [
                           _ActionMenuItem(
                             icon: Icons.info_outline_rounded,
-                            label: '查看详情',
+                            label: textLocalize("recall_info"),
                             isDark: widget.isDark,
                             onTap: () async {
                               widget.onDismiss();
@@ -561,40 +578,59 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                             },
                           ),
                           const SizedBox(height: 6),
+                          if (widget.isOwnModel)
+                            _ActionMenuItem(
+                              icon: Icons.edit_rounded,
+                              label: textLocalize("recall_rename"),
+                              isDark: widget.isDark,
+                              onTap: () async {
+                                widget.onDismiss();
+                                await widget.onRenameModel(widget.model);
+                              },
+                            ),
+                          if (widget.isOwnModel) const SizedBox(height: 6),
                           _ActionMenuItem(
-                            icon: Icons.edit_rounded,
-                            label: '重命名',
+                            icon: widget.isLocalCached
+                                ? Icons.delete_outline_rounded
+                                : Icons.download_rounded,
+                            label: widget.isLocalCached
+                                ? textLocalize('recall_delete_local')
+                                : textLocalize('recall_download_model'),
                             isDark: widget.isDark,
+                            destructive: widget.isLocalCached,
                             onTap: () async {
                               widget.onDismiss();
-                              await widget.onRenameModel(widget.model);
+                              if (widget.isLocalCached) {
+                                final confirmed =
+                                    await _showDeleteConfirmDialog(context);
+                                if (confirmed == true) {
+                                  await widget.onDeleteLocalModel(widget.model);
+                                }
+                              } else {
+                                await widget.onDownloadModel(widget.model);
+                              }
                             },
                           ),
                           const SizedBox(height: 6),
-                          _ActionMenuItem(
-                            icon: Icons.download_rounded,
-                            label: textLocalize('recall_download_model'),
-                            isDark: widget.isDark,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onDownloadModel(widget.model);
-                            },
-                          ),
-                          const SizedBox(height: 6),
-                          _ActionMenuItem(
-                            icon: Icons.delete_outline_rounded,
-                            label: deleteLabel,
-                            isDark: widget.isDark,
-                            destructive: true,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onDeleteCloudModel(widget.model);
-                            },
-                          ),
-                          const SizedBox(height: 6),
+                          if (widget.isOwnModel)
+                            _ActionMenuItem(
+                              icon: Icons.delete_outline_rounded,
+                              label: textLocalize('recall_delete_cloud'),
+                              isDark: widget.isDark,
+                              destructive: true,
+                              onTap: () async {
+                                widget.onDismiss();
+                                final confirmed =
+                                    await _showDeleteConfirmDialog(context);
+                                if (confirmed == true) {
+                                  await widget.onDeleteCloudModel(widget.model);
+                                }
+                              },
+                            ),
+                          if (widget.isOwnModel) const SizedBox(height: 6),
                           _ActionMenuItem(
                             icon: Icons.public_rounded,
-                            label: '分享到社区',
+                            label: textLocalize('recall_share_community'),
                             isDark: widget.isDark,
                             onTap: () async {
                               widget.onDismiss();
@@ -941,7 +977,9 @@ class RecallModelTile extends StatelessWidget {
           BoxShadow(
             color: Colors.black.withAlpha(
               elevationProgress != null
-                  ? (elevationProgress! > 0 ? (20 + (46 - 20) * elevationProgress!).round() : 20)
+                  ? (elevationProgress! > 0
+                        ? (20 + (46 - 20) * elevationProgress!).round()
+                        : 20)
                   : (elevated ? 46 : 20),
             ),
             blurRadius: elevationProgress != null
@@ -1111,7 +1149,8 @@ class TimePeelingList extends StatelessWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const TimePeelingList({
@@ -1202,7 +1241,8 @@ class _TimePeelingSlot extends StatefulWidget {
   final GlobalKey Function(Map<String, dynamic>) modelCardKeyFor;
   final bool Function(Map<String, dynamic>?, Map<String, dynamic>?) isSameModel;
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
-  final void Function(Map<String, dynamic> model, {bool imageOnly}) onShowModelActions;
+  final void Function(Map<String, dynamic> model, {bool imageOnly})
+  onShowModelActions;
   final void Function(String name) onAddNewTask;
 
   const _TimePeelingSlot({
@@ -1638,4 +1678,46 @@ class _TimelinePainter extends CustomPainter {
       old.currentPage != currentPage ||
       old.modelCount != modelCount ||
       old.timeLabel != timeLabel;
+}
+
+Future<bool?> _showDeleteConfirmDialog(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) {
+      return AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          textLocalize('recall_delete_confirm_title'),
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          textLocalize('recall_delete_confirm_message'),
+          style: TextStyle(
+            color: isDark ? Colors.white70 : Colors.black54,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              textLocalize('recall_delete_confirm_cancel'),
+              style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: Text(textLocalize('recall_delete_confirm_yes')),
+          ),
+        ],
+      );
+    },
+  );
 }
