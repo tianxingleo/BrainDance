@@ -58,8 +58,38 @@ const CINEMATIC_MAX_KEYFRAMES = 18;
 const CINEMATIC_MIN_KEYFRAMES = 6;
 const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 const ORBIT_RECENTER_DURATION = 1.5;
+const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
+const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
+const DESKTOP_INTRO_PARTICLE_BUDGET = 120000;
+const MOBILE_INTRO_PARTICLE_BUDGET = 45000;
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
+
+const isMobileDevice = () => (
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+);
+
+const getFileExtension = (url) => {
+  const path = String(url || '').split('?')[0].split('#')[0];
+  const match = path.match(/\.[^./\\]+$/);
+  return match ? match[0].toLowerCase() : '';
+};
+
+const replaceModelExtension = (url, extension) => {
+  const value = String(url || '');
+  const queryIndex = value.search(/[?#]/);
+  const base = queryIndex === -1 ? value : value.slice(0, queryIndex);
+  const suffix = queryIndex === -1 ? '' : value.slice(queryIndex);
+  return `${base.replace(/\.(ply|splat|ksplat)$/i, extension)}${suffix}`;
+};
+
+const isSameOriginUrl = (url) => {
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+};
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -177,6 +207,73 @@ const requestRender = () => {
       viewer.render();
     } catch (_) {}
   });
+};
+
+const hasModelResource = async (url) => {
+  if (!isSameOriginUrl(url)) return false;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const resolvePreferredModelUrl = async (modelUrl) => {
+  const sourceUrl = modelUrl || currentPlyUrl;
+  const ext = getFileExtension(sourceUrl);
+  if (!sourceUrl || ext !== '.ply') return sourceUrl;
+
+  for (const candidateExt of OPTIMIZED_MODEL_EXTENSIONS) {
+    const candidate = replaceModelExtension(sourceUrl, candidateExt);
+    if (candidate === sourceUrl) continue;
+    if (await hasModelResource(candidate)) {
+      console.info(`[Viewer] 检测到优化模型格式，优先加载: ${candidate}`);
+      return candidate;
+    }
+  }
+
+  return sourceUrl;
+};
+
+const addSplatSceneWithFormatFallback = async (sourceUrl) => {
+  const preferredUrl = await resolvePreferredModelUrl(sourceUrl);
+  const candidates = [preferredUrl];
+  if (preferredUrl !== sourceUrl) candidates.push(sourceUrl);
+
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      console.log(`[Viewer] 加载模型: ${candidate}`);
+      await viewer.addSplatScene(candidate, {
+        'showLoadingUI': true,
+        'progressiveLoad': false,
+        'optimizeSplatData': true,
+        'freeIntermediateSplatData': true,
+        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
+      });
+      currentPlyUrl = candidate;
+      return candidate;
+    } catch (error) {
+      lastError = error;
+      if (candidate !== sourceUrl) {
+        console.warn(`[Viewer] 优化格式加载失败，回退原始模型: ${sourceUrl}`, error);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error('模型加载失败');
 };
 
 const applyFocalLengthPx = (focalPx, options = {}) => {
@@ -940,6 +1037,7 @@ const createParticleSystem = (splatMesh) => {
   if (!viewer) return;
 
   const splatCount = splatMesh.getSplatCount();
+  if (!Number.isFinite(splatCount) || splatCount <= 0) return;
   splatMesh.updateMatrixWorld();
 
   // === A. 预计算：计算包围盒与尺寸 ===
@@ -971,13 +1069,11 @@ const createParticleSystem = (splatMesh) => {
   // === B. 自适应参数计算 ===
 
   // 1. 自适应粒子数量
-  // 逻辑：至少显示 1万个点，最多显示 40万个点。
-  // 如果模型本身小于 4万点，则全部显示。
-  let targetParticleCount = 60000;
-  if (splatCount < 40000) targetParticleCount = splatCount; // 小模型全显
-  else if (splatCount > 1000000) targetParticleCount = 400000; // 大模型上限
-
-  const step = Math.ceil(splatCount / targetParticleCount);
+  // 入场动画只承担过渡表达，按设备预算采样可避免大模型额外分配几十 MB 数组。
+  const particleBudget = isMobileDevice() ? MOBILE_INTRO_PARTICLE_BUDGET : DESKTOP_INTRO_PARTICLE_BUDGET;
+  const targetParticleCount = Math.min(splatCount, particleBudget);
+  const step = Math.max(1, Math.ceil(splatCount / targetParticleCount));
+  const sampledCount = Math.ceil(splatCount / step);
 
   // 2. 自适应粒子大小
   // 逻辑：模型越大，单个粒子在世界空间中应该越大才能被看见。
@@ -990,19 +1086,23 @@ const createParticleSystem = (splatMesh) => {
   // 粒子应该从包围盒外面飞进来
   const flyRadiusBase = maxDim * 1.0;
 
-  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${Math.floor(splatCount / step)}, Size: ${adaptiveSize.toFixed(2)}`);
+  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${sampledCount}, Size: ${adaptiveSize.toFixed(2)}`);
 
   // === C. 生成几何体 ===
   const geometry = new THREE.BufferGeometry();
-  const startPositions = [];
-  const targetPositions = [];
-  const randoms = [];
+  const startPositions = new Float32Array(sampledCount * 3);
+  const targetPositions = new Float32Array(sampledCount * 3);
+  const randoms = new Float32Array(sampledCount);
+  let sampleIndex = 0;
 
   for (let i = 0; i < splatCount; i += step) {
     splatMesh.getSplatCenter(i, tempVec);
     tempVec.applyMatrix4(splatMesh.matrixWorld);
 
-    targetPositions.push(tempVec.x, tempVec.y, tempVec.z);
+    const positionIndex = sampleIndex * 3;
+    targetPositions[positionIndex] = tempVec.x;
+    targetPositions[positionIndex + 1] = tempVec.y;
+    targetPositions[positionIndex + 2] = tempVec.z;
 
     // 随机分布在远处 (基于自适应的 maxDim)
     const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
@@ -1014,13 +1114,16 @@ const createParticleSystem = (splatMesh) => {
     const startY = centerY + r * Math.sin(phi) * Math.sin(theta);
     const startZ = centerZ + r * Math.cos(phi);
 
-    startPositions.push(startX, startY, startZ);
-    randoms.push(Math.random());
+    startPositions[positionIndex] = startX;
+    startPositions[positionIndex + 1] = startY;
+    startPositions[positionIndex + 2] = startZ;
+    randoms[sampleIndex] = Math.random();
+    sampleIndex += 1;
   }
 
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(startPositions, 3));
-  geometry.setAttribute('aTarget', new THREE.Float32BufferAttribute(targetPositions, 3));
-  geometry.setAttribute('aRandom', new THREE.Float32BufferAttribute(randoms, 1));
+  geometry.setAttribute('position', new THREE.BufferAttribute(startPositions, 3));
+  geometry.setAttribute('aTarget', new THREE.BufferAttribute(targetPositions, 3));
+  geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1));
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
@@ -1698,22 +1801,30 @@ const flyToImage = (poseData, options = {}) => {
 };
 
 const getViewerConfig = () => {
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
+  const canUseSharedMemory = window.crossOriginIsolated === true;
   return {
     'rootElement': containerRef.value,
     'cameraUp': [0, 1, 0],
     'initialCameraPosition': [0, 0, 5],
     'initialCameraLookAt': [0, 0, 0],
     'useBuiltInControls': false,
-    'gpuAcceleratedSort': false,
+    'gpuAcceleratedSort': canUseSharedMemory,
     'webXRMode': GaussianSplats3D.WebXRMode.None,
-    'sharedMemoryForWorkers': false,
+    'sharedMemoryForWorkers': canUseSharedMemory,
+    'integerBasedSort': true,
+    'halfPrecisionCovariancesOnGPU': true,
+    'dynamicScene': false,
+    'sphericalHarmonicsDegree': 0,
+    'enableOptionalEffects': false,
+    'optimizeSplatData': true,
+    'freeIntermediateSplatData': true,
     'antialiased': !isMobile,
   };
 };
 
-// 当前加载的 PLY 和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
-let currentPlyUrl = '/models/scene_auto_sync.ply';
+// 当前加载的模型和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
+let currentPlyUrl = '/models/scene_auto_sync_raw.ply';
 let currentPosesUrl = '/models/webgl_poses_with_tags.json';
 let hasInitializedFromExternalInput = false;
 
@@ -1809,13 +1920,8 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     window.viewer = viewer;
     manualFocalPx.value = DEFAULT_FOCAL_PX;
 
-    // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
-    console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
-    await viewer.addSplatScene(currentPlyUrl, {
-      'showLoadingUI': true,
-        'progressiveLoad': false,
-        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
-      });
+    // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
+    await addSplatSceneWithFormatFallback(currentPlyUrl);
 
     
     // 告诉 Flutter：模型加载完成

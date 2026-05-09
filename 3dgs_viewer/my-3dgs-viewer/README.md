@@ -64,6 +64,17 @@ npm run preview
 - 位姿 JSON
 - 可选的参考图片与标签数据
 
+## 3DGS 渲染性能策略
+
+查看器会在传入 `.ply` 时优先探测同名 `.ksplat` 和 `.splat`，存在则优先加载优化格式，失败后自动回退原始 URL。生产流水线建议同时保留原始 `.ply` 归档，并额外产出 Web 优先的 `.ksplat`。
+
+排序与内存传输使用自适应配置：
+
+- 页面满足跨域隔离时启用 `sharedMemoryForWorkers` 与 `gpuAcceleratedSort`。
+- Vite 本地开发已配置 `Cross-Origin-Opener-Policy` 和 `Cross-Origin-Embedder-Policy`，线上 CDN / WebView 容器也需要提供等效响应头。
+- 静态模型默认启用 `optimizeSplatData`、`freeIntermediateSplatData`、`halfPrecisionCovariancesOnGPU` 等渲染路径优化。
+- 入场粒子动画仍保留，但会按桌面和移动设备预算采样，避免大模型首次加载时额外生成过大的 `Points` 几何体。
+
 ## 说明
 
 这个目录只负责 Web 端查看器本身。完整的模型生成、位姿导出和同步脚本位于上级目录 [3dgs_viewer/README.md](/home/ltx/projects/BrainDance/3dgs_viewer/README.md)。
