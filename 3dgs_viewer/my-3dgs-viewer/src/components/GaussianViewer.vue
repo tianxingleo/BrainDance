@@ -164,6 +164,9 @@ const interactionState = {
 
 const orbitState = {
   center: new THREE.Vector3(0, 0, 0),
+  up: new THREE.Vector3(0, 1, 0),
+  basisX: new THREE.Vector3(1, 0, 0),
+  basisY: new THREE.Vector3(0, 0, -1),
   yaw: 0,
   pitch: 0,
   radius: 3,
@@ -436,10 +439,50 @@ const getOrbitMaxRadius = () => centerModeBounds
   ? centerModeBounds.radiusMax
   : Math.max(getSceneRadius() * 12, getOrbitMinRadius() * 6);
 
+const getOrbitFrame = () => {
+  const up = centerModeBounds?.up?.clone?.() || orbitState.up.clone();
+  const basisX = centerModeBounds?.basisX?.clone?.() || orbitState.basisX.clone();
+  const basisY = centerModeBounds?.basisY?.clone?.() || orbitState.basisY.clone();
+  return { up, basisX, basisY };
+};
+
+const updateOrbitFrame = (fallbackCenter = getModelWorldCenter()) => {
+  const frame = getOrbitFrame();
+  orbitState.up.copy(frame.up).normalize();
+  orbitState.basisX.copy(frame.basisX).normalize();
+  orbitState.basisY.copy(frame.basisY).normalize();
+  orbitState.center.copy(centerModeBounds?.center || fallbackCenter);
+};
+
+const getOrbitOffsetFromSpherical = (yaw, pitch, radius) => {
+  const frame = getOrbitFrame();
+  const cosPitch = Math.cos(pitch);
+  return new THREE.Vector3()
+    .addScaledVector(frame.basisX, Math.cos(yaw) * cosPitch * radius)
+    .addScaledVector(frame.basisY, Math.sin(yaw) * cosPitch * radius)
+    .addScaledVector(frame.up, Math.sin(pitch) * radius);
+};
+
+const getOrbitAnglesFromOffset = (offset) => {
+  if (!offset || offset.lengthSq() < 1e-8) {
+    return { yaw: 0, pitch: 0 };
+  }
+  const frame = getOrbitFrame();
+  const x = offset.dot(frame.basisX);
+  const y = offset.dot(frame.basisY);
+  const z = offset.dot(frame.up);
+  const horizontal = Math.sqrt(Math.max(offset.lengthSq() - (z * z), 0));
+  return {
+    yaw: Math.atan2(y, x),
+    pitch: Math.atan2(z, horizontal),
+  };
+};
+
 const rebuildCenterModeBounds = () => {
   const sceneCenter = getModelWorldCenter();
   const sceneRadius = getSceneRadius();
   centerModeBounds = buildCenterModeBounds(cameraPoses.value, sceneCenter, sceneRadius);
+  updateOrbitFrame(sceneCenter);
   return centerModeBounds;
 };
 
@@ -468,37 +511,35 @@ const applyCenterModeBoundsToTarget = () => {
   if (!centerModeBounds) return;
   orbitState.targetYaw = clampOrbitYaw(orbitState.targetYaw);
   orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch);
-  orbitState.targetRadius = clampOrbitRadius(orbitState.targetRadius);
 };
 
 const syncOrbitTarget = (center = getModelWorldCenter()) => {
   if (!viewer || !viewer.camera) return;
 
-  orbitState.center.copy(centerModeBounds?.center || center);
+  updateOrbitFrame(center);
   const offset = viewer.camera.position.clone().sub(orbitState.center);
   let radius = offset.length();
   if (!Number.isFinite(radius) || radius < getOrbitMinRadius()) {
     radius = Math.max(getSceneRadius() * 2.6, 1.5);
-    offset.set(0, 0, radius);
+    const fallback = getOrbitOffsetFromSpherical(0, 0, radius);
+    offset.copy(fallback);
   }
 
   orbitState.radius = clampOrbitRadius(radius);
   orbitState.targetRadius = orbitState.radius;
-  orbitState.yaw = Math.atan2(offset.y, offset.x);
-  orbitState.pitch = clampOrbitPitch(Math.asin(THREE.MathUtils.clamp(offset.z / radius, -1, 1)));
+  const angles = getOrbitAnglesFromOffset(offset);
+  orbitState.yaw = angles.yaw;
+  orbitState.pitch = clampOrbitPitch(angles.pitch);
   orbitState.targetYaw = orbitState.yaw;
   orbitState.targetPitch = orbitState.pitch;
   applyCenterModeBoundsToTarget();
 };
 
 const getOrbitCameraState = () => {
-  const cosPitch = Math.cos(orbitState.targetPitch);
-  const position = orbitState.center.clone().add(new THREE.Vector3(
-    Math.cos(orbitState.targetYaw) * cosPitch * orbitState.targetRadius,
-    Math.sin(orbitState.targetYaw) * cosPitch * orbitState.targetRadius,
-    Math.sin(orbitState.targetPitch) * orbitState.targetRadius,
-  ));
-  const lookMatrix = new THREE.Matrix4().lookAt(position, orbitState.center, centerModeUp);
+  const position = orbitState.center.clone().add(
+    getOrbitOffsetFromSpherical(orbitState.targetYaw, orbitState.targetPitch, orbitState.targetRadius),
+  );
+  const lookMatrix = new THREE.Matrix4().lookAt(position, orbitState.center, orbitState.up);
   return {
     position,
     quaternion: new THREE.Quaternion().setFromRotationMatrix(lookMatrix),
@@ -508,7 +549,7 @@ const getOrbitCameraState = () => {
 const buildCameraBezierCurve = (startPos, endPos, targetCenter) => {
   const sceneRadius = getSceneRadius();
   const distance = startPos.distanceTo(endPos);
-  const lift = centerModeUp.clone().multiplyScalar(Math.max(sceneRadius * 0.18, distance * 0.14, 0.08));
+  const lift = orbitState.up.clone().multiplyScalar(Math.max(sceneRadius * 0.18, distance * 0.14, 0.08));
   const startForward = targetCenter.clone().sub(startPos).normalize();
   const endBack = endPos.clone().sub(targetCenter).normalize();
   const handleDistance = Math.max(distance * 0.35, sceneRadius * 0.35, 0.15);
@@ -2451,18 +2492,13 @@ const applyOrbitCamera = (immediate = false) => {
   if (immediate) {
     orbitState.yaw = orbitState.targetYaw;
     orbitState.pitch = orbitState.targetPitch;
-    orbitState.radius = orbitState.targetRadius;
+    orbitState.radius = clampOrbitRadius(orbitState.targetRadius);
   }
 
-  const cosPitch = Math.cos(orbitState.pitch);
-  const offset = new THREE.Vector3(
-    Math.cos(orbitState.yaw) * cosPitch * orbitState.radius,
-    Math.sin(orbitState.yaw) * cosPitch * orbitState.radius,
-    Math.sin(orbitState.pitch) * orbitState.radius,
-  );
+  const offset = getOrbitOffsetFromSpherical(orbitState.yaw, orbitState.pitch, orbitState.radius);
 
   viewer.camera.position.copy(orbitState.center).add(offset);
-  viewer.camera.up.copy(centerModeUp);
+  viewer.camera.up.copy(orbitState.up);
   viewer.camera.lookAt(orbitState.center);
   renderCameraUpdate();
 };
@@ -2509,12 +2545,20 @@ const stepInteractionInertia = (now) => {
 
   if (interactionState.zoomInertiaActive) {
     if (Math.abs(interactionState.orbitZoomVelocity) > 0.0002) {
-      orbitState.targetRadius = clampOrbitRadius(
-        orbitState.targetRadius * Math.exp(interactionState.orbitZoomVelocity)
-      );
+      const zoomStep = THREE.MathUtils.clamp(interactionState.orbitZoomVelocity * dt * 5.5, -0.18, 0.18);
+      orbitState.targetRadius *= Math.exp(zoomStep);
       needsNextFrame = true;
     } else {
       interactionState.zoomInertiaActive = false;
+    }
+  }
+
+  if (centerModeBounds && !interactionState.zoomInertiaActive) {
+    const boundedTargetRadius = clampOrbitRadius(orbitState.targetRadius);
+    if (Math.abs(boundedTargetRadius - orbitState.targetRadius) > 1e-5) {
+      const spring = 1 - Math.exp(-dt * 8);
+      orbitState.targetRadius = THREE.MathUtils.lerp(orbitState.targetRadius, boundedTargetRadius, spring);
+      needsNextFrame = true;
     }
   }
 
@@ -2522,12 +2566,16 @@ const stepInteractionInertia = (now) => {
     const alpha = 1 - Math.exp(-dt * 18);
     orbitState.yaw = THREE.MathUtils.lerp(orbitState.yaw, orbitState.targetYaw, alpha);
     orbitState.pitch = THREE.MathUtils.lerp(orbitState.pitch, orbitState.targetPitch, alpha);
-    orbitState.radius = THREE.MathUtils.lerp(orbitState.radius, orbitState.targetRadius, alpha);
+    orbitState.radius = THREE.MathUtils.lerp(
+      orbitState.radius,
+      clampOrbitRadius(orbitState.targetRadius),
+      alpha,
+    );
     applyOrbitCamera();
     if (
       Math.abs(orbitState.yaw - orbitState.targetYaw) > 0.00001 ||
       Math.abs(orbitState.pitch - orbitState.targetPitch) > 0.00001 ||
-      Math.abs(orbitState.radius - orbitState.targetRadius) > 0.0002
+      Math.abs(orbitState.radius - clampOrbitRadius(orbitState.targetRadius)) > 0.0002
     ) {
       needsNextFrame = true;
     }
@@ -2577,7 +2625,7 @@ const orbitRoll = (deltaAngleRad) => {
   if (isCameraFlightLocked()) return;
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
-  viewer.camera.rotateOnWorldAxis(centerModeUp, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  viewer.camera.rotateOnWorldAxis(orbitState.up, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
   syncOrbitTarget();
   renderCameraUpdate();
 };
@@ -2588,12 +2636,8 @@ const orbitZoom = (zoomFactor) => {
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   const delta = -Math.log(zoomFactor);
-  interactionState.orbitZoomVelocity = delta;
-  interactionState.zoomInertiaActive = false;
-  orbitState.targetRadius = clampOrbitRadius(
-    orbitState.targetRadius * Math.exp(delta)
-  );
-  applyCenterModeBoundsToTarget();
+  interactionState.orbitZoomVelocity += delta * 3.2;
+  interactionState.zoomInertiaActive = true;
   scheduleInteractionFrame();
 };
 
@@ -2618,6 +2662,7 @@ const setupOrbitControls = () => {
   disposeControls();
   orbitTouchState.roll = 0;
   orbitNeedsRecenterAfterPoseFlight = false;
+  updateOrbitFrame();
   syncOrbitTarget();
   applyOrbitCamera(true);
 };

@@ -14,6 +14,9 @@ export interface AngleInterval {
 export interface CenterModeBounds {
   topology: CenterModeTopology;
   center: THREE.Vector3;
+  up: THREE.Vector3;
+  basisX: THREE.Vector3;
+  basisY: THREE.Vector3;
   radiusMin: number;
   radiusMax: number;
   radiusElastic: number;
@@ -27,6 +30,7 @@ export interface CenterModeBounds {
 interface PoseSample {
   position: THREE.Vector3;
   forward: THREE.Vector3;
+  up: THREE.Vector3;
 }
 
 const TAU = Math.PI * 2;
@@ -53,6 +57,10 @@ function vectorMean(vectors: THREE.Vector3[]): THREE.Vector3 {
   if (vectors.length === 0) return out;
   for (const vector of vectors) out.add(vector);
   return out.multiplyScalar(1 / vectors.length);
+}
+
+function projectOntoPlane(vector: THREE.Vector3, normal: THREE.Vector3): THREE.Vector3 {
+  return vector.clone().sub(normal.clone().multiplyScalar(vector.dot(normal)));
 }
 
 function percentile(values: number[], p: number): number {
@@ -107,6 +115,49 @@ function estimateFocusPoint(samples: PoseSample[]): THREE.Vector3 {
   }
 }
 
+function buildOrthonormalBasis(
+  upHint: THREE.Vector3,
+  samples: PoseSample[],
+  center: THREE.Vector3,
+): { up: THREE.Vector3; basisX: THREE.Vector3; basisY: THREE.Vector3 } {
+  const up = upHint.clone().normalize();
+  let basisX = vectorMean(
+    samples.map((sample) => projectOntoPlane(sample.position.clone().sub(center), up)),
+  );
+  basisX = projectOntoPlane(basisX, up);
+  if (basisX.lengthSq() < 1e-8) {
+    basisX = projectOntoPlane(samples[0]!.position.clone().sub(center), up);
+  }
+  if (basisX.lengthSq() < 1e-8) {
+    basisX = new THREE.Vector3(1, 0, 0).projectOnPlane(up);
+  }
+  if (basisX.lengthSq() < 1e-8) {
+    basisX = new THREE.Vector3(0, 0, 1);
+  }
+  basisX.normalize();
+
+  const basisY = up.clone().cross(basisX).normalize();
+  if (basisY.lengthSq() < 1e-8) {
+    basisX.set(1, 0, 0).projectOnPlane(up).normalize();
+    basisY.copy(up).cross(basisX).normalize();
+  }
+
+  return { up, basisX, basisY };
+}
+
+function measureCircularCoverage(angles: number[]): number {
+  if (angles.length < 2) return 0;
+  const sorted = angles.map(normalizeAngle).sort((a, b) => a - b);
+  let largestGap = 0;
+  for (let i = 0; i < sorted.length; i += 1) {
+    const current = sorted[i]!;
+    const next = sorted[(i + 1) % sorted.length]!;
+    const gap = i === sorted.length - 1 ? next + TAU - current : next - current;
+    largestGap = Math.max(largestGap, gap);
+  }
+  return THREE.MathUtils.clamp((TAU - largestGap) / TAU, 0, 1);
+}
+
 function parseSamples(
   poses: Array<{ matrix: unknown }>,
 ): PoseSample[] {
@@ -125,8 +176,11 @@ function parseSamples(
       const forward = new THREE.Vector3(0, 0, -1)
         .applyQuaternion(quaternion)
         .normalize();
+      const up = new THREE.Vector3(0, 1, 0)
+        .applyQuaternion(quaternion)
+        .normalize();
 
-      return { position, forward };
+      return { position, forward, up };
     })
     .filter(Boolean) as PoseSample[];
 }
@@ -213,9 +267,13 @@ export function buildCenterModeBounds(
 ): CenterModeBounds {
   const samples = parseSamples(poses);
   if (samples.length < 3) {
+    const fallbackUp = new THREE.Vector3(0, 1, 0);
     return {
       topology: 'walkthrough',
       center: sceneCenter.clone(),
+      up: fallbackUp.clone(),
+      basisX: new THREE.Vector3(1, 0, 0),
+      basisY: new THREE.Vector3(0, 0, -1),
       radiusMin: Math.max(sceneRadius * 0.12, 0.08),
       radiusMax: Math.max(sceneRadius * 4, 1.2),
       radiusElastic: Math.max(sceneRadius * 0.08, 0.08),
@@ -227,22 +285,28 @@ export function buildCenterModeBounds(
     };
   }
 
-  const focus = estimateFocusPoint(samples);
-  const center = sceneCenter.clone().lerp(focus, 0.4);
   const positions = samples.map((sample) => sample.position);
   const forwards = samples.map((sample) => sample.forward);
-  const offsets = positions.map((position) => position.clone().sub(center));
-  const radii = offsets.map((offset) => offset.length());
+  const upHint = vectorMean(samples.map((sample) => sample.up));
   const positionMean = vectorMean(positions);
-
-  const meanRadius = radii.reduce((sum, value) => sum + value, 0) / radii.length;
-  const radiusVariance = radii.reduce((sum, value) => sum + ((value - meanRadius) ** 2), 0) / radii.length;
-  const radiusStd = Math.sqrt(radiusVariance);
-  const radiusCv = meanRadius > 1e-6 ? radiusStd / meanRadius : 0;
   const positionSpread = Math.sqrt(
     positions.reduce((sum, position) => sum + position.distanceToSquared(positionMean), 0) / positions.length,
   );
   const positionSpreadNorm = positionSpread / Math.max(sceneRadius, 1e-3);
+
+  const center = sceneCenter.clone();
+  const orbitFrame = buildOrthonormalBasis(
+    upHint.lengthSq() > 1e-8 ? upHint : new THREE.Vector3(0, 1, 0),
+    samples,
+    center,
+  );
+
+  const offsets = positions.map((position) => position.clone().sub(center));
+  const radii = offsets.map((offset) => offset.length());
+  const meanRadius = radii.reduce((sum, value) => sum + value, 0) / radii.length;
+  const radiusVariance = radii.reduce((sum, value) => sum + ((value - meanRadius) ** 2), 0) / radii.length;
+  const radiusStd = Math.sqrt(radiusVariance);
+  const radiusCv = meanRadius > 1e-6 ? radiusStd / meanRadius : 0;
 
   let inwardScore = 0;
   for (const sample of samples) {
@@ -251,22 +315,32 @@ export function buildCenterModeBounds(
   }
   inwardScore /= samples.length;
 
-  // 中心模式采用 Z 轴朝上：yaw 在 XY 平面内转，pitch 控制 Z 轴高度。
-  const orbitYawAngles = offsets.map((offset) => Math.atan2(offset.y, offset.x));
-  const orbitPitchAngles = offsets.map((offset) => {
-    const horizontal = Math.sqrt(offset.x * offset.x + offset.y * offset.y);
-    return Math.atan2(offset.z, horizontal);
+  const orbitYawAngles = offsets.map((offset) => {
+    const x = offset.dot(orbitFrame.basisX);
+    const y = offset.dot(orbitFrame.basisY);
+    return Math.atan2(y, x);
   });
-  const forwardYawAngles = forwards.map((forward) => Math.atan2(forward.y, forward.x));
+  const orbitPitchAngles = offsets.map((offset) => {
+    const z = offset.dot(orbitFrame.up);
+    const horizontal = Math.sqrt(Math.max(offset.lengthSq() - (z * z), 0));
+    return Math.atan2(z, horizontal);
+  });
+  const forwardYawAngles = forwards.map((forward) => {
+    const x = forward.dot(orbitFrame.basisX);
+    const y = forward.dot(orbitFrame.basisY);
+    return Math.atan2(y, x);
+  });
   const forwardPitchAngles = forwards.map((forward) => {
-    const horizontal = Math.sqrt(forward.x * forward.x + forward.y * forward.y);
-    return Math.atan2(forward.z, horizontal);
+    const z = forward.dot(orbitFrame.up);
+    const horizontal = Math.sqrt(Math.max(forward.lengthSq() - (z * z), 0));
+    return Math.atan2(z, horizontal);
   });
 
+  const yawCoverage = measureCircularCoverage(orbitYawAngles);
   let topology: CenterModeTopology = 'walkthrough';
-  if (inwardScore > 0.62 && radiusCv < 0.32) {
+  if (inwardScore > 0.64 && yawCoverage > 0.82 && radiusCv < 0.38) {
     topology = 'full_orbit';
-  } else if (inwardScore > 0.42 && positionSpreadNorm < 0.9) {
+  } else if (inwardScore > 0.4 && yawCoverage > 0.28 && positionSpreadNorm < 0.95) {
     topology = 'semi_orbit';
   } else if (positionSpreadNorm < 0.28) {
     topology = 'panorama_anchor';
@@ -279,10 +353,10 @@ export function buildCenterModeBounds(
 
   const yawIntervals = buildCircularInterval(
     yawSource,
-    THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 18 : 26),
+    THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : topology === 'semi_orbit' ? 14 : 22),
   );
 
-  const pitchMarginDeg = topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 14 : 18;
+  const pitchMarginDeg = topology === 'full_orbit' ? 8 : topology === 'semi_orbit' ? 12 : 16;
   const pitchMin = THREE.MathUtils.clamp(
     percentile(pitchSource, 0.05) - THREE.MathUtils.degToRad(pitchMarginDeg),
     -Math.PI / 2 + 0.03,
@@ -294,26 +368,34 @@ export function buildCenterModeBounds(
     Math.PI / 2 - 0.03,
   );
 
+  const radiusLowerPct = topology === 'full_orbit' ? 0.03 : topology === 'semi_orbit' ? 0.05 : 0.08;
+  const radiusUpperPct = topology === 'full_orbit' ? 0.97 : topology === 'semi_orbit' ? 0.95 : 0.92;
+  const lowerPadding = Math.max(sceneRadius * 0.05, radiusStd * 0.35, 0.05);
+  const upperPadding = Math.max(sceneRadius * 0.1, radiusStd * 0.55, 0.08);
   const radiusMin = Math.max(
-    percentile(radii, 0.1) - Math.max(sceneRadius * 0.08, radiusStd * 0.28),
-    sceneRadius * 0.08,
+    percentile(radii, radiusLowerPct) - lowerPadding,
+    sceneRadius * 0.05,
   );
   const radiusMax = Math.max(
-    percentile(radii, 0.9) + Math.max(sceneRadius * 0.08, radiusStd * 0.42),
-    radiusMin + Math.max(sceneRadius * 0.12, 0.15),
+    percentile(radii, radiusUpperPct) + upperPadding,
+    radiusMin + Math.max(sceneRadius * 0.18, 0.22),
   );
+  const radiusSpan = Math.max(radiusMax - radiusMin, 0.12);
 
   return {
     topology,
     center,
+    up: orbitFrame.up,
+    basisX: orbitFrame.basisX,
+    basisY: orbitFrame.basisY,
     radiusMin,
     radiusMax,
-    radiusElastic: Math.max(sceneRadius * 0.08, radiusStd * 0.18, 0.08),
+    radiusElastic: Math.max(radiusSpan * 0.55, sceneRadius * 0.12, radiusStd * 0.3, 0.14),
     yawIntervals,
-    yawElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : 14),
+    yawElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : 12),
     pitchMin,
     pitchMax,
-    pitchElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : 12),
+    pitchElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 6 : 10),
   };
 }
 
