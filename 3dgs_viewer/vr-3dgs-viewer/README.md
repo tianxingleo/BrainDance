@@ -13,10 +13,24 @@ npm run dev
 浏览器打开：
 
 ```text
-https://127.0.0.1:5174/
+https://127.0.0.1:5174/?preview=desktop
 ```
 
-建议先启动 SteamVR，再用 PC Chrome / Edge 打开页面并点击 `Enter VR`。WebXR 需要安全上下文，本端通过 Vite basic SSL 在开发环境提供 HTTPS。
+WebXR 需要安全上下文，本端通过 Vite basic SSL 在开发环境提供 HTTPS。
+
+## 预览模式
+
+VR 端支持三种调试模式：
+
+```text
+https://127.0.0.1:5174/?preview=desktop
+https://127.0.0.1:5174/?preview=stereo
+https://127.0.0.1:5174/?preview=webxr
+```
+
+- `desktop`：普通桌面预览，使用同一套 payload / vr_config / 模型加载逻辑，并启用 OrbitControls，适合确认模型能加载、尺度和朝向是否合理。
+- `stereo`：双眼并排预览，用左右眼相机偏移和 scissor viewport 在普通屏幕上近似检查立体渲染、裁剪和深度方向。
+- `webxr`：真实 WebXR / SteamVR 路径，启动 SteamVR 后用 PC Chrome / Edge 打开页面并点击 `Enter VR`。
 
 ## Payload 协议
 
@@ -66,9 +80,16 @@ Viewer 会根据 `poses` URL 推导同目录的 `vr_config.json`。如果加载�
 
 第一版支持桌面面板的缩放、重置和状态显示。键盘快捷键：
 
+- `1`：切换 desktop preview
+- `2`：切换 stereo preview
+- `3`：切换 webxr mode
 - `[`：缩小模型
 - `]`：放大模型
+- `Q / E`：旋转模型
+- `WASD`：移动调试相机
 - `R`：重置位置和缩放
+
+`desktop` 和 `stereo` 模式用于开发调试，不能替代 SteamVR + PICO Neo 2 的真实头显验证。
 
 ## 模型格式
 

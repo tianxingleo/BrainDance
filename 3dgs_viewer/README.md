@@ -44,7 +44,7 @@ npm install
 npm run dev
 ```
 
-启动 SteamVR 后，用 PC Chrome / Edge 打开 `https://127.0.0.1:5174/`，点击 `Enter VR` 进入沉浸式查看。真实模型建议通过 `?payload=<encoded-json>` 传入 `ply / poses / sceneId`。
+日常调试可打开 `https://127.0.0.1:5174/?preview=desktop` 或 `?preview=stereo`，先在普通屏幕上确认模型加载、尺度、朝向和双眼并排渲染。启动 SteamVR 后，用 PC Chrome / Edge 打开 `https://127.0.0.1:5174/?preview=webxr`，点击 `Enter VR` 进入沉浸式查看。真实模型建议通过 `payload=<encoded-json>` 传入 `ply / poses / sceneId`。
 
 ### 2. 同步图片
 

@@ -17,6 +17,26 @@ export interface BrainDanceVrConfig {
   preferCompressedModel: boolean
 }
 
+export interface RuntimeGaussianViewer {
+  camera?: import('three').PerspectiveCamera
+  renderer?: import('three').WebGLRenderer
+  splatMesh?: import('three').Object3D
+  threeScene?: import('three').Scene
+  controls?: {
+    update: () => void
+  }
+  sceneHelper?: {
+    focusMarker?: import('three').Object3D
+    controlPlane?: import('three').Object3D
+    getFocusMarkerOpacity?: () => number
+  }
+  webXRActive?: boolean
+  showControlPlane?: boolean
+  update?: () => void
+  render?: () => void
+  forceRenderNextFrame?: () => void
+}
+
 export interface VrLoadResult {
   payload: BrainDanceViewerPayload
   modelUrl: string

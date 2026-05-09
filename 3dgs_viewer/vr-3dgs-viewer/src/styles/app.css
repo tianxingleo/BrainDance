@@ -93,34 +93,60 @@ h1 {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin: 14px 0;
 }
 
-.metrics div {
+.metrics div,
+.debug-list div {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.06);
 }
 
-.metrics dt {
+.metrics dt,
+.debug-list dt {
   color: rgba(249, 245, 232, 0.62);
   font-size: 11px;
   text-transform: uppercase;
 }
 
-.metrics dd {
+.metrics dd,
+.debug-list dd {
   margin: 3px 0 0;
   font-size: 16px;
   font-weight: 700;
 }
 
+.debug-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.debug-list dd {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.mode-row,
 .button-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+.mode-row {
+  margin-bottom: 8px;
+}
+
+button.active {
+  border-color: rgba(158, 208, 198, 0.72);
+  background: rgba(28, 121, 108, 0.7);
 }
 
 .hint,
@@ -129,11 +155,6 @@ h1 {
   color: rgba(249, 245, 232, 0.68);
   font-size: 12px;
   line-height: 1.45;
-}
-
-.model-url {
-  overflow-wrap: anywhere;
-  color: rgba(158, 208, 198, 0.78);
 }
 
 #VRButton {
@@ -157,6 +178,6 @@ h1 {
   }
 
   .metrics {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 }

@@ -15,17 +15,24 @@ declare module '@mkkellogg/gaussian-splats-3d' {
 
   export class Viewer {
     constructor(options: Record<string, unknown>)
-    renderer?: {
-      xr?: {
-        enabled: boolean
-        isPresenting?: boolean
-        addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void
-        removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void
-      }
+    camera?: import('three').PerspectiveCamera
+    renderer?: import('three').WebGLRenderer
+    splatMesh?: import('three').Object3D
+    threeScene?: import('three').Scene
+    controls?: { update: () => void }
+    sceneHelper?: {
+      focusMarker?: import('three').Object3D
+      controlPlane?: import('three').Object3D
+      getFocusMarkerOpacity?: () => number
     }
+    webXRActive?: boolean
+    showControlPlane?: boolean
     addSplatScene(path: string, options?: Record<string, unknown>): Promise<unknown>
     start(): void
     stop(): void
     dispose(): void
+    update(): void
+    render(): void
+    forceRenderNextFrame(): void
   }
 }
