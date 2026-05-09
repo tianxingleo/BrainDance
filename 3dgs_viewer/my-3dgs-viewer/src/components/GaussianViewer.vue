@@ -65,6 +65,7 @@ const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 120000;
 const MOBILE_INTRO_PARTICLE_BUDGET = 45000;
 const INTRO_DURATION_MS = 6500;
+const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -1054,6 +1055,30 @@ const globalUniforms = {
   uIntroSplatAlpha: { value: 0 },
 };
 
+const normalizeColorChannel = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0.6;
+  return THREE.MathUtils.clamp(numeric > 1 ? numeric / 255 : numeric, 0, 1);
+};
+
+const readSplatRgbColor = (splatMesh, index, outColor) => {
+  outColor.set(0.6, 0.6, 0.6, 1);
+  if (!splatMesh || typeof splatMesh.getSplatColor !== 'function') return outColor;
+
+  try {
+    const returnedColor = splatMesh.getSplatColor(index, outColor);
+    const source = returnedColor || outColor;
+    const r = source.x ?? source.r ?? source[0] ?? outColor.x;
+    const g = source.y ?? source.g ?? source[1] ?? outColor.y;
+    const b = source.z ?? source.b ?? source[2] ?? outColor.z;
+    outColor.set(normalizeColorChannel(r), normalizeColorChannel(g), normalizeColorChannel(b), 1);
+  } catch (error) {
+    if (index === 0) console.warn('[Intro] 读取 splat 颜色失败，粒子颜色回退为灰色:', error);
+  }
+
+  return outColor;
+};
+
 // --- 2. 自适应粒子系统 (核心修改) ---
 const createParticleSystem = (splatMesh) => {
   if (!viewer) return;
@@ -1100,9 +1125,11 @@ const createParticleSystem = (splatMesh) => {
   // 2. 自适应粒子大小
   // 逻辑：模型越大，单个粒子在世界空间中应该越大才能被看见。
   // 系数 150.0 是经验值，表示将最大边长切分多少份。
-  let adaptiveSize = (maxDim / 200.0) * window.devicePixelRatio;
+  let adaptiveSize = (maxDim / 95.0) * window.devicePixelRatio;
   // 限制最小值，防止极小模型看不见
-  if (adaptiveSize < 0.5) adaptiveSize = 0.5;
+  const minParticleSize = isMobileDevice() ? 1.8 : 2.4;
+  if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 7.0 : 10.0);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
@@ -1117,6 +1144,7 @@ const createParticleSystem = (splatMesh) => {
   const colors = new Float32Array(sampledCount * 3);
   const randoms = new Float32Array(sampledCount);
   const tempColor = new THREE.Vector4(0.6, 0.6, 0.6, 1);
+  let didLogSampleColor = false;
   let sampleIndex = 0;
 
   for (let i = 0; i < splatCount; i += step) {
@@ -1128,17 +1156,16 @@ const createParticleSystem = (splatMesh) => {
     targetPositions[positionIndex + 1] = tempVec.y;
     targetPositions[positionIndex + 2] = tempVec.z;
 
-    if (typeof splatMesh.getSplatColor === 'function') {
-      try {
-        splatMesh.getSplatColor(i, tempColor);
-      } catch (_) {
-        tempColor.set(0.6, 0.6, 0.6, 1);
-      }
+    readSplatRgbColor(splatMesh, i, tempColor);
+    colors[positionIndex] = tempColor.x;
+    colors[positionIndex + 1] = tempColor.y;
+    colors[positionIndex + 2] = tempColor.z;
+    if (!didLogSampleColor) {
+      console.log(
+        `[Intro] Sample particle color: ${tempColor.x.toFixed(3)}, ${tempColor.y.toFixed(3)}, ${tempColor.z.toFixed(3)}`
+      );
+      didLogSampleColor = true;
     }
-    const colorScale = Math.max(tempColor.x, tempColor.y, tempColor.z) > 1 ? 255 : 1;
-    colors[positionIndex] = THREE.MathUtils.clamp(tempColor.x / colorScale, 0, 1);
-    colors[positionIndex + 1] = THREE.MathUtils.clamp(tempColor.y / colorScale, 0, 1);
-    colors[positionIndex + 2] = THREE.MathUtils.clamp(tempColor.z / colorScale, 0, 1);
 
     // 随机分布在远处 (基于自适应的 maxDim)
     const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
@@ -1187,8 +1214,9 @@ const createParticleSystem = (splatMesh) => {
         gl_Position = projectionMatrix * mvPosition;
         
         // 距离衰减 (20.0 是透视缩放因子，配合世界单位的 uSize 使用)
-        gl_PointSize = uSize * (20.0 / -mvPosition.z);
-        if(gl_PointSize < 1.0) gl_PointSize = 1.0;
+        gl_PointSize = uSize * (44.0 / max(-mvPosition.z, 0.001));
+        if(gl_PointSize < 2.0) gl_PointSize = 2.0;
+        if(gl_PointSize > 32.0) gl_PointSize = 32.0;
       }
     `,
     fragmentShader: `
@@ -1313,18 +1341,51 @@ const finalizeIntroAnimation = () => {
   updateDebugInfo();
 };
 
-const buildIntroOrbitCamera = (targetPosition, targetQuaternion) => {
+const getFarthestIntroStartPose = (targetPosition, targetPose = null) => {
+  if (!viewer || !targetPosition || !Array.isArray(cameraPoses.value) || cameraPoses.value.length < 2) return null;
+
+  const targetPoseId = getPosePresentationId(targetPose);
+  let farthestState = null;
+  let farthestDistanceSq = -1;
+
+  for (const pose of cameraPoses.value) {
+    if (targetPose && getPosePresentationId(pose) === targetPoseId) continue;
+    const state = resolvePoseCameraState(pose);
+    if (!state) continue;
+    const distanceSq = state.position.distanceToSquared(targetPosition);
+    if (distanceSq > farthestDistanceSq) {
+      farthestDistanceSq = distanceSq;
+      farthestState = state;
+    }
+  }
+
+  return farthestState;
+};
+
+const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = null) => {
   const center = getModelWorldCenter();
   const radius = getSceneRadius();
-  const targetOffset = targetPosition.clone().sub(center);
-  if (targetOffset.lengthSq() < 1e-8) targetOffset.set(0, 0, Math.max(radius * 2.5, 1));
+  const farthestStartState = getFarthestIntroStartPose(targetPosition, targetPose);
 
-  const orbitAxis = centerModeUp.clone().normalize();
+  if (farthestStartState) {
+    return {
+      center,
+      startPosition: farthestStartState.position.clone(),
+      startQuaternion: makeLookQuaternion(farthestStartState.position, center),
+      targetPosition: targetPosition.clone(),
+      targetQuaternion: targetQuaternion.clone(),
+    };
+  }
+
+  const targetOffset = targetPosition.clone().sub(center);
+  if (targetOffset.lengthSq() < 1e-8) targetOffset.set(Math.max(radius * 2.5, 1), 0, 0);
+
+  const orbitAxis = INTRO_ORBIT_AXIS.clone().normalize();
   const startOffset = targetOffset.clone()
     .applyAxisAngle(orbitAxis, THREE.MathUtils.degToRad(115))
     .multiplyScalar(1.18);
   const lift = Math.max(radius * 0.22, targetOffset.length() * 0.08, 0.08);
-  startOffset.add(orbitAxis.multiplyScalar(lift));
+  startOffset.z += lift;
 
   const startPosition = center.clone().add(startOffset);
   const startQuaternion = makeLookQuaternion(startPosition, center);
@@ -1338,14 +1399,14 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion) => {
   };
 };
 
-const beginIntroAnimation = (targetCameraState = null) => {
+const beginIntroAnimation = (targetCameraState = null, targetPose = null) => {
   if (!viewer || !viewer.camera) return;
   const splatMesh = viewer.getSplatMesh();
   if (!splatMesh) return;
 
   const targetPosition = targetCameraState?.position?.clone?.() || viewer.camera.position.clone();
   const targetQuaternion = targetCameraState?.quaternion?.clone?.() || viewer.camera.quaternion.clone();
-  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion);
+  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion, targetPose);
   animationState.introStartTime = performance.now();
   animationState.lastFrameTime = Date.now();
   animationState.phase = PHASE.INTRO;
@@ -1557,7 +1618,7 @@ const beginIntroAnimationToResolvedPose = () => {
     applyFocalLengthPx(DEFAULT_FOCAL_PX);
   }
 
-  beginIntroAnimation(targetCameraState);
+  beginIntroAnimation(targetCameraState, targetPose);
 };
 
 const resolvePoseCameraState = (poseData) => {
