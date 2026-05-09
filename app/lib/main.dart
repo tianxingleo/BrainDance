@@ -167,8 +167,13 @@ class _SplashScreenState extends State<_SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
+    final backgroundColor =
+        isDark ? AppTheme.darkBackground : const Color(0xFFF7F8FA);
+    final textColor = isDark ? AppConfig.accentColor : const Color(0xFF1F2329);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF101014), // AppTheme.darkBackground
+      backgroundColor: backgroundColor,
       body: Center(
         child: AnimatedBuilder(
           animation: _controller,
@@ -186,14 +191,14 @@ class _SplashScreenState extends State<_SplashScreen>
                       color: AppConfig.primaryColor,
                     ),
                     const SizedBox(height: 24),
-                    const Text(
+                    Text(
                       'BRAIN DANCE',
                       style: TextStyle(
                         fontFamily: AppConfig.fontFamily,
                         fontSize: 20,
                         letterSpacing: 8.0,
                         fontWeight: FontWeight.w600,
-                        color: AppConfig.accentColor,
+                        color: textColor,
                       ),
                     ),
                     const SizedBox(height: 48),
