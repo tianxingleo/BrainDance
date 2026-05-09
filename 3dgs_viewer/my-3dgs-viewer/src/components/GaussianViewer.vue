@@ -1348,13 +1348,16 @@ const finalizeIntroAnimation = () => {
 };
 
 const getFarthestIntroStartPose = (targetPosition, targetPose = null) => {
-  if (!viewer || !targetPosition || !Array.isArray(cameraPoses.value) || cameraPoses.value.length < 2) return null;
+  const candidatePoses = Array.isArray(filteredPoses.value) && filteredPoses.value.length >= 2
+    ? filteredPoses.value
+    : cameraPoses.value;
+  if (!viewer || !targetPosition || !Array.isArray(candidatePoses) || candidatePoses.length < 2) return null;
 
   const targetPoseId = getPosePresentationId(targetPose);
   let farthestState = null;
   let farthestDistanceSq = -1;
 
-  for (const pose of cameraPoses.value) {
+  for (const pose of candidatePoses) {
     if (targetPose && getPosePresentationId(pose) === targetPoseId) continue;
     const state = resolvePoseCameraState(pose);
     if (!state) continue;
@@ -1368,10 +1371,49 @@ const getFarthestIntroStartPose = (targetPosition, targetPose = null) => {
   return farthestState;
 };
 
-const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = null) => {
+const buildIntroOrbitCurve = (startPosition, targetPosition, center) => {
+  const startOffset = startPosition.clone().sub(center);
+  const endOffset = targetPosition.clone().sub(center);
+  const startRadius = startOffset.length();
+  const endRadius = endOffset.length();
+  const travelDistance = startPosition.distanceTo(targetPosition);
+  const orbitAxis = startOffset.clone().cross(endOffset);
+
+  if (orbitAxis.lengthSq() < 1e-8) {
+    orbitAxis.copy(centerModeUp);
+  } else {
+    orbitAxis.normalize();
+  }
+
+  const startTangent = orbitAxis.clone().cross(startOffset).normalize();
+  const endTangent = orbitAxis.clone().cross(endOffset).normalize();
+  const pullToCenter = center.clone().sub(startPosition).normalize();
+  const pushFromCenter = center.clone().sub(targetPosition).normalize();
+  const arcStrength = Math.max(travelDistance * 0.42, Math.max(startRadius, endRadius) * 0.55, 0.28);
+  const centerLift = Math.max(getSceneRadius() * 0.12, travelDistance * 0.06, 0.08);
+
+  const control1 = startPosition.clone()
+    .add(startTangent.multiplyScalar(arcStrength))
+    .add(pullToCenter.multiplyScalar(Math.max(travelDistance * 0.14, 0.12)))
+    .add(centerModeUp.clone().multiplyScalar(centerLift));
+
+  const control2 = targetPosition.clone()
+    .add(endTangent.multiplyScalar(-arcStrength))
+    .add(pushFromCenter.multiplyScalar(Math.max(travelDistance * 0.14, 0.12)))
+    .add(centerModeUp.clone().multiplyScalar(centerLift * 0.85));
+
+  return new THREE.CubicBezierCurve3(
+    startPosition.clone(),
+    control1,
+    control2,
+    targetPosition.clone()
+  );
+};
+
+const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = null, startCameraState = null) => {
   const center = getModelWorldCenter();
   const radius = getSceneRadius();
-  const farthestStartState = getFarthestIntroStartPose(targetPosition, targetPose);
+  const farthestStartState = startCameraState || getFarthestIntroStartPose(targetPosition, targetPose);
   let startPosition;
   let startQuaternion;
 
@@ -1393,7 +1435,7 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = nu
     startQuaternion = makeLookQuaternion(startPosition, center);
   }
 
-  const curve = buildCameraBezierCurve(startPosition, targetPosition, center);
+  const curve = buildIntroOrbitCurve(startPosition, targetPosition, center);
 
   return {
     center,
@@ -1405,14 +1447,14 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = nu
   };
 };
 
-const beginIntroAnimation = (targetCameraState = null, targetPose = null) => {
+const beginIntroAnimation = (targetCameraState = null, targetPose = null, startCameraState = null) => {
   if (!viewer || !viewer.camera) return;
   const splatMesh = viewer.getSplatMesh();
   if (!splatMesh) return;
 
   const targetPosition = targetCameraState?.position?.clone?.() || viewer.camera.position.clone();
   const targetQuaternion = targetCameraState?.quaternion?.clone?.() || viewer.camera.quaternion.clone();
-  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion, targetPose);
+  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion, targetPose, startCameraState);
   animationState.introStartTime = performance.now();
   animationState.lastFrameTime = Date.now();
   animationState.phase = PHASE.INTRO;
@@ -1600,11 +1642,13 @@ const resolveIntroTargetPose = () => {
     }
   }
 
-  if (!pendingInitialTarget && !didApplyDefaultPose) {
-    const defaultPose = getPreferredDefaultPose();
-    if (defaultPose) {
+  if (!pendingInitialTarget) {
+    const firstPose = (Array.isArray(filteredPoses.value) && filteredPoses.value[0])
+      || (Array.isArray(cameraPoses.value) && cameraPoses.value[0])
+      || null;
+    if (firstPose) {
       didApplyDefaultPose = true;
-      return defaultPose;
+      return firstPose;
     }
   }
 
@@ -1614,6 +1658,7 @@ const resolveIntroTargetPose = () => {
 const beginIntroAnimationToResolvedPose = () => {
   const targetPose = resolveIntroTargetPose();
   const targetCameraState = targetPose ? resolvePoseCameraState(targetPose) : null;
+  const introStartState = targetPose ? getFarthestIntroStartPose(targetCameraState?.position || null, targetPose) : null;
 
   if (targetPose) setActivePosePresentation(targetPose);
   if (targetCameraState?.fl_y && targetCameraState?.h) {
@@ -1624,7 +1669,7 @@ const beginIntroAnimationToResolvedPose = () => {
     applyFocalLengthPx(DEFAULT_FOCAL_PX);
   }
 
-  beginIntroAnimation(targetCameraState, targetPose);
+  beginIntroAnimation(targetCameraState, targetPose, introStartState);
 };
 
 const resolvePoseCameraState = (poseData) => {
@@ -2286,7 +2331,9 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           } else {
             viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
           }
-          viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
+          const orbitLookQuaternion = makeLookQuaternion(viewer.camera.position, introCamera.center);
+          const poseBlend = smoothstep01((rawT - 0.72) / 0.28);
+          viewer.camera.quaternion.slerpQuaternions(orbitLookQuaternion, introCamera.targetQuaternion, poseBlend);
         }
 
         const pointT = smoothstep01(rawT / 0.30);
