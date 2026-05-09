@@ -6,6 +6,7 @@
 
 - `my-3dgs-viewer/`：Vue 3 + Three.js 查看器前端
 - `spark-3dgs-viewer/`：基于 `@sparkjsdev/spark` 的备选查看器前端，不影响原版
+- `vr-3dgs-viewer/`：PC WebXR / SteamVR VR 预览端，用于 PICO Neo 2 等头显串流查看 3DGS
 - `run_glomap.py`：本地视频到查看器资源的实验脚本
 - `export_poses.py`：位姿导出工具
 - `sync_images.py`：同步参考图片到查看器目录
@@ -34,6 +35,16 @@ cd 3dgs_viewer/spark-3dgs-viewer
 npm install
 npm run dev
 ```
+
+VR 预览端：
+
+```bash
+cd 3dgs_viewer/vr-3dgs-viewer
+npm install
+npm run dev
+```
+
+启动 SteamVR 后，用 PC Chrome / Edge 打开 `https://127.0.0.1:5174/`，点击 `Enter VR` 进入沉浸式查看。真实模型建议通过 `?payload=<encoded-json>` 传入 `ply / poses / sceneId`。
 
 ### 2. 同步图片
 
