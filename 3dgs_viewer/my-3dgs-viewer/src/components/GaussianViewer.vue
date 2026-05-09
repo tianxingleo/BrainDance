@@ -1286,7 +1286,7 @@ const applyAdvancedShader = (mesh) => {
       float innerSq = innerRadius * innerRadius;
       float outerSq = radius * radius;
       if (distSq > outerSq) discard;
-      float revealT = smoothstep(innerSq, outerSq, distSq);
+      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
       if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
 
       // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
@@ -1419,7 +1419,7 @@ const beginIntroAnimation = (targetCameraState = null, targetPose = null, startC
   animationState.isLoaded = true;
 
   resetIntroAnimationVisuals();
-  splatMesh.visible = false;
+  splatMesh.visible = true;
   viewer.camera.position.copy(animationState.introCamera.startPosition);
   viewer.camera.quaternion.copy(animationState.introCamera.startQuaternion);
   viewer.camera.updateProjectionMatrix();
@@ -2290,19 +2290,18 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         }
 
         const pointT = smoothstep01(rawT / 0.24);
-        const revealT = smoothstep01((rawT - 0.12) / 0.72);
-        const splatAlpha = smoothstep01((rawT - 0.16) / 0.60);
+        const morphT = smoothstep01((rawT - 0.12) / 0.60);
         globalUniforms.uParticleProgress.value = pointT;
-        globalUniforms.uRevealProgress.value = revealT;
-        globalUniforms.uIntroSplatAlpha.value = splatAlpha;
+        globalUniforms.uRevealProgress.value = morphT;
+        globalUniforms.uIntroSplatAlpha.value = morphT;
         globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
-        if (splatMesh && rawT >= 0.46) splatMesh.visible = true;
+        if (splatMesh) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.26) / 0.20), 0, 1);
-          particleSystem.visible = rawT < 0.68;
+          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - morphT, 0, 1);
+          particleSystem.visible = rawT < 0.96;
         }
 
         if (rawT >= 1) {
