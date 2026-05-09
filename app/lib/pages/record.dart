@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -43,6 +44,12 @@ final saveFailBubbleProvider = StateProvider<String?>((ref) => null);
 /// 录制时间过短 → 中央气泡
 final showTooShortBubbleProvider = StateProvider<bool>((ref) => false);
 
+/// 流式拍摄完成气泡（null = 隐藏）
+final streamingDoneBubbleProvider = StateProvider<String?>((ref) => null);
+
+/// 流式传输模式开关
+final streamingModeProvider = StateProvider<bool>((ref) => false);
+
 enum _MotionState { steady, ideal, caution, danger }
 
 class RecordPage extends ConsumerStatefulWidget {
@@ -68,6 +75,17 @@ class _RecordPageState extends ConsumerState<RecordPage>
   bool _isToggling = false;
   DateTime? _recordingStartTime;
   static const _minRecordingMs = 500;
+
+  // ---- streaming mode state ----
+  Timer? _streamingTimer;
+  String? _streamingSceneId;
+  int _streamingFrameIndex = 0;
+  final List<Future> _pendingUploads = [];
+  int _streamingSuccessCount = 0;
+  int _streamingFailCount = 0;
+  static const _streamingIntervalSec = 1;
+  static const _streamingMaxDurationSec = 600; // 10 min
+  bool _streamingUploading = false;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -129,6 +147,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
     WidgetsBinding.instance.removeObserver(this);
     _recordTimer?.cancel();
     _recordTimer = null;
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
     _stopSensors();
     _setGlobalRecording(false);
     _buttonAnimController.dispose();
@@ -150,7 +170,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
 
       if (controller != null && controller.value.isInitialized) {
-        if (controller.value.isRecordingVideo) {
+        if (ref.read(streamingModeProvider) && _streamingTimer != null) {
+          _stopStreaming();
+        } else if (controller.value.isRecordingVideo) {
           _stopVideoRecording(
             controller,
             showToast: false,
@@ -191,6 +213,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
   void _resetRecordingState({bool updateUi = false}) {
     _recordTimer?.cancel();
     _recordTimer = null;
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
+    _streamingSceneId = null;
+    _pendingUploads.clear();
+    _streamingUploading = false;
     _recordSeconds = 0;
     _recordingStartTime = null;
     _setGlobalRecording(false);
@@ -282,14 +309,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
           opaque: true,
           pageBuilder: (_, __, ___) =>
               VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
-          transitionsBuilder: (_, animation, __, child) {
-            return SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, -1),
-                end: Offset.zero,
-              ).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
-              ),
+          transitionsBuilder: (ctx, animation, __, child) {
+            final curved = animation.drive(
+              CurveTween(curve: Curves.easeInOutCubic),
+            );
+            return AnimatedBuilder(
+              animation: curved,
+              builder: (_, child) {
+                final screenHeight = MediaQuery.of(ctx).size.height;
+                return Transform.translate(
+                  offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                  child: child,
+                );
+              },
               child: child,
             );
           },
@@ -308,41 +340,173 @@ class _RecordPageState extends ConsumerState<RecordPage>
       return;
     }
 
-    final isVideoRecording = ref.read(isRecordingProvider);
-    if (isVideoRecording) {
+    final isRecording = ref.read(isRecordingProvider);
+    if (isRecording) {
       try {
-        await _stopVideoRecording(controller);
+        if (ref.read(streamingModeProvider)) {
+          await _stopStreaming();
+        } else {
+          await _stopVideoRecording(controller);
+        }
       } finally {
         _isToggling = false;
       }
       return;
     }
 
-    _resetRecordingState(updateUi: false);
-    _setGlobalRecording(true);
-    try {
-      await controller.startVideoRecording();
-    } catch (_) {
-      _resetRecordingState(updateUi: true);
-      _isToggling = false;
-      rethrow;
-    }
-    try {
-      await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
-    } catch (_) {}
-    _recordSeconds = 0;
-    _recordingStartTime = DateTime.now();
-
-    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _recordSeconds++;
-      if (_recordSeconds >= 600) {
-        _stopVideoRecording(controller);
-      } else if (mounted) {
-        setState(() {});
+    if (ref.read(streamingModeProvider)) {
+      await _startStreaming(controller);
+    } else {
+      _resetRecordingState(updateUi: false);
+      _setGlobalRecording(true);
+      try {
+        await controller.startVideoRecording();
+      } catch (_) {
+        _resetRecordingState(updateUi: true);
+        _isToggling = false;
+        rethrow;
       }
-    });
+      try {
+        await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
+      } catch (_) {}
+      _recordSeconds = 0;
+      _recordingStartTime = DateTime.now();
+
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _recordSeconds++;
+        if (_recordSeconds >= 600) {
+          _stopVideoRecording(controller);
+        } else if (mounted) {
+          setState(() {});
+        }
+      });
+    }
 
     _isToggling = false;
+  }
+
+  String _generateStreamingSceneId() {
+    final time = DateTime.now();
+    final r = Random();
+    return 'stream_'
+        '${time.year}'
+        '${time.month.toString().padLeft(2, '0')}'
+        '${time.day.toString().padLeft(2, '0')}'
+        '${time.hour.toString().padLeft(2, '0')}'
+        '${time.minute.toString().padLeft(2, '0')}'
+        '_'
+        '${r.nextInt(1000000).toString().padLeft(6, '0')}';
+  }
+
+  Future<void> _startStreaming(CameraController controller) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      _isToggling = false;
+      return;
+    }
+
+    _streamingSceneId = _generateStreamingSceneId();
+    _streamingFrameIndex = 0;
+    _streamingSuccessCount = 0;
+    _streamingFailCount = 0;
+    _pendingUploads.clear();
+    _streamingUploading = false;
+    _recordSeconds = 0;
+    _setGlobalRecording(true);
+
+    // Capture first frame immediately, then every 1s
+    _captureAndUploadFrame(controller, user.id);
+    _streamingTimer = Timer.periodic(
+      const Duration(seconds: _streamingIntervalSec),
+      (_) {
+        _recordSeconds++;
+        if (_recordSeconds >= _streamingMaxDurationSec) {
+          _stopStreaming();
+          return;
+        }
+        if (mounted) {
+          setState(() {});
+          _captureAndUploadFrame(controller, user.id);
+        }
+      },
+    );
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _captureAndUploadFrame(
+    CameraController controller,
+    String userId,
+  ) async {
+    if (_streamingUploading) return;
+    _streamingUploading = true;
+
+    final sceneId = _streamingSceneId!;
+    final frameIndex = ++_streamingFrameIndex;
+    final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
+
+    XFile? photo;
+    try {
+      photo = await controller.takePicture();
+    } catch (e) {
+      debugPrint('[_captureAndUpload] takePicture failed: $e');
+      _streamingFailCount++;
+      _streamingUploading = false;
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final file = File(photo.path);
+    final storagePath = '$userId/$sceneId/raw/$frameLabel.png';
+
+    final uploadFuture = Supabase.instance.client.storage
+        .from('braindance-assets')
+        .upload(storagePath, file)
+        .then((result) {
+      _streamingSuccessCount++;
+      debugPrint('[_captureAndUpload] uploaded $frameLabel → $result');
+    }).catchError((e) {
+      _streamingFailCount++;
+      debugPrint('[_captureAndUpload] upload failed: $e');
+    }).whenComplete(() {
+      try {
+        file.deleteSync();
+      } catch (_) {}
+    });
+
+    _pendingUploads.add(uploadFuture);
+
+    // Cleanup old futures (keep last 5)
+    while (_pendingUploads.length > 5) {
+      _pendingUploads.removeAt(0);
+    }
+
+    _streamingUploading = false;
+  }
+
+  Future<void> _stopStreaming() async {
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
+    _setGlobalRecording(false);
+
+    if (!mounted) return;
+
+    // Wait for pending uploads
+    await Future.wait(_pendingUploads);
+
+    if (!mounted) return;
+
+    final message = _streamingFailCount == 0
+        ? '流式拍摄完成：$_streamingSuccessCount 张照片已上传'
+        : '拍摄完成：$_streamingSuccessCount 张成功，$_streamingFailCount 张失败';
+
+    debugPrint('[streaming] done. scene=$_streamingSceneId $message');
+    ref.read(streamingDoneBubbleProvider.notifier).state = message;
+
+    _pendingUploads.clear();
+    _streamingSceneId = null;
+
+    if (mounted) setState(() {});
   }
 
   void _computeOrientation() {
@@ -842,12 +1006,21 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         vertical: 4,
                       ),
                       child: IconButton(
-                        icon: const Icon(
-                          Icons.close,
-                          color: BDDesign.colorAshGray,
+                        icon: Icon(
+                          ref.watch(streamingModeProvider)
+                              ? Icons.photo_camera
+                              : Icons.videocam_outlined,
+                          color: ref.watch(streamingModeProvider)
+                              ? BDDesign.colorPaperWhite
+                              : BDDesign.colorAshGray,
                           size: 24,
                         ),
-                        onPressed: () => Navigator.maybePop(context),
+                        onPressed: () {
+                          ref
+                              .read(streamingModeProvider.notifier)
+                              .state = !ref.read(streamingModeProvider);
+                          if (mounted) setState(() {});
+                        },
                       ),
                     ),
                   ],
