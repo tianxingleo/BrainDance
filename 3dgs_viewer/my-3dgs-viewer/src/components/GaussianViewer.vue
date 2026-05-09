@@ -24,6 +24,8 @@ const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
 const loadError = ref(''); // 添加错误状态
+const loadingProgress = ref(0);
+const loadingStatusText = ref('准备加载模型');
 const currentFps = ref(0); // 实时帧数
 const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
@@ -62,6 +64,7 @@ const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 120000;
 const MOBILE_INTRO_PARTICLE_BUDGET = 45000;
+const INTRO_DURATION_MS = 6500;
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -254,14 +257,33 @@ const addSplatSceneWithFormatFallback = async (sourceUrl) => {
   for (const candidate of candidates) {
     try {
       console.log(`[Viewer] 加载模型: ${candidate}`);
+      loadingStatusText.value = '下载模型数据';
       await viewer.addSplatScene(candidate, {
-        'showLoadingUI': true,
+        'showLoadingUI': false,
         'progressiveLoad': false,
         'optimizeSplatData': true,
         'freeIntermediateSplatData': true,
+        'onProgress': (percentComplete, percentCompleteLabel, loaderStatus) => {
+          const percent = Number(percentComplete);
+          if (Number.isFinite(percent)) {
+            const normalized = THREE.MathUtils.clamp(percent / 100, 0, 1);
+            loadingProgress.value = loaderStatus === 1
+              ? THREE.MathUtils.clamp(0.96 + normalized * 0.04, loadingProgress.value, 1)
+              : THREE.MathUtils.clamp(normalized * 0.96, loadingProgress.value, 0.96);
+          }
+          if (loaderStatus === 1) {
+            loadingStatusText.value = '解析并构建高斯数据';
+          } else {
+            loadingStatusText.value = percentCompleteLabel
+              ? `下载模型数据 ${percentCompleteLabel}`
+              : '下载模型数据';
+          }
+        },
         'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
       });
       currentPlyUrl = candidate;
+      loadingProgress.value = 1;
+      loadingStatusText.value = '模型加载完成，准备入场动画';
       return candidate;
     } catch (error) {
       lastError = error;
@@ -1007,20 +1029,17 @@ const manualRotate = (axis, angleDeg) => {
 
 // --- 1. 状态管理 ---
 const PHASE = {
-  FLY_IN: 0,
-  DIFFUSION: 1,
-  COLORING: 2,
-  FINISHED: 3
+  INTRO: 0,
+  FINISHED: 1
 };
 
 const animationState = {
   isLoaded: false,
   lastFrameTime: 0,
-  phase: PHASE.FLY_IN,
-
-  flyDuration: 1.5,
-  diffusionDuration: 1.0,
-  colorDuration: 4.0,
+  phase: PHASE.INTRO,
+  introStartTime: 0,
+  introDurationMs: INTRO_DURATION_MS,
+  introCamera: null,
 };
 
 const globalUniforms = {
@@ -1030,6 +1049,9 @@ const globalUniforms = {
   uColorRadius: { value: 0 },
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
   uParticleProgress: { value: 0 },
+  uRevealProgress: { value: 0 },
+  uRevealFeather: { value: 0.12 },
+  uIntroSplatAlpha: { value: 0 },
 };
 
 // --- 2. 自适应粒子系统 (核心修改) ---
@@ -1092,7 +1114,9 @@ const createParticleSystem = (splatMesh) => {
   const geometry = new THREE.BufferGeometry();
   const startPositions = new Float32Array(sampledCount * 3);
   const targetPositions = new Float32Array(sampledCount * 3);
+  const colors = new Float32Array(sampledCount * 3);
   const randoms = new Float32Array(sampledCount);
+  const tempColor = new THREE.Vector4(0.6, 0.6, 0.6, 1);
   let sampleIndex = 0;
 
   for (let i = 0; i < splatCount; i += step) {
@@ -1103,6 +1127,18 @@ const createParticleSystem = (splatMesh) => {
     targetPositions[positionIndex] = tempVec.x;
     targetPositions[positionIndex + 1] = tempVec.y;
     targetPositions[positionIndex + 2] = tempVec.z;
+
+    if (typeof splatMesh.getSplatColor === 'function') {
+      try {
+        splatMesh.getSplatColor(i, tempColor);
+      } catch (_) {
+        tempColor.set(0.6, 0.6, 0.6, 1);
+      }
+    }
+    const colorScale = Math.max(tempColor.x, tempColor.y, tempColor.z) > 1 ? 255 : 1;
+    colors[positionIndex] = THREE.MathUtils.clamp(tempColor.x / colorScale, 0, 1);
+    colors[positionIndex + 1] = THREE.MathUtils.clamp(tempColor.y / colorScale, 0, 1);
+    colors[positionIndex + 2] = THREE.MathUtils.clamp(tempColor.z / colorScale, 0, 1);
 
     // 随机分布在远处 (基于自适应的 maxDim)
     const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
@@ -1123,19 +1159,21 @@ const createParticleSystem = (splatMesh) => {
 
   geometry.setAttribute('position', new THREE.BufferAttribute(startPositions, 3));
   geometry.setAttribute('aTarget', new THREE.BufferAttribute(targetPositions, 3));
+  geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1));
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uProgress: globalUniforms.uParticleProgress,
       uSize: { value: adaptiveSize }, // 使用计算出的大小
-      uColor: { value: new THREE.Color(0.6, 0.6, 0.6) }
     },
     vertexShader: `
       uniform float uProgress;
       uniform float uSize;
       attribute vec3 aTarget;
+      attribute vec3 aColor;
       attribute float aRandom;
+      varying vec3 vColor;
       
       float easeOutCubic(float x) { return 1.0 - pow(1.0 - x, 3.0); }
       
@@ -1143,6 +1181,7 @@ const createParticleSystem = (splatMesh) => {
         float t = (uProgress - aRandom * 0.1) / 0.9;
         t = clamp(t, 0.0, 1.0);
         vec3 pos = mix(position, aTarget, easeOutCubic(t));
+        vColor = aColor;
         
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
@@ -1153,11 +1192,11 @@ const createParticleSystem = (splatMesh) => {
       }
     `,
     fragmentShader: `
-      uniform vec3 uColor;
+      varying vec3 vColor;
       void main() {
         vec2 coord = gl_PointCoord - vec2(0.5);
         if(length(coord) > 0.5) discard;
-        gl_FragColor = vec4(uColor, 1.0);
+        gl_FragColor = vec4(vColor, 1.0);
       }
     `,
     transparent: true,
@@ -1181,6 +1220,9 @@ const applyAdvancedShader = (mesh) => {
   material.uniforms.uColorRadius = globalUniforms.uColorRadius;
   material.uniforms.uMaxRadius = globalUniforms.uMaxRadius;
   material.uniforms.uCenter = globalUniforms.uCenter;
+  material.uniforms.uRevealProgress = globalUniforms.uRevealProgress;
+  material.uniforms.uRevealFeather = globalUniforms.uRevealFeather;
+  material.uniforms.uIntroSplatAlpha = globalUniforms.uIntroSplatAlpha;
 
   material.vertexShader = `varying vec3 vWorldPosition;
 ` + material.vertexShader;
@@ -1195,6 +1237,9 @@ const applyAdvancedShader = (mesh) => {
     uniform float uGeoRadius;
     uniform float uColorRadius;
     uniform float uMaxRadius;
+    uniform float uRevealProgress;
+    uniform float uRevealFeather;
+    uniform float uIntroSplatAlpha;
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
   `;
@@ -1205,19 +1250,113 @@ const applyAdvancedShader = (mesh) => {
     const originalContent = material.fragmentShader.substring(0, fsEndIndex);
     const visualLogic = `
       float distFromCenter = distance(vWorldPosition, uCenter);
-      
-      if (distFromCenter > uGeoRadius) {
-          discard;
-      }
-      if (distFromCenter > uColorRadius) {
-          if (gl_FragColor.a < 0.8) discard; 
-          gl_FragColor.a = 1.0; 
-          gl_FragColor.rgb = vec3(0.6, 0.6, 0.6);
-      } 
+      float normalizedOrder = clamp(distFromCenter / max(uMaxRadius, 0.0001), 0.0, 1.0);
+      float revealT = smoothstep(normalizedOrder, normalizedOrder + uRevealFeather, uRevealProgress);
+
+      if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
+
+      // 入场阶段只收窄椭球边缘透明度，不覆盖原始 splat 颜色。
+      float alphaClip = mix(0.92, 0.02, revealT);
+      if (gl_FragColor.a < alphaClip) discard;
+      gl_FragColor.a *= revealT * uIntroSplatAlpha;
     `;
     material.fragmentShader = originalContent + visualLogic + '}';
   }
   material.needsUpdate = true;
+};
+
+const smoothstep01 = (value) => {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+const resetIntroUniforms = () => {
+  globalUniforms.uParticleProgress.value = 0;
+  globalUniforms.uRevealProgress.value = 0;
+  globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uGeoRadius.value = 0;
+  globalUniforms.uColorRadius.value = 0;
+  if (particleSystem) {
+    particleSystem.geometry?.dispose?.();
+    particleSystem.material?.dispose?.();
+    if (viewer?.threeScene) viewer.threeScene.remove(particleSystem);
+    particleSystem = null;
+  }
+};
+
+const resetIntroAnimationVisuals = () => {
+  globalUniforms.uParticleProgress.value = 0;
+  globalUniforms.uRevealProgress.value = 0;
+  globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uGeoRadius.value = 0;
+  globalUniforms.uColorRadius.value = 0;
+  if (particleSystem) {
+    particleSystem.visible = true;
+    if (particleSystem.material) particleSystem.material.opacity = 1;
+  }
+};
+
+const finalizeIntroAnimation = () => {
+  const splatMesh = viewer?.getSplatMesh?.();
+  if (splatMesh) splatMesh.visible = true;
+  if (particleSystem) particleSystem.visible = false;
+  globalUniforms.uParticleProgress.value = 1;
+  globalUniforms.uRevealProgress.value = 1.5;
+  globalUniforms.uIntroSplatAlpha.value = 1;
+  globalUniforms.uGeoRadius.value = 99999;
+  globalUniforms.uColorRadius.value = 99999;
+  animationState.phase = PHASE.FINISHED;
+  animationState.isLoaded = false;
+  animationState.introCamera = null;
+  if (viewer?.controls) viewer.controls.enabled = true;
+  if (isOrbitMode.value) syncOrbitTarget();
+  updateDebugInfo();
+};
+
+const buildIntroOrbitCamera = (targetPosition, targetQuaternion) => {
+  const center = getModelWorldCenter();
+  const radius = getSceneRadius();
+  const targetOffset = targetPosition.clone().sub(center);
+  if (targetOffset.lengthSq() < 1e-8) targetOffset.set(0, 0, Math.max(radius * 2.5, 1));
+
+  const orbitAxis = centerModeUp.clone().normalize();
+  const startOffset = targetOffset.clone()
+    .applyAxisAngle(orbitAxis, THREE.MathUtils.degToRad(115))
+    .multiplyScalar(1.18);
+  const lift = Math.max(radius * 0.22, targetOffset.length() * 0.08, 0.08);
+  startOffset.add(orbitAxis.multiplyScalar(lift));
+
+  const startPosition = center.clone().add(startOffset);
+  const startQuaternion = makeLookQuaternion(startPosition, center);
+
+  return {
+    center,
+    startPosition,
+    startQuaternion,
+    targetPosition: targetPosition.clone(),
+    targetQuaternion: targetQuaternion.clone(),
+  };
+};
+
+const beginIntroAnimation = (targetCameraState = null) => {
+  if (!viewer || !viewer.camera) return;
+  const splatMesh = viewer.getSplatMesh();
+  if (!splatMesh) return;
+
+  const targetPosition = targetCameraState?.position?.clone?.() || viewer.camera.position.clone();
+  const targetQuaternion = targetCameraState?.quaternion?.clone?.() || viewer.camera.quaternion.clone();
+  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion);
+  animationState.introStartTime = performance.now();
+  animationState.lastFrameTime = Date.now();
+  animationState.phase = PHASE.INTRO;
+  animationState.isLoaded = true;
+
+  resetIntroAnimationVisuals();
+  splatMesh.visible = false;
+  viewer.camera.position.copy(animationState.introCamera.startPosition);
+  viewer.camera.quaternion.copy(animationState.introCamera.startQuaternion);
+  viewer.camera.updateProjectionMatrix();
+  if (viewer.controls) viewer.controls.enabled = false;
 };
 
 const normalizeMatrixArray = (input) => {
@@ -1312,36 +1451,36 @@ const findPoseByInitialTarget = (target) => {
   return bestDiff <= 1e-4 ? bestPose : null;
 };
 
-const maybeApplyInitialTarget = (forceFallback = false) => {
-  if (!pendingInitialTarget || didApplyInitialTarget) return;
+const resolveInitialTargetPose = (forceFallback = false) => {
+  if (!pendingInitialTarget) return null;
 
   if (!pendingInitialTarget.imageId) {
     const preferredDefaultPose = getPreferredDefaultPose();
-    if (preferredDefaultPose) {
-      didApplyInitialTarget = true;
-      flyToImage(preferredDefaultPose);
-      return;
-    }
+    if (preferredDefaultPose) return preferredDefaultPose;
   }
 
   const resolvedPose = findPoseByInitialTarget(pendingInitialTarget);
-  if (resolvedPose) {
-    didApplyInitialTarget = true;
-    flyToImage(resolvedPose);
-    return;
-  }
+  if (resolvedPose) return resolvedPose;
 
-  if (!forceFallback) return;
-  if (pendingInitialTarget.imageId && !posesFetchSettled) return;
+  if (!forceFallback) return null;
+  if (pendingInitialTarget.imageId && !posesFetchSettled) return null;
 
   const fallbackMatrix = normalizeMatrixArray(pendingInitialTarget.matrix);
-  if (!fallbackMatrix) return;
+  if (!fallbackMatrix) return null;
 
-  didApplyInitialTarget = true;
-  flyToImage({
+  return {
     matrix: fallbackMatrix,
     image_url: pendingInitialTarget.imageId || '',
-  });
+  };
+};
+
+const maybeApplyInitialTarget = (forceFallback = false) => {
+  if (!pendingInitialTarget || didApplyInitialTarget) return;
+  const targetPose = resolveInitialTargetPose(forceFallback);
+  if (!targetPose) return;
+
+  didApplyInitialTarget = true;
+  flyToImage(targetPose);
 };
 
 const hasUsablePoseImage = (pose) => {
@@ -1383,6 +1522,42 @@ const maybeApplyDefaultPose = () => {
 
   didApplyDefaultPose = true;
   flyToImage(defaultPose);
+};
+
+const resolveIntroTargetPose = () => {
+  if (pendingInitialTarget && !didApplyInitialTarget) {
+    const targetPose = resolveInitialTargetPose(true);
+    if (targetPose) {
+      didApplyInitialTarget = true;
+      return targetPose;
+    }
+  }
+
+  if (!pendingInitialTarget && !didApplyDefaultPose) {
+    const defaultPose = getPreferredDefaultPose();
+    if (defaultPose) {
+      didApplyDefaultPose = true;
+      return defaultPose;
+    }
+  }
+
+  return null;
+};
+
+const beginIntroAnimationToResolvedPose = () => {
+  const targetPose = resolveIntroTargetPose();
+  const targetCameraState = targetPose ? resolvePoseCameraState(targetPose) : null;
+
+  if (targetPose) setActivePosePresentation(targetPose);
+  if (targetCameraState?.fl_y && targetCameraState?.h) {
+    sceneMetadata.value.h = targetCameraState.h;
+    manualFocalPx.value = Number(targetCameraState.fl_y.toFixed(1));
+    applyFocalLengthPx(targetCameraState.fl_y);
+  } else {
+    applyFocalLengthPx(DEFAULT_FOCAL_PX);
+  }
+
+  beginIntroAnimation(targetCameraState);
 };
 
 const resolvePoseCameraState = (poseData) => {
@@ -1874,6 +2049,9 @@ const parseInitialInputFromUrl = () => {
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
+  loadingProgress.value = 0;
+  loadingStatusText.value = '准备加载模型';
+  loadError.value = '';
   stopCinematicPlayback();
 
   // 清除旧模型的视角数据和 UI 状态，防止切换模型时残留
@@ -1906,10 +2084,9 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     }
 
     animationState.isLoaded = false;
-    animationState.phase = PHASE.FLY_IN;
-    globalUniforms.uParticleProgress.value = 0;
-    globalUniforms.uGeoRadius.value = 0;
-    globalUniforms.uColorRadius.value = 0;
+    animationState.phase = PHASE.INTRO;
+    animationState.introCamera = null;
+    resetIntroUniforms();
     pendingInitialTarget = null;
     didApplyInitialTarget = false;
     didApplyDefaultPose = false;
@@ -1923,109 +2100,78 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
     await addSplatSceneWithFormatFallback(currentPlyUrl);
 
-    
-    // 告诉 Flutter：模型加载完成
+    // 加载相机位姿（支持本地路径与云端 URL）
+    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
+    loadingStatusText.value = '加载参考镜头';
+    try {
+      const res = await fetch(currentPosesUrl);
+      const data = await res.json();
+      posesFetchSettled = true;
+      // 数据适配
+      if (data.frames) {
+        sceneMetadata.value = {
+          w: data.w,
+          h: data.h,
+          fl_x: data.fl_x,
+          fl_y: data.fl_y
+        };
+        manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
+        cameraPoses.value = data.frames.map(frame => {
+          let imgUrl = frame.image_url;
+          if (imgUrl && !imgUrl.startsWith('http')) {
+            if (currentPosesUrl.startsWith('http')) {
+              // Determine base path from currentPosesUrl
+              const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
+              let relPath = imgUrl;
+              const imagesIndex = relPath.indexOf('images/');
+              if (imagesIndex !== -1) {
+                relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
+              } else if (relPath.startsWith('/models/')) {
+                relPath = relPath.substring('/models/'.length);
+              } else if (relPath.startsWith('/')) {
+                relPath = relPath.substring(1);
+              }
+              imgUrl = `${baseUrl}/${relPath}`;
+            }
+          }
+          imgUrl = toViewerSafeAssetUrl(imgUrl);
+          return {
+            id: frame.id,
+            matrix: frame.matrix,
+            image_url: imgUrl,
+            tag: frame.tag,
+            fl_x: frame.fl_x,
+            fl_y: frame.fl_y,
+            w: frame.w || data.w,
+            h: frame.h || data.h
+          };
+        });
+      } else {
+        cameraPoses.value = data; // 兼容旧格式
+      }
+    } catch (err) {
+      posesFetchSettled = true;
+      console.error("加载位姿失败:", err);
+    }
+
+    const splatMesh = viewer.getSplatMesh();
+    splatMesh.visible = false;
+    createParticleSystem(splatMesh);
+    applyAdvancedShader(splatMesh);
+
+    if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
+      pendingInitialTarget = {
+        matrix: initialTarget.matrix || null,
+        imageId: initialTarget.imageId || null
+      };
+    }
+
     isLoading.value = false;
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
     }
 
-    // 加载相机位姿（支持本地路径与云端 URL）
-    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
-    fetch(currentPosesUrl)
-      .then(res => res.json())
-      .then(data => {
-        posesFetchSettled = true;
-        // 数据适配
-        if (data.frames) {
-          sceneMetadata.value = {
-            w: data.w,
-            h: data.h,
-            fl_x: data.fl_x,
-            fl_y: data.fl_y
-          };
-          manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
-          cameraPoses.value = data.frames.map(frame => {
-            let imgUrl = frame.image_url;
-            if (imgUrl && !imgUrl.startsWith('http')) {
-              if (currentPosesUrl.startsWith('http')) {
-                // Determine base path from currentPosesUrl
-                const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
-                let relPath = imgUrl;
-                const imagesIndex = relPath.indexOf('images/');
-                if (imagesIndex !== -1) {
-                  relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
-                } else if (relPath.startsWith('/models/')) {
-                  relPath = relPath.substring('/models/'.length);
-                } else if (relPath.startsWith('/')) {
-                  relPath = relPath.substring(1);
-                }
-                imgUrl = `${baseUrl}/${relPath}`;
-              }
-            }
-            imgUrl = toViewerSafeAssetUrl(imgUrl);
-            return {
-              id: frame.id,
-              matrix: frame.matrix,
-              image_url: imgUrl,
-              tag: frame.tag,
-              fl_x: frame.fl_x,
-              fl_y: frame.fl_y,
-              w: frame.w || data.w,
-              h: frame.h || data.h
-            };
-          });
-          // 首次加载按拍摄焦距初始化查看相机
-          if (sceneMetadata.value.fl_y && sceneMetadata.value.h) {
-            applyFocalLengthPx(sceneMetadata.value.fl_y);
-          } else {
-            applyFocalLengthPx(DEFAULT_FOCAL_PX);
-          }
-          maybeApplyInitialTarget(true);
-          maybeApplyDefaultPose();
-        } else {
-          cameraPoses.value = data; // 兼容旧格式
-          applyFocalLengthPx(DEFAULT_FOCAL_PX);
-          maybeApplyInitialTarget(true);
-          maybeApplyDefaultPose();
-        }
-      })
-      .catch(err => {
-        posesFetchSettled = true;
-        console.error("加载位姿失败:", err);
-        applyFocalLengthPx(DEFAULT_FOCAL_PX);
-        maybeApplyInitialTarget(true);
-      });
-
-    const splatMesh = viewer.getSplatMesh();
-    splatMesh.visible = false;
-
-    setTimeout(() => {
-      if (splatMesh) {
-        // 先生成粒子系统，这会计算出 uCenter 和 uMaxRadius
-        createParticleSystem(splatMesh);
-        // 然后应用 Shader
-        applyAdvancedShader(splatMesh);
-        
-          if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
-            pendingInitialTarget = {
-              matrix: initialTarget.matrix || null,
-              imageId: initialTarget.imageId || null
-            };
-            maybeApplyInitialTarget(posesFetchSettled);
-            setTimeout(() => { maybeApplyInitialTarget(false); }, 50);
-            if (!initialTarget.imageId) {
-              setTimeout(() => { maybeApplyInitialTarget(true); }, 800);
-            }
-          } else {
-            setTimeout(() => { maybeApplyDefaultPose(); }, 80);
-          }
-
-        animationState.lastFrameTime = Date.now();
-        animationState.startTime = Date.now();
-        animationState.isLoaded = true;
-      }
-    }, 200);
+    beginIntroAnimationToResolvedPose();
     // --- 5. 动画循环 (120 FPS 上限) ---
     let lastDrawTime = performance.now();
     const fpsInterval = 1000 / 120; // 目标 120 帧
@@ -2058,54 +2204,38 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       const dt = (now - animationState.lastFrameTime) / 1000 || 0.016;
       animationState.lastFrameTime = now;
 
-      // 1. 飞入
-      if (animationState.phase === PHASE.FLY_IN) {
-        const speed = 1.0 / animationState.flyDuration;
-        let p = globalUniforms.uParticleProgress.value + (dt * speed);
+      if (animationState.phase === PHASE.INTRO) {
+        const rawT = THREE.MathUtils.clamp(
+          (performance.now() - animationState.introStartTime) / animationState.introDurationMs,
+          0,
+          1
+        );
+        const t = smoothstep01(rawT);
+        const introCamera = animationState.introCamera;
 
-        if (p >= 1.2) { // 稍微给点余量保证完全到达
-          p = 1.2;
-          const splatMesh = viewer.getSplatMesh();
-          if (splatMesh) splatMesh.visible = true;
-
-          animationState.phase = PHASE.DIFFUSION;
-          animationState.diffuseTime = 0;
+        if (introCamera) {
+          viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
+          viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
-        globalUniforms.uParticleProgress.value = p;
-      }
 
-      // 2. 扩散切换
-      else if (animationState.phase === PHASE.DIFFUSION) {
-        animationState.diffuseTime += dt;
-        const progress = Math.min(animationState.diffuseTime / animationState.diffusionDuration, 1.0);
+        const pointT = smoothstep01(rawT / 0.45);
+        const revealT = smoothstep01((rawT - 0.25) / 0.75);
+        const splatAlpha = smoothstep01((rawT - 0.42) / 0.58);
+        globalUniforms.uParticleProgress.value = pointT;
+        globalUniforms.uRevealProgress.value = revealT * 1.5;
+        globalUniforms.uIntroSplatAlpha.value = splatAlpha;
+        globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
-        const maxR = globalUniforms.uMaxRadius.value;
-        globalUniforms.uGeoRadius.value = progress * (maxR * 1.5); // 确保覆盖角落
-
+        const splatMesh = viewer.getSplatMesh();
+        if (splatMesh && rawT >= 0.25) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = 1.0 - progress;
+          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.38) / 0.34), 0, 1);
+          particleSystem.visible = rawT < 0.78;
         }
 
-        if (progress >= 1.0) {
-          if (particleSystem) particleSystem.visible = false;
-          globalUniforms.uGeoRadius.value = 99999.0;
-
-          animationState.phase = PHASE.COLORING;
-          animationState.colorStartTime = now;
-        }
-      }
-
-      // 3. 上色
-      else if (animationState.phase === PHASE.COLORING) {
-        const colorTime = (now - animationState.colorStartTime) / 1000;
-        const maxR = globalUniforms.uMaxRadius.value;
-        const progress = colorTime / animationState.colorDuration;
-
-        globalUniforms.uColorRadius.value = progress * (maxR * 1.5);
-
-        if (progress >= 1.0) {
-          animationState.phase = PHASE.FINISHED;
-          globalUniforms.uColorRadius.value = 99999.0;
+        if (rawT >= 1) {
+          finalizeIntroAnimation();
         }
       }
     });
@@ -2976,7 +3106,11 @@ onBeforeUnmount(async () => {
       <div class="loading-card">
         <div class="loading-dot"></div>
         <div class="loading-title">场景正在展开</div>
-        <div class="loading-copy">模型与参考镜头正在同步到工作台。</div>
+        <div class="loading-copy">{{ loadingStatusText }}</div>
+        <div class="loading-progress" aria-hidden="true">
+          <div class="loading-progress-fill" :style="{ width: `${Math.round(loadingProgress * 100)}%` }"></div>
+        </div>
+        <div class="loading-percent">{{ Math.round(loadingProgress * 100) }}%</div>
       </div>
     </div>
 
@@ -3467,6 +3601,30 @@ onBeforeUnmount(async () => {
   margin-top: 6px;
   font-size: 13px;
   color: var(--loading-copy-text);
+}
+
+.loading-progress {
+  width: 100%;
+  height: 6px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+
+.loading-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms ease-out;
+}
+
+.loading-percent {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .error-overlay {
