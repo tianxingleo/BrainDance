@@ -15,7 +15,7 @@ import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../main.dart' show overviewStatsProvider;
+import '../main.dart' show overviewStatsProvider, pageAnimatingProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -222,26 +222,22 @@ class _SettingsTabSwitch extends StatelessWidget {
         ? const Color(0xFFB4BEC9)
         : const Color(0xFF9AA3AD);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      height: 56,
-      child: ClipRRect(
-        borderRadius: BDDesign.radiusLarge,
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
-          child: Container(
-            padding: const EdgeInsets.all(4.0),
-            decoration: BoxDecoration(
-              color: navBackground,
-              borderRadius: BDDesign.radiusLarge,
-              border: Border.all(color: navBorder, width: 1.0),
-              boxShadow: [
-                BoxShadow(
-                  color: navShadow,
-                  blurRadius: 28,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+    return Consumer(
+      builder: (_, ref, child) {
+        final skipBlur = ref.watch(pageAnimatingProvider);
+        final content = Container(
+          padding: const EdgeInsets.all(4.0),
+          decoration: BoxDecoration(
+            color: navBackground,
+            borderRadius: BDDesign.radiusLarge,
+            border: Border.all(color: navBorder, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: navShadow,
+                blurRadius: 28,
+                offset: const Offset(0, 8),
+              ),
+            ],
             ),
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -287,10 +283,25 @@ class _SettingsTabSwitch extends StatelessWidget {
                 );
               },
             ),
-          ),
-        ),
-      ),
-    );
+          );
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            height: 56,
+            child: ClipRRect(
+              borderRadius: BDDesign.radiusLarge,
+              child: skipBlur
+                  ? content
+                  : BackdropFilter(
+                      filter: ui.ImageFilter.blur(
+                        sigmaX: 24.0,
+                        sigmaY: 24.0,
+                      ),
+                      child: content,
+                    ),
+            ),
+          );
+        },
+      );
   }
 
   Widget _buildTabItem(
