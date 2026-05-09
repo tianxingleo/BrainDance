@@ -2268,10 +2268,16 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       console.error("加载位姿失败:", err);
     }
 
+    rebuildCenterModeBounds();
+    if (isOrbitMode.value) {
+      syncOrbitTarget();
+      applyCenterModeBoundsToTarget();
+      applyOrbitCamera(true);
+    }
+
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false;
     createParticleSystem(splatMesh);
-    rebuildCenterModeBounds();
     applyAdvancedShader(splatMesh);
 
     if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {

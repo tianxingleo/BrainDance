@@ -251,7 +251,8 @@ export function buildCenterModeBounds(
   }
   inwardScore /= samples.length;
 
-  const orbitYawAngles = offsets.map((offset) => Math.atan2(offset.x, offset.z));
+  // 中心模式采用 Z 轴朝上：yaw 在 XY 平面内转，pitch 控制 Z 轴高度。
+  const orbitYawAngles = offsets.map((offset) => Math.atan2(offset.y, offset.x));
   const orbitPitchAngles = offsets.map((offset) => {
     const horizontal = Math.sqrt(offset.x * offset.x + offset.y * offset.y);
     return Math.atan2(offset.z, horizontal);
