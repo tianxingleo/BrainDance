@@ -4,6 +4,12 @@ import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
 import BottomSelector from './BottomSelector.vue';
+import {
+  buildCenterModeBounds,
+  clampCenterModePitch,
+  clampCenterModeRadius,
+  clampCenterModeYaw,
+} from '../lib/interaction/centerModeBounds';
 
 const containerRef = ref(null);
 const isVRMode = ref(false);
@@ -165,6 +171,7 @@ const orbitState = {
   targetPitch: 0,
   targetRadius: 3,
 };
+let centerModeBounds = null;
 let orbitNeedsRecenterAfterPoseFlight = false;
 
 const reusableYawQuat = new THREE.Quaternion();
@@ -421,19 +428,53 @@ const getSceneRadius = () => {
   return radius > 0 ? radius : 1;
 };
 
-const clampOrbitPitch = (pitch) => THREE.MathUtils.clamp(
-  pitch,
-  THREE.MathUtils.degToRad(-86),
-  THREE.MathUtils.degToRad(86)
-);
+const getOrbitMinRadius = () => centerModeBounds
+  ? centerModeBounds.radiusMin
+  : Math.max(getSceneRadius() * 0.18, 0.08);
 
-const getOrbitMinRadius = () => Math.max(getSceneRadius() * 0.18, 0.08);
-const getOrbitMaxRadius = () => Math.max(getSceneRadius() * 12, getOrbitMinRadius() * 6);
+const getOrbitMaxRadius = () => centerModeBounds
+  ? centerModeBounds.radiusMax
+  : Math.max(getSceneRadius() * 12, getOrbitMinRadius() * 6);
+
+const rebuildCenterModeBounds = () => {
+  const sceneCenter = getModelWorldCenter();
+  const sceneRadius = getSceneRadius();
+  centerModeBounds = buildCenterModeBounds(cameraPoses.value, sceneCenter, sceneRadius);
+  return centerModeBounds;
+};
+
+const clampOrbitYaw = (yaw) => {
+  if (!centerModeBounds) return yaw;
+  return clampCenterModeYaw(yaw, centerModeBounds);
+};
+
+const clampOrbitPitch = (pitch) => {
+  if (!centerModeBounds) {
+    return THREE.MathUtils.clamp(
+      pitch,
+      THREE.MathUtils.degToRad(-86),
+      THREE.MathUtils.degToRad(86),
+    );
+  }
+  return clampCenterModePitch(pitch, centerModeBounds);
+};
+
+const clampOrbitRadius = (radius) => {
+  if (!centerModeBounds) return radius;
+  return clampCenterModeRadius(radius, centerModeBounds);
+};
+
+const applyCenterModeBoundsToTarget = () => {
+  if (!centerModeBounds) return;
+  orbitState.targetYaw = clampOrbitYaw(orbitState.targetYaw);
+  orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch);
+  orbitState.targetRadius = clampOrbitRadius(orbitState.targetRadius);
+};
 
 const syncOrbitTarget = (center = getModelWorldCenter()) => {
   if (!viewer || !viewer.camera) return;
 
-  orbitState.center.copy(center);
+  orbitState.center.copy(centerModeBounds?.center || center);
   const offset = viewer.camera.position.clone().sub(orbitState.center);
   let radius = offset.length();
   if (!Number.isFinite(radius) || radius < getOrbitMinRadius()) {
@@ -441,12 +482,13 @@ const syncOrbitTarget = (center = getModelWorldCenter()) => {
     offset.set(0, 0, radius);
   }
 
-  orbitState.radius = THREE.MathUtils.clamp(radius, getOrbitMinRadius(), getOrbitMaxRadius());
+  orbitState.radius = clampOrbitRadius(radius);
   orbitState.targetRadius = orbitState.radius;
   orbitState.yaw = Math.atan2(offset.y, offset.x);
   orbitState.pitch = clampOrbitPitch(Math.asin(THREE.MathUtils.clamp(offset.z / radius, -1, 1)));
   orbitState.targetYaw = orbitState.yaw;
   orbitState.targetPitch = orbitState.pitch;
+  applyCenterModeBoundsToTarget();
 };
 
 const getOrbitCameraState = () => {
@@ -2229,6 +2271,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false;
     createParticleSystem(splatMesh);
+    rebuildCenterModeBounds();
     applyAdvancedShader(splatMesh);
 
     if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
@@ -2451,6 +2494,7 @@ const stepInteractionInertia = (now) => {
     ) {
       orbitState.targetYaw += interactionState.orbitVelocityYaw;
       orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + interactionState.orbitVelocityPitch);
+      applyCenterModeBoundsToTarget();
       needsNextFrame = true;
     } else {
       interactionState.orbitInertiaActive = false;
@@ -2459,10 +2503,8 @@ const stepInteractionInertia = (now) => {
 
   if (interactionState.zoomInertiaActive) {
     if (Math.abs(interactionState.orbitZoomVelocity) > 0.0002) {
-      orbitState.targetRadius = THREE.MathUtils.clamp(
-        orbitState.targetRadius * Math.exp(interactionState.orbitZoomVelocity),
-        getOrbitMinRadius(),
-        getOrbitMaxRadius()
+      orbitState.targetRadius = clampOrbitRadius(
+        orbitState.targetRadius * Math.exp(interactionState.orbitZoomVelocity)
       );
       needsNextFrame = true;
     } else {
@@ -2520,6 +2562,7 @@ const orbitRotate = (deltaYaw, deltaPitch) => {
   interactionState.orbitInertiaActive = false;
   orbitState.targetYaw += deltaYaw;
   orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + deltaPitch);
+  applyCenterModeBoundsToTarget();
   scheduleInteractionFrame();
 };
 
@@ -2541,11 +2584,10 @@ const orbitZoom = (zoomFactor) => {
   const delta = -Math.log(zoomFactor);
   interactionState.orbitZoomVelocity = delta;
   interactionState.zoomInertiaActive = false;
-  orbitState.targetRadius = THREE.MathUtils.clamp(
-    orbitState.targetRadius * Math.exp(delta),
-    getOrbitMinRadius(),
-    getOrbitMaxRadius()
+  orbitState.targetRadius = clampOrbitRadius(
+    orbitState.targetRadius * Math.exp(delta)
   );
+  applyCenterModeBoundsToTarget();
   scheduleInteractionFrame();
 };
 
