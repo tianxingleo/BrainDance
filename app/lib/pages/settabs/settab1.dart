@@ -253,7 +253,9 @@ class _ClearCacheRow extends StatelessWidget {
       borderRadius: radius,
       child: InkWell(
         onTap: () async {
-          ScaffoldMessenger.of(context).showSnackBar(
+          final messenger = ScaffoldMessenger.of(context);
+          messenger.hideCurrentSnackBar();
+          messenger.showSnackBar(
             SnackBar(content: Text(textLocalize('tip_cache'))),
           );
           await DirSystem.deleteDir(await DirFinder.cacheDir());
