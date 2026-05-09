@@ -247,7 +247,9 @@ async function loadScene(input: unknown) {
     installXrSessionListeners()
   }
   activeModelUrl.value = await addSplatSceneWithFallback(payload, config)
-  viewer.start()
+  if (mode !== 'stereo') {
+    viewer.start()
+  }
   if (mode === 'stereo') {
     startStereoPreviewLoop()
   }
