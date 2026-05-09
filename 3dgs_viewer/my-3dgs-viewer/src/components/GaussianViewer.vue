@@ -1051,7 +1051,7 @@ const globalUniforms = {
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
   uParticleProgress: { value: 0 },
   uRevealProgress: { value: 0 },
-  uRevealFeather: { value: 0.055 },
+  uRevealFeather: { value: 0.085 },
   uIntroSplatAlpha: { value: 0 },
 };
 
@@ -1281,16 +1281,16 @@ const applyAdvancedShader = (mesh) => {
       vec3 centeredPos = vWorldPosition - uCenter;
       float distSq = dot(centeredPos, centeredPos);
       float radius = max(uGeoRadius, 0.0001);
-      float feather = max(uRevealFeather * max(uMaxRadius, 0.0001), 0.0001);
+      float feather = max(uRevealFeather * max(uMaxRadius, 0.0001), 0.001);
       float innerRadius = max(radius - feather, 0.0);
       float innerSq = innerRadius * innerRadius;
       float outerSq = radius * radius;
       if (distSq > outerSq) discard;
-      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
+      float revealT = smoothstep(innerSq, outerSq, distSq);
       if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
 
       // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
-      float alphaClip = mix(0.96, 0.02, revealT);
+      float alphaClip = mix(0.90, 0.02, revealT);
       if (gl_FragColor.a < alphaClip) discard;
       gl_FragColor.a *= revealT * uIntroSplatAlpha;
     `;
@@ -1371,45 +1371,6 @@ const getFarthestIntroStartPose = (targetPosition, targetPose = null) => {
   return farthestState;
 };
 
-const buildIntroOrbitCurve = (startPosition, targetPosition, center) => {
-  const startOffset = startPosition.clone().sub(center);
-  const endOffset = targetPosition.clone().sub(center);
-  const startRadius = startOffset.length();
-  const endRadius = endOffset.length();
-  const travelDistance = startPosition.distanceTo(targetPosition);
-  const orbitAxis = startOffset.clone().cross(endOffset);
-
-  if (orbitAxis.lengthSq() < 1e-8) {
-    orbitAxis.copy(centerModeUp);
-  } else {
-    orbitAxis.normalize();
-  }
-
-  const startTangent = orbitAxis.clone().cross(startOffset).normalize();
-  const endTangent = orbitAxis.clone().cross(endOffset).normalize();
-  const pullToCenter = center.clone().sub(startPosition).normalize();
-  const pushFromCenter = center.clone().sub(targetPosition).normalize();
-  const arcStrength = Math.max(travelDistance * 0.42, Math.max(startRadius, endRadius) * 0.55, 0.28);
-  const centerLift = Math.max(getSceneRadius() * 0.12, travelDistance * 0.06, 0.08);
-
-  const control1 = startPosition.clone()
-    .add(startTangent.multiplyScalar(arcStrength))
-    .add(pullToCenter.multiplyScalar(Math.max(travelDistance * 0.14, 0.12)))
-    .add(centerModeUp.clone().multiplyScalar(centerLift));
-
-  const control2 = targetPosition.clone()
-    .add(endTangent.multiplyScalar(-arcStrength))
-    .add(pushFromCenter.multiplyScalar(Math.max(travelDistance * 0.14, 0.12)))
-    .add(centerModeUp.clone().multiplyScalar(centerLift * 0.85));
-
-  return new THREE.CubicBezierCurve3(
-    startPosition.clone(),
-    control1,
-    control2,
-    targetPosition.clone()
-  );
-};
-
 const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = null, startCameraState = null) => {
   const center = getModelWorldCenter();
   const radius = getSceneRadius();
@@ -1419,7 +1380,7 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = nu
 
   if (farthestStartState) {
     startPosition = farthestStartState.position.clone();
-    startQuaternion = makeLookQuaternion(startPosition, center);
+    startQuaternion = farthestStartState.quaternion.clone();
   } else {
     const targetOffset = targetPosition.clone().sub(center);
     if (targetOffset.lengthSq() < 1e-8) targetOffset.set(Math.max(radius * 2.5, 1), 0, 0);
@@ -1432,14 +1393,11 @@ const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = nu
     startOffset.z += lift;
 
     startPosition = center.clone().add(startOffset);
-    startQuaternion = makeLookQuaternion(startPosition, center);
+    startQuaternion = makeLookQuaternion(startPosition, targetPosition);
   }
-
-  const curve = buildIntroOrbitCurve(startPosition, targetPosition, center);
 
   return {
     center,
-    curve,
     startPosition: startPosition.clone(),
     startQuaternion,
     targetPosition: targetPosition.clone(),
@@ -2107,6 +2065,7 @@ const getViewerConfig = () => {
     'optimizeSplatData': true,
     'freeIntermediateSplatData': true,
     'antialiased': !isMobile,
+    'sceneRevealMode': GaussianSplats3D.SceneRevealMode.Instant,
   };
 };
 
@@ -2326,19 +2285,13 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const introCamera = animationState.introCamera;
 
         if (introCamera) {
-          if (introCamera.curve) {
-            viewer.camera.position.copy(introCamera.curve.getPoint(t));
-          } else {
-            viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
-          }
-          const orbitLookQuaternion = makeLookQuaternion(viewer.camera.position, introCamera.center);
-          const poseBlend = smoothstep01((rawT - 0.72) / 0.28);
-          viewer.camera.quaternion.slerpQuaternions(orbitLookQuaternion, introCamera.targetQuaternion, poseBlend);
+          viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
+          viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
 
-        const pointT = smoothstep01(rawT / 0.30);
-        const revealT = smoothstep01((rawT - 0.08) / 0.70);
-        const splatAlpha = smoothstep01((rawT - 0.12) / 0.58);
+        const pointT = smoothstep01(rawT / 0.24);
+        const revealT = smoothstep01((rawT - 0.12) / 0.72);
+        const splatAlpha = smoothstep01((rawT - 0.16) / 0.60);
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = revealT;
         globalUniforms.uIntroSplatAlpha.value = splatAlpha;
@@ -2346,10 +2299,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
-        if (splatMesh && rawT >= 0.14) splatMesh.visible = true;
+        if (splatMesh && rawT >= 0.22) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.18) / 0.18), 0, 1);
-          particleSystem.visible = rawT < 0.40;
+          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.26) / 0.20), 0, 1);
+          particleSystem.visible = rawT < 0.56;
         }
 
         if (rawT >= 1) {
