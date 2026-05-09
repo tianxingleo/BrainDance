@@ -103,6 +103,8 @@ let hasInitializedFromExternalInput = false;
 let fpsFrames = 0;
 let fpsTimestamp = 0;
 let clock = new THREE.Clock();
+let lastAppliedDpr = 0;
+let lastQualityUpdateAt = 0;
 
 // ── Spark 2.0 interaction state ──
 let cameraRig = null;
@@ -548,6 +550,9 @@ const setupResizeHandler = () => {
  * .rad (LoD streaming) > .spz (compressed) > .ksplat > .ply (original)
  */
 const resolveBestModelUrl = async (originalUrl) => {
+  if (/\.(splat|ksplat|spz|rad|sog)$/i.test(originalUrl || '')) {
+    return originalUrl;
+  }
   const stripExt = (url) => url.replace(/\.(ply|splat|ksplat|spz|rad|sog)$/i, '');
   const candidates = ['.rad', '.spz', '.ksplat'];
 
@@ -565,6 +570,17 @@ const resolveBestModelUrl = async (originalUrl) => {
   }
 
   return originalUrl;
+};
+
+const applyRendererDpr = (targetDpr) => {
+  if (!renderer || !containerRef.value) return;
+  const normalizedDpr = Math.round(targetDpr * 100) / 100;
+  if (Math.abs(normalizedDpr - lastAppliedDpr) < 0.05) return;
+  lastAppliedDpr = normalizedDpr;
+  const width = containerRef.value.clientWidth || window.innerWidth;
+  const height = containerRef.value.clientHeight || window.innerHeight;
+  renderer.setPixelRatio(normalizedDpr);
+  renderer.setSize(width, height, false);
 };
 
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
@@ -593,8 +609,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       alpha: true,
       powerPreference: 'high-performance',
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    renderer.setSize(width, height, false);
+    applyRendererDpr(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     containerRef.value.innerHTML = '';
     containerRef.value.appendChild(renderer.domElement);
@@ -648,6 +663,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
 
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return;
+      const now = performance.now();
 
       const dt = clock.getDelta();
       if (cameraRig) {
@@ -658,11 +674,12 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           spark.lodSplatScale = cameraRig.getRecommendedLodScale(currentFps.value);
         }
         const baseDpr = window.devicePixelRatio || 1;
-        renderer.setPixelRatio(cameraRig.getRecommendedDpr(baseDpr));
+        if (now - lastQualityUpdateAt >= 500) {
+          lastQualityUpdateAt = now;
+          applyRendererDpr(cameraRig.getRecommendedDpr(baseDpr));
+        }
       }
 
-
-      const now = performance.now();
       const orbitDt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
       orbitLastFrameTime = now;
 
@@ -962,7 +979,7 @@ onMounted(() => {
     }
 
     if (typeof input === 'object' && input !== null) {
-      initViewer(input.ply || null, input.poses || null, {
+      initViewer(input.modelUrl || input.ply || null, input.posesUrl || input.poses || null, {
         matrix: input.matrix || null,
         imageId: input.imageId || null,
       });
@@ -986,7 +1003,7 @@ onMounted(() => {
 
   if (initialInput && !hasInitializedFromExternalInput) {
     hasInitializedFromExternalInput = true;
-    initViewer(initialInput.ply, initialInput.poses, {
+    initViewer(initialInput.modelUrl || initialInput.ply, initialInput.posesUrl || initialInput.poses, {
       matrix: initialInput.matrix || null,
       imageId: initialInput.imageId || null,
     });

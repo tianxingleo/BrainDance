@@ -911,8 +911,8 @@ class BrainDanceEngine {
 
   async loadScene(payload = {}) {
     const loadSignature = JSON.stringify({
-      ply: payload?.ply || DEFAULT_PLY,
-      poses: payload?.poses || DEFAULT_POSES,
+      modelUrl: payload?.modelUrl || payload?.ply || DEFAULT_PLY,
+      posesUrl: payload?.posesUrl || payload?.poses || DEFAULT_POSES,
       imageId: payload?.imageId || '',
       matrix: payload?.matrix || null,
     });
@@ -921,8 +921,8 @@ class BrainDanceEngine {
     }
     this._activeLoadSignature = loadSignature;
     const loadToken = ++this._loadToken;
-    const ply = payload?.ply || DEFAULT_PLY;
-    const posesUrl = payload?.poses || DEFAULT_POSES;
+    const ply = payload?.modelUrl || payload?.ply || DEFAULT_PLY;
+    const posesUrl = payload?.posesUrl || payload?.poses || DEFAULT_POSES;
     const isSplatLike = String(ply || '').toLowerCase().endsWith('.splat') || String(ply || '').toLowerCase().endsWith('.ksplat');
     this.setStatus(`准备加载模型\n${ply}`);
 
@@ -936,7 +936,7 @@ class BrainDanceEngine {
     }
     this.pipeline.dispose();
     this.pipeline = new DataPipeline({ renderer: this.renderer });
-    await this.pipeline.load(ply);
+    await this.pipeline.load(ply, { allowSplatFallback: false });
     if (loadToken !== this._loadToken) return;
     if (this.pipeline.points) {
       this.scene.add(this.pipeline.points);
@@ -947,7 +947,7 @@ class BrainDanceEngine {
     if (this.pipeline.points) {
       this.pipeline.points.visible = true;
     }
-    this.usePostProcessing = true;
+    this.usePostProcessing = !isSplatLike;
     this.setStatus(`PLY 请求完成\n${ply}`);
 
     try {

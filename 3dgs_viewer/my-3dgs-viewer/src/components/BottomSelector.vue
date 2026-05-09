@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount, shallowRef } from 'vue';
 
 const props = defineProps({
   models: { type: Array, default: () => [] },
@@ -23,13 +23,7 @@ let dragStartX = 0;
 let scrollStartLeft = 0;
 let dragMoved = false;
 
-const sortedModels = computed(() => {
-  return [...props.models].sort((a, b) => {
-    const ta = new Date(a.createdAt || 0).getTime();
-    const tb = new Date(b.createdAt || 0).getTime();
-    return tb - ta;
-  });
-});
+const modelItems = shallowRef([]);
 
 const showTabs = computed(() => props.hasModels);
 
@@ -47,6 +41,23 @@ function formatTime(dateStr) {
   const min = String(d.getMinutes()).padStart(2, '0');
   return `${mm}/${dd} ${hh}:${min}`;
 }
+
+watch(
+  () => props.models,
+  (models) => {
+    modelItems.value = [...models]
+      .sort((a, b) => {
+        const ta = new Date(a.createdAt || 0).getTime();
+        const tb = new Date(b.createdAt || 0).getTime();
+        return tb - ta;
+      })
+      .map((model) => ({
+        ...model,
+        formattedTime: formatTime(model.createdAt),
+      }));
+  },
+  { immediate: true },
+);
 
 function onClickModel(model) {
   if (dragMoved) return;
@@ -134,7 +145,15 @@ onBeforeUnmount(() => {
             :class="{ 'bs-item--active': activePoseId === getPosePresentationId(pose) }"
             @click="onClickPose(pose)"
           >
-            <img v-if="pose.image_url" :src="pose.image_url" class="bs-thumb" draggable="false" />
+            <img
+              v-if="pose.image_url"
+              :src="pose.image_url"
+              class="bs-thumb"
+              draggable="false"
+              loading="lazy"
+              decoding="async"
+              fetchpriority="low"
+            />
             <div v-else class="bs-thumb bs-thumb--empty">
               <span>未命名</span>
             </div>
@@ -146,19 +165,27 @@ onBeforeUnmount(() => {
         <!-- 模型模式 -->
         <template v-if="mode === 'model'">
           <div
-            v-for="model in sortedModels"
+            v-for="model in modelItems"
             :key="model.id"
             class="bs-item"
             :class="{ 'bs-item--active': model.id === activeModelId }"
             @click="onClickModel(model)"
           >
-            <img v-if="model.previewImg" :src="model.previewImg" class="bs-thumb" draggable="false" />
+            <img
+              v-if="model.previewImg"
+              :src="model.previewImg"
+              class="bs-thumb"
+              draggable="false"
+              loading="lazy"
+              decoding="async"
+              fetchpriority="low"
+            />
             <div v-else class="bs-thumb bs-thumb--empty">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
               </svg>
             </div>
-            <div class="bs-time">{{ formatTime(model.createdAt) }}</div>
+            <div class="bs-time">{{ model.formattedTime }}</div>
           </div>
         </template>
       </div>
@@ -253,23 +280,29 @@ onBeforeUnmount(() => {
 /* 缩略图项 */
 .bs-item {
   position: relative;
-  width: 80px;
-  height: 56px;
+  width: 96px;
+  height: 68px;
   flex-shrink: 0;
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
   border: 2px solid var(--card-border, rgba(107, 122, 143, 0.12));
   opacity: 0.7;
   box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
+  transform: scale(0.84);
+  transform-origin: center;
+  will-change: transform, opacity;
 }
 .bs-item--active {
-  width: 96px;
-  height: 68px;
   border-color: #CC9A5C;
   opacity: 1;
   box-shadow: 0 4px 16px rgba(204, 154, 92, 0.3);
+  transform: scale(1);
 }
 .bs-item:hover:not(.bs-item--active) {
   opacity: 0.88;

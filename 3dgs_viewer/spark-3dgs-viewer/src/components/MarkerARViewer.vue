@@ -386,8 +386,18 @@ const resetTransform = () => {
   transform.value = cloneArTransform(initialTransform)
 }
 
-const disposeViewer = () => {
+const disposeViewer = async () => {
   renderer?.setAnimationLoop(null)
+
+  const activeMindAr = mindarThree
+  mindarThree = null
+  if (activeMindAr?.stop) {
+    try {
+      await activeMindAr.stop()
+    } catch (error) {
+      console.warn('[MarkerARViewer] stop mindar failed:', error)
+    }
+  }
 
   if (splatMesh) {
     splatMesh.removeFromParent()
@@ -408,8 +418,6 @@ const disposeViewer = () => {
     renderer = null
   }
 
-  mindarThree?.stop?.()
-  mindarThree = null
   arRoot = null
   scene = null
   camera = null
@@ -489,7 +497,7 @@ onMounted(async () => {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, params.pixelRatio))
     renderer.outputColorSpace = THREE.SRGBColorSpace
 
-    status.value = '模型加载中...'
+    status.value = '准备 AR 与模型...'
     spark = new SparkRenderer({
       renderer,
       maxStdDev: Math.sqrt(7),
@@ -502,12 +510,13 @@ onMounted(async () => {
     anchor.group.add(arRoot)
     applyArTransform(arRoot, transform.value)
 
+    const startPromise = mindarThree.start()
+
     splatMesh = new SplatMesh({
       url: params.modelUrl,
-      editable: true,
+      editable: false,
     })
-
-    await splatMesh.initialized
+    await Promise.all([startPromise, splatMesh.initialized])
     arRoot.add(splatMesh)
 
     anchor.onTargetFound = () => {
@@ -520,7 +529,6 @@ onMounted(async () => {
 
     status.value = '请允许摄像头权限，并将纸板放入画面'
     postBridgeMessage({ status: 'info', msg: 'Marker AR starting camera' })
-    await mindarThree.start()
     normalizeMindArLayers()
     status.value = '请将纸板放入画面'
     postBridgeMessage({
@@ -559,7 +567,7 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => {
-  disposeViewer()
+  void disposeViewer()
 })
 </script>
 

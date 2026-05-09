@@ -98,6 +98,7 @@ let didApplyDefaultPose = false;
 let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
 let interactionFrameHandle = 0;
+let renderRequested = false;
 
 const cinematicState = {
   trajectory: null,
@@ -164,6 +165,20 @@ const refreshCurrentFocalInfo = () => {
   }
 };
 
+const requestRender = () => {
+  if (renderRequested) return;
+  renderRequested = true;
+
+  requestAnimationFrame(() => {
+    renderRequested = false;
+    if (!viewer) return;
+    try {
+      viewer.update();
+      viewer.render();
+    } catch (_) {}
+  });
+};
+
 const applyFocalLengthPx = (focalPx, options = {}) => {
   if (!viewer || !viewer.camera) return;
   // 优先使用位姿 JSON 中记录的真实图像高度，否则回退到视口高度
@@ -182,16 +197,15 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
       ease: options.ease || 'power2.out',
       onUpdate: () => {
         cam.updateProjectionMatrix();
-        // 更新 splat shader uniforms 并立即重绘
-        try { viewer.update(); viewer.render(); } catch (_) {}
+        // 将投影更新合并到下一帧，避免与 viewer 自身循环重复渲染。
+        requestRender();
         refreshCurrentFocalInfo();
       }
     });
   } else {
     cam.fov = targetFov;
     cam.updateProjectionMatrix();
-    // 更新 splat shader uniforms 并立即重绘，无需等到下一帧
-    try { viewer.update(); viewer.render(); } catch (_) {}
+    requestRender();
     refreshCurrentFocalInfo();
   }
 };
@@ -2011,7 +2025,7 @@ const renderCameraUpdate = () => {
   viewer.camera.updateProjectionMatrix();
   refreshCurrentFocalInfo();
   updateDebugInfo();
-  try { viewer.update(); viewer.render(); } catch (_) {}
+  requestRender();
 };
 
 const applyFreeLookDelta = (deltaYaw, deltaPitch) => {

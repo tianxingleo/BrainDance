@@ -380,13 +380,19 @@ export class PerformanceIO {
   }
 
   setFps(value) {
-    this.dom.fps.textContent = `帧率 ${value.toFixed(0)}`;
+    const rounded = Math.round(value);
+    if (rounded === this._lastFps) return;
+    this._lastFps = rounded;
+    this.dom.fps.textContent = `帧率 ${rounded}`;
   }
 
   setGestureScalar(value) {
+    const next = Math.round(value * 100) / 100;
+    if (Math.abs((this._lastGestureScalar ?? -Infinity) - next) < 0.03) return;
+    this._lastGestureScalar = next;
     this.state.pinch = value;
-    this.dom.gesture.textContent = this.state.gestureEnabled ? `手势 ${value.toFixed(2)}` : '手势 关闭';
-    this.dom.gesturePreview.style.setProperty('--gesture', `${value}`);
+    this.dom.gesture.textContent = this.state.gestureEnabled ? `手势 ${next.toFixed(2)}` : '手势 关闭';
+    this.dom.gesturePreview.style.setProperty('--gesture', `${next}`);
     this._emit();
   }
 

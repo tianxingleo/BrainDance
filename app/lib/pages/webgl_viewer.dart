@@ -48,6 +48,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   static const int _downloadProgressThrottleMs = 100;
   static const String _defaultMarkerTargetPath = '/targets/braindance-card.mind';
   static const String _markerArDebugVersion = 'marker-ar-debug-20260503-3';
+  static const String _viewerBuildVersion = 'viewer-20260509';
   static const MethodChannel _cameraPermissionChannel = MethodChannel(
     'braindance/camera_permission',
   );
@@ -94,6 +95,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     response.headers.add('Cross-Origin-Opener-Policy', 'same-origin');
     response.headers.add('Cross-Origin-Embedder-Policy', 'require-corp');
     response.headers.add('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+
+  bool _isModelAssetPath(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.ply') ||
+        lower.endsWith('.splat') ||
+        lower.endsWith('.ksplat') ||
+        lower.endsWith('.spz') ||
+        lower.endsWith('.rad') ||
+        lower.endsWith('.sog');
   }
 
   String get _viewerAssetRoot =>
@@ -195,12 +206,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         if (await file.exists()) {
           _attachViewerHeaders(request.response);
 
-          if (filePath.endsWith('.ply') ||
-              filePath.endsWith('.splat') ||
-              filePath.endsWith('.ksplat') ||
-              filePath.endsWith('.spz') ||
-              filePath.endsWith('.rad') ||
-              filePath.endsWith('.sog')) {
+          if (_isModelAssetPath(filePath)) {
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
@@ -302,19 +308,29 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           contentType = 'image/x-icon';
         } else if (path.endsWith('.mind')) {
           contentType = 'application/octet-stream';
-        } else if (path.endsWith('.ply') ||
-            path.endsWith('.splat') ||
-            path.endsWith('.ksplat')) {
+        } else if (_isModelAssetPath(path)) {
           contentType = 'application/octet-stream';
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
-        request.response.headers.set(
-          'Cache-Control',
-          'no-store, no-cache, must-revalidate, max-age=0',
-        );
-        request.response.headers.set('Pragma', 'no-cache');
-        request.response.headers.set('Expires', '0');
+        if (path == '/index.html') {
+          request.response.headers.set(
+            'Cache-Control',
+            'no-store, no-cache, must-revalidate, max-age=0',
+          );
+          request.response.headers.set('Pragma', 'no-cache');
+          request.response.headers.set('Expires', '0');
+        } else if (path.startsWith('/assets/')) {
+          request.response.headers.set(
+            'Cache-Control',
+            'public, max-age=31536000, immutable',
+          );
+        } else if (_isModelAssetPath(path)) {
+          request.response.headers.set('Accept-Ranges', 'bytes');
+          request.response.headers.set('Cache-Control', 'no-cache');
+        } else {
+          request.response.headers.set('Cache-Control', 'no-cache');
+        }
         _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
@@ -564,7 +580,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final targetUrl = _resolveBestModelUrl(rawUrl);
 
     return {
+      'modelUrl': targetUrl,
       'ply': targetUrl,
+      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
+        'posesUrl': widget.posesUrl,
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,
@@ -575,8 +594,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   Future<void> _openInExternalBrowser() async {
     if (_isMarkerArMode) {
-      final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = _buildViewerUrl(cacheBust);
+      final url = _buildViewerUrl(_viewerBuildVersion);
       _externalViewerUrl = url;
 
       if (_didAttemptExternalOpen) {
@@ -764,9 +782,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     try {
       // 本地 WebGL viewer 文件名和内容会频繁更新，进入页面时强制清理 WebView 缓存，
       // 避免 Android WebView 继续执行旧的构建产物导致相机修复看起来没有生效。
-      await _controller?.clearCache();
-      final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = _buildViewerUrl(cacheBust);
+      if (kDebugMode) {
+        await _controller?.clearCache();
+      }
+      final url = _buildViewerUrl(_viewerBuildVersion);
       _lastLoadedViewerUrl = url;
       debugPrint('Loading WebGL viewer URL: $url');
       await _controller?.loadRequest(Uri.parse(url));
@@ -775,7 +794,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
   }
 
-  String _buildViewerUrl(int cacheBust) {
+  String _buildViewerUrl(String version) {
     if (_isMarkerArMode) {
       final payload = _buildViewerPayload();
       return Uri(
@@ -785,21 +804,21 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         path: '/index.html',
         queryParameters: {
           'mode': 'marker-ar',
-          'model': payload['ply']?.toString() ?? '',
+          'model': payload['modelUrl']?.toString() ?? payload['ply']?.toString() ?? '',
           'target': _defaultMarkerTargetPath,
-          'v': '$_markerArDebugVersion-$cacheBust',
+          'v': '$_markerArDebugVersion-$version',
         },
       ).toString();
     }
 
-    return 'http://127.0.0.1:$_localPort/index.html?v=rollfix-$cacheBust';
+    return 'http://127.0.0.1:$_localPort/index.html?v=$version';
   }
 
   void _sendModelToVue() {
     if (_isMarkerArMode) return;
     if (!_isWebReady) return;
     final payloadData = _buildViewerPayload();
-    final targetUrl = payloadData['ply'];
+    final targetUrl = payloadData['modelUrl'] ?? payloadData['ply'];
 
     debugPrint('Sending model URL to WebView: $targetUrl');
     final payload = jsonEncode(payloadData);
@@ -833,7 +852,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         {
           'id': widget.sceneId,
           'name': widget.sceneId,
+          'modelUrl': plyUrl,
           'ply': plyUrl,
+          'posesUrl': widget.posesUrl ?? '',
           'poses': widget.posesUrl ?? '',
           'previewImg': '',
           'createdAt': '',
@@ -904,7 +925,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       return {
         'id': model['id']?.toString() ?? model['scene_id']?.toString() ?? '',
         'name': displayName,
+        'modelUrl': plyUrl,
         'ply': plyUrl,
+        'posesUrl': posesUrl ?? '',
         'poses': posesUrl ?? '',
         'previewImg': previewUrl,
         'createdAt': model['created_at']?.toString() ?? '',
@@ -1042,8 +1065,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
 
     // 通知 WebView 加载模型
-    final payloadData = <String, String>{'ply': targetUrl};
+    final payloadData = <String, String>{
+      'modelUrl': targetUrl,
+      'ply': targetUrl,
+    };
     if (posesUrl != null) {
+      payloadData['posesUrl'] = posesUrl;
       payloadData['poses'] = posesUrl;
     }
     final payload = jsonEncode(payloadData);
