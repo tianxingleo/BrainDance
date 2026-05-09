@@ -40,7 +40,7 @@ class CreateGuidePage extends StatelessWidget {
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.only(bottom: 96.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -50,40 +50,38 @@ class CreateGuidePage extends StatelessWidget {
                   subtitle: textLocalize('create_guide_subtitle'),
                 ),
                 const SizedBox(height: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        _buildEntryCard(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      _buildEntryCard(
+                        context,
+                        icon: Icons.camera_rounded,
+                        title: textLocalize('record'),
+                        subtitle: textLocalize('create_record_desc'),
+                        onTap: () => Navigator.push(
                           context,
-                          icon: Icons.camera_rounded,
-                          title: textLocalize('record'),
-                          subtitle: textLocalize('create_record_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            _verticalSlideRoute(
-                              builder: (_) => const RecordPage(),
-                              fromTop: true,
-                            ),
+                          _verticalSlideRoute(
+                            builder: (_) => const RecordPage(),
+                            fromTop: true,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        _buildEntryCard(
+                      ),
+                      const SizedBox(height: 16),
+                      _buildEntryCard(
+                        context,
+                        icon: Icons.auto_awesome_rounded,
+                        title: textLocalize('generate'),
+                        subtitle: textLocalize('create_generate_desc'),
+                        onTap: () => Navigator.push(
                           context,
-                          icon: Icons.auto_awesome_rounded,
-                          title: textLocalize('generate'),
-                          subtitle: textLocalize('create_generate_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            _verticalSlideRoute(
-                              builder: (_) => const GeneratePage(),
-                              fromTop: false,
-                            ),
+                          _verticalSlideRoute(
+                            builder: (_) => const GeneratePage(),
+                            fromTop: false,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ],
