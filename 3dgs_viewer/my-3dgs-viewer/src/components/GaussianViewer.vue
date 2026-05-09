@@ -2299,10 +2299,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
-        if (splatMesh && rawT >= 0.22) splatMesh.visible = true;
+        if (splatMesh && rawT >= 0.46) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
           particleSystem.material.opacity = THREE.MathUtils.clamp(1 - ((rawT - 0.26) / 0.20), 0, 1);
-          particleSystem.visible = rawT < 0.56;
+          particleSystem.visible = rawT < 0.68;
         }
 
         if (rawT >= 1) {
