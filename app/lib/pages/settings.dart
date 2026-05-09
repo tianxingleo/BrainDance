@@ -70,6 +70,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   title: textLocalize('manage'),
                   trailing: GestureDetector(
                     onTap: () async {
+                      if (ref.read(themeAnimationProvider).isAnimating) return;
+
                       // 1. Capture the UI before changing theme
                       final boundary =
                           themeAnimationKey.currentContext?.findRenderObject()
@@ -131,24 +133,23 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                         Navigator.push(
                           context,
                           PageRouteBuilder(
-                            transitionDuration: const Duration(
-                              milliseconds: 320,
-                            ),
-                            reverseTransitionDuration: const Duration(
-                              milliseconds: 320,
-                            ),
+                            transitionDuration: BDMotion.durationNormal,
+                            reverseTransitionDuration: BDMotion.durationNormal,
                             opaque: true,
                             pageBuilder: (_, __, ___) => const TaskListPage(),
-                            transitionsBuilder: (_, animation, __, child) {
-                              final curved = CurvedAnimation(
-                                parent: animation,
-                                curve: Curves.easeInOutCubic,
+                            transitionsBuilder: (ctx, animation, __, child) {
+                              final curved = animation.drive(
+                                CurveTween(curve: Curves.easeInOutCubic),
                               );
-                              return SlideTransition(
-                                position: Tween<Offset>(
-                                  begin: const Offset(0, -1),
-                                  end: Offset.zero,
-                                ).animate(curved),
+                              return AnimatedBuilder(
+                                animation: curved,
+                                builder: (_, child) {
+                                  final screenHeight = MediaQuery.of(ctx).size.height;
+                                  return Transform.translate(
+                                    offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                                    child: child,
+                                  );
+                                },
                                 child: child,
                               );
                             },

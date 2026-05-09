@@ -70,19 +70,12 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
         if (isAnimating && screenshot != null)
           Positioned.fill(
             child: IgnorePointer(
-              // Allow touches to pass through during animation? 
-              // Usually safer to block touches or ignore. Ignoring is better if the animation is purely visual overlay.
-              child: AnimatedBuilder(
-                animation: _animation,
-                builder: (context, child) {
-                  return CustomPaint(
-                    painter: _ScreenshotPainter(
-                      image: screenshot,
-                      center: animationState.center,
-                      radiusValid: _animation.value,
-                    ),
-                  );
-                },
+              child: CustomPaint(
+                painter: _ScreenshotPainter(
+                  image: screenshot,
+                  center: animationState.center,
+                  animation: _animation,
+                ),
               ),
             ),
           ),
@@ -94,29 +87,25 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
 class _ScreenshotPainter extends CustomPainter {
   final ui.Image image;
   final Offset center;
-  final double radiusValid; // 0.0 to 1.0
+  final Animation<double> animation;
 
   _ScreenshotPainter({
     required this.image,
     required this.center,
-    required this.radiusValid,
-  });
+    required this.animation,
+  }) : super(repaint: animation);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final radiusValid = animation.value;
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    final double maxRadius = _maxDistance(center, size);
-    final double specificRadius = maxRadius * radiusValid;
-
-    final holePath = Path()
-      ..fillType = PathFillType.evenOdd
-      ..addRect(dst)
-      ..addOval(Rect.fromCircle(center: center, radius: specificRadius));
-
-    canvas.clipPath(holePath);
-
+    final double specificRadius = _maxDistance(center, size) * radiusValid;
     final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+
+    canvas.saveLayer(dst, Paint());
     canvas.drawImageRect(image, src, dst, Paint()..filterQuality = FilterQuality.low);
+    canvas.drawCircle(center, specificRadius, Paint()..blendMode = BlendMode.clear);
+    canvas.restore();
   }
 
   double _maxDistance(Offset p, Size size) {
@@ -130,8 +119,6 @@ class _ScreenshotPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ScreenshotPainter oldDelegate) {
-    return oldDelegate.image != image ||
-           oldDelegate.center != center ||
-           oldDelegate.radiusValid != radiusValid;
+    return oldDelegate.image != image || oldDelegate.center != center;
   }
 }
