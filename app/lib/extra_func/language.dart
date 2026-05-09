@@ -375,7 +375,7 @@ enum Language {
       "create": "创作",
       "create_guide_subtitle": "选择一种方式开始创建新的记忆。",
       "create_record_desc": "使用相机拍摄并记录空间场景。",
-      "create_generate_desc": "通过图片、文本或视频生成记忆模型。",
+      "create_generate_desc": "通过素材生成记忆模型。",
       "timepeeling": "时间切片",
       "coming_soon": "即将推出",
       "gen_text_generating": "正在生成中",
