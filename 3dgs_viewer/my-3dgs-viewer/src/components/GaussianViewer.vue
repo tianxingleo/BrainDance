@@ -62,8 +62,8 @@ const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 const ORBIT_RECENTER_DURATION = 1.5;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
-const DESKTOP_INTRO_PARTICLE_BUDGET = 120000;
-const MOBILE_INTRO_PARTICLE_BUDGET = 45000;
+const DESKTOP_INTRO_PARTICLE_BUDGET = 65000;
+const MOBILE_INTRO_PARTICLE_BUDGET = 26000;
 const INTRO_DURATION_MS = 6500;
 const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
 
@@ -1051,7 +1051,7 @@ const globalUniforms = {
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
   uParticleProgress: { value: 0 },
   uRevealProgress: { value: 0 },
-  uRevealFeather: { value: 0.22 },
+  uRevealFeather: { value: 0.055 },
   uIntroSplatAlpha: { value: 0 },
 };
 
@@ -1274,26 +1274,6 @@ const applyAdvancedShader = (mesh) => {
     float introHash(vec3 p) {
       return fract(sin(dot(p, vec3(17.13, 43.71, 91.17))) * 43758.5453);
     }
-
-    float introValueNoise(vec3 p) {
-      vec3 i = floor(p);
-      vec3 f = smoothstep(vec3(0.0), vec3(1.0), fract(p));
-      float n000 = introHash(i + vec3(0.0, 0.0, 0.0));
-      float n100 = introHash(i + vec3(1.0, 0.0, 0.0));
-      float n010 = introHash(i + vec3(0.0, 1.0, 0.0));
-      float n110 = introHash(i + vec3(1.0, 1.0, 0.0));
-      float n001 = introHash(i + vec3(0.0, 0.0, 1.0));
-      float n101 = introHash(i + vec3(1.0, 0.0, 1.0));
-      float n011 = introHash(i + vec3(0.0, 1.0, 1.0));
-      float n111 = introHash(i + vec3(1.0, 1.0, 1.0));
-      float nx00 = mix(n000, n100, f.x);
-      float nx10 = mix(n010, n110, f.x);
-      float nx01 = mix(n001, n101, f.x);
-      float nx11 = mix(n011, n111, f.x);
-      float nxy0 = mix(nx00, nx10, f.y);
-      float nxy1 = mix(nx01, nx11, f.y);
-      return mix(nxy0, nxy1, f.z);
-    }
   `;
   material.fragmentShader = commonFragment + material.fragmentShader;
 
@@ -1304,11 +1284,16 @@ const applyAdvancedShader = (mesh) => {
       vec3 centeredPos = vWorldPosition - uCenter;
       float distFromCenter = length(centeredPos);
       float normalizedOrder = clamp(distFromCenter / max(uMaxRadius, 0.0001), 0.0, 1.0);
-      float waveNoise = introValueNoise(centeredPos * 2.2);
-      float fineNoise = introValueNoise(centeredPos * 7.5 + 19.0);
-      float noisyOrder = clamp(normalizedOrder + (waveNoise - 0.5) * 0.18 + (fineNoise - 0.5) * 0.06, 0.0, 1.0);
+      float directionalRipple = dot(normalize(centeredPos + vec3(0.0001)), normalize(vec3(0.37, 0.59, 0.71)));
+      float waveNoise = introHash(floor(centeredPos * 4.0));
+      float noisyOrder = clamp(
+        normalizedOrder + (waveNoise - 0.5) * 0.045 + directionalRipple * 0.025,
+        0.0,
+        1.0
+      );
       float revealT = smoothstep(noisyOrder, noisyOrder + uRevealFeather, uRevealProgress);
 
+      if (uRevealProgress + uRevealFeather * 0.35 < noisyOrder) discard;
       if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
 
       // 带噪声的空间波前让高斯从中心向外逐片恢复，而不是全局同时变形。
@@ -2312,10 +2297,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         }
 
         const pointT = smoothstep01(rawT / 0.45);
-        const revealT = smoothstep01((rawT - 0.24) / 0.72);
-        const splatAlpha = smoothstep01((rawT - 0.30) / 0.56);
+        const revealT = smoothstep01((rawT - 0.18) / 0.78);
+        const splatAlpha = smoothstep01((rawT - 0.24) / 0.64);
         globalUniforms.uParticleProgress.value = pointT;
-        globalUniforms.uRevealProgress.value = revealT * 1.22;
+        globalUniforms.uRevealProgress.value = revealT;
         globalUniforms.uIntroSplatAlpha.value = splatAlpha;
         globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
