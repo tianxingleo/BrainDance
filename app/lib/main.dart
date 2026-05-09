@@ -495,6 +495,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
             }
           }
         });
+
+    // 首帧只渲染当前页，首帧结束后立即预热其余 Tab 页面（Offstage），消除首次切换掉帧
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _builtPages.addAll({1, 2}));
+    });
   }
 
   @override
