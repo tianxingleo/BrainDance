@@ -790,20 +790,42 @@ function startControllerLoop() {
 
 function renderSceneWithCamera(runtime: RuntimeGaussianViewer, camera: THREE.PerspectiveCamera) {
   if (!runtime.renderer || !runtime.splatMesh) return
+
+  const savedAutoClear = runtime.renderer.autoClear
+  if (runtime.threeScene?.children.some((child) => child.visible)) {
+    runtime.renderer.render(runtime.threeScene, camera)
+    runtime.renderer.autoClear = false
+  }
+
   runtime.renderer.render(runtime.splatMesh, camera)
-  if (worldRoot) runtime.renderer.render(worldRoot, camera)
+  runtime.renderer.autoClear = false
+
+  const focusOpacity = runtime.sceneHelper?.getFocusMarkerOpacity?.() ?? 0
+  if (focusOpacity > 0 && runtime.sceneHelper?.focusMarker) {
+    runtime.renderer.render(runtime.sceneHelper.focusMarker, camera)
+  }
+  if (runtime.showControlPlane && runtime.sceneHelper?.controlPlane) {
+    runtime.renderer.render(runtime.sceneHelper.controlPlane, camera)
+  }
+
+  runtime.renderer.autoClear = savedAutoClear
 }
 
 function startStereoPreviewLoop() {
   const runtime = getRuntimeViewer()
   if (!runtime?.renderer || !runtime.camera) return
 
-  const leftCamera = runtime.camera.clone()
-  const rightCamera = runtime.camera.clone()
+  const baseCamera = runtime.camera
+  const leftCamera = baseCamera.clone()
+  const rightCamera = baseCamera.clone()
 
   const renderStereoFrame = () => {
     const currentRuntime = getRuntimeViewer()
     if (!currentRuntime?.renderer || !currentRuntime.camera) return
+
+    currentRuntime.controls?.update()
+    currentRuntime.update?.()
+
     const renderer = currentRuntime.renderer
     const camera = currentRuntime.camera
     const canvas = renderer.domElement
@@ -825,6 +847,8 @@ function startStereoPreviewLoop() {
     rightCamera.aspect = Math.max(0.1, halfWidth / height)
     leftCamera.updateProjectionMatrix()
     rightCamera.updateProjectionMatrix()
+    leftCamera.updateMatrixWorld()
+    rightCamera.updateMatrixWorld()
 
     renderer.setScissorTest(true)
     renderer.setViewport(0, 0, halfWidth, height)
@@ -1214,6 +1238,7 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
 
   const candidate = await addSplatSceneWithFallback(nextPayload, resolvedConfig)
   activeModelUrl.value = candidate
+  disposeIntroGlint()
   rebuildSpatialHelpers()
   applySceneScaleMode()
   setLoadState('ready', '模型已加载，准备进入 VR', 1)
@@ -1234,6 +1259,9 @@ async function bootstrap(input?: unknown) {
     const payload = normalizePayload(input ?? getInitialPayload())
     activePayload.value = payload
     if (payload.previewMode) previewMode.value = payload.previewMode
+    else if (previewMode.value === 'desktop' && (payload.ply || payload.modelUrl || (payload.modelList?.length ?? 0) <= 1)) {
+      previewMode.value = 'webxr'
+    }
     authSession.value = payload.authSession || null
     modelList.value = normalizeModelPayloadList(payload)
     markers.value = payload.markers || []

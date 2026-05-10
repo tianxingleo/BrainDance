@@ -2,9 +2,11 @@ export type PreviewMode = 'desktop' | 'stereo' | 'webxr'
 
 export function getPreviewMode(): PreviewMode {
   const params = new URLSearchParams(window.location.search)
-  const value = params.get('preview') || getPayloadPreviewMode(params.get('payload'))
+  const rawPayload = params.get('payload')
+  const value = params.get('preview') || getPayloadPreviewMode(rawPayload)
   if (value === 'stereo') return 'stereo'
   if (value === 'webxr') return 'webxr'
+  if (rawPayload) return 'webxr'
   return 'desktop'
 }
 
