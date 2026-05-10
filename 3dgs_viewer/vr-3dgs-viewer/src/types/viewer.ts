@@ -6,6 +6,7 @@ export interface BrainDanceViewerPayload {
   matrix?: number[]
   imageId?: string
   sceneId?: string
+  activeModelId?: string
   modelList?: BrainDanceRecallModel[]
   markers?: BrainDanceRecallMarker[]
   searchResults?: BrainDanceRecallSearchResult[]
@@ -127,12 +128,12 @@ export interface VrLoadResult {
 
 declare global {
   interface Window {
-    loadModelFromFlutter?: (input: unknown) => void
-    setModelListForTimePeeling?: (list: unknown, currentId?: unknown) => void
-    setBrainDanceSession?: (session: unknown) => void
-    setRecallSearchResults?: (results: unknown) => void
-    setRecallQuery?: (query: string) => void
-    setThemeFromFlutter?: (theme: string) => void
-    setRecallMarkers?: (markers: unknown) => void
+    loadViewerPayload?: (input: unknown) => void
+    setViewerModelList?: (list: unknown, currentId?: unknown) => void
+    setViewerSession?: (session: unknown) => void
+    setViewerSearchResults?: (results: unknown) => void
+    setViewerQuery?: (query: string) => void
+    setViewerTheme?: (theme: string) => void
+    setViewerMarkers?: (markers: unknown) => void
   }
 }

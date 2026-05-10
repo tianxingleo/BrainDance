@@ -1,5 +1,17 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_BD_DEFAULT_MODEL_URL?: string
+  readonly VITE_BD_DEFAULT_POSES_URL?: string
+  readonly VITE_BD_DEFAULT_VR_CONFIG_URL?: string
+  readonly VITE_BD_DEFAULT_PREVIEW_MODE?: 'desktop' | 'stereo' | 'webxr'
+  readonly VITE_BD_MODEL_CATALOG_URL?: string
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
   const component: DefineComponent<object, object, unknown>

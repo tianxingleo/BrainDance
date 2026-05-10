@@ -2,6 +2,46 @@
 
 这是 BrainDance 的独立 VR 预览端，定位是 PC WebXR / SteamVR 查看器。PICO Neo 2 这类旧安卓头显不需要直接安装新 App，只作为 PCVR 串流显示端使用。
 
+## 与 Flutter 客户端的边界
+
+**vr-3dgs-viewer 与 Flutter 客户端完全分离，是两个独立运行的应用。**
+
+- Flutter 客户端通过 `webview_flutter` 内嵌的是 `my-3dgs-viewer` 或 `spark-3dgs-viewer`（构建产物位于 `app/assets/webgl/` 和 `app/assets/webgl_spark/`），运行在手机本地 WebView 中。
+- vr-3dgs-viewer 运行在 PC 浏览器（Chrome / Edge）中，不嵌入任何 Flutter 页面，也不被 Flutter 启动或管理。
+- 两者之间没有直接的网络通信或运行时耦合，各自独立启动、独立运行。
+
+**两端实现相近的核心能力，但入口不同：**
+
+- 使用相同的 payload JSON 协议字段（`ply / modelUrl`、`poses / posesUrl`、`modelList / timePeelingModels`、`authSession`、`markers`、`searchResults` 等），共享同一套 `BrainDanceViewerPayload` 类型定义。
+- 独立 viewer 通过 `window.loadViewerPayload`、`window.setViewerSession`、`window.setViewerModelList`、`window.setViewerSearchResults`、`window.setViewerMarkers`、`window.setViewerQuery` 等钩子接收桌面调试输入。
+- 采用相同的坐标系修正策略（Z 轴镜像 `scale: [s, s, -s]`），确保模型在两个端的朝向和尺度表现一致。
+- 共享同一套模型加载策略（`.ksplat` > `.splat` > `.ply` 压缩格式优先链）。
+
+**典型使用场景对比：**
+
+| 场景 | Flutter 客户端 | vr-3dgs-viewer |
+|---|---|---|
+| 运行设备 | 安卓手机 | PC + VR 头显 |
+| 渲染方式 | WebView 内嵌 my-3dgs-viewer | PC Chrome/Edge 直接渲染 |
+| VR 模式 | 无 | WebXR / SteamVR |
+| 交互方式 | 触屏手势 | VR 手柄 |
+| 启动方式 | Flutter 应用内导航 | 浏览器直接打开 URL |
+| 调试模式 | 依赖 Flutter DevTools | 桌面 / 立体预览可直接调试 |
+
+## WebXR 与 SteamVR 依赖
+
+vr-3dgs-viewer 的 VR 模式（`?preview=webxr`）依赖以下底层能力：
+
+- **WebXR Device API**：浏览器原生 API，通过 `navigator.xr.requestSession('immersive-vr')` 申请沉浸式 VR 会话，使用 `local-floor` 参考空间进行地面级追踪。可选特性包括 `bounded-floor`（安全边界）、`hand-tracking`（手部追踪）和 `layers`（图层合成）。
+- **SteamVR**：系统级 VR 运行时。PC 端必须先启动 SteamVR，浏览器才会将 WebXR 调用委托给 SteamVR，由 SteamVR 驱动头显显示和手柄输入。没有 SteamVR 或其他 WebXR 兼容运行时，`?preview=webxr` 将无法进入 VR 会话。
+- **HTTPS 安全上下文**：WebXR 强制要求安全上下文。开发环境通过 Vite basic SSL 插件提供自签名 HTTPS，生产部署需要有效的 TLS 证书。
+- **Cross-Origin Isolation**：为启用 `SharedArrayBuffer`（多线程 3DGS 排序所需），服务端设置了 `Cross-Origin-Opener-Policy: same-origin` 和 `Cross-Origin-Embedder-Policy: require-corp` 响应头。
+
+**没有 VR 头显时的替代方案：**
+- `?preview=desktop`：普通桌面预览，支持 OrbitControls 鼠标交互，适合开发调试。
+- `?preview=stereo`：左右眼并排立体预览，可在普通屏幕上检查双眼视差和深度方向。
+- 以上两种模式均不需要 WebXR 或 SteamVR，直接在浏览器中运行。
+
 ## 运行方式
 
 ```bash
@@ -84,24 +124,38 @@ payload 示例：
 }
 ```
 
-本端不是把 VR 渲染器接到 Flutter，而是在网页 VR 内复刻 Flutter 客户端的核心用户态和交互入口。保留这些全局 hook 是为了让桌面调试、WebView 或后端 Recall 结果能用同一套协议灌入网页：
+本端不是把 VR 渲染器接到 Flutter，而是独立实现网页 VR 的核心用户态和交互入口。保留这些全局 hook 是为了让桌面调试、模型目录与后端 Recall 结果能用同一套协议灌入网页：
 
 ```ts
-window.loadModelFromFlutter({
+window.loadViewerPayload({
   ply: 'https://example.com/point_cloud.ksplat',
   poses: 'https://example.com/webgl_poses.json',
   authSession: { displayName: 'Demo User' },
   modelList: [{ id: 'a', name: 'A', modelUrl: 'https://example.com/a.ksplat' }],
 })
 
-window.setBrainDanceSession({ displayName: 'Demo User' })
-window.setModelListForTimePeeling([{ id: 'a', name: 'A', modelUrl: 'https://example.com/a.ksplat' }], 'a')
-window.setRecallQuery('桌子')
-window.setRecallSearchResults([{ id: 'hit', label: '桌子', markerId: 'desk' }])
-window.setRecallMarkers([{ id: 'desk', label: '桌子', position: [0, 1.2, -2.4] }])
+window.setViewerSession({ displayName: 'Demo User' })
+window.setViewerModelList([{ id: 'a', name: 'A', modelUrl: 'https://example.com/a.ksplat' }], 'a')
+window.setViewerQuery('桌子')
+window.setViewerSearchResults([{ id: 'hit', label: '桌子', markerId: 'desk' }])
+window.setViewerMarkers([{ id: 'desk', label: '桌子', position: [0, 1.2, -2.4] }])
 ```
 
-字段兼容 Flutter 侧历史命名：`modelUrl / ply`、`posesUrl / poses`、`timePeelingModels / modelList`、`authSession / session / userSession`、`recallMarkers / markers`、`recallSearchResults / searchResults`。
+字段兼容历史命名：`modelUrl / ply`、`posesUrl / poses`、`timePeelingModels / modelList`、`authSession / session / userSession`、`recallMarkers / markers`、`recallSearchResults / searchResults`。
+
+## 独立端配置
+
+可通过 `.env` 配置默认模型目录与 catalog：
+
+```env
+VITE_BD_DEFAULT_MODEL_URL=./models/point_cloud.splat
+VITE_BD_DEFAULT_POSES_URL=./models/webgl_poses.json
+VITE_BD_DEFAULT_VR_CONFIG_URL=./models/vr_config.json
+VITE_BD_DEFAULT_PREVIEW_MODE=webxr
+VITE_BD_MODEL_CATALOG_URL=./models/model_catalog.json
+```
+
+`public/models/model_catalog.json` 用于独立端本地调试目录，会在没有外部 payload 时作为默认模型列表和登录态来源。
 
 ## VR 配置
 
@@ -139,6 +193,7 @@ WebXR 控制器映射：
 - `B / Y` 或等价侧键：显示 / 隐藏 VR HUD
 - 单手 `Grip`：抓取移动和旋转场景
 - 双手 `Grip`：按双手距离缩放场景
+- HUD 支持控制器光标 + `Trigger` 点选按钮、模型、搜索结果、标记和导航点
 
 `desktop` 和 `stereo` 模式用于开发调试，不能替代 SteamVR + PICO Neo 2 的真实头显验证。
 

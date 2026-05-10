@@ -9,9 +9,26 @@ import {
 } from './bridge'
 import type { PreviewMode } from './previewMode'
 
+const defaultModelUrl = normalizeEnvString(
+  import.meta.env.VITE_BD_DEFAULT_MODEL_URL,
+  './models/point_cloud.splat',
+)
+const defaultPosesUrl = normalizeEnvString(
+  import.meta.env.VITE_BD_DEFAULT_POSES_URL,
+  './models/webgl_poses.json',
+)
+const defaultVrConfigUrl = normalizeEnvString(
+  import.meta.env.VITE_BD_DEFAULT_VR_CONFIG_URL,
+  './models/vr_config.json',
+)
+const defaultPreviewMode = normalizePreviewMode(import.meta.env.VITE_BD_DEFAULT_PREVIEW_MODE)
+
 const fallbackPayload: BrainDanceViewerPayload = {
-  ply: './models/point_cloud.splat',
-  poses: './models/webgl_poses.json',
+  ply: defaultModelUrl,
+  modelUrl: defaultModelUrl,
+  poses: defaultPosesUrl,
+  posesUrl: defaultPosesUrl,
+  previewMode: defaultPreviewMode,
 }
 
 export function parsePayloadFromUrl(): BrainDanceViewerPayload | null {
@@ -55,6 +72,7 @@ export function normalizePayload(input: unknown): BrainDanceViewerPayload {
     matrix: normalizeNumericArray(value.matrix),
     imageId: value.imageId ? String(value.imageId) : undefined,
     sceneId: value.sceneId ? String(value.sceneId) : undefined,
+    activeModelId: value.activeModelId ? String(value.activeModelId) : undefined,
     modelList: modelList.length > 0 ? modelList : undefined,
     markers: markers.length > 0 ? markers : undefined,
     searchResults: searchResults.length > 0 ? searchResults : undefined,
@@ -68,9 +86,13 @@ export function getInitialPayload(): BrainDanceViewerPayload {
 }
 
 export function deriveVrConfigUrl(payload: BrainDanceViewerPayload): string {
-  if (!payload.poses) return './models/vr_config.json'
+  if (!payload.poses) return defaultVrConfigUrl
   const nextUrl = payload.poses.replace(/webgl_poses(?:_with_tags)?\.json(?:\?.*)?$/i, 'vr_config.json')
-  return nextUrl === payload.poses ? './models/vr_config.json' : nextUrl
+  return nextUrl === payload.poses ? defaultVrConfigUrl : nextUrl
+}
+
+function normalizeEnvString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
 
 function normalizeNumericArray(value: unknown): number[] | undefined {

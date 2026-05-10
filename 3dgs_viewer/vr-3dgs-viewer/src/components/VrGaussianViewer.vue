@@ -6,6 +6,7 @@ import { deriveVrConfigUrl, getInitialPayload, normalizePayload } from '../engin
 import { getPreviewMode, switchPreviewMode, type PreviewMode } from '../engine/previewMode'
 import { loadVrConfig } from '../engine/vrConfig'
 import { getVrModelCandidates } from '../engine/modelUrl'
+import { mergeStandaloneCatalog } from '../engine/catalog'
 import {
   decomposeMatrix,
   normalizeMatrixForViewer,
@@ -26,6 +27,7 @@ type InteractionMode = 'explore' | 'inspect'
 type SceneScaleMode = 'room' | 'diorama'
 type TurnMode = 'snap' | 'smooth'
 type QualityPreset = 'ultra' | 'high' | 'balanced' | 'performance' | 'potato'
+type HudView = 'controls' | 'models' | 'search' | 'markers' | 'nav'
 type LoadPhase =
   | 'idle'
   | 'config'
@@ -49,6 +51,19 @@ type GrabState =
     startObjectPosition: THREE.Vector3
     startObjectScale: THREE.Vector3
   }
+
+type HudAction = {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  kind: 'tab' | 'button' | 'item'
+  accent?: string
+  disabled?: boolean
+  onActivate: () => void
+}
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const status = ref('等待初始化')
@@ -77,6 +92,7 @@ const isMenuOpen = ref(true)
 const interactionMode = ref<InteractionMode>('explore')
 const sceneScaleMode = ref<SceneScaleMode>('room')
 const turnMode = ref<TurnMode>('snap')
+const hudView = ref<HudView>('controls')
 const moveSpeed = ref(1.15)
 const snapTurnAngle = ref(30)
 const vignetteEnabled = ref(true)
@@ -107,6 +123,11 @@ let leftController: THREE.Group | null = null
 let rightController: THREE.Group | null = null
 let controllerRay: THREE.Line | null = null
 let controllerTip: THREE.Mesh | null = null
+let hudActions: HudAction[] = []
+let hudHoveredActionId: string | null = null
+let hudPointerHit = false
+let hudPointerDistance = 1.5
+let hudRaycaster = new THREE.Raycaster()
 let hudCanvas: HTMLCanvasElement | null = null
 let hudTexture: THREE.CanvasTexture | null = null
 let hudMesh: THREE.Mesh | null = null
@@ -129,8 +150,9 @@ const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performan
 
 const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
 const modelLabel = computed(() => {
-  if (activeModelIndex >= 0 && modelList.value[activeModelIndex]) {
-    return modelList.value[activeModelIndex]?.name || modelList.value[activeModelIndex]?.displayName || modelList.value[activeModelIndex]?.id
+  const selected = modelList.value.find((item) => item.id === activeModelId.value) || modelList.value[activeModelIndex]
+  if (selected) {
+    return selected.name || selected.displayName || selected.id
   }
   return activePayload.value?.sceneId || activePayload.value?.imageId || '当前场景'
 })
@@ -170,6 +192,12 @@ const activeEvidence = computed(() => {
 })
 const navigationPoints = computed(() => activeConfig.value?.navigationPoints || [])
 const qualityLabel = computed(() => qualityPreset.value)
+const authLabel = computed(() => authSession.value?.displayName || authSession.value?.email || '未登录')
+const modelCountLabel = computed(() => {
+  if (modelList.value.length === 0) return '0/0'
+  const currentIndex = Math.max(0, modelList.value.findIndex((item) => item.id === activeModelId.value))
+  return `${currentIndex + 1}/${modelList.value.length}`
+})
 const filteredModels = computed(() => {
   const query = activeSearchQuery.value.trim().toLowerCase()
   if (!query) return modelList.value
@@ -199,6 +227,78 @@ function setLoadState(phase: LoadPhase, text: string, progress = loadProgress.va
   loadProgress.value = THREE.MathUtils.clamp(progress, 0, 1)
 }
 
+function getSceneActionTargets() {
+  const runtime = getRuntimeViewer()
+  const targets: THREE.Object3D[] = []
+  if (runtime?.splatMesh) targets.push(runtime.splatMesh)
+  if (worldRoot && !targets.includes(worldRoot)) targets.push(worldRoot)
+  return targets
+}
+
+function applySceneDelta(delta: THREE.Vector3) {
+  for (const target of getSceneActionTargets()) {
+    target.position.add(delta)
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function applySceneRotationY(angle: number) {
+  for (const target of getSceneActionTargets()) {
+    target.rotateY(angle)
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function rotateSceneAroundUser(angle: number) {
+  const runtime = getRuntimeViewer()
+  const camera = runtime?.renderer?.xr?.isPresenting
+    ? runtime.renderer.xr.getCamera()
+    : runtime?.camera
+  if (!camera) {
+    applySceneRotationY(angle)
+    return
+  }
+
+  const pivot = camera.getWorldPosition(new THREE.Vector3())
+  for (const target of getSceneActionTargets()) {
+    target.position.sub(pivot).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).add(pivot)
+    target.rotateY(angle)
+  }
+  runtime?.forceRenderNextFrame?.()
+}
+
+function focusSceneOnPoint(point: THREE.Vector3, offset = 1.45) {
+  const runtime = getRuntimeViewer()
+  const camera = runtime?.renderer?.xr?.isPresenting
+    ? runtime.renderer.xr.getCamera()
+    : runtime?.camera
+  if (!camera) return
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  const desired = camera.position.clone().addScaledVector(forward, offset)
+  const delta = desired.sub(point)
+  applySceneDelta(delta)
+}
+
+function resolveInitialModel(payload: BrainDanceViewerPayload, models: BrainDanceRecallModel[]) {
+  if (models.length === 0) return null
+  const candidates = [payload.activeModelId, payload.sceneId, payload.imageId].filter(
+    (item): item is string => Boolean(item && item.trim()),
+  )
+  for (const candidate of candidates) {
+    const match = models.find((item) => item.id === candidate || item.sceneId === candidate)
+    if (match) return match
+  }
+
+  const payloadUrl = payload.modelUrl || payload.ply
+  if (payloadUrl) {
+    const match = models.find((item) => item.modelUrl === payloadUrl || item.ply === payloadUrl)
+    if (match) return match
+  }
+
+  return models[0] || null
+}
+
 function disposeViewer() {
   if (!viewer) return
   try {
@@ -215,6 +315,9 @@ function disposeViewer() {
   rightController = null
   controllerRay = null
   controllerTip = null
+  hudActions = []
+  hudHoveredActionId = null
+  hudPointerHit = false
   markerGroup = null
   navGroup = null
   clippingPlaneHelper = null
@@ -235,6 +338,7 @@ function resetRuntimeState() {
   selectedMarkerId.value = ''
   selectedSearchResultId.value = ''
   selectedNavPointId.value = ''
+  hudHoveredActionId = null
   measurementPoints.value = []
   lastDirectionHint.value = '暂无导航目标'
 }
@@ -315,7 +419,7 @@ function createHud() {
 
   hudCanvas = document.createElement('canvas')
   hudCanvas.width = 1024
-  hudCanvas.height = 512
+  hudCanvas.height = 640
   hudContext = hudCanvas.getContext('2d')
   if (!hudContext) return
 
@@ -328,7 +432,7 @@ function createHud() {
     depthWrite: false,
   })
   hudMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.35, 0.675),
+    new THREE.PlaneGeometry(1.6, 1.0),
     material,
   )
   hudMesh.renderOrder = 999
@@ -500,8 +604,254 @@ function updateSceneSummary() {
   ].filter(Boolean).join('；')
 }
 
+function setHudView(view: HudView) {
+  hudView.value = view
+  drawHud()
+}
+
+function nextQualityPreset(offset: number) {
+  const index = qualityPresets.indexOf(qualityPreset.value)
+  const next = qualityPresets[(index + offset + qualityPresets.length) % qualityPresets.length]
+  if (next) setQualityPreset(next)
+}
+
+function addHudAction(action: HudAction) {
+  hudActions.push(action)
+}
+
+function drawHudButton(
+  ctx: CanvasRenderingContext2D,
+  action: HudAction,
+  active = false,
+) {
+  addHudAction(action)
+  const hovered = hudHoveredActionId === action.id
+  const accent = action.accent || '#9ed0c6'
+  ctx.save()
+  ctx.globalAlpha = action.disabled ? 0.38 : 1
+  ctx.fillStyle = active
+    ? `${accent}66`
+    : hovered
+      ? 'rgba(247, 248, 251, 0.20)'
+      : 'rgba(247, 248, 251, 0.08)'
+  ctx.strokeStyle = hovered ? accent : active ? `${accent}cc` : 'rgba(247, 248, 251, 0.20)'
+  ctx.lineWidth = hovered ? 3 : 2
+  ctx.beginPath()
+  ctx.roundRect(action.x, action.y, action.width, action.height, 10)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = action.disabled ? 'rgba(247, 248, 251, 0.48)' : '#f7f8fb'
+  ctx.font = '700 20px Inter, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(action.label.slice(0, 18), action.x + action.width / 2, action.y + action.height / 2)
+  ctx.restore()
+}
+
+function drawHudListItem(
+  ctx: CanvasRenderingContext2D,
+  action: HudAction,
+  meta: string,
+  active = false,
+) {
+  addHudAction(action)
+  const hovered = hudHoveredActionId === action.id
+  const accent = action.accent || '#9ed0c6'
+  ctx.save()
+  ctx.globalAlpha = action.disabled ? 0.38 : 1
+  ctx.fillStyle = active
+    ? `${accent}44`
+    : hovered
+      ? 'rgba(247, 248, 251, 0.16)'
+      : 'rgba(247, 248, 251, 0.06)'
+  ctx.strokeStyle = hovered ? accent : 'rgba(247, 248, 251, 0.16)'
+  ctx.lineWidth = hovered ? 3 : 1.5
+  ctx.beginPath()
+  ctx.roundRect(action.x, action.y, action.width, action.height, 8)
+  ctx.fill()
+  ctx.stroke()
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+  ctx.fillStyle = '#f7f8fb'
+  ctx.font = '700 22px Inter, sans-serif'
+  ctx.fillText(action.label.slice(0, 32), action.x + 18, action.y + 28)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
+  ctx.font = '18px Inter, sans-serif'
+  ctx.fillText(meta.slice(0, 64), action.x + 18, action.y + 54)
+  ctx.restore()
+}
+
+function drawHudTabs(ctx: CanvasRenderingContext2D) {
+  const tabs: Array<{ view: HudView; label: string }> = [
+    { view: 'controls', label: '控制' },
+    { view: 'models', label: `模型 ${modelCountLabel.value}` },
+    { view: 'search', label: `结果 ${searchResults.value.length}` },
+    { view: 'markers', label: `标记 ${markers.value.length}` },
+    { view: 'nav', label: `视角 ${navigationPoints.value.length}` },
+  ]
+  tabs.forEach((tab, index) => {
+    drawHudButton(ctx, {
+      id: `tab:${tab.view}`,
+      label: tab.label,
+      x: 44 + index * 184,
+      y: 206,
+      width: 168,
+      height: 42,
+      kind: 'tab',
+      onActivate: () => setHudView(tab.view),
+    }, hudView.value === tab.view)
+  })
+}
+
+function drawHudControls(ctx: CanvasRenderingContext2D) {
+  const buttons: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'preview:desktop', label: 'Desktop', active: previewMode.value === 'desktop', onActivate: () => selectMode('desktop') },
+    { id: 'preview:stereo', label: 'Stereo', active: previewMode.value === 'stereo', onActivate: () => selectMode('stereo') },
+    { id: 'preview:webxr', label: 'WebXR', active: previewMode.value === 'webxr', onActivate: () => selectMode('webxr') },
+    { id: 'interaction:explore', label: 'Explore', active: interactionMode.value === 'explore', onActivate: () => setInteractionMode('explore') },
+    { id: 'interaction:inspect', label: 'Inspect', active: interactionMode.value === 'inspect', onActivate: () => setInteractionMode('inspect') },
+    { id: 'scale:room', label: '1:1', active: sceneScaleMode.value === 'room', onActivate: () => setSceneScaleMode('room') },
+    { id: 'scale:diorama', label: '沙盘', active: sceneScaleMode.value === 'diorama', onActivate: () => setSceneScaleMode('diorama') },
+  ]
+  buttons.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 134,
+      y: 282,
+      width: 120,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  const rowTwo: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'model:prev', label: '上一模型', onActivate: () => selectModelByOffset(-1) },
+    { id: 'model:next', label: '下一模型', onActivate: () => selectModelByOffset(1) },
+    { id: 'view:reset', label: '重置', onActivate: resetView },
+    { id: 'vr:enter', label: '进入VR', accent: '#87a5ff', onActivate: () => { void enterVrSession() } },
+    { id: 'vr:exit', label: '退出VR', accent: '#f2c38f', onActivate: () => { void exitVrSession() } },
+    { id: 'menu:close', label: '收起HUD', onActivate: () => { isMenuOpen.value = false } },
+  ]
+  rowTwo.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 154,
+      y: 338,
+      width: 140,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  const rowThree: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'quality:prev', label: `质量 -`, onActivate: () => nextQualityPreset(-1) },
+    { id: 'quality:next', label: `质量 +`, onActivate: () => nextQualityPreset(1) },
+    { id: 'turn:toggle', label: turnMode.value === 'snap' ? 'Snap' : 'Smooth', active: turnMode.value === 'snap', onActivate: () => { turnMode.value = turnMode.value === 'snap' ? 'smooth' : 'snap' } },
+    { id: 'floor:toggle', label: '锁地面', active: floorLockEnabled.value, onActivate: () => { floorLockEnabled.value = !floorLockEnabled.value } },
+    { id: 'vignette:toggle', label: '黑边', active: vignetteEnabled.value, onActivate: () => { vignetteEnabled.value = !vignetteEnabled.value } },
+    { id: 'clip:toggle', label: '剖切', active: clippingEnabled.value, onActivate: () => { clippingEnabled.value = !clippingEnabled.value; updateClippingPlaneHelper() } },
+    { id: 'measure:toggle', label: '测量', active: measurementEnabled.value, onActivate: () => { measurementEnabled.value = !measurementEnabled.value } },
+    { id: 'measure:clear', label: '清除', onActivate: clearMeasurement },
+  ]
+  rowThree.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 116,
+      y: 394,
+      width: 102,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.70)'
+  ctx.font = '22px Inter, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.fillText(`当前：${modelLabel.value} / ${qualityLabel.value} / ${measurementDistanceLabel.value}`, 44, 492)
+  ctx.fillText(`提示：用控制器光标指向按钮，扣 Trigger 执行；Grip 抓取模型，双手 Grip 缩放。`, 44, 532)
+}
+
+function drawHudCollection(ctx: CanvasRenderingContext2D) {
+  const yStart = 278
+  const rowHeight = 68
+  const maxRows = 5
+  if (hudView.value === 'models') {
+    modelList.value.slice(0, maxRows).forEach((model, index) => {
+      drawHudListItem(ctx, {
+        id: `model:${model.id}`,
+        label: model.name || model.displayName || model.id,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        onActivate: () => selectModel(model),
+      }, model.description || model.ply || '-', activeModelId.value === model.id)
+    })
+    return
+  }
+
+  if (hudView.value === 'search') {
+    searchResults.value.slice(0, maxRows).forEach((item, index) => {
+      drawHudListItem(ctx, {
+        id: `search:${item.id}`,
+        label: item.label,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        accent: '#f2c38f',
+        onActivate: () => selectSearchResult(item),
+      }, `${item.score != null ? `${Math.round(item.score * 100)}% · ` : ''}${item.description || item.markerId || '-'}`, selectedSearchResultId.value === item.id)
+    })
+    return
+  }
+
+  if (hudView.value === 'markers') {
+    markers.value.slice(0, maxRows).forEach((item, index) => {
+      drawHudListItem(ctx, {
+        id: `marker:${item.id}`,
+        label: item.label,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        accent: item.color || '#9ed0c6',
+        onActivate: () => selectMarker(item),
+      }, item.description || item.imageId || '-', selectedMarkerId.value === item.id)
+    })
+    return
+  }
+
+  navigationPoints.value.slice(0, maxRows).forEach((item, index) => {
+    drawHudListItem(ctx, {
+      id: `nav:${item.id}`,
+      label: item.label,
+      x: 44,
+      y: yStart + index * rowHeight,
+      width: 936,
+      height: 58,
+      kind: 'item',
+      accent: '#87a5ff',
+      onActivate: () => selectNavigationPoint(item.id),
+    }, item.description || item.kind || item.position.map((value) => value.toFixed(1)).join(', '), selectedNavPointId.value === item.id)
+  })
+}
+
 function drawHud() {
   if (!hudContext || !hudCanvas) return
+  hudActions = []
   const ctx = hudContext
   const { width, height } = hudCanvas
   ctx.clearRect(0, 0, width, height)
@@ -527,17 +877,26 @@ function drawHud() {
   ctx.font = '24px Inter, sans-serif'
   ctx.fillStyle = '#f7f8fb'
   ctx.fillText(`FPS ${fps.value || '--'}   |   模型 ${modelLabel.value}`, 44, 224)
-  ctx.fillText(`状态 ${status.value}`, 44, 266)
-  ctx.fillText(`模式 ${previewMode.value} / ${interactionMode.value} / ${sceneScaleMode.value}`, 44, 308)
-  ctx.fillText(`质量 ${qualityLabel.value}   |   转向 ${turnMode.value} ${snapTurnAngle.value}°`, 44, 350)
-  ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
-  ctx.fillText(`导航 ${lastDirectionHint.value}`, 44, 394)
-  ctx.fillText(`测量 ${measurementDistanceLabel.value}   |   剖切 ${clippingEnabled.value ? `${clippingDistance.value.toFixed(1)}m` : '关闭'}`, 44, 432)
-  ctx.fillText('Grip 抓取/双手缩放，Trigger 选择，A/X 重置，B/Y 菜单', 44, 470)
+  ctx.fillText(`用户 ${authLabel.value}   |   状态 ${status.value}`, 44, 184)
 
-  if (authSession.value?.displayName || authSession.value?.email) {
+  drawHudTabs(ctx)
+  if (hudView.value === 'controls') {
+    drawHudControls(ctx)
+  } else {
+    drawHudCollection(ctx)
+  }
+
+  const hover = hudActions.find((action) => action.id === hudHoveredActionId)
+  ctx.fillStyle = hover ? '#f2c38f' : 'rgba(247, 248, 251, 0.58)'
+  ctx.font = '20px Inter, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.fillText(hover ? `Trigger：${hover.label}` : '光标指向按钮后扣 Trigger 选择；B/Y 收起或展开 HUD。', 44, 614)
+
+  if (hudPointerHit && hudPointerDistance > 0) {
     ctx.fillStyle = '#f2c38f'
-    ctx.fillText(`用户 ${authSession.value.displayName || authSession.value.email}`, 44, 494)
+    ctx.beginPath()
+    ctx.arc(1000, 614, 7, 0, Math.PI * 2)
+    ctx.fill()
   }
 
   hudTexture!.needsUpdate = true
@@ -644,6 +1003,10 @@ function wasPressedNow(hand: ControllerHand, action: string, pressed: boolean) {
   return pressed && !previous
 }
 
+function wasAxisCrossed(hand: ControllerHand, action: string, value: number, threshold = 0.7) {
+  return wasPressedNow(hand, action, Math.abs(value) >= threshold)
+}
+
 function getControllerWorldPose(controller: THREE.Object3D) {
   return {
     position: controller.getWorldPosition(new THREE.Vector3()),
@@ -656,6 +1019,108 @@ function getActiveControllerPoses() {
   return {
     left: getControllerWorldPose(leftController),
     right: getControllerWorldPose(rightController),
+  }
+}
+
+function getHudPointerController() {
+  return rightController || leftController
+}
+
+function getHudActionAtUv(uv: THREE.Vector2) {
+  if (!hudCanvas) return null
+  const x = uv.x * hudCanvas.width
+  const y = (1 - uv.y) * hudCanvas.height
+  return hudActions.find(
+    (action) =>
+      x >= action.x &&
+      x <= action.x + action.width &&
+      y >= action.y &&
+      y <= action.y + action.height,
+  ) || null
+}
+
+function activateHudAction(action: HudAction | null) {
+  if (!action || action.disabled) return false
+  try {
+    action.onActivate()
+    drawHud()
+    return true
+  } catch (error) {
+    console.warn('[BrainDance VR] HUD action failed:', action.id, error)
+    return false
+  }
+}
+
+function updateHudPointer(triggerPressed: boolean) {
+  if (!hudMesh) {
+    hudHoveredActionId = null
+    hudPointerHit = false
+    return
+  }
+  const controller = getHudPointerController()
+  if (!controller) {
+    hudHoveredActionId = null
+    hudPointerHit = false
+    return
+  }
+
+  const origin = controller.getWorldPosition(new THREE.Vector3())
+  const direction = controller.getWorldDirection(new THREE.Vector3()).normalize()
+  hudRaycaster.set(origin, direction)
+  const intersections = hudRaycaster.intersectObject(hudMesh, false)
+  const hit = intersections[0]
+  const previousHoverId = hudHoveredActionId
+  hudPointerHit = Boolean(hit && hit.uv)
+
+  if (!hit || !hit.uv) {
+    hudHoveredActionId = null
+    if (controllerRay) {
+      controllerRay.visible = isMenuOpen.value
+      controllerRay.scale.z = 1
+    }
+    if (controllerTip) {
+      controllerTip.visible = isMenuOpen.value
+      controllerTip.position.z = -1.5
+    }
+    if (previousHoverId !== hudHoveredActionId) drawHud()
+    if (triggerPressed && !isMenuOpen.value) {
+      handlePrimarySelect()
+    }
+    return
+  }
+
+  hudHoveredActionId = getHudActionAtUv(hit.uv)?.id || null
+  hudPointerDistance = hit.distance
+
+  if (controllerRay) {
+    controllerRay.visible = true
+    controllerRay.scale.z = Math.max(0.01, hit.distance / 1.5)
+  }
+  if (controllerTip) {
+    controllerTip.visible = true
+    controllerTip.position.z = -Math.max(0.05, hit.distance)
+  }
+
+  if (triggerPressed && hudHoveredActionId) {
+    const action = hudActions.find((item) => item.id === hudHoveredActionId) || null
+    activateHudAction(action)
+  }
+
+  if (hudHoveredActionId && controllerTip && controllerRay) {
+    const action = hudActions.find((item) => item.id === hudHoveredActionId)
+    if (action) {
+      const color = action.kind === 'tab' ? 0x87a5ff : action.kind === 'item' ? 0xf2c38f : 0x9ed0c6
+      ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(color)
+      ;(controllerRay.material as THREE.LineBasicMaterial).color.setHex(color)
+    }
+  }
+
+  if (previousHoverId !== hudHoveredActionId) {
+    drawHud()
+  }
+
+  if (triggerPressed && !hudHoveredActionId && !isMenuOpen.value) {
+    handlePrimarySelect()
   }
 }
 
@@ -738,6 +1203,7 @@ function updateControllerState(nowMs: number) {
   let leftGrip = false
   let rightGrip = false
   let moving = false
+  let hudTriggerPressed = false
   const debugLines: string[] = []
   for (const source of session.inputSources || []) {
     const gamepad = source.gamepad
@@ -750,33 +1216,49 @@ function updateControllerState(nowMs: number) {
     if (!controller) continue
     const hand = source.handedness === 'left' ? 'left' : source.handedness === 'right' ? 'right' : null
     if (!hand) continue
-    const gripPressed = isButtonPressed(gamepad, [1, 2, 3])
+    const triggerPressed = isButtonPressed(gamepad, [0])
+    const gripPressed = isButtonPressed(gamepad, [1])
+    const menuPressed = isButtonPressed(gamepad, [3, 4, 5])
     if (hand === 'left') leftGrip = gripPressed
     if (hand === 'right') rightGrip = gripPressed
 
     if (source.handedness === 'left') {
-      moving = moveRig(x, -y, dt) || moving
-      if (wasPressedNow(hand, 'reset', isButtonPressed(gamepad, [4, 5]))) {
+      if (isMenuOpen.value && Math.abs(x) >= 0.7) {
+        if (wasAxisCrossed(hand, 'model-prev', x)) {
+          selectModelByOffset(x > 0 ? 1 : -1)
+        }
+      } else {
+        moving = moveRig(x, -y, dt) || moving
+      }
+      if (wasPressedNow(hand, 'reset', menuPressed)) {
         resetView()
       }
     } else if (source.handedness === 'right') {
       moving = turnRig(x, dt, nowMs) || moving
-      if (Math.abs(y) > 0) {
+      if (isMenuOpen.value && Math.abs(y) >= 0.7) {
+        if (wasAxisCrossed(hand, 'model-next', y)) {
+          selectModelByOffset(y < 0 ? 1 : -1)
+        }
+      } else if (Math.abs(y) > 0 && !isVrPresenting.value) {
         moving = moveRig(0, 0, dt, -y) || moving
       }
-      if (wasPressedNow(hand, 'menu', isButtonPressed(gamepad, [0, 1, 4, 5]))) {
+      if (wasPressedNow(hand, 'menu', menuPressed)) {
         isMenuOpen.value = !isMenuOpen.value
       }
-      if (wasPressedNow(hand, 'trigger', isButtonPressed(gamepad, [0]))) {
-        handlePrimarySelect()
+      if (wasPressedNow(hand, 'trigger', triggerPressed)) {
+        hudTriggerPressed = true
+        if (!isMenuOpen.value) handlePrimarySelect()
       }
     }
   }
 
-  if (debugLines.length > 0) controllerDebug.value = debugLines.join('\n')
+  if (debugLines.length > 0) {
+    controllerDebug.value = debugLines.join('\n')
+  }
   updateGrabState(leftGrip, rightGrip)
   updateDirectionHint()
   updateVignette(moving)
+  updateHudPointer(hudTriggerPressed)
   updateHud(nowMs)
 }
 
@@ -948,20 +1430,35 @@ function handlePrimarySelect() {
   if (navigationPoints.value.length > 0) nextNavigationPoint()
 }
 
+function selectModelByOffset(offset: number) {
+  if (modelList.value.length === 0) return
+  const currentIndex = Math.max(0, modelList.value.findIndex((item) => item.id === activeModelId.value))
+  const nextIndex = (currentIndex + offset + modelList.value.length) % modelList.value.length
+  const nextModel = modelList.value[nextIndex]
+  if (nextModel) selectModel(nextModel)
+}
+
 function flyToMatrix(matrix: unknown) {
   const runtime = getRuntimeViewer()
   const resolved = resolveMatrixPayload(matrix)
-  if (!runtime?.camera || !resolved) return
-  runtime.camera.position.copy(resolved.position)
-  runtime.camera.quaternion.copy(resolved.quaternion)
-  runtime.forceRenderNextFrame?.()
+  if (!resolved) return
+  if (isVrPresenting.value && runtime?.renderer?.xr?.isPresenting) {
+    focusSceneOnPoint(resolved.position)
+  } else if (runtime?.camera) {
+    runtime.camera.position.copy(resolved.position)
+    runtime.camera.quaternion.copy(resolved.quaternion)
+  }
+  runtime?.forceRenderNextFrame?.()
 }
 
 function flyToPosition(position: [number, number, number]) {
   const runtime = getRuntimeViewer()
-  if (!runtime?.camera) return
-  runtime.camera.position.set(position[0], position[1], position[2])
-  runtime.forceRenderNextFrame?.()
+  if (isVrPresenting.value && runtime?.renderer?.xr?.isPresenting) {
+    focusSceneOnPoint(new THREE.Vector3(position[0], position[1], position[2]))
+  } else if (runtime?.camera) {
+    runtime.camera.position.set(position[0], position[1], position[2])
+  }
+  runtime?.forceRenderNextFrame?.()
 }
 
 function addMeasurementPointFromCamera() {
@@ -1256,7 +1753,8 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
 
 async function bootstrap(input?: unknown) {
   try {
-    const payload = normalizePayload(input ?? getInitialPayload())
+    const seedPayload = normalizePayload(input ?? getInitialPayload())
+    const payload = await mergeStandaloneCatalog(seedPayload)
     activePayload.value = payload
     if (payload.previewMode) previewMode.value = payload.previewMode
     else if (previewMode.value === 'desktop' && (payload.ply || payload.modelUrl || (payload.modelList?.length ?? 0) <= 1)) {
@@ -1268,11 +1766,12 @@ async function bootstrap(input?: unknown) {
     searchResults.value = payload.searchResults || []
     selectedSearchResultId.value = searchResults.value[0]?.id || ''
     selectedMarkerId.value = !selectedSearchResultId.value ? markers.value[0]?.id || '' : ''
-    activeModelId.value = modelList.value[0]?.id || ''
+    activeModelId.value = payload.activeModelId || modelList.value[0]?.id || ''
     activeSearchQuery.value = ''
     setLoadState('config', '准备读取模型配置', 0.04)
-    const initialModel = modelList.value[0] || normalizeModelPayloadList(payload)[0]
+    const initialModel = resolveInitialModel(payload, modelList.value)
     if (initialModel) {
+      activeModelId.value = initialModel.id
       await loadModel(initialModel)
     }
   } catch (error) {
@@ -1375,7 +1874,11 @@ function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
   delta.addScaledVector(direction, -forward * moveSpeed.value * dt)
   delta.addScaledVector(right, strafe * moveSpeed.value * dt)
   if (!floorLockEnabled.value) delta.y += vertical * 0.85 * dt
-  xrRig.position.add(delta)
+  if (isVrPresenting.value) {
+    applySceneDelta(delta.clone().multiplyScalar(-1))
+  } else {
+    xrRig.position.add(delta)
+  }
   runtime.forceRenderNextFrame?.()
   return true
 }
@@ -1388,7 +1891,11 @@ function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now()) {
     angle = -Math.sign(turn) * THREE.MathUtils.degToRad(snapTurnAngle.value)
     lastSnapTurnTime = nowMs
   }
-  xrRig.rotateY(angle)
+  if (isVrPresenting.value) {
+    rotateSceneAroundUser(angle)
+  } else {
+    xrRig.rotateY(angle)
+  }
   getRuntimeViewer()?.forceRenderNextFrame?.()
   return true
 }
@@ -1464,13 +1971,13 @@ async function exitVrSession() {
 }
 
 function normalizeWindowHooks() {
-  window.loadModelFromFlutter = (input: unknown) => {
+  window.loadViewerPayload = (input: unknown) => {
     void bootstrap(input)
   }
-  window.setThemeFromFlutter = () => {
+  window.setViewerTheme = () => {
     drawHud()
   }
-  window.setModelListForTimePeeling = (list: unknown, currentId?: unknown) => {
+  window.setViewerModelList = (list: unknown, currentId?: unknown) => {
     const nextList = normalizePayload({
       ...activePayload.value,
       modelList: list,
@@ -1486,14 +1993,14 @@ function normalizeWindowHooks() {
     }
     drawHud()
   }
-  window.setBrainDanceSession = (session: unknown) => {
+  window.setViewerSession = (session: unknown) => {
     authSession.value = session && typeof session === 'object' ? normalizePayload({
       ...activePayload.value,
       authSession: session,
     }).authSession || null : null
     drawHud()
   }
-  window.setRecallSearchResults = (results: unknown) => {
+  window.setViewerSearchResults = (results: unknown) => {
     searchResults.value = normalizePayload({
       ...activePayload.value,
       searchResults: results,
@@ -1502,7 +2009,7 @@ function normalizeWindowHooks() {
     rebuildSpatialHelpers()
     drawHud()
   }
-  window.setRecallMarkers = (nextMarkers: unknown) => {
+  window.setViewerMarkers = (nextMarkers: unknown) => {
     markers.value = normalizePayload({
       ...activePayload.value,
       markers: nextMarkers,
@@ -1510,7 +2017,7 @@ function normalizeWindowHooks() {
     rebuildSpatialHelpers()
     drawHud()
   }
-  window.setRecallQuery = (query: string) => {
+  window.setViewerQuery = (query: string) => {
     activeSearchQuery.value = query || ''
   }
 }
@@ -1527,13 +2034,13 @@ onBeforeUnmount(() => {
   stopStereoLoop()
   stopControllerLoop()
   window.removeEventListener('keydown', onKeydown)
-  delete window.loadModelFromFlutter
-  delete window.setThemeFromFlutter
-  delete window.setModelListForTimePeeling
-  delete window.setBrainDanceSession
-  delete window.setRecallSearchResults
-  delete window.setRecallMarkers
-  delete window.setRecallQuery
+  delete window.loadViewerPayload
+  delete window.setViewerTheme
+  delete window.setViewerModelList
+  delete window.setViewerSession
+  delete window.setViewerSearchResults
+  delete window.setViewerMarkers
+  delete window.setViewerQuery
   disposeHud()
   disposeIntroGlint()
   disposeViewer()
@@ -1577,7 +2084,7 @@ onBeforeUnmount(() => {
       <dl class="debug-list">
         <div>
           <dt>Model</dt>
-          <dd>{{ activeModelUrl || '-' }}</dd>
+          <dd>{{ modelCountLabel }} · {{ activeModelUrl || '-' }}</dd>
         </div>
         <div>
           <dt>Position</dt>
@@ -1589,7 +2096,7 @@ onBeforeUnmount(() => {
         </div>
         <div>
           <dt>User</dt>
-          <dd>{{ authSession?.displayName || authSession?.email || '-' }}</dd>
+          <dd>{{ authLabel }}</dd>
         </div>
       </dl>
 
