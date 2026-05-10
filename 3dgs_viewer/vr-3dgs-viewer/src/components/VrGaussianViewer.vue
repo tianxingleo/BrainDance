@@ -537,7 +537,7 @@ function drawHud() {
 
   if (authSession.value?.displayName || authSession.value?.email) {
     ctx.fillStyle = '#f2c38f'
-    ctx.fillText(`用户 ${authSession.value.displayName || authSession.value.email}`, 604, 494)
+    ctx.fillText(`用户 ${authSession.value.displayName || authSession.value.email}`, 44, 494)
   }
 
   hudTexture!.needsUpdate = true
@@ -1181,8 +1181,6 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   disposeObject3D(measurementLabelMesh)
   disposeObject3D(vignetteMesh)
   disposeViewer()
-  if (containerRef.value) containerRef.value.innerHTML = ''
-
   viewer = new GaussianSplats3D.Viewer({
     rootElement: containerRef.value,
     cameraUp: [0, 1, 0],
