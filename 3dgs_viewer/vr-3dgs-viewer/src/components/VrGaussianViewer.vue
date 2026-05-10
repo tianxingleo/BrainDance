@@ -107,9 +107,6 @@ const navPointIndex = ref(0)
 const controllerDebug = ref('等待 SteamVR 手柄输入')
 const lastDirectionHint = ref('暂无导航目标')
 const modelSummaryText = ref('等待场景摘要')
-const browserMirrorLabel = computed(() => (isVrPresenting.value ? '浏览器镜像已开启' : '浏览器镜像已关闭'))
-const browserMirrorCanvasRef = ref<HTMLCanvasElement | null>(null)
-
 let viewer: GaussianSplats3D.Viewer | null = null
 let frameCount = 0
 let lastFpsTime = performance.now()
@@ -137,8 +134,6 @@ let hudTexture: THREE.CanvasTexture | null = null
 let hudMesh: THREE.Mesh | null = null
 let hudContext: CanvasRenderingContext2D | null = null
 let lastHudDrawTime = 0
-let browserMirrorContext: CanvasRenderingContext2D | null = null
-let browserMirrorRafId = 0
 let sceneRoot: THREE.Group | null = null
 let xrRig: THREE.Group | null = null
 let worldRoot: THREE.Group | null = null
@@ -151,8 +146,6 @@ let measurementLine: THREE.Line | null = null
 let measurementLabelMesh: THREE.Sprite | null = null
 let vignetteMesh: THREE.Mesh | null = null
 let lastSnapTurnTime = 0
-let modelLoadToken = 0
-let loadedModelUrl = ''
 const buttonLatch = new Map<string, boolean>()
 const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
 
@@ -328,7 +321,6 @@ function disposeViewer() {
   hudPointerHit = false
   hudPointerWorldPoint = new THREE.Vector3()
   hudPointerTargets = []
-  loadedModelUrl = ''
   markerGroup = null
   navGroup = null
   clippingPlaneHelper = null
@@ -394,12 +386,6 @@ function stopControllerLoop() {
   controllerRafId = 0
 }
 
-function stopBrowserMirrorLoop() {
-  if (!browserMirrorRafId) return
-  window.cancelAnimationFrame(browserMirrorRafId)
-  browserMirrorRafId = 0
-}
-
 function getRuntimeViewer(): RuntimeGaussianViewer | null {
   return viewer as (GaussianSplats3D.Viewer & RuntimeGaussianViewer) | null
 }
@@ -456,45 +442,6 @@ function createHud() {
   hudMesh.visible = false
   runtime.threeScene.add(hudMesh)
   hudPointerTargets = [hudMesh]
-}
-
-function ensureBrowserMirrorCanvas() {
-  const canvas = browserMirrorCanvasRef.value
-  if (!canvas) return
-  if (browserMirrorContext && browserMirrorContext.canvas === canvas) return
-  canvas.width = Math.max(1, canvas.clientWidth || 1280)
-  canvas.height = Math.max(1, canvas.clientHeight || 720)
-  browserMirrorContext = canvas.getContext('2d')
-}
-
-function drawBrowserMirrorFrame() {
-  ensureBrowserMirrorCanvas()
-  const canvas = browserMirrorCanvasRef.value
-  if (!canvas || !browserMirrorContext) return
-  const runtime = getRuntimeViewer()
-  if (!runtime?.renderer) return
-
-  const source = runtime.renderer.domElement
-  const width = source.width || source.clientWidth
-  const height = source.height || source.clientHeight
-  if (!width || !height) return
-
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width
-    canvas.height = height
-  }
-
-  browserMirrorContext.clearRect(0, 0, width, height)
-  browserMirrorContext.drawImage(source, 0, 0, width, height)
-}
-
-function startBrowserMirrorLoop() {
-  stopBrowserMirrorLoop()
-  const tick = () => {
-    drawBrowserMirrorFrame()
-    browserMirrorRafId = window.requestAnimationFrame(tick)
-  }
-  tick()
 }
 
 function createIntroGlint() {
@@ -1563,18 +1510,6 @@ function clearMeasurement() {
   updateMeasurementVisual()
 }
 
-async function clearSplatSceneCache() {
-  const runtime = getRuntimeViewer()
-  if (!runtime?.removeSplatScenes) return
-  const sceneCount = (runtime.splatMesh as { getSceneCount?: () => number } | undefined)?.getSceneCount?.() ?? 0
-  if (sceneCount <= 0) return
-  try {
-    await runtime.removeSplatScenes(Array.from({ length: sceneCount }, (_, index) => index), false)
-  } catch (error) {
-    console.warn('[BrainDance VR] 清理旧模型场景失败:', error)
-  }
-}
-
 function updateMeasurementVisual() {
   disposeObject3D(measurementLine)
   disposeObject3D(measurementLabelMesh)
@@ -1774,7 +1709,6 @@ function normalizeModelPayloadList(payload: BrainDanceViewerPayload) {
 
 async function loadModel(model: BrainDanceRecallModel, options: { preserveState?: boolean } = {}) {
   if (!containerRef.value) return
-  const loadToken = ++modelLoadToken
   const payload = activePayload.value || getInitialPayload()
   const config = activeConfig.value || (await loadVrConfig(deriveVrConfigUrl(payload)))
   const nextPayload = {
@@ -1809,31 +1743,27 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   disposeObject3D(measurementLine)
   disposeObject3D(measurementLabelMesh)
   disposeObject3D(vignetteMesh)
-  const keepSession = Boolean(xrSession || isVrPresenting.value)
-  const canReuseViewer = Boolean(viewer && keepSession && options.preserveState !== false)
-  if (!canReuseViewer) {
-    disposeViewer()
-    viewer = new GaussianSplats3D.Viewer({
-      rootElement: containerRef.value,
-      cameraUp: [0, 1, 0],
-      initialCameraPosition: [0, resolvedConfig.userHeight, resolvedConfig.startDistance],
-      initialCameraLookAt: [0, resolvedConfig.userHeight, 0],
-      sharedMemoryForWorkers: typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : false,
-      gpuAcceleratedSort: false,
-      integerBasedSort: false,
-      halfPrecisionCovariancesOnGPU: true,
-      antialiased: false,
-      ignoreDevicePixelRatio: true,
-      dynamicScene: true,
-      webXRMode: previewMode.value === 'webxr' ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
-      sphericalHarmonicsDegree: 0,
-      selfDrivenMode: previewMode.value !== 'stereo',
-      useBuiltInControls: previewMode.value !== 'webxr',
-    })
+  disposeViewer()
+  viewer = new GaussianSplats3D.Viewer({
+    rootElement: containerRef.value,
+    cameraUp: [0, 1, 0],
+    initialCameraPosition: [0, resolvedConfig.userHeight, resolvedConfig.startDistance],
+    initialCameraLookAt: [0, resolvedConfig.userHeight, 0],
+    sharedMemoryForWorkers: typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : false,
+    gpuAcceleratedSort: false,
+    integerBasedSort: false,
+    halfPrecisionCovariancesOnGPU: true,
+    antialiased: false,
+    ignoreDevicePixelRatio: true,
+    dynamicScene: true,
+    webXRMode: previewMode.value === 'webxr' ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
+    sphericalHarmonicsDegree: 0,
+    selfDrivenMode: previewMode.value !== 'stereo',
+    useBuiltInControls: previewMode.value !== 'webxr',
+  })
 
-    if (previewMode.value === 'webxr') {
-      installXrSessionListeners()
-    }
+  if (previewMode.value === 'webxr') {
+    installXrSessionListeners()
   }
 
   activeModelIndex = modelList.value.findIndex((item) => item.id === model.id)
@@ -1846,7 +1776,6 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   applyQualityPreset()
 
   const candidate = await addSplatSceneWithFallback(nextPayload, resolvedConfig)
-  if (loadToken !== modelLoadToken) return
   activeModelUrl.value = candidate
   disposeIntroGlint()
   rebuildSpatialHelpers()
@@ -1861,7 +1790,6 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
     startStereoPreviewLoop()
   }
   if (xrSession) startControllerLoop()
-  startBrowserMirrorLoop()
   drawHud()
 }
 
@@ -2060,7 +1988,6 @@ function installXrSessionListeners() {
     isVrPresenting.value = false
     xrSession = null
     stopControllerLoop()
-    stopBrowserMirrorLoop()
     if (hudMesh) hudMesh.visible = false
     status.value = 'WebXR 会话已结束'
   })
@@ -2156,7 +2083,6 @@ onBeforeUnmount(() => {
   window.cancelAnimationFrame(statsRafId)
   stopStereoLoop()
   stopControllerLoop()
-  stopBrowserMirrorLoop()
   window.removeEventListener('keydown', onKeydown)
   delete window.loadViewerPayload
   delete window.setViewerTheme
@@ -2174,14 +2100,6 @@ onBeforeUnmount(() => {
 <template>
   <main class="vr-page">
     <div ref="containerRef" class="vr-canvas" />
-    <aside class="browser-mirror" aria-label="浏览器 VR 预览">
-      <div class="mirror-header">
-        <span class="eyebrow">Browser Mirror</span>
-        <span>{{ browserMirrorLabel }}</span>
-      </div>
-      <canvas class="browser-mirror-canvas" ref="browserMirrorCanvasRef"></canvas>
-    </aside>
-
     <section class="desktop-panel" :class="{ collapsed: !isMenuOpen }" aria-label="BrainDance VR 状态">
       <header class="panel-header">
         <p class="eyebrow">BrainDance</p>

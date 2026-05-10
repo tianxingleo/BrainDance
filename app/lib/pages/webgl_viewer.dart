@@ -818,11 +818,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     if (_isMarkerArMode) return;
     if (!_isWebReady) return;
     final payloadData = _buildViewerPayload();
-    final targetUrl = payloadData['modelUrl'] ?? payloadData['ply'];
 
-    debugPrint('Sending model URL to WebView: $targetUrl');
+    debugPrint('Sending model payload to WebView: ${payloadData['modelUrl'] ?? payloadData['ply']}');
     final payload = jsonEncode(payloadData);
-    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+    _controller?.runJavaScript('''
+      (function() {
+        var payload = $payload;
+        if (window.loadViewerPayload) {
+          window.loadViewerPayload(payload);
+        } else if (window.loadModelFromFlutter) {
+          window.loadModelFromFlutter(payload);
+        }
+      })();
+    ''');
 
     // 发送 TimePeeling 模型列表（无条件发送，空列表时 JS 端显示空态）
     _sendTimePeelingList();
@@ -833,7 +841,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendThemeToVue() {
     final theme = AppConfig.isNightMode ? 'dark' : 'light';
-    _controller?.runJavaScript("window.setThemeFromFlutter('$theme')");
+    _controller?.runJavaScript('''
+      (function() {
+        var theme = '$theme';
+        if (window.setViewerTheme) {
+          window.setViewerTheme(theme);
+        } else if (window.setThemeFromFlutter) {
+          window.setThemeFromFlutter(theme);
+        }
+      })();
+    ''');
   }
 
   void _sendTimePeelingList() {
@@ -862,9 +879,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ];
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
-      _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
-      );
+      _controller?.runJavaScript('''
+        (function() {
+          var list = $json;
+          var currentId = ${jsonEncode(widget.sceneId)};
+          if (window.setViewerModelList) {
+            window.setViewerModelList(list, currentId);
+          } else if (window.setModelListForTimePeeling) {
+            window.setModelListForTimePeeling(list, currentId);
+          }
+        })();
+      ''');
       return;
     }
 
@@ -938,9 +963,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     // 找出当前加载的模型 ID
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
-    _controller?.runJavaScript(
-      "window.setModelListForTimePeeling($json, '$currentModelId')",
-    );
+    _controller?.runJavaScript('''
+      (function() {
+        var list = $json;
+        var currentId = ${jsonEncode(currentModelId)};
+        if (window.setViewerModelList) {
+          window.setViewerModelList(list, currentId);
+        } else if (window.setModelListForTimePeeling) {
+          window.setModelListForTimePeeling(list, currentId);
+        }
+      })();
+    ''');
   }
 
   String _findCurrentModelId() {
@@ -1074,7 +1107,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       payloadData['poses'] = posesUrl;
     }
     final payload = jsonEncode(payloadData);
-    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
+    _controller?.runJavaScript('''
+      (function() {
+        var payload = $payload;
+        if (window.loadViewerPayload) {
+          window.loadViewerPayload(payload);
+        } else if (window.loadModelFromFlutter) {
+          window.loadModelFromFlutter(payload);
+        }
+      })();
+    ''');
   }
 
   Future<void> _switchViewer(bool useSpark) async {
