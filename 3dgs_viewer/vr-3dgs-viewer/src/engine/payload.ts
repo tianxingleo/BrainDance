@@ -91,13 +91,14 @@ export function deriveVrConfigUrl(payload: BrainDanceViewerPayload): string {
   return nextUrl === payload.poses ? defaultVrConfigUrl : nextUrl
 }
 
-export function resolveRelativeAssetUrl(assetUrl: string | undefined, baseUrl: string): string {
+export function resolveRelativeAssetUrl(assetUrl: string | undefined, baseUrl = window.location.href): string {
   const value = typeof assetUrl === 'string' ? assetUrl.trim() : ''
   if (!value) return value
   try {
-    return new URL(value, baseUrl).toString()
+    const base = new URL(baseUrl, window.location.href)
+    return new URL(value, base).toString()
   } catch {
-    return value
+    return new URL(value, window.location.href).toString()
   }
 }
 

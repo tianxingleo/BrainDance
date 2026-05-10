@@ -1256,23 +1256,13 @@ function updateControllerState(nowMs: number) {
     if (hand === 'right') rightGrip = gripPressed
 
     if (source.handedness === 'left') {
-      if (isMenuOpen.value && Math.abs(x) >= 0.7) {
-        if (wasAxisCrossed(hand, 'model-prev', x)) {
-          selectModelByOffset(x > 0 ? 1 : -1)
-        }
-      } else {
-        moving = moveRig(x, -y, dt) || moving
-      }
+      moving = moveRig(x, -y, dt) || moving
       if (wasPressedNow(hand, 'reset', menuPressed)) {
         resetView()
       }
     } else if (source.handedness === 'right') {
       moving = turnRig(x, dt, nowMs) || moving
-      if (isMenuOpen.value && Math.abs(y) >= 0.7) {
-        if (wasAxisCrossed(hand, 'model-next', y)) {
-          selectModelByOffset(y < 0 ? 1 : -1)
-        }
-      } else if (Math.abs(y) > 0 && !isVrPresenting.value) {
+      if (Math.abs(y) > 0 && !isVrPresenting.value) {
         moving = moveRig(0, 0, dt, -y) || moving
       }
       if (wasPressedNow(hand, 'menu', menuPressed)) {
@@ -1464,6 +1454,10 @@ function handlePrimarySelect() {
 }
 
 function selectModelByOffset(offset: number) {
+  if (isVrPresenting.value) {
+    status.value = 'VR 会话中已禁用摇杆切换模型，请先退出 VR 或使用网页列表切换'
+    return
+  }
   if (modelList.value.length === 0) return
   const currentIndex = Math.max(0, modelList.value.findIndex((item) => item.id === activeModelId.value))
   const nextIndex = (currentIndex + offset + modelList.value.length) % modelList.value.length
@@ -1572,9 +1566,7 @@ function updateDirectionHint() {
 }
 
 function resolveAssetUrl(assetUrl: string | undefined) {
-  const payload = activePayload.value || getInitialPayload()
-  const baseUrl = payload.poses || payload.modelUrl || payload.ply || window.location.href
-  return resolveRelativeAssetUrl(assetUrl, baseUrl)
+  return resolveRelativeAssetUrl(assetUrl, window.location.href)
 }
 
 function getActiveTargetPosition() {
@@ -1843,8 +1835,12 @@ function adjustScale(delta: number) {
     worldScale: nextScale,
   }
   userScale.value = nextScale
-  const current = modelList.value[activeModelIndex] || modelList.value[0]
-  if (current) void loadModel(current, { preserveState: true })
+  const target = getSceneManipulationTarget()
+  if (target) {
+    const signZ = target.scale.z < 0 ? -1 : 1
+    target.scale.set(nextScale, nextScale, signZ * nextScale)
+    getRuntimeViewer()?.forceRenderNextFrame?.()
+  }
 }
 
 function adjustRotation(delta: number) {
@@ -1854,15 +1850,21 @@ function adjustRotation(delta: number) {
     ...activeConfig.value,
     worldRotationY: rotationOverride,
   }
-  const current = modelList.value[activeModelIndex] || modelList.value[0]
-  if (current) void loadModel(current, { preserveState: true })
+  const target = getSceneManipulationTarget()
+  if (target) {
+    target.quaternion.set(...makeSceneRotationY(rotationOverride))
+    getRuntimeViewer()?.forceRenderNextFrame?.()
+  }
 }
 
 function applySceneScaleMode() {
   const target = getSceneManipulationTarget()
   if (!target) return
+  const baseScale = activeConfig.value?.worldScale ?? 1
+  const modeScale = sceneScaleMode.value === 'diorama' ? baseScale * 0.22 : baseScale
+  const signZ = target.scale.z < 0 ? -1 : 1
+  target.scale.set(modeScale, modeScale, signZ * modeScale)
   if (sceneScaleMode.value === 'diorama') {
-    target.scale.multiplyScalar(0.22)
     target.position.y += 0.8
   }
   userScale.value = getWorldRootScale()
@@ -1872,8 +1874,7 @@ function applySceneScaleMode() {
 function setSceneScaleMode(mode: SceneScaleMode) {
   if (sceneScaleMode.value === mode) return
   sceneScaleMode.value = mode
-  const current = modelList.value[activeModelIndex] || modelList.value[0]
-  if (current) void loadModel(current, { preserveState: true })
+  applySceneScaleMode()
 }
 
 function setInteractionMode(mode: InteractionMode) {
