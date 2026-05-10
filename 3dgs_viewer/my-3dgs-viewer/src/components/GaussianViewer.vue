@@ -73,6 +73,19 @@ const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
 const MOBILE_INTRO_PARTICLE_BUDGET = 18000;
 const INTRO_DURATION_MS = 6500;
 const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
+const VR_MOVE_SPEED = 1.35;
+const VR_TURN_SPEED = 1.65;
+const VR_VERTICAL_SPEED = 0.85;
+const VR_DEADZONE = 0.18;
+const VR_HUD_REFRESH_MS = 180;
+const VR_HUD_CANVAS_SIZE = { width: 1024, height: 512 };
+const VR_HUD_WORLD_SIZE = { width: 1.35, height: 0.675 };
+const SCENE_AXIS_FIX = {
+  position: [0, 0, 0],
+  // 当前训练导出的水平面已经正确，但模型整体落在相反 Z 半轴，统一在加载层做 Z 镜像。
+  scale: [1, 1, -1],
+  rotation: [0, 0, 0, 1],
+};
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
 
@@ -140,6 +153,11 @@ let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
 let interactionFrameHandle = 0;
 let renderRequested = false;
+let xrSession = null;
+let xrSessionEndHandler = null;
+let vrHud = null;
+let vrLastFrameTime = 0;
+let vrLastHudUpdateMs = 0;
 
 const cinematicState = {
   trajectory: null,
@@ -174,6 +192,7 @@ const orbitState = {
   targetPitch: 0,
   targetRadius: 3,
 };
+
 let centerModeBounds = null;
 let orbitNeedsRecenterAfterPoseFlight = false;
 
@@ -222,6 +241,12 @@ const requestRender = () => {
       viewer.render();
     } catch (_) {}
   });
+};
+
+const normalizeMatrixArray = (input) => {
+  if (!Array.isArray(input) || input.length !== 16) return null;
+  const matrix = input.map(value => Number(value));
+  return matrix.every(Number.isFinite) ? matrix : null;
 };
 
 const hasModelResource = async (url) => {
@@ -288,10 +313,12 @@ const addSplatSceneWithFormatFallback = async (sourceUrl) => {
           } else {
             loadingStatusText.value = percentCompleteLabel
               ? `下载模型数据 ${percentCompleteLabel}`
-              : '下载模型数据';
+            : '下载模型数据';
           }
         },
-        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
+        'position': SCENE_AXIS_FIX.position,
+        'rotation': SCENE_AXIS_FIX.rotation,
+        'scale': SCENE_AXIS_FIX.scale,
       });
       currentPlyUrl = candidate;
       loadingProgress.value = 1;
@@ -429,6 +456,193 @@ const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 const getSceneRadius = () => {
   const radius = Number(globalUniforms.uMaxRadius.value || 0);
   return radius > 0 ? radius : 1;
+};
+
+const getCurrentXrSession = () => viewer?.renderer?.xr?.getSession?.() || xrSession;
+
+const getXrCamera = () => {
+  if (!viewer?.renderer?.xr || !viewer?.camera) return viewer?.camera || null;
+  try {
+    return viewer.renderer.xr.getCamera(viewer.camera);
+  } catch (_) {
+    return viewer.camera;
+  }
+};
+
+const applyVrDeadzone = (value, threshold = VR_DEADZONE) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || Math.abs(numeric) < threshold) return 0;
+  return numeric;
+};
+
+const readThumbstick = (gamepad) => {
+  if (!gamepad) return { x: 0, y: 0 };
+  const axes = gamepad.axes || [];
+  const x = applyVrDeadzone(axes[2] ?? axes[0] ?? 0);
+  const y = applyVrDeadzone(axes[3] ?? axes[1] ?? 0);
+  return { x, y };
+};
+
+const moveVrCameraRig = (strafe, forward, vertical, dt) => {
+  if (!viewer?.camera) return;
+  const xrCamera = getXrCamera();
+  const direction = new THREE.Vector3();
+  (xrCamera || viewer.camera).getWorldDirection(direction);
+  direction.y = 0;
+  if (direction.lengthSq() < 1e-8) direction.set(0, 0, -1);
+  direction.normalize();
+
+  const right = new THREE.Vector3().crossVectors(direction, worldUp).normalize();
+  const delta = new THREE.Vector3()
+    .addScaledVector(direction, -forward * VR_MOVE_SPEED * dt)
+    .addScaledVector(right, strafe * VR_MOVE_SPEED * dt)
+    .addScaledVector(worldUp, vertical * VR_VERTICAL_SPEED * dt);
+
+  viewer.camera.position.add(delta);
+};
+
+const rotateVrCameraRig = (turn, dt) => {
+  if (!viewer?.camera || !turn) return;
+  const angle = -turn * VR_TURN_SPEED * dt;
+  const pivot = getXrCamera()?.position || viewer.camera.position;
+  const offset = viewer.camera.position.clone().sub(pivot);
+  const quat = new THREE.Quaternion().setFromAxisAngle(worldUp, angle);
+  offset.applyQuaternion(quat);
+  viewer.camera.position.copy(pivot).add(offset);
+  viewer.camera.quaternion.premultiply(quat).normalize();
+};
+
+const resetVrView = () => {
+  if (!viewer?.camera) return;
+  const center = globalUniforms.uCenter.value || new THREE.Vector3(0, 0, 0);
+  const radius = Math.max(getSceneRadius(), 0.8);
+  viewer.camera.position.set(center.x, center.y + Math.min(radius * 0.2, 1.0), center.z + radius * 2.2);
+  viewer.camera.up.copy(worldUp);
+  viewer.camera.lookAt(center);
+};
+
+const createVrHud = () => {
+  if (!viewer?.threeScene || vrHud) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = VR_HUD_CANVAS_SIZE.width;
+  canvas.height = VR_HUD_CANVAS_SIZE.height;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(VR_HUD_WORLD_SIZE.width, VR_HUD_WORLD_SIZE.height),
+    material,
+  );
+  mesh.renderOrder = 999;
+  mesh.visible = false;
+  viewer.threeScene.add(mesh);
+  vrHud = { canvas, context: canvas.getContext('2d'), texture, mesh };
+};
+
+const drawVrHud = () => {
+  if (!vrHud?.context) return;
+  const ctx = vrHud.context;
+  const { width, height } = vrHud.canvas;
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = 'rgba(12, 14, 18, 0.76)';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(210, 220, 235, 0.26)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(2, 2, width - 4, height - 4);
+
+  ctx.fillStyle = '#f7f8fb';
+  ctx.font = '700 48px Microsoft YaHei, sans-serif';
+  ctx.fillText('BrainDance VR', 48, 76);
+  ctx.font = '28px Microsoft YaHei, sans-serif';
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.78)';
+  ctx.fillText(`FPS ${currentFps.value || '--'}  |  ${isLoading.value ? loadingStatusText.value : '模型已就绪'}`, 48, 122);
+
+  const progressWidth = 520;
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.12)';
+  ctx.fillRect(48, 152, progressWidth, 18);
+  ctx.fillStyle = '#8fae7f';
+  ctx.fillRect(48, 152, progressWidth * THREE.MathUtils.clamp(loadingProgress.value, 0, 1), 18);
+
+  ctx.font = '26px Microsoft YaHei, sans-serif';
+  ctx.fillStyle = '#f7f8fb';
+  ctx.fillText('左摇杆：前后 / 平移', 48, 230);
+  ctx.fillText('右摇杆：转向 / 升降', 48, 274);
+  ctx.fillText('A/X：重置视角    B/Y：退出 VR', 48, 318);
+  ctx.fillText(`模式：${currentViewMode.value === VIEW_MODE.ORBIT ? '中心观察' : '自由漫游'}`, 48, 382);
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.58)';
+  ctx.fillText(`模型：${activeModelId.value || currentPlyUrl.split('/').pop() || '当前场景'}`, 48, 428);
+
+  vrHud.texture.needsUpdate = true;
+};
+
+const updateVrHud = (nowMs) => {
+  if (!vrHud?.mesh || !viewer?.camera) return;
+  const camera = getXrCamera() || viewer.camera;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+
+  vrHud.mesh.position
+    .copy(camera.position)
+    .addScaledVector(forward, 1.55)
+    .addScaledVector(right, 0)
+    .addScaledVector(up, -0.22);
+  vrHud.mesh.quaternion.copy(camera.quaternion);
+  vrHud.mesh.visible = true;
+
+  if (nowMs - vrLastHudUpdateMs > VR_HUD_REFRESH_MS) {
+    vrLastHudUpdateMs = nowMs;
+    drawVrHud();
+  }
+};
+
+const destroyVrHud = () => {
+  if (!vrHud) return;
+  if (viewer?.threeScene && vrHud.mesh) viewer.threeScene.remove(vrHud.mesh);
+  vrHud.mesh?.geometry?.dispose?.();
+  vrHud.mesh?.material?.dispose?.();
+  vrHud.texture?.dispose?.();
+  vrHud = null;
+};
+
+const handleVrButtons = (gamepad) => {
+  if (!gamepad?.buttons) return;
+  const pressed = (index) => gamepad.buttons[index]?.pressed === true;
+  if (pressed(4) || pressed(5)) resetVrView();
+  if (pressed(3) || pressed(6)) exitVRSession();
+};
+
+const updateVrInteraction = (nowMs) => {
+  if (!isVRMode.value || !viewer?.renderer) return;
+  const session = getCurrentXrSession();
+  if (!session) return;
+
+  const dt = vrLastFrameTime > 0
+    ? THREE.MathUtils.clamp((nowMs - vrLastFrameTime) / 1000, 1 / 120, 0.06)
+    : 1 / 90;
+  vrLastFrameTime = nowMs;
+
+  for (const source of session.inputSources || []) {
+    const gamepad = source.gamepad;
+    if (!gamepad) continue;
+    const stick = readThumbstick(gamepad);
+    if (source.handedness === 'left') {
+      moveVrCameraRig(stick.x, stick.y, 0, dt);
+    } else if (source.handedness === 'right') {
+      rotateVrCameraRig(stick.x, dt);
+      moveVrCameraRig(0, 0, -stick.y, dt);
+      handleVrButtons(gamepad);
+    }
+  }
+
+  updateVrHud(nowMs);
 };
 
 const getOrbitMinRadius = () => centerModeBounds
@@ -1510,22 +1724,6 @@ const beginIntroAnimation = (targetCameraState = null, targetPose = null, startC
   if (viewer.controls) viewer.controls.enabled = false;
 };
 
-const normalizeMatrixArray = (input) => {
-  if (!Array.isArray(input)) return null;
-
-  if (input.length === 16) {
-    const flat = input.map(value => Number(value));
-    return flat.every(Number.isFinite) ? flat : null;
-  }
-
-  if (input.length === 4 && input.every(row => Array.isArray(row) && row.length === 4)) {
-    const flat = input.flat().map(value => Number(value));
-    return flat.every(Number.isFinite) ? flat : null;
-  }
-
-  return null;
-};
-
 const normalizeImageId = (value) => {
   if (value == null) return '';
 
@@ -2251,6 +2449,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
     manualFocalPx.value = DEFAULT_FOCAL_PX;
+    createVrHud();
 
     // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
     await addSplatSceneWithFormatFallback(currentPlyUrl);
@@ -2292,7 +2491,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           imgUrl = toViewerSafeAssetUrl(imgUrl);
           return {
             id: frame.id,
-            matrix: frame.matrix,
+            matrix: normalizeMatrixArray(frame.matrix),
             image_url: imgUrl,
             tag: frame.tag,
             fl_x: frame.fl_x,
@@ -2302,7 +2501,12 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           };
         });
       } else {
-        cameraPoses.value = data; // 兼容旧格式
+        cameraPoses.value = Array.isArray(data)
+          ? data.map(pose => ({
+              ...pose,
+              matrix: normalizeMatrixArray(pose.matrix),
+            }))
+          : data; // 兼容旧格式
       }
     } catch (err) {
       posesFetchSettled = true;
@@ -2348,6 +2552,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
 
       // 更新上一帧时间，这会保留超出的那一点时间以防长期的漂移
       lastDrawTime = nowPerf - (elapsedSinceDraw % fpsInterval);
+
+      if (isVRMode.value) {
+        updateVrInteraction(nowPerf);
+      }
 
       viewer.update();
       viewer.render();
@@ -2708,14 +2916,52 @@ const adjustControlsToModel = () => {
 
 const onSessionStarted = (session) => {
   isVRMode.value = true;
+  xrSession = session;
+  vrLastFrameTime = 0;
+  createVrHud();
+  drawVrHud();
   if (viewer && viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
-  session.addEventListener('end', onSessionEnded);
+  if (session) {
+    xrSessionEndHandler = onSessionEnded;
+    session.addEventListener('end', xrSessionEndHandler);
+  }
 };
-const onSessionEnded = () => { isVRMode.value = false; applyViewMode(); };
+const onSessionEnded = () => {
+  if (xrSession && xrSessionEndHandler) {
+    xrSession.removeEventListener('end', xrSessionEndHandler);
+  }
+  xrSession = null;
+  xrSessionEndHandler = null;
+  vrLastFrameTime = 0;
+  if (vrHud?.mesh) vrHud.mesh.visible = false;
+  isVRMode.value = false;
+  applyViewMode();
+};
+const enterVRSession = async () => {
+  if (!viewer?.renderer?.xr || !navigator.xr) return;
+  viewer.renderer.xr.enabled = true;
+  viewer.renderer.xr.setReferenceSpaceType?.('local-floor');
+  const session = await navigator.xr.requestSession('immersive-vr', {
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+  });
+  await viewer.renderer.xr.setSession(session);
+  onSessionStarted(session);
+};
+const exitVRSession = async () => {
+  const session = getCurrentXrSession();
+  if (session) await session.end();
+  else onSessionEnded();
+};
 const toggleVRMode = async () => {
   if (!isSecureContext.value) { alert("需HTTPS"); return; }
-  if (isVRMode.value) { if (viewer.xr) viewer.xr.exitVR(); isVRMode.value = false; }
-  else { if (viewer.xr) viewer.xr.enterVR(); isVRMode.value = true; }
+  try {
+    if (isVRMode.value) await exitVRSession();
+    else await enterVRSession();
+  } catch (error) {
+    console.error('[VR] 切换 VR 模式失败:', error);
+    alert('VR 启动失败，请确认浏览器和头显已允许 WebXR');
+    onSessionEnded();
+  }
 };
 const toggleAutoRotate = () => { isAutoRotate.value = !isAutoRotate.value; };
 const checkProtocol = () => {
@@ -3149,6 +3395,10 @@ onBeforeUnmount(async () => {
     try {
       if (viewer.renderer) viewer.renderer.setAnimationLoop(null);
     } catch (_) {}
+    try {
+      await exitVRSession();
+    } catch (_) {}
+    destroyVrHud();
     try {
       await viewer.dispose();
     } catch (_) {}
