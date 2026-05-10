@@ -219,6 +219,30 @@ h1 {
   margin-top: 10px;
 }
 
+.auth-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.auth-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.ghost-button {
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: transparent;
+}
+
 .control-grid label,
 .tool-panel label {
   display: grid;

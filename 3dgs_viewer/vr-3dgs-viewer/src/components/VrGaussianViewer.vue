@@ -7,6 +7,8 @@ import { getPreviewMode, switchPreviewMode, type PreviewMode } from '../engine/p
 import { loadVrConfig } from '../engine/vrConfig'
 import { getVrModelCandidates } from '../engine/modelUrl'
 import { mergeStandaloneCatalog } from '../engine/catalog'
+import { loadViewerClientState, saveViewerClientState } from '../engine/clientState'
+import { viewerSupabaseClient, viewerSupabaseEnabled } from '../engine/supabaseClient'
 import {
   decomposeMatrix,
   normalizeMatrixForViewer,
@@ -27,7 +29,7 @@ type InteractionMode = 'explore' | 'inspect'
 type SceneScaleMode = 'room' | 'diorama'
 type TurnMode = 'snap' | 'smooth'
 type QualityPreset = 'ultra' | 'high' | 'balanced' | 'performance' | 'potato'
-type HudView = 'controls' | 'models' | 'search' | 'markers' | 'nav'
+type HudView = 'controls' | 'auth' | 'models' | 'search' | 'markers' | 'nav'
 type LoadPhase =
   | 'idle'
   | 'config'
@@ -70,7 +72,8 @@ const status = ref('等待初始化')
 const errorMessage = ref('')
 const fps = ref(0)
 const isVrPresenting = ref(false)
-const previewMode = ref<PreviewMode>(getPreviewMode())
+const persistedClientState = loadViewerClientState()
+const previewMode = ref<PreviewMode>(persistedClientState.previewMode || getPreviewMode())
 const activePayload = ref<BrainDanceViewerPayload | null>(null)
 const activeModelUrl = ref('')
 const activeConfig = ref<BrainDanceVrConfig | null>(null)
@@ -80,33 +83,37 @@ const userScale = ref(1)
 const loadPhase = ref<LoadPhase>('idle')
 const loadProgress = ref(0)
 const loadText = ref('等待加载')
-const authSession = ref<BrainDanceAuthSession | null>(null)
+const authSession = ref<BrainDanceAuthSession | null>(persistedClientState.authSession || null)
 const modelList = ref<BrainDanceRecallModel[]>([])
 const markers = ref<BrainDanceRecallMarker[]>([])
 const searchResults = ref<BrainDanceRecallSearchResult[]>([])
-const activeModelId = ref('')
-const activeSearchQuery = ref('')
+const activeModelId = ref(persistedClientState.activeModelId || '')
+const activeSearchQuery = ref(persistedClientState.activeSearchQuery || '')
 const selectedMarkerId = ref('')
 const selectedSearchResultId = ref('')
-const isMenuOpen = ref(true)
-const interactionMode = ref<InteractionMode>('explore')
-const sceneScaleMode = ref<SceneScaleMode>('room')
-const turnMode = ref<TurnMode>('snap')
-const hudView = ref<HudView>('controls')
+const isMenuOpen = ref(persistedClientState.isMenuOpen ?? true)
+const interactionMode = ref<InteractionMode>(persistedClientState.interactionMode || 'explore')
+const sceneScaleMode = ref<SceneScaleMode>(persistedClientState.sceneScaleMode || 'room')
+const turnMode = ref<TurnMode>(persistedClientState.turnMode || 'snap')
+const hudView = ref<HudView>(persistedClientState.hudView || 'controls')
 const moveSpeed = ref(1.15)
 const snapTurnAngle = ref(30)
 const vignetteEnabled = ref(true)
 const floorLockEnabled = ref(true)
-const qualityPreset = ref<QualityPreset>('balanced')
-const clippingEnabled = ref(false)
-const clippingDistance = ref(3.2)
-const measurementEnabled = ref(false)
+const qualityPreset = ref<QualityPreset>(persistedClientState.qualityPreset || 'balanced')
+const clippingEnabled = ref(persistedClientState.clippingEnabled ?? false)
+const clippingDistance = ref(persistedClientState.clippingDistance ?? 3.2)
+const measurementEnabled = ref(persistedClientState.measurementEnabled ?? false)
 const measurementPoints = ref<[number, number, number][]>([])
 const selectedNavPointId = ref('')
 const navPointIndex = ref(0)
 const controllerDebug = ref('等待 SteamVR 手柄输入')
 const lastDirectionHint = ref('暂无导航目标')
 const modelSummaryText = ref('等待场景摘要')
+const authEmail = ref(persistedClientState.authSession?.email || '')
+const authPassword = ref('')
+const authMessage = ref('')
+const authBusy = ref(false)
 let viewer: GaussianSplats3D.Viewer | null = null
 let frameCount = 0
 let lastFpsTime = performance.now()
@@ -128,12 +135,16 @@ let hudPointerHit = false
 let hudPointerDistance = 1.5
 let hudPointerWorldPoint = new THREE.Vector3()
 let hudRaycaster = new THREE.Raycaster()
-let hudPointerTargets: THREE.Object3D[] = []
 let hudCanvas: HTMLCanvasElement | null = null
 let hudTexture: THREE.CanvasTexture | null = null
 let hudMesh: THREE.Mesh | null = null
 let hudContext: CanvasRenderingContext2D | null = null
 let lastHudDrawTime = 0
+let hudPlane = new THREE.Plane()
+let hudPlaneNormal = new THREE.Vector3(0, 0, 1)
+let hudPlaneAnchor = new THREE.Vector3()
+let hudPlaneRight = new THREE.Vector3(1, 0, 0)
+let hudPlaneUp = new THREE.Vector3(0, 1, 0)
 let sceneRoot: THREE.Group | null = null
 let xrRig: THREE.Group | null = null
 let worldRoot: THREE.Group | null = null
@@ -146,8 +157,11 @@ let measurementLine: THREE.Line | null = null
 let measurementLabelMesh: THREE.Sprite | null = null
 let vignetteMesh: THREE.Mesh | null = null
 let lastSnapTurnTime = 0
+let stateSaveTimer = 0
 const buttonLatch = new Map<string, boolean>()
 const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
+const hudPlaneWidth = 1.6
+const hudPlaneHeight = 1.0
 
 const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
 const modelLabel = computed(() => {
@@ -226,6 +240,7 @@ function setLoadState(phase: LoadPhase, text: string, progress = loadProgress.va
   loadPhase.value = phase
   loadText.value = text
   loadProgress.value = THREE.MathUtils.clamp(progress, 0, 1)
+  scheduleClientStateSave()
 }
 
 function getSceneActionTargets() {
@@ -241,6 +256,7 @@ function applySceneDelta(delta: THREE.Vector3) {
     target.position.add(delta)
   }
   getRuntimeViewer()?.forceRenderNextFrame?.()
+  scheduleClientStateSave()
 }
 
 function applySceneRotationY(angle: number) {
@@ -248,6 +264,7 @@ function applySceneRotationY(angle: number) {
     target.rotateY(angle)
   }
   getRuntimeViewer()?.forceRenderNextFrame?.()
+  scheduleClientStateSave()
 }
 
 function rotateSceneAroundUser(angle: number) {
@@ -320,7 +337,6 @@ function disposeViewer() {
   hudHoveredActionId = null
   hudPointerHit = false
   hudPointerWorldPoint = new THREE.Vector3()
-  hudPointerTargets = []
   markerGroup = null
   navGroup = null
   clippingPlaneHelper = null
@@ -344,6 +360,140 @@ function resetRuntimeState() {
   hudHoveredActionId = null
   measurementPoints.value = []
   lastDirectionHint.value = '暂无导航目标'
+}
+
+function scheduleClientStateSave() {
+  if (stateSaveTimer) return
+  stateSaveTimer = window.setTimeout(() => {
+    stateSaveTimer = 0
+    saveViewerClientState({
+      authSession: authSession.value,
+      activeModelId: activeModelId.value,
+      activeSearchQuery: activeSearchQuery.value,
+      previewMode: previewMode.value,
+      hudView: hudView.value,
+      interactionMode: interactionMode.value,
+      sceneScaleMode: sceneScaleMode.value,
+      turnMode: turnMode.value,
+      qualityPreset: qualityPreset.value,
+      clippingEnabled: clippingEnabled.value,
+      clippingDistance: clippingDistance.value,
+      measurementEnabled: measurementEnabled.value,
+      isMenuOpen: isMenuOpen.value,
+    })
+  }, 120)
+}
+
+function syncClientStateNow() {
+  if (stateSaveTimer) {
+    window.clearTimeout(stateSaveTimer)
+    stateSaveTimer = 0
+  }
+  saveViewerClientState({
+    authSession: authSession.value,
+    activeModelId: activeModelId.value,
+    activeSearchQuery: activeSearchQuery.value,
+    previewMode: previewMode.value,
+    hudView: hudView.value,
+    interactionMode: interactionMode.value,
+    sceneScaleMode: sceneScaleMode.value,
+    turnMode: turnMode.value,
+    qualityPreset: qualityPreset.value,
+    clippingEnabled: clippingEnabled.value,
+    clippingDistance: clippingDistance.value,
+    measurementEnabled: measurementEnabled.value,
+    isMenuOpen: isMenuOpen.value,
+  })
+}
+
+function setAuthSession(session: BrainDanceAuthSession | null, message = '') {
+  authSession.value = session
+  authEmail.value = session?.email || authEmail.value
+  authMessage.value = message
+  scheduleClientStateSave()
+  drawHud()
+}
+
+async function refreshSupabaseSession() {
+  if (!viewerSupabaseClient) return
+  const { data, error } = await viewerSupabaseClient.auth.getSession()
+  if (error) {
+    authMessage.value = `会话同步失败：${error.message}`
+    return
+  }
+  const session = data.session
+  if (!session?.user) return
+  setAuthSession({
+    userId: session.user.id,
+    email: session.user.email || undefined,
+    displayName: session.user.user_metadata?.display_name || session.user.email || session.user.id,
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresAt: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
+    status: 'signed-in',
+  }, '已同步当前登录态')
+}
+
+async function signInToViewer() {
+  if (!viewerSupabaseClient) {
+    setAuthSession({
+      email: authEmail.value.trim() || 'local@viewer',
+      displayName: authEmail.value.trim() || 'Local VR User',
+      status: 'local-only',
+    }, '未配置 Supabase，已切换到本地会话模式')
+    return
+  }
+  if (!authEmail.value.trim() || !authPassword.value.trim()) {
+    authMessage.value = '请输入邮箱和密码'
+    return
+  }
+  authBusy.value = true
+  authMessage.value = '正在登录...'
+  try {
+    const { data, error } = await viewerSupabaseClient.auth.signInWithPassword({
+      email: authEmail.value.trim(),
+      password: authPassword.value,
+    })
+    if (error) throw error
+    const user = data.user
+    const session = data.session
+    if (user) {
+      setAuthSession({
+        userId: user.id,
+        email: user.email || undefined,
+        displayName: user.user_metadata?.display_name || user.email || user.id,
+        accessToken: session?.access_token,
+        refreshToken: session?.refresh_token,
+        expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
+        status: 'signed-in',
+      }, '登录成功')
+    }
+  } catch (error) {
+    authMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+    authPassword.value = ''
+  }
+}
+
+async function signOutOfViewer() {
+  if (!viewerSupabaseClient) {
+    setAuthSession({
+      status: 'local-only',
+      displayName: 'VR Local User',
+    }, '本地会话已清除')
+    return
+  }
+  authBusy.value = true
+  try {
+    const { error } = await viewerSupabaseClient.auth.signOut()
+    if (error) throw error
+    setAuthSession(null, '已退出登录')
+  } catch (error) {
+    authMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+  }
 }
 
 function updateFps() {
@@ -441,7 +591,38 @@ function createHud() {
   hudMesh.renderOrder = 999
   hudMesh.visible = false
   runtime.threeScene.add(hudMesh)
-  hudPointerTargets = [hudMesh]
+  updateHudPlaneBasis()
+}
+
+function updateHudPlaneBasis() {
+  if (!hudMesh) return
+  hudMesh.updateMatrixWorld(true)
+  const worldPosition = hudMesh.getWorldPosition(new THREE.Vector3())
+  const worldQuaternion = hudMesh.getWorldQuaternion(new THREE.Quaternion())
+  hudPlaneAnchor = worldPosition
+  hudPlaneNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(worldQuaternion).normalize()
+  hudPlaneRight = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuaternion).normalize()
+  hudPlaneUp = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuaternion).normalize()
+  hudPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(hudPlaneNormal, hudPlaneAnchor)
+}
+
+function intersectHudPlane(origin: THREE.Vector3, direction: THREE.Vector3) {
+  if (!hudMesh) return null
+  updateHudPlaneBasis()
+  const hitPoint = new THREE.Vector3()
+  const hit = hudRaycaster.ray.intersectPlane(hudPlane, hitPoint)
+  if (!hit) return null
+  const localPoint = hitPoint.clone().sub(hudPlaneAnchor)
+  const u = localPoint.dot(hudPlaneRight)
+  const v = localPoint.dot(hudPlaneUp)
+  const halfWidth = hudPlaneWidth / 2
+  const halfHeight = hudPlaneHeight / 2
+  if (Math.abs(u) > halfWidth || Math.abs(v) > halfHeight) return null
+  return {
+    distance: origin.distanceTo(hitPoint),
+    point: hitPoint,
+    uv: new THREE.Vector2((u / hudPlaneWidth) + 0.5, 1 - ((v / hudPlaneHeight) + 0.5)),
+  }
 }
 
 function createIntroGlint() {
@@ -610,6 +791,7 @@ function updateSceneSummary() {
 
 function setHudView(view: HudView) {
   hudView.value = view
+  scheduleClientStateSave()
   drawHud()
 }
 
@@ -688,6 +870,7 @@ function drawHudListItem(
 function drawHudTabs(ctx: CanvasRenderingContext2D) {
   const tabs: Array<{ view: HudView; label: string }> = [
     { view: 'controls', label: '控制' },
+    { view: 'auth', label: '账户' },
     { view: 'models', label: `模型 ${modelCountLabel.value}` },
     { view: 'search', label: `结果 ${searchResults.value.length}` },
     { view: 'markers', label: `标记 ${markers.value.length}` },
@@ -697,9 +880,9 @@ function drawHudTabs(ctx: CanvasRenderingContext2D) {
     drawHudButton(ctx, {
       id: `tab:${tab.view}`,
       label: tab.label,
-      x: 44 + index * 184,
+      x: 44 + index * 148,
       y: 206,
-      width: 168,
+      width: 132,
       height: 42,
       kind: 'tab',
       onActivate: () => setHudView(tab.view),
@@ -782,6 +965,57 @@ function drawHudControls(ctx: CanvasRenderingContext2D) {
   ctx.textAlign = 'left'
   ctx.fillText(`当前：${modelLabel.value} / ${qualityLabel.value} / ${measurementDistanceLabel.value}`, 44, 492)
   ctx.fillText(`提示：用控制器光标指向按钮，扣 Trigger 执行；Grip 抓取模型，双手 Grip 缩放。`, 44, 532)
+}
+
+function drawHudAuth(ctx: CanvasRenderingContext2D) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.94)'
+  ctx.font = '700 28px Inter, sans-serif'
+  ctx.fillText('账户', 44, 286)
+  ctx.font = '22px Inter, sans-serif'
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.76)'
+  ctx.fillText(`当前：${authLabel.value}`, 44, 322)
+  ctx.fillText(`状态：${authMessage.value || '未操作'}`, 44, 356)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
+  ctx.font = '20px Inter, sans-serif'
+  ctx.fillText(viewerSupabaseEnabled ? 'Supabase 登录已启用' : '未配置 Supabase，使用本地会话', 44, 388)
+  ctx.restore()
+
+  drawHudButton(ctx, {
+    id: 'auth:signin',
+    label: authBusy.value ? '登录中' : '登录',
+    x: 44,
+    y: 424,
+    width: 124,
+    height: 42,
+    kind: 'button',
+    accent: '#87a5ff',
+    disabled: authBusy.value || !authEmail.value.trim(),
+    onActivate: () => { void signInToViewer() },
+  })
+  drawHudButton(ctx, {
+    id: 'auth:signout',
+    label: '退出',
+    x: 180,
+    y: 424,
+    width: 124,
+    height: 42,
+    kind: 'button',
+    accent: '#f2c38f',
+    disabled: authBusy.value,
+    onActivate: () => { void signOutOfViewer() },
+  })
+  drawHudListItem(ctx, {
+    id: 'auth:email',
+    label: authEmail.value.trim() || '邮箱',
+    x: 44,
+    y: 484,
+    width: 260,
+    height: 58,
+    kind: 'item',
+    accent: '#9ed0c6',
+    onActivate: () => {},
+  }, authPassword.value ? '已输入密码' : '点击后在页面输入邮箱/密码')
 }
 
 function drawHudCollection(ctx: CanvasRenderingContext2D) {
@@ -886,6 +1120,8 @@ function drawHud() {
   drawHudTabs(ctx)
   if (hudView.value === 'controls') {
     drawHudControls(ctx)
+  } else if (hudView.value === 'auth') {
+    drawHudAuth(ctx)
   } else {
     drawHudCollection(ctx)
   }
@@ -904,6 +1140,7 @@ function drawHud() {
   }
 
   hudTexture!.needsUpdate = true
+  updateHudPlaneBasis()
 }
 
 function placeHudInFrontOfUser() {
@@ -913,6 +1150,7 @@ function placeHudInFrontOfUser() {
   hudMesh.position.copy(camera.position).addScaledVector(forward, 1.35).add(new THREE.Vector3(0, -0.18, 0))
   hudMesh.quaternion.copy(camera.quaternion)
   hudMesh.visible = isMenuOpen.value || !isVrPresenting.value
+  updateHudPlaneBasis()
 }
 
 function ensureVignette() {
@@ -986,15 +1224,6 @@ function ensureControllerRig() {
   )
   controllerTip.position.set(0, 0, -1.5)
   rightController.add(controllerTip)
-}
-
-function getControllerHitCandidates() {
-  const candidates: THREE.Object3D[] = []
-  if (hudMesh) candidates.push(hudMesh)
-  for (const item of hudPointerTargets) {
-    if (item && !candidates.includes(item)) candidates.push(item)
-  }
-  return candidates
 }
 
 function getWorldRootScale() {
@@ -1089,12 +1318,11 @@ function updateHudPointer(triggerPressed: boolean) {
   const direction = controller.getWorldDirection(new THREE.Vector3()).normalize()
   hudRaycaster.set(origin, direction)
   hudRaycaster.far = Math.max(6, hudPointerDistance + 2)
-  const intersections = hudRaycaster.intersectObjects(getControllerHitCandidates(), true)
-  const hit = intersections.find((entry) => entry.object === hudMesh || entry.object.parent === hudMesh) || intersections[0]
+  const hit = intersectHudPlane(origin, direction) || null
   const previousHoverId = hudHoveredActionId
-  hudPointerHit = Boolean(hit && hit.uv)
+  hudPointerHit = Boolean(hit)
 
-  if (!hit || !hit.uv) {
+  if (!hit) {
     hudHoveredActionId = null
     if (controllerRay) {
       controllerRay.visible = isMenuOpen.value
@@ -1112,17 +1340,8 @@ function updateHudPointer(triggerPressed: boolean) {
   }
 
   hudHoveredActionId = getHudActionAtUv(hit.uv)?.id || null
-  hudPointerDistance = hit.distance
+  hudPointerDistance = origin.distanceTo(hit.point)
   hudPointerWorldPoint = hit.point.clone()
-
-  if (controllerRay) {
-    controllerRay.visible = true
-    controllerRay.scale.z = Math.max(0.01, hit.distance / 1.5)
-  }
-  if (controllerTip) {
-    controllerTip.visible = true
-    controllerTip.position.z = -Math.max(0.05, hit.distance)
-  }
 
   if (controllerRay) {
     controllerRay.visible = true
@@ -1394,6 +1613,7 @@ function selectModel(model: BrainDanceRecallModel) {
   activeModelIndex = index
   activeModelUrl.value = model.modelUrl || model.ply
   activeModelId.value = model.id
+  scheduleClientStateSave()
   loadModel(model, { preserveState: true })
 }
 
@@ -1401,6 +1621,7 @@ function selectMarker(marker: BrainDanceRecallMarker) {
   selectedMarkerId.value = marker.id
   selectedSearchResultId.value = ''
   selectedNavPointId.value = ''
+  scheduleClientStateSave()
   if (marker.matrix) {
     flyToMatrix(marker.matrix)
   } else if (marker.position) {
@@ -1412,6 +1633,7 @@ function selectSearchResult(result: BrainDanceRecallSearchResult) {
   selectedSearchResultId.value = result.id
   selectedMarkerId.value = ''
   selectedNavPointId.value = ''
+  scheduleClientStateSave()
   if (result.matrix) {
     flyToMatrix(result.matrix)
   } else if (result.position) {
@@ -1428,6 +1650,7 @@ function selectNavigationPoint(pointId: string) {
   selectedNavPointId.value = point.id
   selectedMarkerId.value = ''
   selectedSearchResultId.value = ''
+  scheduleClientStateSave()
   if (point.matrix) flyToMatrix(point.matrix)
   else flyToPosition(point.position)
 }
@@ -1794,7 +2017,15 @@ async function bootstrap(input?: unknown) {
     else if (previewMode.value === 'desktop' && (payload.ply || payload.modelUrl || (payload.modelList?.length ?? 0) <= 1)) {
       previewMode.value = 'webxr'
     }
-    authSession.value = payload.authSession || null
+    authMessage.value = viewerSupabaseEnabled ? 'Supabase 已启用，等待登录' : '未配置 Supabase，使用本地会话'
+    if (payload.authSession) {
+      setAuthSession(payload.authSession, '已加载 payload 会话')
+    } else if (!authSession.value && !viewerSupabaseEnabled) {
+      setAuthSession({
+        status: 'local-preview',
+        displayName: 'VR Local User',
+      }, '本地预览会话已启用')
+    }
     modelList.value = normalizeModelPayloadList(payload)
     markers.value = payload.markers || []
     searchResults.value = payload.searchResults || []
@@ -1808,6 +2039,7 @@ async function bootstrap(input?: unknown) {
       activeModelId.value = initialModel.id
       await loadModel(initialModel)
     }
+    void refreshSupabaseSession()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     errorMessage.value = message
@@ -1841,6 +2073,7 @@ function adjustScale(delta: number) {
     target.scale.set(nextScale, nextScale, signZ * nextScale)
     getRuntimeViewer()?.forceRenderNextFrame?.()
   }
+  scheduleClientStateSave()
 }
 
 function adjustRotation(delta: number) {
@@ -1855,6 +2088,7 @@ function adjustRotation(delta: number) {
     target.quaternion.set(...makeSceneRotationY(rotationOverride))
     getRuntimeViewer()?.forceRenderNextFrame?.()
   }
+  scheduleClientStateSave()
 }
 
 function applySceneScaleMode() {
@@ -1875,6 +2109,7 @@ function setSceneScaleMode(mode: SceneScaleMode) {
   if (sceneScaleMode.value === mode) return
   sceneScaleMode.value = mode
   applySceneScaleMode()
+  scheduleClientStateSave()
 }
 
 function setInteractionMode(mode: InteractionMode) {
@@ -1882,6 +2117,7 @@ function setInteractionMode(mode: InteractionMode) {
   if (mode === 'inspect') {
     setSceneScaleMode('diorama')
   }
+  scheduleClientStateSave()
 }
 
 function applyQualityPreset() {
@@ -1901,6 +2137,7 @@ function applyQualityPreset() {
 function setQualityPreset(preset: QualityPreset) {
   qualityPreset.value = preset
   applyQualityPreset()
+  scheduleClientStateSave()
 }
 
 function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
@@ -1946,6 +2183,8 @@ function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now()) {
 function selectMode(mode: PreviewMode) {
   if (mode === previewMode.value) return
   switchPreviewMode(mode)
+  previewMode.value = mode
+  scheduleClientStateSave()
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -2018,14 +2257,8 @@ function normalizeWindowHooks() {
   window.loadViewerPayload = (input: unknown) => {
     void bootstrap(input)
   }
-  window.loadModelFromFlutter = (input: unknown) => {
-    void bootstrap(input)
-  }
   window.setViewerTheme = () => {
     drawHud()
-  }
-  window.setThemeFromFlutter = (theme: string) => {
-    if (theme === 'dark' || theme === 'light') drawHud()
   }
   window.setViewerModelList = (list: unknown, currentId?: unknown) => {
     const nextList = normalizePayload({
@@ -2043,7 +2276,6 @@ function normalizeWindowHooks() {
     }
     drawHud()
   }
-  window.setModelListForTimePeeling = window.setViewerModelList
   window.setViewerSession = (session: unknown) => {
     authSession.value = session && typeof session === 'object' ? normalizePayload({
       ...activePayload.value,
@@ -2084,14 +2316,8 @@ onBeforeUnmount(() => {
   window.cancelAnimationFrame(statsRafId)
   stopStereoLoop()
   stopControllerLoop()
+  syncClientStateNow()
   window.removeEventListener('keydown', onKeydown)
-  delete window.loadViewerPayload
-  delete window.setViewerTheme
-  delete window.setViewerModelList
-  delete window.setViewerSession
-  delete window.setViewerSearchResults
-  delete window.setViewerMarkers
-  delete window.setViewerQuery
   disposeHud()
   disposeIntroGlint()
   disposeViewer()
@@ -2149,6 +2375,26 @@ onBeforeUnmount(() => {
           <dd>{{ authLabel }}</dd>
         </div>
       </dl>
+
+      <div class="auth-panel">
+        <div class="auth-header">
+          <p class="panel-label">登录</p>
+          <button type="button" class="ghost-button" @click="void refreshSupabaseSession()">同步会话</button>
+        </div>
+        <label>
+          <span>邮箱</span>
+          <input v-model="authEmail" type="email" placeholder="name@example.com" @input="scheduleClientStateSave()" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input v-model="authPassword" type="password" placeholder="Password" @keydown.enter="void signInToViewer()" />
+        </label>
+        <div class="button-row">
+          <button type="button" :disabled="authBusy || !authEmail.trim()" @click="void signInToViewer()">登录</button>
+          <button type="button" :disabled="authBusy" @click="void signOutOfViewer()">退出</button>
+        </div>
+        <p class="hint">{{ authMessage || (viewerSupabaseEnabled ? 'VR 独立客户端已连接 Supabase' : '未配置 Supabase，当前为本地会话模式') }}</p>
+      </div>
 
       <div class="mode-row">
         <button type="button" :class="{ active: previewMode === 'desktop' }" @click="selectMode('desktop')">Desktop</button>
@@ -2211,7 +2457,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="search-panel">
-        <input v-model="activeSearchQuery" type="text" placeholder="搜索模型、标签、描述" />
+        <input v-model="activeSearchQuery" type="text" placeholder="搜索模型、标签、描述" @input="scheduleClientStateSave()" />
         <div class="search-results">
           <button
             v-for="item in filteredModels"

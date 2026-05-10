@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "@supabase/supabase-js": "^2.98.0",
     "three": "^0.181.2",
     "vue": "^3.5.25"
   },

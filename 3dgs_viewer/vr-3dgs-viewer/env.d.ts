@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_BD_DEFAULT_VR_CONFIG_URL?: string
   readonly VITE_BD_DEFAULT_PREVIEW_MODE?: 'desktop' | 'stereo' | 'webxr'
   readonly VITE_BD_MODEL_CATALOG_URL?: string
+  readonly VITE_BD_SUPABASE_URL?: string
+  readonly VITE_BD_SUPABASE_ANON_KEY?: string
 }
 
 interface ImportMeta {
