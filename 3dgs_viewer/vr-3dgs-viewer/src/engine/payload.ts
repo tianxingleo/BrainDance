@@ -1,7 +1,16 @@
-import type { BrainDanceViewerPayload } from '../types/viewer'
+import type {
+  BrainDanceViewerPayload,
+} from '../types/viewer'
+import {
+  normalizeAuthSession,
+  normalizeMarkers,
+  normalizeModelList,
+  normalizeSearchResults,
+} from './bridge'
+import type { PreviewMode } from './previewMode'
 
 const fallbackPayload: BrainDanceViewerPayload = {
-  ply: './models/scene_auto_sync_raw.ply',
+  ply: './models/point_cloud.splat',
   poses: './models/webgl_poses.json',
 }
 
@@ -32,13 +41,25 @@ export function normalizePayload(input: unknown): BrainDanceViewerPayload {
 
   const value = input as Record<string, unknown>
   const ply = value.ply || value.modelUrl || value.url
+  const poses = value.poses || value.posesUrl
+  const modelList = normalizeModelList(value.modelList || value.timePeelingModels)
+  const markers = normalizeMarkers(value.markers || value.recallMarkers)
+  const searchResults = normalizeSearchResults(value.searchResults || value.recallSearchResults)
+  const authSession = normalizeAuthSession(value.authSession || value.session || value.userSession)
 
   return {
     ply: typeof ply === 'string' && ply.trim() ? ply : fallbackPayload.ply,
-    poses: value.poses ? String(value.poses) : fallbackPayload.poses,
-    matrix: Array.isArray(value.matrix) ? value.matrix.map(Number).filter(Number.isFinite) : undefined,
+    modelUrl: typeof ply === 'string' && ply.trim() ? String(ply) : undefined,
+    poses: poses ? String(poses) : fallbackPayload.poses,
+    posesUrl: poses ? String(poses) : undefined,
+    matrix: normalizeNumericArray(value.matrix),
     imageId: value.imageId ? String(value.imageId) : undefined,
     sceneId: value.sceneId ? String(value.sceneId) : undefined,
+    modelList: modelList.length > 0 ? modelList : undefined,
+    markers: markers.length > 0 ? markers : undefined,
+    searchResults: searchResults.length > 0 ? searchResults : undefined,
+    authSession: authSession || undefined,
+    previewMode: normalizePreviewMode(value.previewMode),
   }
 }
 
@@ -50,4 +71,15 @@ export function deriveVrConfigUrl(payload: BrainDanceViewerPayload): string {
   if (!payload.poses) return './models/vr_config.json'
   const nextUrl = payload.poses.replace(/webgl_poses(?:_with_tags)?\.json(?:\?.*)?$/i, 'vr_config.json')
   return nextUrl === payload.poses ? './models/vr_config.json' : nextUrl
+}
+
+function normalizeNumericArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  const numbers = value.map(Number).filter(Number.isFinite)
+  return numbers.length > 0 ? numbers : undefined
+}
+
+function normalizePreviewMode(value: unknown): PreviewMode | undefined {
+  if (value === 'desktop' || value === 'stereo' || value === 'webxr') return value
+  return undefined
 }

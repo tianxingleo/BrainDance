@@ -45,21 +45,63 @@ payload 示例：
 ```json
 {
   "ply": "https://example.com/point_cloud.ksplat",
+  "modelUrl": "https://example.com/point_cloud.ksplat",
   "poses": "https://example.com/webgl_poses.json",
+  "posesUrl": "https://example.com/webgl_poses.json",
   "matrix": [1, 0, 0, 0],
   "imageId": "frame_000123.jpg",
-  "sceneId": "my-room"
+  "sceneId": "my-room",
+  "previewMode": "webxr",
+  "authSession": {
+    "userId": "u_001",
+    "email": "demo@example.com",
+    "displayName": "Demo User"
+  },
+  "modelList": [
+    {
+      "id": "room-a",
+      "name": "Room A",
+      "modelUrl": "https://example.com/room-a.ksplat",
+      "posesUrl": "https://example.com/webgl_poses.json",
+      "tags": ["room", "scan"]
+    }
+  ],
+  "markers": [
+    {
+      "id": "desk",
+      "label": "Desk",
+      "position": [0, 1.2, -2.4]
+    }
+  ],
+  "searchResults": [
+    {
+      "id": "hit_001",
+      "label": "Desk close-up",
+      "markerId": "desk",
+      "score": 0.91
+    }
+  ]
 }
 ```
 
-同时保留 Flutter WebView 兼容入口：
+本端不是把 VR 渲染器接到 Flutter，而是在网页 VR 内复刻 Flutter 客户端的核心用户态和交互入口。保留这些全局 hook 是为了让桌面调试、WebView 或后端 Recall 结果能用同一套协议灌入网页：
 
 ```ts
 window.loadModelFromFlutter({
   ply: 'https://example.com/point_cloud.ksplat',
   poses: 'https://example.com/webgl_poses.json',
+  authSession: { displayName: 'Demo User' },
+  modelList: [{ id: 'a', name: 'A', modelUrl: 'https://example.com/a.ksplat' }],
 })
+
+window.setBrainDanceSession({ displayName: 'Demo User' })
+window.setModelListForTimePeeling([{ id: 'a', name: 'A', modelUrl: 'https://example.com/a.ksplat' }], 'a')
+window.setRecallQuery('桌子')
+window.setRecallSearchResults([{ id: 'hit', label: '桌子', markerId: 'desk' }])
+window.setRecallMarkers([{ id: 'desk', label: '桌子', position: [0, 1.2, -2.4] }])
 ```
+
+字段兼容 Flutter 侧历史命名：`modelUrl / ply`、`posesUrl / poses`、`timePeelingModels / modelList`、`authSession / session / userSession`、`recallMarkers / markers`、`recallSearchResults / searchResults`。
 
 ## VR 配置
 
@@ -78,7 +120,7 @@ Viewer 会根据 `poses` URL 推导同目录的 `vr_config.json`。如果加载�
 }
 ```
 
-第一版支持桌面面板的缩放、重置和状态显示。键盘快捷键：
+网页壳层包含用户状态、模型列表、搜索结果、空间 marker、加载进度和 VR HUD。键盘快捷键：
 
 - `1`：切换 desktop preview
 - `2`：切换 stereo preview
@@ -88,6 +130,15 @@ Viewer 会根据 `poses` URL 推导同目录的 `vr_config.json`。如果加载�
 - `Q / E`：旋转模型
 - `WASD`：移动调试相机
 - `R`：重置位置和缩放
+
+WebXR 控制器映射：
+
+- 左摇杆：水平漫游
+- 右摇杆：转向和升降
+- `A / X` 或等价侧键：重置当前场景
+- `B / Y` 或等价侧键：显示 / 隐藏 VR HUD
+- 单手 `Grip`：抓取移动和旋转场景
+- 双手 `Grip`：按双手距离缩放场景
 
 `desktop` 和 `stereo` 模式用于开发调试，不能替代 SteamVR + PICO Neo 2 的真实头显验证。
 
@@ -100,3 +151,9 @@ VR 优先加载压缩格式。传入 `point_cloud.ply` 时会按顺序尝试：
 3. 原始 `point_cloud.ply`
 
 大型 `.ply` 在 VR 双眼渲染下可能加载慢或帧率低，真实演示建议优先准备 `.ksplat`。
+
+## 坐标系修正
+
+VR viewer 的 3DGS 加载链路以 `3dgs_viewer/my-3dgs-viewer` 为主参考，而不是 Spark viewer。模型加载时在 `addSplatScene` 的 `scale` 上统一应用 `[worldScale, worldScale, -worldScale]`，只在加载层做 Z 轴镜像，保持 XY 水平面不再额外翻转。
+
+Recall marker / 搜索结果传入的矩阵和位置也会进入同一套 Z 轴转换。相机跳转时会先套用当前 `splatMesh.matrixWorld` 再分解位姿，避免模型镜像后出现跳转到负 Z 或上下反向的问题。

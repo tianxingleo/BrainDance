@@ -1,9 +1,61 @@
 export interface BrainDanceViewerPayload {
   ply: string
+  modelUrl?: string
   poses?: string
+  posesUrl?: string
   matrix?: number[]
   imageId?: string
   sceneId?: string
+  modelList?: BrainDanceRecallModel[]
+  markers?: BrainDanceRecallMarker[]
+  searchResults?: BrainDanceRecallSearchResult[]
+  authSession?: BrainDanceAuthSession
+  previewMode?: import('../engine/previewMode').PreviewMode
+}
+
+export interface BrainDanceRecallModel {
+  id: string
+  sceneId?: string
+  name?: string
+  displayName?: string
+  ply: string
+  modelUrl?: string
+  poses?: string
+  posesUrl?: string
+  previewImage?: string
+  previewImg?: string
+  description?: string
+  tags?: string[]
+  createdAt?: string
+}
+
+export interface BrainDanceRecallMarker {
+  id: string
+  label: string
+  position?: [number, number, number]
+  matrix?: number[]
+  color?: string
+}
+
+export interface BrainDanceRecallSearchResult {
+  id: string
+  label: string
+  description?: string
+  imageId?: string
+  matrix?: number[]
+  markerId?: string
+  score?: number
+}
+
+export interface BrainDanceAuthSession {
+  userId?: string
+  email?: string
+  displayName?: string
+  accessToken?: string
+  refreshToken?: string
+  expiresAt?: string
+  code?: string
+  status?: string
 }
 
 export interface BrainDanceVrConfig {
@@ -22,6 +74,11 @@ export interface RuntimeGaussianViewer {
   renderer?: import('three').WebGLRenderer
   splatMesh?: import('three').Object3D
   threeScene?: import('three').Scene
+  update?: () => void
+  render?: () => void
+  start?: () => void
+  stop?: () => void
+  dispose?: () => void
   controls?: {
     update: () => void
   }
@@ -32,8 +89,6 @@ export interface RuntimeGaussianViewer {
   }
   webXRActive?: boolean
   showControlPlane?: boolean
-  update?: () => void
-  render?: () => void
   forceRenderNextFrame?: () => void
 }
 
@@ -45,5 +100,11 @@ export interface VrLoadResult {
 declare global {
   interface Window {
     loadModelFromFlutter?: (input: unknown) => void
+    setModelListForTimePeeling?: (list: unknown, currentId?: unknown) => void
+    setBrainDanceSession?: (session: unknown) => void
+    setRecallSearchResults?: (results: unknown) => void
+    setRecallQuery?: (query: string) => void
+    setThemeFromFlutter?: (theme: string) => void
+    setRecallMarkers?: (markers: unknown) => void
   }
 }
