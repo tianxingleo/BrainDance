@@ -12,6 +12,7 @@ import {
 } from '../engine/bridge'
 import type {
   BrainDanceAuthSession,
+  BrainDanceNavigationPoint,
   BrainDanceRecallMarker,
   BrainDanceRecallModel,
   BrainDanceRecallSearchResult,
@@ -21,6 +22,10 @@ import type {
 } from '../types/viewer'
 
 type ControllerHand = 'left' | 'right'
+type InteractionMode = 'explore' | 'inspect'
+type SceneScaleMode = 'room' | 'diorama'
+type TurnMode = 'snap' | 'smooth'
+type QualityPreset = 'ultra' | 'high' | 'balanced' | 'performance' | 'potato'
 type LoadPhase =
   | 'idle'
   | 'config'
@@ -69,6 +74,23 @@ const activeSearchQuery = ref('')
 const selectedMarkerId = ref('')
 const selectedSearchResultId = ref('')
 const isMenuOpen = ref(true)
+const interactionMode = ref<InteractionMode>('explore')
+const sceneScaleMode = ref<SceneScaleMode>('room')
+const turnMode = ref<TurnMode>('snap')
+const moveSpeed = ref(1.15)
+const snapTurnAngle = ref(30)
+const vignetteEnabled = ref(true)
+const floorLockEnabled = ref(true)
+const qualityPreset = ref<QualityPreset>('balanced')
+const clippingEnabled = ref(false)
+const clippingDistance = ref(3.2)
+const measurementEnabled = ref(false)
+const measurementPoints = ref<[number, number, number][]>([])
+const selectedNavPointId = ref('')
+const navPointIndex = ref(0)
+const controllerDebug = ref('等待 SteamVR 手柄输入')
+const lastDirectionHint = ref('暂无导航目标')
+const modelSummaryText = ref('等待场景摘要')
 
 let viewer: GaussianSplats3D.Viewer | null = null
 let frameCount = 0
@@ -95,7 +117,15 @@ let xrRig: THREE.Group | null = null
 let worldRoot: THREE.Group | null = null
 let introGlint: THREE.Points | null = null
 let grabState: GrabState | null = null
+let markerGroup: THREE.Group | null = null
+let navGroup: THREE.Group | null = null
+let clippingPlaneHelper: THREE.Mesh | null = null
+let measurementLine: THREE.Line | null = null
+let measurementLabelMesh: THREE.Sprite | null = null
+let vignetteMesh: THREE.Mesh | null = null
+let lastSnapTurnTime = 0
 const buttonLatch = new Map<string, boolean>()
+const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
 
 const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
 const modelLabel = computed(() => {
@@ -107,6 +137,39 @@ const modelLabel = computed(() => {
 const scaleLabel = computed(() => activeConfig.value?.worldScale.toFixed(2) ?? '1.00')
 const positionLabel = computed(() => activeConfig.value?.worldPosition.map((item) => item.toFixed(2)).join(', ') ?? '0, 0, 0')
 const rotationLabel = computed(() => activeConfig.value?.worldRotationY.toFixed(2) ?? '0.00')
+const measurementDistanceLabel = computed(() => {
+  if (measurementPoints.value.length < 2) return '未完成'
+  const a = measurementPoints.value[0]
+  const b = measurementPoints.value[1]
+  if (!a || !b) return '未完成'
+  const distance = new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b))
+  return `${distance.toFixed(2)} m`
+})
+const activeSearchResult = computed(() => searchResults.value.find((item) => item.id === selectedSearchResultId.value) || null)
+const activeMarker = computed(() => markers.value.find((item) => item.id === selectedMarkerId.value) || null)
+const activeEvidence = computed(() => {
+  const result = activeSearchResult.value
+  if (result) return {
+    label: result.label,
+    description: result.description,
+    imageId: result.imageId,
+    score: result.score,
+    tags: result.tags,
+    createdAt: result.createdAt,
+  }
+  const marker = activeMarker.value
+  if (marker) return {
+    label: marker.label,
+    description: marker.description,
+    imageId: marker.imageId,
+    score: marker.score,
+    tags: marker.tags,
+    createdAt: marker.createdAt,
+  }
+  return null
+})
+const navigationPoints = computed(() => activeConfig.value?.navigationPoints || [])
+const qualityLabel = computed(() => qualityPreset.value)
 const filteredModels = computed(() => {
   const query = activeSearchQuery.value.trim().toLowerCase()
   if (!query) return modelList.value
@@ -152,6 +215,12 @@ function disposeViewer() {
   rightController = null
   controllerRay = null
   controllerTip = null
+  markerGroup = null
+  navGroup = null
+  clippingPlaneHelper = null
+  measurementLine = null
+  measurementLabelMesh = null
+  vignetteMesh = null
   grabState = null
   buttonLatch.clear()
 }
@@ -165,6 +234,9 @@ function resetRuntimeState() {
   loadPhase.value = 'idle'
   selectedMarkerId.value = ''
   selectedSearchResultId.value = ''
+  selectedNavPointId.value = ''
+  measurementPoints.value = []
+  lastDirectionHint.value = '暂无导航目标'
 }
 
 function updateFps() {
@@ -294,6 +366,140 @@ function disposeIntroGlint() {
   introGlint = null
 }
 
+function disposeObject3D(object: THREE.Object3D | null) {
+  if (!object) return
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh
+    mesh.geometry?.dispose?.()
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined
+    if (Array.isArray(material)) material.forEach((item) => item.dispose())
+    else material?.dispose?.()
+  })
+  object.parent?.remove(object)
+}
+
+function rebuildSpatialHelpers() {
+  ensureSceneRoots()
+  if (!worldRoot) return
+  disposeObject3D(markerGroup)
+  disposeObject3D(navGroup)
+  markerGroup = new THREE.Group()
+  navGroup = new THREE.Group()
+  worldRoot.add(markerGroup)
+  worldRoot.add(navGroup)
+  buildMarkerMeshes()
+  buildNavigationMeshes()
+  updateClippingPlaneHelper()
+  updateMeasurementVisual()
+  updateSceneSummary()
+}
+
+function createTextSprite(text: string, color = '#f7f8fb') {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = 'rgba(8, 10, 12, 0.78)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.strokeStyle = 'rgba(247, 248, 251, 0.22)'
+  ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4)
+  ctx.fillStyle = color
+  ctx.font = '700 34px Inter, sans-serif'
+  ctx.fillText(text.slice(0, 24), 24, 58)
+  ctx.font = '22px Inter, sans-serif'
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.72)'
+  ctx.fillText('Trigger 选择 / 导航', 24, 96)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })
+  const sprite = new THREE.Sprite(material)
+  sprite.scale.set(0.72, 0.18, 1)
+  return sprite
+}
+
+function markerPositionFromInput(input: BrainDanceRecallMarker | BrainDanceRecallSearchResult) {
+  if (input.position) return new THREE.Vector3(...input.position)
+  if (input.matrix) {
+    const resolved = resolveMatrixPayload(input.matrix)
+    if (resolved) return resolved.position
+  }
+  return null
+}
+
+function buildMarkerMeshes() {
+  if (!markerGroup) return
+  const resultMarkers = searchResults.value
+    .map((result) => ({
+      id: `result:${result.id}`,
+      label: result.label,
+      color: '#f2c38f',
+      source: result,
+    }))
+  const manualMarkers = markers.value.map((marker) => ({
+    id: `marker:${marker.id}`,
+    label: marker.label,
+    color: marker.color || '#9ed0c6',
+    source: marker,
+  }))
+
+  for (const item of [...manualMarkers, ...resultMarkers]) {
+    const position = markerPositionFromInput(item.source)
+    if (!position) continue
+    const group = new THREE.Group()
+    group.name = item.id
+    group.position.copy(position)
+    const color = new THREE.Color(item.color)
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 24, 16),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92 }),
+    )
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.12, 0.15, 32),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.66, side: THREE.DoubleSide }),
+    )
+    ring.rotation.x = -Math.PI / 2
+    const sprite = createTextSprite(item.label, item.color)
+    sprite.position.set(0, 0.22, 0)
+    group.add(sphere, ring, sprite)
+    markerGroup.add(group)
+  }
+}
+
+function buildNavigationMeshes() {
+  if (!navGroup) return
+  const groupRoot = navGroup
+  navigationPoints.value.forEach((point) => {
+    const group = new THREE.Group()
+    group.name = `nav:${point.id}`
+    group.position.set(...point.position)
+    const material = new THREE.MeshBasicMaterial({ color: 0x87a5ff, transparent: true, opacity: 0.72 })
+    const disk = new THREE.Mesh(new THREE.CircleGeometry(0.16, 32), material)
+    disk.rotation.x = -Math.PI / 2
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, 0.35, 12),
+      new THREE.MeshBasicMaterial({ color: 0x87a5ff, transparent: true, opacity: 0.6 }),
+    )
+    stem.position.y = 0.17
+    const sprite = createTextSprite(point.label, '#d8e0ff')
+    sprite.position.y = 0.5
+    group.add(disk, stem, sprite)
+    groupRoot.add(group)
+  })
+}
+
+function updateSceneSummary() {
+  const summary = activeConfig.value?.summary
+  const model = modelList.value[activeModelIndex] || modelList.value[0]
+  const objects = summary?.objects?.length ? summary.objects : model?.tags
+  const searchable = summary?.searchableObjects?.length ? summary.searchableObjects : objects
+  modelSummaryText.value = [
+    summary?.sceneType ? `场景：${summary.sceneType}` : model?.description || '场景摘要：可从 model_assets / vr_config 注入',
+    objects?.length ? `主要对象：${objects.slice(0, 6).join('、')}` : '',
+    searchable?.length ? `可检索：${searchable.slice(0, 6).join('、')}` : '',
+  ].filter(Boolean).join('；')
+}
+
 function drawHud() {
   if (!hudContext || !hudCanvas) return
   const ctx = hudContext
@@ -322,15 +528,16 @@ function drawHud() {
   ctx.fillStyle = '#f7f8fb'
   ctx.fillText(`FPS ${fps.value || '--'}   |   模型 ${modelLabel.value}`, 44, 224)
   ctx.fillText(`状态 ${status.value}`, 44, 266)
-  ctx.fillText(`模式 ${previewMode.value}   |   XR ${isVrPresenting.value ? 'Presenting' : 'Ready'}`, 44, 308)
-  ctx.fillText(`场景尺度 ${scaleLabel.value}   |   旋转Y ${rotationLabel.value}`, 44, 350)
+  ctx.fillText(`模式 ${previewMode.value} / ${interactionMode.value} / ${sceneScaleMode.value}`, 44, 308)
+  ctx.fillText(`质量 ${qualityLabel.value}   |   转向 ${turnMode.value} ${snapTurnAngle.value}°`, 44, 350)
   ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
-  ctx.fillText('左摇杆：移动/漫步   右摇杆：转向/升降', 44, 414)
-  ctx.fillText('A/X：重置   B/Y：菜单   Trigger：射线选择', 44, 452)
+  ctx.fillText(`导航 ${lastDirectionHint.value}`, 44, 394)
+  ctx.fillText(`测量 ${measurementDistanceLabel.value}   |   剖切 ${clippingEnabled.value ? `${clippingDistance.value.toFixed(1)}m` : '关闭'}`, 44, 432)
+  ctx.fillText('Grip 抓取/双手缩放，Trigger 选择，A/X 重置，B/Y 菜单', 44, 470)
 
   if (authSession.value?.displayName || authSession.value?.email) {
     ctx.fillStyle = '#f2c38f'
-    ctx.fillText(`用户 ${authSession.value.displayName || authSession.value.email}`, 44, 494)
+    ctx.fillText(`用户 ${authSession.value.displayName || authSession.value.email}`, 604, 494)
   }
 
   hudTexture!.needsUpdate = true
@@ -343,6 +550,36 @@ function placeHudInFrontOfUser() {
   hudMesh.position.copy(camera.position).addScaledVector(forward, 1.35).add(new THREE.Vector3(0, -0.18, 0))
   hudMesh.quaternion.copy(camera.quaternion)
   hudMesh.visible = isMenuOpen.value || !isVrPresenting.value
+}
+
+function ensureVignette() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.threeScene || vignetteMesh) return
+  vignetteMesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.36, 0.82, 64),
+    new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.34,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  vignetteMesh.renderOrder = 1000
+  vignetteMesh.visible = false
+  runtime.threeScene.add(vignetteMesh)
+}
+
+function updateVignette(visible: boolean) {
+  if (!vignetteEnabled.value) visible = false
+  ensureVignette()
+  if (!vignetteMesh || !viewer?.renderer?.xr) return
+  const camera = viewer.renderer.xr.getCamera()
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  vignetteMesh.position.copy(camera.position).addScaledVector(forward, 0.32)
+  vignetteMesh.quaternion.copy(camera.quaternion)
+  vignetteMesh.visible = visible && isVrPresenting.value
 }
 
 function updateHud(nowMs: number) {
@@ -500,12 +737,15 @@ function updateControllerState(nowMs: number) {
 
   let leftGrip = false
   let rightGrip = false
+  let moving = false
+  const debugLines: string[] = []
   for (const source of session.inputSources || []) {
     const gamepad = source.gamepad
     if (!gamepad) continue
     const axes = gamepad.axes || []
     const x = Math.abs(axes[2] ?? axes[0] ?? 0) > 0.18 ? axes[2] ?? axes[0] ?? 0 : 0
     const y = Math.abs(axes[3] ?? axes[1] ?? 0) > 0.18 ? axes[3] ?? axes[1] ?? 0 : 0
+    debugLines.push(`${source.handedness || 'unknown'} profiles=${source.profiles?.join(',') || '-'} axes=[${axes.map((axis) => axis.toFixed(2)).join(', ')}] buttons=${gamepad.buttons.map((button, index) => `${index}:${button.pressed ? 'P' : '-'}:${button.value.toFixed(2)}`).join(' ')}`)
     const controller = getControllerByHandedness(source.handedness)
     if (!controller) continue
     const hand = source.handedness === 'left' ? 'left' : source.handedness === 'right' ? 'right' : null
@@ -515,22 +755,28 @@ function updateControllerState(nowMs: number) {
     if (hand === 'right') rightGrip = gripPressed
 
     if (source.handedness === 'left') {
-      moveRig(x, -y, dt)
+      moving = moveRig(x, -y, dt) || moving
       if (wasPressedNow(hand, 'reset', isButtonPressed(gamepad, [4, 5]))) {
         resetView()
       }
     } else if (source.handedness === 'right') {
-      turnRig(x, dt)
+      moving = turnRig(x, dt, nowMs) || moving
       if (Math.abs(y) > 0) {
-        moveRig(0, 0, -y, dt)
+        moving = moveRig(0, 0, dt, -y) || moving
       }
       if (wasPressedNow(hand, 'menu', isButtonPressed(gamepad, [0, 1, 4, 5]))) {
         isMenuOpen.value = !isMenuOpen.value
       }
+      if (wasPressedNow(hand, 'trigger', isButtonPressed(gamepad, [0]))) {
+        handlePrimarySelect()
+      }
     }
   }
 
+  if (debugLines.length > 0) controllerDebug.value = debugLines.join('\n')
   updateGrabState(leftGrip, rightGrip)
+  updateDirectionHint()
+  updateVignette(moving)
   updateHud(nowMs)
 }
 
@@ -624,6 +870,8 @@ function selectModel(model: BrainDanceRecallModel) {
 
 function selectMarker(marker: BrainDanceRecallMarker) {
   selectedMarkerId.value = marker.id
+  selectedSearchResultId.value = ''
+  selectedNavPointId.value = ''
   if (marker.matrix) {
     flyToMatrix(marker.matrix)
   } else if (marker.position) {
@@ -633,12 +881,47 @@ function selectMarker(marker: BrainDanceRecallMarker) {
 
 function selectSearchResult(result: BrainDanceRecallSearchResult) {
   selectedSearchResultId.value = result.id
+  selectedMarkerId.value = ''
+  selectedNavPointId.value = ''
   if (result.matrix) {
     flyToMatrix(result.matrix)
+  } else if (result.position) {
+    flyToPosition(result.position)
   } else if (result.markerId) {
     const marker = markers.value.find((item) => item.id === result.markerId)
     if (marker) selectMarker(marker)
   }
+}
+
+function selectNavigationPoint(pointId: string) {
+  const point = navigationPoints.value.find((item) => item.id === pointId)
+  if (!point) return
+  selectedNavPointId.value = point.id
+  selectedMarkerId.value = ''
+  selectedSearchResultId.value = ''
+  if (point.matrix) flyToMatrix(point.matrix)
+  else flyToPosition(point.position)
+}
+
+function nextNavigationPoint() {
+  if (navigationPoints.value.length === 0) return
+  navPointIndex.value = (navPointIndex.value + 1) % navigationPoints.value.length
+  const point = navigationPoints.value[navPointIndex.value]
+  if (point) selectNavigationPoint(point.id)
+}
+
+function handlePrimarySelect() {
+  if (measurementEnabled.value) {
+    addMeasurementPointFromCamera()
+    return
+  }
+  if (searchResults.value.length > 0) {
+    const currentIndex = Math.max(0, searchResults.value.findIndex((item) => item.id === selectedSearchResultId.value))
+    const next = searchResults.value[currentIndex] || searchResults.value[0]
+    if (next) selectSearchResult(next)
+    return
+  }
+  if (navigationPoints.value.length > 0) nextNavigationPoint()
 }
 
 function flyToMatrix(matrix: unknown) {
@@ -655,6 +938,93 @@ function flyToPosition(position: [number, number, number]) {
   if (!runtime?.camera) return
   runtime.camera.position.set(position[0], position[1], position[2])
   runtime.forceRenderNextFrame?.()
+}
+
+function addMeasurementPointFromCamera() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return
+  const forward = new THREE.Vector3()
+  runtime.camera.getWorldDirection(forward)
+  const point = runtime.camera.position.clone().addScaledVector(forward, 1.25)
+  const next: [number, number, number] = [point.x, point.y, point.z]
+  measurementPoints.value = measurementPoints.value.length >= 2 ? [next] : [...measurementPoints.value, next]
+  updateMeasurementVisual()
+}
+
+function clearMeasurement() {
+  measurementPoints.value = []
+  updateMeasurementVisual()
+}
+
+function updateMeasurementVisual() {
+  disposeObject3D(measurementLine)
+  disposeObject3D(measurementLabelMesh)
+  measurementLine = null
+  measurementLabelMesh = null
+  if (!worldRoot || measurementPoints.value.length < 2) return
+  const points = measurementPoints.value.map((point) => new THREE.Vector3(...point))
+  const firstPoint = points[0]
+  const secondPoint = points[1]
+  if (!firstPoint || !secondPoint) return
+  measurementLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color: 0xf2c38f }),
+  )
+  const mid = firstPoint.clone().add(secondPoint).multiplyScalar(0.5)
+  const sprite = createTextSprite(measurementDistanceLabel.value, '#f2c38f')
+  sprite.position.copy(mid).add(new THREE.Vector3(0, 0.12, 0))
+  measurementLabelMesh = sprite
+  worldRoot.add(measurementLine, measurementLabelMesh)
+}
+
+function updateClippingPlaneHelper() {
+  disposeObject3D(clippingPlaneHelper)
+  clippingPlaneHelper = null
+  if (!worldRoot || !clippingEnabled.value) return
+  clippingPlaneHelper = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 2.2),
+    new THREE.MeshBasicMaterial({
+      color: 0x87a5ff,
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+    }),
+  )
+  clippingPlaneHelper.position.set(0, activeConfig.value?.userHeight || 1.4, -clippingDistance.value)
+  worldRoot.add(clippingPlaneHelper)
+}
+
+function updateDirectionHint() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return
+  const target = getActiveTargetPosition()
+  if (!target) {
+    lastDirectionHint.value = '暂无导航目标'
+    return
+  }
+  const cameraPos = runtime.camera.getWorldPosition(new THREE.Vector3())
+  const cameraForward = new THREE.Vector3()
+  runtime.camera.getWorldDirection(cameraForward)
+  cameraForward.y = 0
+  cameraForward.normalize()
+  const toTarget = target.clone().sub(cameraPos)
+  const distance = toTarget.length()
+  toTarget.y = 0
+  toTarget.normalize()
+  const cross = new THREE.Vector3().crossVectors(cameraForward, toTarget).y
+  const dot = cameraForward.dot(toTarget)
+  const direction = dot > 0.85 ? '前方' : cross > 0 ? '左前方' : '右前方'
+  lastDirectionHint.value = `${direction} ${distance.toFixed(1)}m`
+}
+
+function getActiveTargetPosition() {
+  const result = activeSearchResult.value
+  if (result) return markerPositionFromInput(result)
+  const marker = activeMarker.value
+  if (marker) return markerPositionFromInput(marker)
+  const nav = navigationPoints.value.find((point) => point.id === selectedNavPointId.value)
+  if (nav) return new THREE.Vector3(...nav.position)
+  return null
 }
 
 async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, config: BrainDanceVrConfig): Promise<string> {
@@ -697,6 +1067,68 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
   throw lastError || new Error('没有可用的 3DGS 模型候选')
 }
 
+function extractPoseMatrices(input: unknown): number[][] {
+  if (!input || typeof input !== 'object') return []
+  const root = input as Record<string, unknown>
+  const candidates = Array.isArray(root.frames)
+    ? root.frames
+    : Array.isArray(root.poses)
+      ? root.poses
+      : Array.isArray(root.cameras)
+        ? root.cameras
+        : []
+
+  return candidates
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const entry = item as Record<string, unknown>
+      const matrix = entry.transform_matrix || entry.matrix || entry.transform || entry.camera_to_world
+      if (Array.isArray(matrix) && matrix.length === 16) return matrix.map(Number).filter(Number.isFinite)
+      if (Array.isArray(matrix) && matrix.length >= 3 && Array.isArray(matrix[0])) {
+        return (matrix as unknown[][]).flat().map(Number).filter(Number.isFinite)
+      }
+      return null
+    })
+    .filter((matrix): matrix is number[] => Boolean(matrix && matrix.length === 16))
+}
+
+async function inferNavigationPoints(payload: BrainDanceViewerPayload, config: BrainDanceVrConfig): Promise<BrainDanceNavigationPoint[] | undefined> {
+  if (config.navigationPoints?.length || !payload.poses) return config.navigationPoints
+  try {
+    const response = await fetch(payload.poses, { cache: 'no-cache' })
+    if (!response.ok) return undefined
+    const matrices = extractPoseMatrices(await response.json())
+    if (matrices.length === 0) return undefined
+    const sampleIndexes = Array.from(new Set([
+      0,
+      Math.floor(matrices.length * 0.25),
+      Math.floor(matrices.length * 0.5),
+      Math.floor(matrices.length * 0.75),
+      matrices.length - 1,
+    ])).filter((index) => index >= 0 && index < matrices.length)
+    const points = sampleIndexes
+      .map((matrixIndex, outputIndex) => {
+        const matrix = normalizeMatrixForViewer(matrices[matrixIndex])
+        if (!matrix) return null
+        const pose = decomposeMatrix(matrix)
+        const label = outputIndex === 0 ? '入口点' : outputIndex === 2 ? '中心观察点' : `导览点 ${outputIndex + 1}`
+        return {
+          id: `pose-${matrixIndex}`,
+          label,
+          position: [pose.position.x, pose.position.y, pose.position.z] as [number, number, number],
+          matrix,
+          kind: outputIndex === 0 ? 'entry' : outputIndex === 2 ? 'center' : 'tour',
+          description: `来自 webgl_poses 第 ${matrixIndex + 1} 帧`,
+        } satisfies BrainDanceNavigationPoint
+      })
+      .filter(Boolean) as BrainDanceNavigationPoint[]
+    return points.length > 0 ? points : undefined
+  } catch (error) {
+    console.warn('[BrainDance VR] 自动导航点生成失败:', error)
+    return undefined
+  }
+}
+
 function normalizeModelPayloadList(payload: BrainDanceViewerPayload) {
   const list = payload.modelList || []
   if (list.length > 0) return list
@@ -732,6 +1164,8 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   activeModelUrl.value = nextPayload.modelUrl || nextPayload.ply
   setLoadState('config', '读取 VR 配置', 0.06)
   const resolvedConfig = await loadVrConfig(deriveVrConfigUrl(nextPayload))
+  const inferredNavigationPoints = await inferNavigationPoints(nextPayload, resolvedConfig)
+  if (inferredNavigationPoints?.length) resolvedConfig.navigationPoints = inferredNavigationPoints
   if (scaleOverride != null) resolvedConfig.worldScale = scaleOverride
   if (rotationOverride != null) resolvedConfig.worldRotationY = rotationOverride
   activeConfig.value = resolvedConfig
@@ -740,6 +1174,12 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   setLoadState('model', '初始化 WebXR Viewer', 0.15)
   disposeHud()
   disposeIntroGlint()
+  disposeObject3D(markerGroup)
+  disposeObject3D(navGroup)
+  disposeObject3D(clippingPlaneHelper)
+  disposeObject3D(measurementLine)
+  disposeObject3D(measurementLabelMesh)
+  disposeObject3D(vignetteMesh)
   disposeViewer()
   if (containerRef.value) containerRef.value.innerHTML = ''
 
@@ -770,9 +1210,14 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
   ensureSceneRoots()
   createHud()
   createIntroGlint()
+  rebuildSpatialHelpers()
+  applySceneScaleMode()
+  applyQualityPreset()
 
   const candidate = await addSplatSceneWithFallback(nextPayload, resolvedConfig)
   activeModelUrl.value = candidate
+  rebuildSpatialHelpers()
+  applySceneScaleMode()
   setLoadState('ready', '模型已加载，准备进入 VR', 1)
   status.value = '模型已加载，网页端 Recall/VR 壳已就绪'
 
@@ -795,6 +1240,8 @@ async function bootstrap(input?: unknown) {
     modelList.value = normalizeModelPayloadList(payload)
     markers.value = payload.markers || []
     searchResults.value = payload.searchResults || []
+    selectedSearchResultId.value = searchResults.value[0]?.id || ''
+    selectedMarkerId.value = !selectedSearchResultId.value ? markers.value[0]?.id || '' : ''
     activeModelId.value = modelList.value[0]?.id || ''
     activeSearchQuery.value = ''
     setLoadState('config', '准备读取模型配置', 0.04)
@@ -844,26 +1291,80 @@ function adjustRotation(delta: number) {
   if (current) void loadModel(current, { preserveState: true })
 }
 
+function applySceneScaleMode() {
+  const target = getSceneManipulationTarget()
+  if (!target) return
+  if (sceneScaleMode.value === 'diorama') {
+    target.scale.multiplyScalar(0.22)
+    target.position.y += 0.8
+  }
+  userScale.value = getWorldRootScale()
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function setSceneScaleMode(mode: SceneScaleMode) {
+  if (sceneScaleMode.value === mode) return
+  sceneScaleMode.value = mode
+  const current = modelList.value[activeModelIndex] || modelList.value[0]
+  if (current) void loadModel(current, { preserveState: true })
+}
+
+function setInteractionMode(mode: InteractionMode) {
+  interactionMode.value = mode
+  if (mode === 'inspect') {
+    setSceneScaleMode('diorama')
+  }
+}
+
+function applyQualityPreset() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer) return
+  const ratioMap: Record<QualityPreset, number> = {
+    ultra: 1,
+    high: 0.88,
+    balanced: 0.72,
+    performance: 0.58,
+    potato: 0.44,
+  }
+  runtime.renderer.setPixelRatio(ratioMap[qualityPreset.value])
+  runtime.forceRenderNextFrame?.()
+}
+
+function setQualityPreset(preset: QualityPreset) {
+  qualityPreset.value = preset
+  applyQualityPreset()
+}
+
 function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
   const runtime = getRuntimeViewer()
-  if (!runtime?.camera || !xrRig) return
+  if (!runtime?.camera || !xrRig) return false
+  if (interactionMode.value === 'inspect') return false
+  if (Math.abs(strafe) <= 0.01 && Math.abs(forward) <= 0.01 && Math.abs(vertical) <= 0.01) return false
   const direction = new THREE.Vector3()
   runtime.camera.getWorldDirection(direction)
   direction.y = 0
   direction.normalize()
   const right = new THREE.Vector3().crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize()
   const delta = new THREE.Vector3()
-  delta.addScaledVector(direction, -forward * 1.35 * dt)
-  delta.addScaledVector(right, strafe * 1.35 * dt)
-  delta.y += vertical * 0.85 * dt
+  delta.addScaledVector(direction, -forward * moveSpeed.value * dt)
+  delta.addScaledVector(right, strafe * moveSpeed.value * dt)
+  if (!floorLockEnabled.value) delta.y += vertical * 0.85 * dt
   xrRig.position.add(delta)
   runtime.forceRenderNextFrame?.()
+  return true
 }
 
-function turnRig(turn: number, dt = 1 / 90) {
-  if (!xrRig) return
-  const angle = -turn * 1.65 * dt
+function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now()) {
+  if (!xrRig || Math.abs(turn) <= 0.18) return false
+  let angle = -turn * 1.65 * dt
+  if (turnMode.value === 'snap') {
+    if (nowMs - lastSnapTurnTime < 360) return false
+    angle = -Math.sign(turn) * THREE.MathUtils.degToRad(snapTurnAngle.value)
+    lastSnapTurnTime = nowMs
+  }
   xrRig.rotateY(angle)
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  return true
 }
 
 function selectMode(mode: PreviewMode) {
@@ -885,6 +1386,15 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === '2') selectMode('stereo')
   if (event.key === '3') selectMode('webxr')
   if (event.key === 'm' || event.key === 'M') isMenuOpen.value = !isMenuOpen.value
+  if (event.key === 'x' || event.key === 'X') setInteractionMode(interactionMode.value === 'explore' ? 'inspect' : 'explore')
+  if (event.key === 'z' || event.key === 'Z') setSceneScaleMode(sceneScaleMode.value === 'room' ? 'diorama' : 'room')
+  if (event.key === 'n' || event.key === 'N') nextNavigationPoint()
+  if (event.key === 'c' || event.key === 'C') {
+    clippingEnabled.value = !clippingEnabled.value
+    updateClippingPlaneHelper()
+  }
+  if (event.key === 'v' || event.key === 'V') measurementEnabled.value = !measurementEnabled.value
+  if (event.key === 'Enter') handlePrimarySelect()
 }
 
 function installXrSessionListeners() {
@@ -962,6 +1472,8 @@ function normalizeWindowHooks() {
       ...activePayload.value,
       searchResults: results,
     }).searchResults || []
+    selectedSearchResultId.value = searchResults.value[0]?.id || ''
+    rebuildSpatialHelpers()
     drawHud()
   }
   window.setRecallMarkers = (nextMarkers: unknown) => {
@@ -969,6 +1481,7 @@ function normalizeWindowHooks() {
       ...activePayload.value,
       markers: nextMarkers,
     }).markers || []
+    rebuildSpatialHelpers()
     drawHud()
   }
   window.setRecallQuery = (query: string) => {
@@ -1019,7 +1532,7 @@ onBeforeUnmount(() => {
       <dl class="metrics">
         <div>
           <dt>Mode</dt>
-          <dd>{{ previewMode }}</dd>
+          <dd>{{ interactionMode }}</dd>
         </div>
         <div>
           <dt>FPS</dt>
@@ -1027,11 +1540,11 @@ onBeforeUnmount(() => {
         </div>
         <div>
           <dt>Scale</dt>
-          <dd>{{ scaleLabel }}</dd>
+          <dd>{{ sceneScaleMode }}</dd>
         </div>
         <div>
-          <dt>XR</dt>
-          <dd>{{ isVrPresenting ? 'Presenting' : 'Ready' }}</dd>
+          <dt>Quality</dt>
+          <dd>{{ qualityLabel }}</dd>
         </div>
       </dl>
 
@@ -1060,16 +1573,58 @@ onBeforeUnmount(() => {
         <button type="button" :class="{ active: previewMode === 'webxr' }" @click="selectMode('webxr')">WebXR</button>
       </div>
 
+      <div class="mode-row">
+        <button type="button" :class="{ active: interactionMode === 'explore' }" @click="setInteractionMode('explore')">Explore</button>
+        <button type="button" :class="{ active: interactionMode === 'inspect' }" @click="setInteractionMode('inspect')">Inspect</button>
+        <button type="button" :class="{ active: sceneScaleMode === 'diorama' }" @click="setSceneScaleMode(sceneScaleMode === 'room' ? 'diorama' : 'room')">沙盘</button>
+      </div>
+
       <div class="button-row">
         <button type="button" @click="adjustScale(-0.1)">缩小</button>
         <button type="button" @click="resetView">重置</button>
         <button type="button" @click="adjustScale(0.1)">放大</button>
       </div>
 
+      <div class="button-row">
+        <button type="button" :class="{ active: turnMode === 'snap' }" @click="turnMode = turnMode === 'snap' ? 'smooth' : 'snap'">Snap</button>
+        <button type="button" :class="{ active: floorLockEnabled }" @click="floorLockEnabled = !floorLockEnabled">锁地面</button>
+        <button type="button" :class="{ active: vignetteEnabled }" @click="vignetteEnabled = !vignetteEnabled">黑边</button>
+      </div>
+
+      <div class="control-grid">
+        <label>
+          <span>移动速度 {{ moveSpeed.toFixed(2) }}</span>
+          <input v-model.number="moveSpeed" type="range" min="0.35" max="2.2" step="0.05" />
+        </label>
+        <label>
+          <span>转向角度 {{ snapTurnAngle }}°</span>
+          <input v-model.number="snapTurnAngle" type="range" min="15" max="45" step="15" />
+        </label>
+      </div>
+
+      <div class="quality-row">
+        <button v-for="preset in qualityPresets" :key="preset" type="button" :class="{ active: qualityPreset === preset }" @click="setQualityPreset(preset)">
+          {{ preset }}
+        </button>
+      </div>
+
       <div class="button-row xr-row">
         <button type="button" @click="enterVrSession">进入 VR</button>
         <button type="button" @click="exitVrSession">退出 VR</button>
         <button type="button" @click="isMenuOpen = !isMenuOpen">面板</button>
+      </div>
+
+      <div class="tool-panel">
+        <div class="button-row">
+          <button type="button" :class="{ active: clippingEnabled }" @click="clippingEnabled = !clippingEnabled; updateClippingPlaneHelper()">剖切</button>
+          <button type="button" :class="{ active: measurementEnabled }" @click="measurementEnabled = !measurementEnabled">测量</button>
+          <button type="button" @click="clearMeasurement">清除</button>
+        </div>
+        <label>
+          <span>剖切距离 {{ clippingDistance.toFixed(1) }}m</span>
+          <input v-model.number="clippingDistance" type="range" min="0.8" max="8" step="0.1" @input="updateClippingPlaneHelper" />
+        </label>
+        <p class="hint">测量距离：{{ measurementDistanceLabel }}；Enter / VR Trigger 记录测量点。</p>
       </div>
 
       <div class="search-panel">
@@ -1099,9 +1654,31 @@ onBeforeUnmount(() => {
             @click="selectSearchResult(item)"
           >
             <strong>{{ item.label }}</strong>
-            <span>{{ item.description || item.markerId || '-' }}</span>
+            <span>{{ item.score != null ? `${Math.round(item.score * 100)}% · ` : '' }}{{ item.description || item.markerId || '-' }}</span>
           </button>
         </div>
+      </div>
+
+      <div v-if="activeEvidence" class="evidence-card">
+        <p class="panel-label">Evidence</p>
+        <h2>{{ activeEvidence.label }}</h2>
+        <p>{{ activeEvidence.description || '暂无证据描述' }}</p>
+        <dl>
+          <div>
+            <dt>Score</dt>
+            <dd>{{ activeEvidence.score != null ? `${Math.round(activeEvidence.score * 100)}%` : '-' }}</dd>
+          </div>
+          <div>
+            <dt>Frame</dt>
+            <dd>{{ activeEvidence.imageId || '-' }}</dd>
+          </div>
+          <div>
+            <dt>Time</dt>
+            <dd>{{ activeEvidence.createdAt || '-' }}</dd>
+          </div>
+        </dl>
+        <p v-if="activeEvidence.tags?.length" class="tag-line">{{ activeEvidence.tags.join('、') }}</p>
+        <p class="hint">{{ lastDirectionHint }}</p>
       </div>
 
       <div class="search-panel">
@@ -1120,7 +1697,34 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <p class="hint">1/2/3 切换 Desktop/Stereo/WebXR，WASD 漫游，M 显隐面板，[ / ] 缩放，Q/E 旋转，R 重置。VR 内左摇杆移动，右摇杆转向/升降，Grip 抓取场景，双 Grip 缩放。</p>
+      <div class="search-panel">
+        <p class="panel-label">Time / Navigation</p>
+        <div class="search-results">
+          <button
+            v-for="item in navigationPoints"
+            :key="item.id"
+            type="button"
+            :class="{ active: selectedNavPointId === item.id }"
+            @click="selectNavigationPoint(item.id)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.kind || 'navigation' }} · {{ item.description || item.position.join(', ') }}</span>
+          </button>
+        </div>
+        <button type="button" @click="nextNavigationPoint">下一个导航点</button>
+      </div>
+
+      <div class="summary-panel">
+        <p class="panel-label">Scene Summary</p>
+        <p>{{ modelSummaryText }}</p>
+      </div>
+
+      <details class="debug-panel">
+        <summary>SteamVR Input Debug</summary>
+        <pre>{{ controllerDebug }}</pre>
+      </details>
+
+      <p class="hint">1/2/3 切换 Desktop/Stereo/WebXR，WASD 漫游，M 面板，X Explore/Inspect，Z 沙盘/1:1，N 导航点，C 剖切，V 测量，Enter 选择/测量。</p>
     </section>
   </main>
 </template>

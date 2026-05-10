@@ -88,6 +88,11 @@ export function normalizeMarkers(value: unknown): BrainDanceRecallMarker[] {
         position,
         matrix: normalizeMatrixForViewer(entry.matrix),
         color: entry.color ? String(entry.color) : undefined,
+        description: entry.description ? String(entry.description) : undefined,
+        imageId: entry.imageId ? String(entry.imageId) : undefined,
+        score: Number.isFinite(Number(entry.score)) ? Number(entry.score) : undefined,
+        tags: Array.isArray(entry.tags) ? entry.tags.map(String).filter(Boolean) : undefined,
+        createdAt: entry.createdAt ? String(entry.createdAt) : undefined,
       }
     })
     .filter((item): item is BrainDanceRecallMarker => Boolean(item))
@@ -109,8 +114,11 @@ export function normalizeSearchResults(value: unknown): BrainDanceRecallSearchRe
         description: entry.description ? String(entry.description) : undefined,
         imageId: entry.imageId ? String(entry.imageId) : undefined,
         matrix: normalizeMatrixForViewer(entry.matrix),
+        position: normalizeVector3ForViewer(entry.position),
         markerId: entry.markerId ? String(entry.markerId) : undefined,
         score: Number.isFinite(scoreValue) ? scoreValue : undefined,
+        tags: Array.isArray(entry.tags) ? entry.tags.map(String).filter(Boolean) : undefined,
+        createdAt: entry.createdAt ? String(entry.createdAt) : undefined,
       }
     })
     .filter((item): item is BrainDanceRecallSearchResult => Boolean(item))

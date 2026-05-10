@@ -35,6 +35,11 @@ export interface BrainDanceRecallMarker {
   position?: [number, number, number]
   matrix?: number[]
   color?: string
+  description?: string
+  imageId?: string
+  score?: number
+  tags?: string[]
+  createdAt?: string
 }
 
 export interface BrainDanceRecallSearchResult {
@@ -43,8 +48,11 @@ export interface BrainDanceRecallSearchResult {
   description?: string
   imageId?: string
   matrix?: number[]
+  position?: [number, number, number]
   markerId?: string
   score?: number
+  tags?: string[]
+  createdAt?: string
 }
 
 export interface BrainDanceAuthSession {
@@ -67,6 +75,26 @@ export interface BrainDanceVrConfig {
   near: number
   far: number
   preferCompressedModel: boolean
+  mode?: 'room' | 'object' | 'auto'
+  comfortStart?: 'outside' | 'inside' | 'safe-point'
+  navigationPoints?: BrainDanceNavigationPoint[]
+  summary?: BrainDanceSceneSummary
+}
+
+export interface BrainDanceNavigationPoint {
+  id: string
+  label: string
+  position: [number, number, number]
+  kind?: 'entry' | 'center' | 'best-view' | 'search-hit' | 'tour'
+  matrix?: number[]
+  description?: string
+}
+
+export interface BrainDanceSceneSummary {
+  sceneType?: string
+  objects?: string[]
+  searchableObjects?: string[]
+  recommendedPoints?: string[]
 }
 
 export interface RuntimeGaussianViewer {
