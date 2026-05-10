@@ -119,6 +119,7 @@ export interface RuntimeGaussianViewer {
   webXRActive?: boolean
   showControlPlane?: boolean
   forceRenderNextFrame?: () => void
+  removeSplatScenes?: (indexes: number[], showLoadingUI?: boolean) => Promise<unknown>
 }
 
 export interface VrLoadResult {
@@ -129,8 +130,11 @@ export interface VrLoadResult {
 declare global {
   interface Window {
     loadViewerPayload?: (input: unknown) => void
+    loadModelFromFlutter?: (input: unknown) => void
     setViewerModelList?: (list: unknown, currentId?: unknown) => void
+    setModelListForTimePeeling?: (list: unknown, currentId?: unknown) => void
     setViewerSession?: (session: unknown) => void
+    setThemeFromFlutter?: (theme: string) => void
     setViewerSearchResults?: (results: unknown) => void
     setViewerQuery?: (query: string) => void
     setViewerTheme?: (theme: string) => void

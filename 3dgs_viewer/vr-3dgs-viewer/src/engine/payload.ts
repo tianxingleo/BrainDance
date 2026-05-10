@@ -91,6 +91,16 @@ export function deriveVrConfigUrl(payload: BrainDanceViewerPayload): string {
   return nextUrl === payload.poses ? defaultVrConfigUrl : nextUrl
 }
 
+export function resolveRelativeAssetUrl(assetUrl: string | undefined, baseUrl: string): string {
+  const value = typeof assetUrl === 'string' ? assetUrl.trim() : ''
+  if (!value) return value
+  try {
+    return new URL(value, baseUrl).toString()
+  } catch {
+    return value
+  }
+}
+
 function normalizeEnvString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }

@@ -64,6 +64,37 @@ input:focus {
   background: #050505;
 }
 
+.browser-mirror {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  z-index: 25;
+  width: min(38vw, 640px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(8, 10, 12, 0.72);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+
+.mirror-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: rgba(249, 245, 232, 0.72);
+  font-size: 12px;
+}
+
+.browser-mirror-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: #000;
+}
+
 .desktop-panel {
   position: fixed;
   top: 20px;
@@ -350,6 +381,13 @@ button.active {
     left: 12px;
     width: calc(100vw - 24px);
     padding: 12px;
+  }
+
+  .browser-mirror {
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: calc(100vw - 24px);
   }
 
   .metrics {
