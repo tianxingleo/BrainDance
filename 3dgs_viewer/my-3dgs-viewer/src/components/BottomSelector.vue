@@ -36,6 +36,11 @@ watch([() => props.hasModels, () => props.hasPoses], () => {
   if (mode.value === 'model' && !props.hasModels) mode.value = 'pose';
 }, { immediate: true });
 
+watch(mode, () => {
+  // 切换 tab 时重置拖拽态，避免把时间轴的选择误判为滚动。
+  dragMoved = false;
+});
+
 function formatTime(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -64,9 +69,13 @@ watch(
 );
 
 function onClickModel(model) {
-  if (dragMoved) return;
   if (model.id === props.activeModelId) return;
   emit('selectModel', model);
+}
+
+function onSelectTimelineModel(model) {
+  dragMoved = false;
+  onClickModel(model);
 }
 
 function onClickPose(pose) {
@@ -88,6 +97,7 @@ watch([() => props.activePoseId, () => props.activeModelId, mode], () => {
 
 // 拖拽滚动
 function onPointerDown(e) {
+  if (mode.value !== 'pose') return;
   isDragging = true;
   dragMoved = false;
   dragStartX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
@@ -95,6 +105,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  if (mode.value !== 'pose') return;
   if (!isDragging || !scrollRef.value) return;
   const x = e.clientX || (e.touches && e.touches[0].clientX) || 0;
   const dx = x - dragStartX;
@@ -104,6 +115,7 @@ function onPointerMove(e) {
 
 function onPointerUp() {
   isDragging = false;
+  dragMoved = false;
 }
 
 onMounted(() => {
@@ -173,7 +185,7 @@ onBeforeUnmount(() => {
           <TimelineElastic
             :items="modelItems"
             :active-id="activeModelId"
-            @select="onClickModel"
+            @select="onSelectTimelineModel"
           />
         </template>
       </div>

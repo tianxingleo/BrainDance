@@ -178,6 +178,7 @@ function handlePointerUp() {
   
   const nearest = points.value[activeIndex.value];
   if (nearest) {
+    // 松手时明确抛出选中项，由父组件负责真正触发模型切换。
     emit('select', nearest);
     gsap.killTweensOf(state);
     gsap.to(state, {
