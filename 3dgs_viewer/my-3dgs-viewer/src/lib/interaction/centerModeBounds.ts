@@ -349,13 +349,10 @@ export function buildCenterModeBounds(
   const useOrbitAngles = topology === 'full_orbit' || topology === 'semi_orbit';
   const useForwardAngles = topology === 'panorama_anchor';
   const yawSource = useOrbitAngles ? orbitYawAngles : useForwardAngles ? forwardYawAngles : orbitYawAngles;
-  const yawSourceForClamp = topology === 'semi_orbit'
-    ? yawSource.map((angle) => wrapAngle(angle + Math.PI))
-    : yawSource;
   const pitchSource = useOrbitAngles ? orbitPitchAngles : useForwardAngles ? forwardPitchAngles : forwardPitchAngles;
 
   const yawIntervals = buildCircularInterval(
-    yawSourceForClamp,
+    yawSource,
     THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 16 : 22),
   );
 
@@ -371,17 +368,17 @@ export function buildCenterModeBounds(
     Math.PI / 2 - 0.03,
   );
 
-  const radiusLowerPct = topology === 'full_orbit' ? 0.02 : topology === 'semi_orbit' ? 0.04 : 0.06;
+  const radiusLowerPct = topology === 'full_orbit' ? 0.01 : topology === 'semi_orbit' ? 0.02 : 0.04;
   const radiusUpperPct = topology === 'full_orbit' ? 0.98 : topology === 'semi_orbit' ? 0.96 : 0.94;
-  const lowerPadding = Math.max(sceneRadius * 0.03, radiusStd * 0.22, 0.03);
+  const lowerPadding = Math.max(sceneRadius * 0.015, radiusStd * 0.14, 0.02);
   const upperPadding = Math.max(sceneRadius * 0.08, radiusStd * 0.42, 0.06);
   const radiusMin = Math.max(
     percentile(radii, radiusLowerPct) - lowerPadding,
-    sceneRadius * 0.03,
+    sceneRadius * 0.015,
   );
   const radiusMax = Math.max(
     percentile(radii, radiusUpperPct) + upperPadding,
-    radiusMin + Math.max(sceneRadius * 0.14, 0.18),
+    radiusMin + Math.max(sceneRadius * 0.10, 0.12),
   );
   const radiusSpan = Math.max(radiusMax - radiusMin, 0.12);
 
@@ -393,7 +390,7 @@ export function buildCenterModeBounds(
     basisY: orbitFrame.basisY,
     radiusMin,
     radiusMax,
-    radiusElastic: Math.max(radiusSpan * 0.38, sceneRadius * 0.08, radiusStd * 0.2, 0.08),
+    radiusElastic: Math.max(radiusSpan * 0.28, sceneRadius * 0.05, radiusStd * 0.16, 0.06),
     yawIntervals,
     yawElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : 14),
     pitchMin,

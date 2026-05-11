@@ -87,8 +87,8 @@ const VR_HUD_CANVAS_SIZE = { width: 1024, height: 512 };
 const VR_HUD_WORLD_SIZE = { width: 1.35, height: 0.675 };
 const SCENE_AXIS_FIX = {
   position: [0, 0, 0],
-  // 当前训练导出的水平面已经正确，但模型整体落在相反 Z 半轴，统一在加载层做 Z 镜像。
-  scale: [1, 1, -1],
+  // 桌面查看器保持原始朝向，不额外做镜像，避免把正常模型翻到头朝地。
+  scale: [1, 1, 1],
   rotation: [0, 0, 0, 1],
 };
 
@@ -653,7 +653,7 @@ const updateVrInteraction = (nowMs) => {
 
 const getOrbitMinRadius = () => centerModeBounds
   ? centerModeBounds.radiusMin
-  : Math.max(getSceneRadius() * 0.18, 0.08);
+  : Math.max(getSceneRadius() * 0.05, 0.04);
 
 const getOrbitMaxRadius = () => centerModeBounds
   ? centerModeBounds.radiusMax
@@ -740,7 +740,7 @@ const syncOrbitTarget = (center = getModelWorldCenter()) => {
   const offset = viewer.camera.position.clone().sub(orbitState.center);
   let radius = offset.length();
   if (!Number.isFinite(radius) || radius < getOrbitMinRadius()) {
-    radius = Math.max(getSceneRadius() * 2.6, 1.5);
+    radius = Math.max(getSceneRadius() * 1.25, 0.85);
     const fallback = getOrbitOffsetFromSpherical(0, 0, radius);
     offset.copy(fallback);
   }
@@ -2466,63 +2466,68 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
     await addSplatSceneWithFormatFallback(currentPlyUrl);
 
-    // 加载相机位姿（支持本地路径与云端 URL）
-    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
-    loadingStatusText.value = '加载参考镜头';
-    try {
-      const res = await fetch(currentPosesUrl);
-      const data = await res.json();
-      posesFetchSettled = true;
-      // 数据适配
-      if (data.frames) {
-        sceneMetadata.value = {
-          w: data.w,
-          h: data.h,
-          fl_x: data.fl_x,
-          fl_y: data.fl_y
-        };
-        manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
-        cameraPoses.value = data.frames.map(frame => {
-          let imgUrl = frame.image_url;
-          if (imgUrl && !imgUrl.startsWith('http')) {
-            if (currentPosesUrl.startsWith('http')) {
-              // Determine base path from currentPosesUrl
-              const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
-              let relPath = imgUrl;
-              const imagesIndex = relPath.indexOf('images/');
-              if (imagesIndex !== -1) {
-                relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
-              } else if (relPath.startsWith('/models/')) {
-                relPath = relPath.substring('/models/'.length);
-              } else if (relPath.startsWith('/')) {
-                relPath = relPath.substring(1);
-              }
-              imgUrl = `${baseUrl}/${relPath}`;
-            }
-          }
-          imgUrl = toViewerSafeAssetUrl(imgUrl);
-          return {
-            id: frame.id,
-            matrix: normalizeMatrixArray(frame.matrix),
-            image_url: imgUrl,
-            tag: frame.tag,
-            fl_x: frame.fl_x,
-            fl_y: frame.fl_y,
-            w: frame.w || data.w,
-            h: frame.h || data.h
+    // 加载相机位姿（支持本地路径与云端 URL）；没有位姿时直接结束，不把 SHARP 单图卡在 100%。
+    if (currentPosesUrl && String(currentPosesUrl).trim()) {
+      console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
+      loadingStatusText.value = '加载参考镜头';
+      try {
+        const res = await fetch(currentPosesUrl);
+        const data = await res.json();
+        posesFetchSettled = true;
+        // 数据适配
+        if (data.frames) {
+          sceneMetadata.value = {
+            w: data.w,
+            h: data.h,
+            fl_x: data.fl_x,
+            fl_y: data.fl_y
           };
-        });
-      } else {
-        cameraPoses.value = Array.isArray(data)
-          ? data.map(pose => ({
-              ...pose,
-              matrix: normalizeMatrixArray(pose.matrix),
-            }))
-          : data; // 兼容旧格式
+          manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
+          cameraPoses.value = data.frames.map(frame => {
+            let imgUrl = frame.image_url;
+            if (imgUrl && !imgUrl.startsWith('http')) {
+              if (currentPosesUrl.startsWith('http')) {
+                // Determine base path from currentPosesUrl
+                const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
+                let relPath = imgUrl;
+                const imagesIndex = relPath.indexOf('images/');
+                if (imagesIndex !== -1) {
+                  relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
+                } else if (relPath.startsWith('/models/')) {
+                  relPath = relPath.substring('/models/'.length);
+                } else if (relPath.startsWith('/')) {
+                  relPath = relPath.substring(1);
+                }
+                imgUrl = `${baseUrl}/${relPath}`;
+              }
+            }
+            imgUrl = toViewerSafeAssetUrl(imgUrl);
+            return {
+              id: frame.id,
+              matrix: normalizeMatrixArray(frame.matrix),
+              image_url: imgUrl,
+              tag: frame.tag,
+              fl_x: frame.fl_x,
+              fl_y: frame.fl_y,
+              w: frame.w || data.w,
+              h: frame.h || data.h
+            };
+          });
+        } else {
+          cameraPoses.value = Array.isArray(data)
+            ? data.map(pose => ({
+                ...pose,
+                matrix: normalizeMatrixArray(pose.matrix),
+              }))
+            : data; // 兼容旧格式
+        }
+      } catch (err) {
+        posesFetchSettled = true;
+        console.error("加载位姿失败:", err);
       }
-    } catch (err) {
+    } else {
       posesFetchSettled = true;
-      console.error("加载位姿失败:", err);
+      cameraPoses.value = [];
     }
 
     rebuildCenterModeBounds();
@@ -2544,12 +2549,11 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       };
     }
 
+    beginIntroAnimationToResolvedPose();
     isLoading.value = false;
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
     }
-
-    beginIntroAnimationToResolvedPose();
     // --- 5. 动画循环 (120 FPS 上限) ---
     let lastDrawTime = performance.now();
     const fpsInterval = 1000 / 120; // 目标 120 帧
