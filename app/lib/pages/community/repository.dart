@@ -38,10 +38,12 @@ class CommunityRepository {
         final model = map['model_assets'] is Map
             ? Map<String, dynamic>.from(map['model_assets'] as Map)
             : <String, dynamic>{};
-        final modelUrl = _publicModelUrl(model['ply_path']?.toString() ?? '');
-        final previewUrl = map['cover_image_url']?.toString().isNotEmpty == true
-            ? map['cover_image_url']?.toString()
-            : model['preview_img_path']?.toString();
+        final modelUrl = _normalizeStorageUrl(model['ply_path']?.toString() ?? '');
+        final previewUrl = _normalizeStorageUrl(
+          map['cover_image_url']?.toString().isNotEmpty == true
+              ? map['cover_image_url']!.toString()
+              : (model['preview_img_path']?.toString() ?? ''),
+        );
 
         return CommunityPost(
           id: map['id'].toString(),
@@ -88,40 +90,50 @@ class CommunityRepository {
 
   Future<List<CommunityModelOption>> fetchShareableModels() async {
     try {
-      final userId = _client.auth.currentUser?.id;
-      dynamic query = _client
-          .from('model_assets')
-          .select('id, scene_id, description, ply_path, preview_img_path')
-          .order('created_at', ascending: false)
-          .limit(20);
-      if (userId != null && userId.isNotEmpty) {
-        query = query.eq('user_id', userId);
-      }
+      final currentUserId =
+          (_client.auth.currentUser?.id ?? '').trim();
 
-      final response = await query;
-      final models = response.map<CommunityModelOption>((raw) {
+      final response = await _client
+          .from('model_assets')
+          .select(
+            'id, scene_id, display_name, description, tags, ply_path, preview_img_path, user_id',
+          )
+          .order('created_at', ascending: false)
+          .limit(50);
+
+      final models = <CommunityModelOption>[];
+      for (final raw in response) {
         final map = Map<String, dynamic>.from(raw);
+
+        // Client-side ownership check, same logic as recall's _isOwnModel
+        if (currentUserId.isNotEmpty) {
+          final ownerId = (map['user_id']?.toString() ?? '').trim();
+          if (ownerId.isNotEmpty && ownerId != currentUserId) {
+            continue;
+          }
+        }
+
         final path = map['ply_path']?.toString() ?? '';
-        final publicUrl = _publicModelUrl(path);
-        return CommunityModelOption(
+        final publicUrl = _normalizeStorageUrl(path);
+        // Same display name priority as recall's _modelDisplayName:
+        // display_name → first tag → scene_id → fallback
+        final displayName = _modelDisplayName(map);
+        models.add(CommunityModelOption(
           id: map['id'].toString(),
-          sceneId:
-              map['display_name']?.toString() ??
-              map['scene_id']?.toString() ??
-              textLocalize('community_unnamed_model'),
+          sceneId: displayName,
           description: map['description']?.toString() ?? '',
           modelUrl: publicUrl,
           posesUrl: _posesUrlFromPath(path),
-          coverUrl: map['preview_img_path']?.toString(),
-        );
-      }).toList();
-
-      if (models.isNotEmpty) {
-        return models;
+          coverUrl: _normalizeStorageUrl(
+            map['preview_img_path']?.toString() ?? '',
+          ),
+        ));
       }
+
+      return models;
     } catch (_) {}
 
-    return _demoModels;
+    return <CommunityModelOption>[];
   }
 
   Future<CommunityPost> createPost(CommunityComposerResult draft) async {
@@ -160,20 +172,27 @@ class CommunityRepository {
     }
   }
 
-  String _publicModelUrl(String storagePath) {
-    if (storagePath.isEmpty) {
-      return '';
+  /// Convert storage path / old server URL to a valid public URL.
+  /// Same logic as recall's _normalizeStorageUrl + _toPublicUrl.
+  String _normalizeStorageUrl(String raw) {
+    if (raw.isEmpty) return '';
+
+    // Strip old Supabase instance prefix if present
+    const marker = '/storage/v1/object/public/braindance-assets/';
+    final idx = raw.indexOf(marker);
+    if (idx >= 0) {
+      raw = raw.substring(idx + marker.length);
     }
-    if (storagePath.startsWith('http://') ||
-        storagePath.startsWith('https://')) {
-      return storagePath;
+
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return raw;
     }
     try {
       return _client.storage
           .from('braindance-assets')
-          .getPublicUrl(storagePath);
+          .getPublicUrl(raw);
     } catch (_) {
-      return storagePath;
+      return raw;
     }
   }
 
@@ -195,6 +214,26 @@ class CommunityRepository {
     }
   }
 
+  /// Same display name priority as recall's _modelDisplayName:
+  /// display_name → first tag → scene_id → fallback
+  String _modelDisplayName(Map<String, dynamic> model) {
+    final dn = model['display_name']?.toString().trim() ?? '';
+    if (dn.isNotEmpty) return dn;
+
+    final tags = model['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) return value;
+      }
+    }
+
+    final sid = model['scene_id']?.toString().trim() ?? '';
+    if (sid.isNotEmpty) return sid;
+
+    return textLocalize('community_unnamed_model');
+  }
+
   List<String> _extractTags(String? description, String? placeName) {
     final words = <String>[];
     if (placeName != null && placeName.isNotEmpty) {
@@ -213,25 +252,6 @@ class CommunityRepository {
     return words.take(3).toList();
   }
 }
-
-final List<CommunityModelOption> _demoModels = [
-  CommunityModelOption(
-    id: 'demo-1',
-    sceneId: '西湖断桥晨雾',
-    description: '湖面、柳树、桥面和低雾一起形成了安静的晨间空间。',
-    modelUrl: '',
-    posesUrl: null,
-    coverUrl: null,
-  ),
-  CommunityModelOption(
-    id: 'demo-2',
-    sceneId: '东京塔夜色',
-    description: '夜间城市灯光包围着塔体，适合做高对比空间浏览。',
-    modelUrl: '',
-    posesUrl: null,
-    coverUrl: null,
-  ),
-];
 
 final List<CommunityPost> _demoPosts = [
   CommunityPost(

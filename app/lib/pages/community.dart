@@ -1,16 +1,13 @@
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
-import 'package:braindance/pages/community/composer_sheet.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
-import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 class CommunityPage extends StatefulWidget {
   const CommunityPage({super.key});
@@ -22,7 +19,6 @@ class CommunityPage extends StatefulWidget {
 class _CommunityPageState extends State<CommunityPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final PageController _feedController = PageController(viewportFraction: 0.96);
   final CommunityRepository _repository = CommunityRepository();
 
   List<CommunityPost> _posts = const [];
@@ -31,19 +27,34 @@ class _CommunityPageState extends State<CommunityPage>
   bool _isLoading = true;
   int _tabIndex = 0;
 
+  // Discover tab
+  final Set<String> _selectedTags = {};
+
+  // Submit tab
+  CommunityModelOption? _selectedSubmitModel;
+  late final TextEditingController _submitTitleController;
+  late final TextEditingController _submitCaptionController;
+  late final TextEditingController _submitPlaceController;
+  late final TextEditingController _submitLatController;
+  late final TextEditingController _submitLngController;
+  bool _isSubmitting = false;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
+    _submitTitleController = TextEditingController();
+    _submitCaptionController = TextEditingController();
+    _submitPlaceController = TextEditingController();
+    _submitLatController = TextEditingController();
+    _submitLngController = TextEditingController();
     _loadCommunity();
   }
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) {
-      setState(() {
-        _tabIndex = _tabController.index;
-      });
+      setState(() => _tabIndex = _tabController.index);
     }
   }
 
@@ -51,54 +62,26 @@ class _CommunityPageState extends State<CommunityPage>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
-    _feedController.dispose();
+    _submitTitleController.dispose();
+    _submitCaptionController.dispose();
+    _submitPlaceController.dispose();
+    _submitLatController.dispose();
+    _submitLngController.dispose();
     super.dispose();
   }
 
   Future<void> _loadCommunity() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     final posts = await _repository.fetchPosts();
     final models = await _repository.fetchShareableModels();
-
-    if (!mounted) {
-      return;
-    }
-
+    if (!mounted) return;
     setState(() {
       _posts = posts;
       _shareableModels = models;
-      _selectedMapIndex = posts.isEmpty
-          ? 0
-          : _selectedMapIndex.clamp(0, posts.length - 1);
+      _selectedMapIndex =
+          posts.isEmpty ? 0 : _selectedMapIndex.clamp(0, posts.length - 1);
       _isLoading = false;
     });
-  }
-
-  Future<void> _openShareSheet() async {
-    final draft = await showCommunityComposerSheet(
-      context,
-      models: _shareableModels,
-    );
-
-    if (draft == null) {
-      return;
-    }
-
-    final createdPost = await _repository.createPost(draft);
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _posts = [createdPost, ..._posts];
-      _selectedMapIndex = 0;
-    });
-
-    showAppToast(context, textLocalize('community_joined'));
   }
 
   void _openViewer(CommunityPost post) {
@@ -113,17 +96,16 @@ class _CommunityPageState extends State<CommunityPage>
   void _openLocationHub(CommunityPost seedPost) {
     final peers = _posts
         .where((post) => post.placeName == seedPost.placeName)
-        .toList(growable: false);
+        .toList();
 
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) {
-        final isDark = context.isDarkMode;
-        final textColor = isDark
-            ? BDDesign.colorPaperWhite
-            : BDDesign.colorInkBlack;
+      builder: (ctx) {
+        final isDark = ctx.isDarkMode;
+        final textColor =
+            isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
         final hintColor = isDark
             ? Colors.white.withValues(alpha: 0.62)
             : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
@@ -155,14 +137,18 @@ class _CommunityPageState extends State<CommunityPage>
                             const SizedBox(height: 6),
                             Text(
                               '这里收集了 ${peers.length} 个来自不同用户的空间记忆，点进任何一个都可以直接进入 3D 模型。',
-                              style: TextStyle(color: hintColor, height: 1.4),
+                              style: TextStyle(
+                                color: hintColor,
+                                height: 1.4,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
-                        onPressed: () => Navigator.pop(context),
-                        icon: Icon(Icons.close_rounded, color: textColor),
+                        onPressed: () => Navigator.pop(ctx),
+                        icon:
+                            Icon(Icons.close_rounded, color: textColor),
                       ),
                     ],
                   ),
@@ -171,13 +157,14 @@ class _CommunityPageState extends State<CommunityPage>
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: peers.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final post = peers[index];
                         return InkWell(
                           borderRadius: BDDesign.radiusLarge,
                           onTap: () {
-                            Navigator.pop(context);
+                            Navigator.pop(ctx);
                             _openViewer(post);
                           },
                           child: CommunityLocationHubRow(post: post),
@@ -194,57 +181,117 @@ class _CommunityPageState extends State<CommunityPage>
     );
   }
 
+  void _showModelPicker() {
+    if (_shareableModels.isEmpty) {
+      showAppToast(context, '还没有可分享的模型，请先在创作页面生成记忆模型。');
+      return;
+    }
+    showModalBottomSheet<CommunityModelOption>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => CommunityModelPickerSheet(
+        models: _shareableModels,
+        selectedModel: _selectedSubmitModel,
+      ),
+    ).then((model) {
+      if (model != null && mounted) {
+        setState(() => _selectedSubmitModel = model);
+      }
+    });
+  }
+
+  Future<void> _submitPost() async {
+    final model = _selectedSubmitModel;
+    final lat = double.tryParse(_submitLatController.text.trim());
+    final lng = double.tryParse(_submitLngController.text.trim());
+    final title = _submitTitleController.text.trim();
+    final caption = _submitCaptionController.text.trim();
+    final place = _submitPlaceController.text.trim();
+
+    if (model == null ||
+        lat == null ||
+        lng == null ||
+        title.isEmpty ||
+        caption.isEmpty ||
+        place.isEmpty) {
+      showAppToast(context, textLocalize('community_fill_all'));
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    final result = CommunityComposerResult(
+      title: title,
+      caption: caption,
+      placeName: place,
+      latitude: lat,
+      longitude: lng,
+      model: model,
+    );
+    final created = await _repository.createPost(result);
+
+    if (!mounted) return;
+
+    setState(() {
+      _posts = [created, ..._posts];
+      _isSubmitting = false;
+      _selectedSubmitModel = null;
+      _submitTitleController.clear();
+      _submitCaptionController.clear();
+      _submitPlaceController.clear();
+      _submitLatController.clear();
+      _submitLngController.clear();
+    });
+
+    showAppToast(context, textLocalize('community_joined'));
+  }
+
+  List<CommunityPost> get _filteredPosts {
+    if (_selectedTags.isEmpty) return _posts;
+    final filtered = _posts
+        .where((p) => p.tags.any((t) => _selectedTags.contains(t)))
+        .toList();
+    filtered.sort(
+      (a, b) => b.tags
+          .where((t) => _selectedTags.contains(t))
+          .length
+          .compareTo(
+            a.tags.where((t) => _selectedTags.contains(t)).length,
+          ),
+    );
+    return filtered;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final posts = _posts;
-    final selectedPost = posts.isEmpty ? null : posts[_selectedMapIndex];
+    final selectedPost =
+        _posts.isEmpty ? null : _posts[_selectedMapIndex];
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              BDPageHeader(
-                title: textLocalize('community'),
-                subtitle: '把 3D 记忆变成一条可以下翻的世界流，也把地点重新组织成可以点击的空间索引。',
-                trailing: IconButton(
-                  onPressed: _openShareSheet,
-                  icon: Icon(
-                    Icons.add_location_alt_rounded,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Text(
+                  textLocalize('community'),
+                  style: TextStyle(
                     color: isDark
                         ? BDDesign.colorPaperWhite
                         : BDDesign.colorInkBlack,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
-                  tooltip: textLocalize('community_share_tooltip'),
                 ),
               ),
+              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CommunityMetricCard(
-                        label: textLocalize('community_label_memories'),
-                        value: '${posts.length}',
-                        hint: textLocalize('community_label_memories_hint'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: CommunityMetricCard(
-                        label: textLocalize('community_label_nodes'),
-                        value:
-                            '${posts.map((post) => post.placeName).toSet().length}',
-                        hint: textLocalize('community_label_nodes_hint'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
                 child: BDPanelCard(
                   padding: const EdgeInsets.all(6),
                   child: TabBar(
@@ -254,7 +301,8 @@ class _CommunityPageState extends State<CommunityPage>
                     indicator: BoxDecoration(
                       color: isDark
                           ? AppTheme.darkSurfaceElevated
-                          : BDDesign.colorMutedBlue.withValues(alpha: 0.12),
+                          : BDDesign.colorMutedBlue
+                              .withValues(alpha: 0.12),
                       borderRadius: BDDesign.radiusLarge,
                     ),
                     labelColor: isDark
@@ -264,35 +312,53 @@ class _CommunityPageState extends State<CommunityPage>
                         ? Colors.white.withValues(alpha: 0.56)
                         : BDDesign.colorMutedBlue,
                     tabs: [
-                      Tab(text: textLocalize('community_tab_feed')),
-                      Tab(text: textLocalize('community_tab_map')),
+                      Tab(text: textLocalize('community_tab_explore')),
+                      Tab(text: textLocalize('community_tab_discover')),
+                      Tab(text: textLocalize('community_tab_submit')),
                     ],
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
-                    : BDTabSwitcher(
+                    : IndexedStack(
                         index: _tabIndex,
                         children: [
-                          CommunityFeedView(
-                            posts: posts,
-                            controller: _feedController,
-                            onOpenViewer: _openViewer,
-                            onOpenLocationHub: _openLocationHub,
-                          ),
-                          CommunityMapView(
-                            posts: posts,
+                          CommunityExploreView(
+                            posts: _posts,
                             selectedIndex: _selectedMapIndex,
-                            onSelect: (index) {
-                              setState(() {
-                                _selectedMapIndex = index;
-                              });
-                            },
+                            onSelect: (i) =>
+                                setState(() => _selectedMapIndex = i),
                             onOpenViewer: _openViewer,
                             onOpenLocationHub: _openLocationHub,
                             selectedPost: selectedPost,
+                          ),
+                          CommunityDiscoverView(
+                            posts: _filteredPosts,
+                            selectedTags: _selectedTags,
+                            onToggleTag: (tag) {
+                              setState(() {
+                                if (_selectedTags.contains(tag)) {
+                                  _selectedTags.remove(tag);
+                                } else {
+                                  _selectedTags.add(tag);
+                                }
+                              });
+                            },
+                            onOpenViewer: _openViewer,
+                          ),
+                          CommunitySubmitView(
+                            selectedModel: _selectedSubmitModel,
+                            onPickModel: _showModelPicker,
+                            titleController: _submitTitleController,
+                            captionController: _submitCaptionController,
+                            placeController: _submitPlaceController,
+                            latController: _submitLatController,
+                            lngController: _submitLngController,
+                            isSubmitting: _isSubmitting,
+                            onSubmit: _submitPost,
                           ),
                         ],
                       ),
