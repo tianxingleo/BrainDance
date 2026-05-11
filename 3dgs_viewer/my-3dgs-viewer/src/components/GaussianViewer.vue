@@ -75,12 +75,10 @@ const ORBIT_RADIUS_MIN_STEP = 0.02;
 const INTRO_PARTICLE_FADE_IN_START = 0.04;
 const INTRO_PARTICLE_FADE_OUT_START = 0.82;
 const INTRO_PARTICLE_FADE_OUT_END = 0.965;
-const INTRO_PARTICLE_FOCAL_REFERENCE_PX = DEFAULT_FOCAL_PX;
-const INTRO_PARTICLE_MIN_CAMERA_SCALE = 0.48;
-const INTRO_PARTICLE_MAX_CAMERA_SCALE = 1.12;
-const INTRO_PARTICLE_REFERENCE_DISTANCE_MULTIPLIER = 2.2;
-const INTRO_PARTICLE_DISTANCE_SCALE_MIN = 0.72;
-const INTRO_PARTICLE_DISTANCE_SCALE_MAX = 1.0;
+const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
+const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.24;
+const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
+const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 0.92;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
@@ -478,38 +476,38 @@ const getSceneRadius = () => {
 const getIntroParticleCameraScale = () => {
   if (!viewer?.camera) return 1;
 
-  // 粒子是过渡提示，不适合把小物体的近景也渲染成“满屏大点”。
-  // 这里同时考虑焦距和相机到场景中心的距离，让广角近拍时点更收敛。
-  const viewportHeight = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  // 用包围球的屏幕投影占比统一粒子观感：物体越铺满屏幕，单点越要收敛。
+  // 这样广角近景不会因为相机离模型近而出现粗颗粒，大场景的默认密度也能保持。
+  const viewportHeight = containerRef.value?.clientHeight || sceneMetadata.value.h || window.innerHeight;
+  const viewportWidth = containerRef.value?.clientWidth || sceneMetadata.value.w || window.innerWidth;
+  const viewportReference = Math.max(Math.min(viewportWidth || 0, viewportHeight || 0), 1);
   const focalPx = calcFocalFromFov(viewer.camera.fov, viewportHeight)
     || sceneMetadata.value.fl_y
     || DEFAULT_FOCAL_PX;
 
-  let focalScale = 1;
-  if (Number.isFinite(focalPx) && focalPx > 0) {
-    const focalRatio = focalPx / INTRO_PARTICLE_FOCAL_REFERENCE_PX;
-    focalScale = focalRatio < 1 ? focalRatio : Math.sqrt(focalRatio);
-  }
-  focalScale = THREE.MathUtils.clamp(
-    focalScale,
-    INTRO_PARTICLE_MIN_CAMERA_SCALE,
-    INTRO_PARTICLE_MAX_CAMERA_SCALE
-  );
-
   const radius = getSceneRadius();
-  const distance = viewer.camera.position.distanceTo(globalUniforms.uCenter.value);
-  const referenceDistance = Math.max(radius * INTRO_PARTICLE_REFERENCE_DISTANCE_MULTIPLIER, 0.5);
-  const distanceRatio = distance > 0 ? distance / referenceDistance : 1;
-  const distanceScale = THREE.MathUtils.clamp(
-    distanceRatio < 1 ? Math.sqrt(distanceRatio) : 1,
-    INTRO_PARTICLE_DISTANCE_SCALE_MIN,
-    INTRO_PARTICLE_DISTANCE_SCALE_MAX
+  const distance = Math.max(
+    viewer.camera.position.distanceTo(globalUniforms.uCenter.value),
+    radius * 0.08,
+    0.001
+  );
+  const projectedRadiusPx = Number.isFinite(focalPx) && focalPx > 0
+    ? (focalPx * radius) / distance
+    : viewportReference * INTRO_PARTICLE_SCREEN_COVERAGE_TARGET * 0.5;
+  const screenCoverage = THREE.MathUtils.clamp(
+    projectedRadiusPx / (viewportReference * 0.5),
+    0.04,
+    3.0
+  );
+  const screenScale = Math.pow(
+    INTRO_PARTICLE_SCREEN_COVERAGE_TARGET / screenCoverage,
+    INTRO_PARTICLE_SCREEN_SCALE_EXPONENT
   );
 
   return THREE.MathUtils.clamp(
-    focalScale * distanceScale,
-    INTRO_PARTICLE_MIN_CAMERA_SCALE,
-    INTRO_PARTICLE_MAX_CAMERA_SCALE
+    screenScale,
+    INTRO_PARTICLE_SCREEN_SCALE_MIN,
+    INTRO_PARTICLE_SCREEN_SCALE_MAX
   );
 };
 
