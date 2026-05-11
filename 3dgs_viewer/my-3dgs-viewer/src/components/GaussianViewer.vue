@@ -58,6 +58,9 @@ const PINCH_ZOOM_STEP = 1.8;
 const ORBIT_YAW_SENSITIVITY = 0.0048;
 const ORBIT_PITCH_SENSITIVITY = 0.0048;
 const ORBIT_ROLL_SENSITIVITY = 1.0;
+// 双指缩放时允许少量抖动，但不能把它误判成旋转，否则中心模式会出现镜头抽动。
+const ORBIT_TOUCH_PINCH_DISTANCE_EPS = 2.5;
+const ORBIT_TOUCH_ROTATE_ANGLE_EPS = THREE.MathUtils.degToRad(2.0);
 const CINEMATIC_MIN_LOOK_AHEAD = 1.2;
 const CINEMATIC_MAX_LOOK_AHEAD = 8.0;
 const CINEMATIC_PATH_BLEND = 0.72;
@@ -3008,7 +3011,8 @@ const pinchState = {
 const orbitTouchState = {
   active: false,
   angle: 0,
-  roll: 0
+  roll: 0,
+  mode: 'idle'
 };
 // const rotationDelta removed here
 
@@ -3024,6 +3028,7 @@ const resetManualCameraInputState = () => {
   pinchState.distance = 0;
   orbitTouchState.active = false;
   orbitTouchState.angle = 0;
+  orbitTouchState.mode = 'idle';
 };
 
 const handleFreePinchMove = (touches) => {
@@ -3161,11 +3166,13 @@ const onTouchStart = (e) => {
       pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
       orbitTouchState.active = true;
       orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      orbitTouchState.mode = 'pending';
       return;
     }
 
     pinchState.active = false;
     orbitTouchState.active = false;
+    orbitTouchState.mode = 'idle';
     if (e.touches.length === 1) {
       isDragging.value = true;
       lastMouse.x = e.touches[0].clientX;
@@ -3177,10 +3184,12 @@ const onTouchStart = (e) => {
     isDragging.value = false;
     pinchState.active = true;
     pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    orbitTouchState.mode = 'idle';
     return;
   }
 
   pinchState.active = false;
+  orbitTouchState.mode = 'idle';
   if (e.touches.length === 1) {
     isDragging.value = true;
     lastMouse.x = e.touches[0].clientX;
@@ -3198,18 +3207,43 @@ const onTouchMove = (e) => {
     if (e.touches.length >= 2) {
       const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
       const nextAngle = getTouchAngle(e.touches[0], e.touches[1]);
+      const distanceDelta = pinchState.active && pinchState.distance > 0
+        ? nextDistance - pinchState.distance
+        : 0;
+      const angleDelta = orbitTouchState.active
+        ? normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle)
+        : 0;
 
-      if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
-        orbitZoom(nextDistance / pinchState.distance);
+      if (orbitTouchState.mode === 'pending') {
+        if (Math.abs(distanceDelta) > ORBIT_TOUCH_PINCH_DISTANCE_EPS) {
+          orbitTouchState.mode = 'pinch';
+        } else if (Math.abs(angleDelta) >= ORBIT_TOUCH_ROTATE_ANGLE_EPS) {
+          orbitTouchState.mode = 'rotate';
+        }
       }
-      if (orbitTouchState.active) {
-        orbitRoll(normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle));
+
+      if (orbitTouchState.mode === 'pinch') {
+        if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+          orbitZoom(nextDistance / pinchState.distance);
+        }
+        pinchState.distance = nextDistance;
+        orbitTouchState.angle = nextAngle;
+      } else if (orbitTouchState.mode === 'rotate') {
+        if (Math.abs(angleDelta) >= ORBIT_TOUCH_ROTATE_ANGLE_EPS) {
+          orbitRoll(angleDelta);
+          orbitTouchState.angle = nextAngle;
+        }
+        pinchState.distance = nextDistance;
+      } else {
+        // 维持初始参考值不动，让慢速缩放或旋转能在后续移动里累积到可判定阈值。
+        if (!pinchState.active || pinchState.distance <= 0) {
+          pinchState.distance = nextDistance;
+          orbitTouchState.angle = nextAngle;
+        }
       }
 
       pinchState.active = true;
-      pinchState.distance = nextDistance;
       orbitTouchState.active = true;
-      orbitTouchState.angle = nextAngle;
       isDragging.value = false;
       return;
     }
@@ -3260,6 +3294,7 @@ const onTouchEnd = (e) => {
       pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
       orbitTouchState.active = true;
       orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      orbitTouchState.mode = 'pending';
       isDragging.value = false;
       return;
     }
@@ -3268,6 +3303,7 @@ const onTouchEnd = (e) => {
     pinchState.distance = 0;
     orbitTouchState.active = false;
     orbitTouchState.angle = 0;
+    orbitTouchState.mode = 'idle';
     if (isDragging.value) {
       interactionState.orbitInertiaActive = true;
       scheduleInteractionFrame();
@@ -3288,12 +3324,14 @@ const onTouchEnd = (e) => {
   if (e.touches.length >= 2) {
     pinchState.active = true;
     pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    orbitTouchState.mode = 'idle';
     isDragging.value = false;
     return;
   }
 
   pinchState.active = false;
   pinchState.distance = 0;
+  orbitTouchState.mode = 'idle';
   if (isDragging.value) {
     interactionState.freeInertiaActive = true;
     scheduleInteractionFrame();
