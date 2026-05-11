@@ -46,6 +46,10 @@ class WebGLViewerPage extends StatefulWidget {
 }
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
+  static const MethodChannel _cameraPermissionChannel = MethodChannel(
+    'braindance/camera_permission',
+  );
+
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -493,7 +497,25 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   void _initWebView() {
-    _controller = WebViewController()
+    final controller = WebViewController(
+      onPermissionRequest: (WebViewPermissionRequest request) async {
+        final needsCamera = request.types.contains(
+          WebViewPermissionResourceType.camera,
+        );
+        if (!needsCamera) {
+          await request.deny();
+          return;
+        }
+
+        final granted = await _requestNativeCameraPermission();
+        if (granted) {
+          await request.grant();
+        } else {
+          await request.deny();
+        }
+      },
+    );
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
       ..addJavaScriptChannel(
@@ -537,6 +559,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           },
         ),
       );
+    _controller = controller;
 
     if (mounted) setState(() {});
     _loadLocalHtml();
@@ -812,10 +835,27 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   Future<bool> _ensureRuntimeCameraPermission() async {
+    final granted = await _requestNativeCameraPermission();
+    if (!granted) {
+      return false;
+    }
+
     try {
       final cameras = await availableCameras();
       return cameras.isNotEmpty;
     } on CameraException {
+      return false;
+    }
+  }
+
+  Future<bool> _requestNativeCameraPermission() async {
+    try {
+      final granted = await _cameraPermissionChannel.invokeMethod<bool>(
+        'ensureCameraPermission',
+      );
+      return granted ?? false;
+    } catch (e) {
+      debugPrint('[WebGLViewer] camera permission channel failed: $e');
       return false;
     }
   }
@@ -826,7 +866,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final granted = await _ensureRuntimeCameraPermission();
       if (!granted) {
         if (mounted) {
-          TDToast.showText('未获得摄像头权限，无法进入 Marker AR', context: context);
+          TDToast.showText(textLocalize('reco_camun'), context: context);
         }
         return;
       }
