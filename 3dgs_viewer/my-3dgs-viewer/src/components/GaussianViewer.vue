@@ -2608,6 +2608,10 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     createParticleSystem(splatMesh);
     applyAdvancedShader(splatMesh);
 
+    // 模型本体已经可渲染后，就先关闭 loading 遮罩。
+    // 对单图 SHARP 这类没有位姿信息的场景，后续只剩参考镜头/入场动画收尾，不应继续挡住用户视图。
+    isLoading.value = false;
+
     if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
       pendingInitialTarget = {
         matrix: initialTarget.matrix || null,
@@ -2616,7 +2620,6 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     }
 
     beginIntroAnimationToResolvedPose();
-    isLoading.value = false;
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
     }
