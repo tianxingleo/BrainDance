@@ -36,9 +36,7 @@ String? toPosesUrl(String? plyPath) {
 // ── Sibling query ────────────────────────────────────────────
 
 /// 根据 sceneId（display_name）自动查询兄弟模型（同名场景的不同时间版本）。
-Future<List<Map<String, dynamic>>> _querySiblingModels(
-  String sceneId,
-) async {
+Future<List<Map<String, dynamic>>> _querySiblingModels(String sceneId) async {
   try {
     // 1. 查 processing_tasks 获取当前 sceneId 对应的 display_name
     //    sceneId 参数可能是 display_name，也可能是 scene_id
@@ -115,6 +113,7 @@ Future<void> openViewer(
   required String sceneId,
   List<double>? initialPose,
   String? initialPoseId,
+  bool initialMarkerArMode = false,
 }) async {
   final siblings = await _querySiblingModels(sceneId);
 
@@ -125,15 +124,16 @@ Future<void> openViewer(
       transitionDuration: const Duration(milliseconds: 320),
       reverseTransitionDuration: const Duration(milliseconds: 320),
       opaque: true,
-      pageBuilder: (_, __, ___) => WebGLViewerPage(
+      pageBuilder: (context, animation, secondaryAnimation) => WebGLViewerPage(
         initialModelUrl: initialModelUrl,
         posesUrl: posesUrl,
         sceneId: sceneId,
         initialPose: initialPose,
         initialPoseId: initialPoseId,
+        initialMarkerArMode: initialMarkerArMode,
         timePeelingModels: siblings,
       ),
-      transitionsBuilder: (_, animation, __, child) {
+      transitionsBuilder: (_, animation, secondaryAnimation, child) {
         final curved = CurvedAnimation(
           parent: animation,
           curve: Curves.easeInOutCubic,

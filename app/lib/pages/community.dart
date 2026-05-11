@@ -10,7 +10,6 @@ import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 class CommunityPage extends StatefulWidget {
   const CommunityPage({super.key});
@@ -107,6 +106,7 @@ class _CommunityPageState extends State<CommunityPage>
       initialModelUrl: post.modelUrl,
       posesUrl: post.posesUrl,
       sceneId: post.modelName,
+      initialMarkerArMode: true,
     );
   }
 
