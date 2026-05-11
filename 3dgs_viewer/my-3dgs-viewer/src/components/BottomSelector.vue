@@ -260,8 +260,8 @@ onBeforeUnmount(() => {
   gap: 12px;
   align-items: center;
   overflow-x: auto;
-  overflow-y: hidden;
-  padding: 6px 36px;
+  overflow-y: visible;
+  padding: 16px 36px 28px;
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: grab;

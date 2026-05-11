@@ -8,9 +8,9 @@ const props = defineProps({
 });
 const emit = defineEmits(['select']);
 
-const SVG_HEIGHT = 60;
-const BASE_Y = 40;     // The flat line Y
-const PEAK_Y = 15;     // The Y at the thumb
+const SVG_HEIGHT = 84;
+const BASE_Y = 56;     // The flat line Y
+const PEAK_Y = 24;     // The Y at the thumb
 const BEND_WIDTH = 50; // The horizontal spread of the curve
 
 const containerRef = ref(null);
@@ -208,15 +208,13 @@ function handlePointerUp() {
     </svg>
     <div class="te-thumb" :style="{ transform: 'translate3d(' + thumbX + 'px,' + thumbY + 'px,0) translate(-50%,-50%)' }">
       <div class="te-thumb-inner"></div>
-      
-      <!-- Label and Preview -->
-      <div class="te-label" :class="{ 'te-label-dragging': isDragging }">
+      <div class="te-preview-panel" :class="{ 'te-preview-panel-dragging': isDragging }">
         <div v-if="points[activeIndex]?.previewImg" class="te-preview-img-wrap">
           <img :src="points[activeIndex].previewImg" class="te-preview-img" :class="{ 'te-preview-loaded': loadedThumbs[points[activeIndex].previewImg] }" draggable="false" />
         </div>
         <div v-else class="te-preview-empty">未命名</div>
-        <div class="te-time-text">{{ formattedTime }}</div>
       </div>
+      <div class="te-time-text" :class="{ 'te-time-text-dragging': isDragging }">{{ formattedTime }}</div>
     </div>
   </div>
 </template>
@@ -225,7 +223,7 @@ function handlePointerUp() {
 .timeline-elastic-wrap {
   position: relative;
   width: 100%;
-  height: 72px;
+  height: 112px;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -278,24 +276,23 @@ function handlePointerUp() {
 .timeline-elastic-wrap:active .te-thumb-inner {
   transform: scale(1.15);
 }
-.te-label {
+.te-preview-panel {
   position: absolute;
-  top: -100px;
+  bottom: calc(100% + 12px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
   background: rgba(30, 30, 32, 0.85);
   padding: 6px 8px;
   border-radius: 10px;
   pointer-events: none;
   transition: opacity 0.2s, transform 0.2s;
   opacity: 0;
-  transform: translateY(12px) scale(0.9);
+  transform: translateY(10px) scale(0.92);
   backdrop-filter: blur(4px);
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
-.te-label::after {
+.te-preview-panel::after {
   content: '';
   position: absolute;
   bottom: -4px;
@@ -305,13 +302,13 @@ function handlePointerUp() {
   border-style: solid;
   border-color: rgba(30, 30, 32, 0.85) transparent transparent transparent;
 }
-.te-label-dragging, .timeline-elastic-wrap:hover .te-label {
+.te-preview-panel-dragging, .timeline-elastic-wrap:hover .te-preview-panel {
   opacity: 1;
   transform: translateY(0) scale(1);
 }
 .te-preview-img-wrap {
-  width: 76px;
-  height: 54px;
+  width: 84px;
+  height: 60px;
   border-radius: 6px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.1);
@@ -327,8 +324,8 @@ function handlePointerUp() {
   opacity: 1;
 }
 .te-preview-empty {
-  width: 76px;
-  height: 54px;
+  width: 84px;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -338,9 +335,17 @@ function handlePointerUp() {
   background: rgba(255, 255, 255, 0.1);
 }
 .te-time-text {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.45);
+}
+.te-time-text-dragging {
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
 }
 </style>
