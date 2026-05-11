@@ -240,9 +240,7 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
-  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  overflow: visible;
 }
 
 .bs-track {
@@ -256,6 +254,8 @@ onBeforeUnmount(() => {
   -ms-overflow-style: none;
   cursor: grab;
   user-select: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
 }
 .bs-track::-webkit-scrollbar {
   display: none;

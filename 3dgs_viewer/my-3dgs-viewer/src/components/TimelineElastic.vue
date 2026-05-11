@@ -224,11 +224,11 @@ function handlePointerUp() {
 .timeline-elastic-wrap {
   position: relative;
   width: 100%;
-  height: 60px;
+  height: 72px;
   cursor: grab;
   touch-action: none;
   user-select: none;
-  margin: 4px 10px;
+  margin: 0 10px 2px;
   flex: 1;
 }
 .timeline-elastic-wrap:active {
@@ -279,7 +279,7 @@ function handlePointerUp() {
 }
 .te-label {
   position: absolute;
-  top: -85px;
+  top: -100px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -309,8 +309,8 @@ function handlePointerUp() {
   transform: translateY(0) scale(1);
 }
 .te-preview-img-wrap {
-  width: 64px;
-  height: 44px;
+  width: 76px;
+  height: 54px;
   border-radius: 6px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.1);
@@ -326,8 +326,8 @@ function handlePointerUp() {
   opacity: 1;
 }
 .te-preview-empty {
-  width: 64px;
-  height: 44px;
+  width: 76px;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
