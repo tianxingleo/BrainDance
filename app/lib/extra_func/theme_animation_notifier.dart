@@ -38,7 +38,9 @@ class ThemeAnimationNotifier extends StateNotifier<ThemeAnimationState> {
   }
 
   void end() {
+    final oldScreenshot = state.screenshot;
     state = state.copyWith(isAnimating: false, screenshot: null);
+    oldScreenshot?.dispose();
   }
 }
 

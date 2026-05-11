@@ -188,7 +188,7 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
     final taskId = task['id'].toString();
     final sceneId = task['scene_id']?.toString() ?? 'Unknown';
     final description = task['description']?.toString() ?? '';
-    final displayName = task['display_name']?.toString();
+    final displayName = _resolveDisplayName(task, sceneId);
     final createdAt = task['created_at'] != null
         ? DateTime.tryParse(task['created_at'].toString())
         : null;
@@ -249,7 +249,7 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
                       children: [
                         Expanded(
                           child: Text(
-                            displayName ?? sceneId,
+                            displayName,
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -315,6 +315,21 @@ class _ExpandableCategorySectionState extends State<ExpandableCategorySection>
         ),
       ),
     );
+  }
+
+  String _resolveDisplayName(Map<String, dynamic> task, String fallback) {
+    final displayName = task['display_name']?.toString().trim() ?? '';
+    if (displayName.isNotEmpty) return displayName;
+
+    final tags = task['tags'];
+    if (tags is List) {
+      for (final tag in tags) {
+        final value = tag?.toString().trim() ?? '';
+        if (value.isNotEmpty) return value;
+      }
+    }
+
+    return fallback;
   }
 
   IconData _getTaskTypeIcon(String taskType) {

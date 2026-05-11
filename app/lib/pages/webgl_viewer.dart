@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:braindance/configs/app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,7 +29,7 @@ class WebGLViewerPage extends StatefulWidget {
 
   const WebGLViewerPage({
     super.key,
-    this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.initialModelUrl = '',
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
@@ -144,8 +145,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
         } catch (e) {
+          debugPrint('[WebGLViewer] proxy error: $e');
           request.response.statusCode = HttpStatus.badGateway;
-          request.response.write('Proxy error: $e');
+          request.response.write('Proxy error');
         }
         await request.response.close();
         return;
@@ -360,12 +362,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           }
         }
       } catch (e) {
-        debugPrint('Download error: $e');
+        debugPrint('[WebGLViewer] download error: $e');
         if (mounted) {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          showAppToast(context, textLocalize('viewer_download_fail'));
           _launchViewer();
         }
       }
@@ -392,11 +394,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       targetUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      targetUrl = widget.initialModelUrl;
+      // 相对路径或空路径：不传给 JS，让查看器以空状态打开
+      targetUrl = '';
     }
 
     return {
-      'ply': targetUrl,
+      if (targetUrl.isNotEmpty) 'ply': targetUrl,
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,
@@ -468,8 +471,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
+            debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
-              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+              showAppToast(context, textLocalize('viewer_spark_error'));
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');

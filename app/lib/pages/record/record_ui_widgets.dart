@@ -112,3 +112,498 @@ class _RecordOverlayPanel extends StatelessWidget {
     );
   }
 }
+
+// ===== Accelerometer Warning Banner =====
+class _AccelWarningBanner extends ConsumerStatefulWidget {
+  const _AccelWarningBanner();
+
+  @override
+  ConsumerState<_AccelWarningBanner> createState() =>
+      _AccelWarningBannerState();
+}
+
+class _AccelWarningBannerState extends ConsumerState<_AccelWarningBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<Offset> _slide;
+  Timer? _dismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 350),
+      vsync: this,
+    );
+    _slide = Tween<Offset>(
+      begin: const Offset(0, -1.2),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed) {
+        ref.read(showAccelBannerProvider.notifier).state = false;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(showAccelBannerProvider, (prev, next) {
+      if (next) {
+        _dismissTimer?.cancel();
+        _ctrl.forward();
+        _dismissTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) _ctrl.reverse();
+        });
+      }
+    });
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
+
+          return SafeArea(
+            child: SlideTransition(
+              position: _slide,
+              child: GestureDetector(
+                onTap: () {
+                  _dismissTimer?.cancel();
+                  _ctrl.reverse();
+                },
+                child: Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A30),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.withAlpha(80)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withAlpha(25),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.speed,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          textLocalize('reco_accel_warning'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ===== Save Fail Bubble (middle-lower floating) =====
+class _SaveFailBubble extends ConsumerStatefulWidget {
+  const _SaveFailBubble();
+
+  @override
+  ConsumerState<_SaveFailBubble> createState() => _SaveFailBubbleState();
+}
+
+class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+  Timer? _dismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 280),
+      vsync: this,
+    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.15),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed) {
+        ref.read(saveFailBubbleProvider.notifier).state = null;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = ref.watch(saveFailBubbleProvider);
+
+    ref.listen(saveFailBubbleProvider, (prev, next) {
+      if (next != null) {
+        _dismissTimer?.cancel();
+        _ctrl.forward();
+        _dismissTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) _ctrl.reverse();
+        });
+      }
+    });
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
+          if (message == null) return const SizedBox.shrink();
+
+          return Align(
+            alignment: const Alignment(0, 0.30),
+            child: FadeTransition(
+              opacity: _fade,
+              child: SlideTransition(
+                position: _slide,
+                child: GestureDetector(
+                  onTap: () {
+                    _dismissTimer?.cancel();
+                    _ctrl.reverse();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xE6282828),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white.withAlpha(18)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.error_outline_rounded,
+                          color: Colors.orange.withAlpha(200),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(220),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ===== Center Bubble (reusable) =====
+class _CenterBubble extends ConsumerStatefulWidget {
+  final StateProvider<bool> provider;
+  final String message;
+  final IconData icon;
+  final Color iconColor;
+  final int durationSeconds;
+
+  _CenterBubble({
+    required this.provider,
+    required this.message,
+    required this.icon,
+    required this.iconColor,
+    this.durationSeconds = 3,
+  });
+
+  @override
+  ConsumerState<_CenterBubble> createState() => _CenterBubbleState();
+}
+
+class _CenterBubbleState extends ConsumerState<_CenterBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  Timer? _dismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 250),
+      vsync: this,
+    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _scale = Tween<double>(
+      begin: 0.88,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed && mounted) {
+        ref.read(widget.provider.notifier).state = false;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(widget.provider, (prev, next) {
+      if (next) {
+        _dismissTimer?.cancel();
+        _ctrl.forward();
+        _dismissTimer = Timer(Duration(seconds: widget.durationSeconds), () {
+          if (mounted) _ctrl.reverse();
+        });
+      } else if ((prev == true) && !next) {
+        _dismissTimer?.cancel();
+        if (mounted) _ctrl.reverse();
+      }
+    });
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
+
+          return Align(
+            alignment: Alignment.center,
+            child: FadeTransition(
+              opacity: _fade,
+              child: ScaleTransition(
+                scale: _scale,
+                child: GestureDetector(
+                  onTap: () {
+                    _dismissTimer?.cancel();
+                    _ctrl.reverse();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 13,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xE6282828),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white.withAlpha(18)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(widget.icon, color: widget.iconColor, size: 20),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            widget.message,
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(220),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ===== Streaming Done Bubble (center) =====
+class _StreamingDoneBubble extends ConsumerStatefulWidget {
+  const _StreamingDoneBubble();
+
+  @override
+  ConsumerState<_StreamingDoneBubble> createState() =>
+      _StreamingDoneBubbleState();
+}
+
+class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<double> _scale;
+  Timer? _dismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 250),
+      vsync: this,
+    );
+    _fade = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+    _scale = Tween<double>(begin: 0.88, end: 1).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+    _ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed && mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state = null;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = ref.watch(streamingDoneBubbleProvider);
+
+    ref.listen(streamingDoneBubbleProvider, (prev, next) {
+      if (next != null) {
+        _dismissTimer?.cancel();
+        _ctrl.forward();
+        _dismissTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) _ctrl.reverse();
+        });
+      }
+    });
+
+    if (_ctrl.isDismissed && message == null) return const SizedBox.shrink();
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (message == null) return const SizedBox.shrink();
+
+          return Align(
+            alignment: const Alignment(0, 0.30),
+            child: FadeTransition(
+              opacity: _fade,
+              child: ScaleTransition(
+                scale: _scale,
+                child: GestureDetector(
+                  onTap: () {
+                    _dismissTimer?.cancel();
+                    _ctrl.reverse();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 13,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xE6282828),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white.withAlpha(18)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.check_circle_outline_rounded,
+                          color: BDDesign.colorFadedOlive,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            message,
+                            style: TextStyle(
+                              color: Colors.white.withAlpha(220),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}

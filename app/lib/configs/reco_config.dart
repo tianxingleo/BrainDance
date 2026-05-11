@@ -5,7 +5,7 @@ class RecoConfig {
   //更新
   static VoidCallback? onUpdate;
   //程序
-  static late final bool cameraEnabled;
+  static late bool cameraEnabled;
   static late final List<CameraDescription> cameras;
   static List<CameraDescription> frontCameras = [];
   static List<CameraDescription> backCameras = [];
@@ -21,6 +21,11 @@ class RecoConfig {
     await cameraController!.initialize().catchError((Object e) {
       suc = false;
     });
+    if (!suc) {
+      cameraEnabled = false;
+    } else {
+      cameraEnabled = true;
+    }
     onUpdate?.call();
     return suc;
   }

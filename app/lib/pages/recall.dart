@@ -25,7 +25,8 @@ import '../main.dart'
         overviewStatsProvider,
         overviewLocalIndexingProvider,
         pageIndexProvider,
-        pendingSubmitTitleProvider;
+        pendingSubmitTitleProvider,
+        recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
 import '../services/local_rag_index.dart';
@@ -33,6 +34,7 @@ import '../services/local_model_catalog_service.dart';
 import '../services/download_event_bus.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
+import '../widgets/app_toast.dart';
 import 'community/composer_sheet.dart';
 import 'community/models.dart';
 import 'community/repository.dart';
@@ -87,7 +89,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;
-  RecallSearchMode _searchMode = RecallSearchMode.cloud;
+  RecallSearchMode _searchMode = RecallSearchMode.local;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   StreamSubscription<String>? _agentStreamSubscription;

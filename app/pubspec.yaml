@@ -47,6 +47,8 @@ dependencies:
   wakelock_plus: ^1.4.0
   cross_file: ^0.3.5+2
   dio: ^5.9.2
+  connectivity_plus: ^6.1.2
+  ffmpeg_kit_extended_flutter: ^0.4.3
   sqflite: ^2.2.5
   llamadart: ^0.6.6
   flutter_markdown: ^0.7.7+1

@@ -17,12 +17,14 @@ class FloatingNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final List<NavIslandItem> items;
+  final bool skipBlur;
 
   const FloatingNavBar({
     super.key,
     required this.currentIndex,
     required this.onTap,
     required this.items,
+    this.skipBlur = false,
   });
 
   @override
@@ -117,27 +119,27 @@ class _FloatingNavBarState extends State<FloatingNavBar>
               right: 0,
               child: ClipRRect(
                 borderRadius: BDDesign.radiusLarge,
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 24.0, sigmaY: 24.0),
-                  child: Container(
-                    height: _kNavBarInnerHeight,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8.0,
-                      vertical: 8.0,
-                    ),
-                    decoration: BoxDecoration(
-                      color: navBackground,
-                      borderRadius: BDDesign.radiusLarge,
-                      border: Border.all(color: navBorder, width: 1.0),
-                      boxShadow: [
-                        BoxShadow(
-                          color: navShadow,
-                          blurRadius: 28,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: LayoutBuilder(
+                child: Builder(
+                  builder: (ctx) {
+                    final navBarContent = Container(
+                      height: _kNavBarInnerHeight,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0,
+                        vertical: 8.0,
+                      ),
+                      decoration: BoxDecoration(
+                        color: navBackground,
+                        borderRadius: BDDesign.radiusLarge,
+                        border: Border.all(color: navBorder, width: 1.0),
+                        boxShadow: [
+                          BoxShadow(
+                            color: navShadow,
+                            blurRadius: 28,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: LayoutBuilder(
                       builder: (context, constraints) {
                         final compact = constraints.maxWidth < 420;
                         final normalItems = widget.items
@@ -288,8 +290,18 @@ class _FloatingNavBarState extends State<FloatingNavBar>
                           },
                         );
                       },
-                    ),
-                  ),
+                      ),
+                    );
+                    return widget.skipBlur
+                        ? navBarContent
+                        : BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX: 24.0,
+                              sigmaY: 24.0,
+                            ),
+                            child: navBarContent,
+                          );
+                  },
                 ),
               ),
             ),
