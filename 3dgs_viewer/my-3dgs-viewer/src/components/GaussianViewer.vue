@@ -75,6 +75,12 @@ const ORBIT_RADIUS_MIN_STEP = 0.02;
 const INTRO_PARTICLE_FADE_IN_START = 0.04;
 const INTRO_PARTICLE_FADE_OUT_START = 0.82;
 const INTRO_PARTICLE_FADE_OUT_END = 0.965;
+const INTRO_PARTICLE_FOCAL_REFERENCE_PX = DEFAULT_FOCAL_PX;
+const INTRO_PARTICLE_MIN_CAMERA_SCALE = 0.48;
+const INTRO_PARTICLE_MAX_CAMERA_SCALE = 1.12;
+const INTRO_PARTICLE_REFERENCE_DISTANCE_MULTIPLIER = 2.2;
+const INTRO_PARTICLE_DISTANCE_SCALE_MIN = 0.72;
+const INTRO_PARTICLE_DISTANCE_SCALE_MAX = 1.0;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
@@ -367,6 +373,7 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
         // 将投影更新合并到下一帧，避免与 viewer 自身循环重复渲染。
         requestRender();
         refreshCurrentFocalInfo();
+        updateIntroParticleCameraScale();
       }
     });
   } else {
@@ -374,6 +381,7 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
     cam.updateProjectionMatrix();
     requestRender();
     refreshCurrentFocalInfo();
+    updateIntroParticleCameraScale();
   }
 };
 
@@ -465,6 +473,49 @@ const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 const getSceneRadius = () => {
   const radius = Number(globalUniforms.uMaxRadius.value || 0);
   return radius > 0 ? radius : 1;
+};
+
+const getIntroParticleCameraScale = () => {
+  if (!viewer?.camera) return 1;
+
+  // 粒子是过渡提示，不适合把小物体的近景也渲染成“满屏大点”。
+  // 这里同时考虑焦距和相机到场景中心的距离，让广角近拍时点更收敛。
+  const viewportHeight = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  const focalPx = calcFocalFromFov(viewer.camera.fov, viewportHeight)
+    || sceneMetadata.value.fl_y
+    || DEFAULT_FOCAL_PX;
+
+  let focalScale = 1;
+  if (Number.isFinite(focalPx) && focalPx > 0) {
+    const focalRatio = focalPx / INTRO_PARTICLE_FOCAL_REFERENCE_PX;
+    focalScale = focalRatio < 1 ? focalRatio : Math.sqrt(focalRatio);
+  }
+  focalScale = THREE.MathUtils.clamp(
+    focalScale,
+    INTRO_PARTICLE_MIN_CAMERA_SCALE,
+    INTRO_PARTICLE_MAX_CAMERA_SCALE
+  );
+
+  const radius = getSceneRadius();
+  const distance = viewer.camera.position.distanceTo(globalUniforms.uCenter.value);
+  const referenceDistance = Math.max(radius * INTRO_PARTICLE_REFERENCE_DISTANCE_MULTIPLIER, 0.5);
+  const distanceRatio = distance > 0 ? distance / referenceDistance : 1;
+  const distanceScale = THREE.MathUtils.clamp(
+    distanceRatio < 1 ? Math.sqrt(distanceRatio) : 1,
+    INTRO_PARTICLE_DISTANCE_SCALE_MIN,
+    INTRO_PARTICLE_DISTANCE_SCALE_MAX
+  );
+
+  return THREE.MathUtils.clamp(
+    focalScale * distanceScale,
+    INTRO_PARTICLE_MIN_CAMERA_SCALE,
+    INTRO_PARTICLE_MAX_CAMERA_SCALE
+  );
+};
+
+const updateIntroParticleCameraScale = () => {
+  if (!particleSystem?.material?.uniforms?.uCameraScale) return;
+  particleSystem.material.uniforms.uCameraScale.value = getIntroParticleCameraScale();
 };
 
 const getCurrentXrSession = () => viewer?.renderer?.xr?.getSession?.() || xrSession;
@@ -1500,10 +1551,12 @@ const createParticleSystem = (splatMesh) => {
     uniforms: {
       uProgress: globalUniforms.uParticleProgress,
       uSize: { value: adaptiveSize }, // 使用计算出的大小
+      uCameraScale: { value: getIntroParticleCameraScale() },
     },
     vertexShader: `
       uniform float uProgress;
       uniform float uSize;
+      uniform float uCameraScale;
       attribute vec3 aTarget;
       attribute vec3 aColor;
       attribute float aRandom;
@@ -1520,9 +1573,11 @@ const createParticleSystem = (splatMesh) => {
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        gl_PointSize = uSize * (34.0 / max(-mvPosition.z, 0.001));
-        if(gl_PointSize < 1.2) gl_PointSize = 1.2;
-        if(gl_PointSize > 18.0) gl_PointSize = 18.0;
+        float pointScale = clamp(uCameraScale, 0.48, 1.12);
+        gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
+        float minPointSize = max(0.85, 1.2 * min(pointScale, 1.0));
+        float maxPointSize = max(minPointSize, 18.0 * min(pointScale, 1.0));
+        gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
     `,
     fragmentShader: `
@@ -1731,6 +1786,7 @@ const beginIntroAnimation = (targetCameraState = null, targetPose = null, startC
   viewer.camera.position.copy(animationState.introCamera.startPosition);
   viewer.camera.quaternion.copy(animationState.introCamera.startQuaternion);
   viewer.camera.updateProjectionMatrix();
+  updateIntroParticleCameraScale();
   if (viewer.controls) viewer.controls.enabled = false;
 };
 
@@ -2583,6 +2639,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         updateVrInteraction(nowPerf);
       }
 
+      updateIntroParticleCameraScale();
       viewer.update();
       viewer.render();
 
@@ -2613,6 +2670,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
           viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
           viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
+        updateIntroParticleCameraScale();
 
         const pointT = smoothstep01(rawT / 0.24);
         const morphT = smoothstep01((rawT - 0.12) / 0.60);
