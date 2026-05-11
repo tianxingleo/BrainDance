@@ -280,7 +280,9 @@ extension _RecallPageView on _RecallPageState {
               model: _activeModelAction!,
               rect: _activeModelActionRect!,
               toPublicUrl: _toPublicUrl,
-              isLocalCached: (_activeModelAction!['_local_size_label']?.toString() ?? '').isNotEmpty,
+              isLocalCached:
+                  (_activeModelAction!['_local_size_label']?.toString() ?? '')
+                      .isNotEmpty,
               isOwnModel: _activeModelAction!['_is_own_model'] == true,
               onDismiss: _dismissModelActions,
               onNavigateToViewer: _navigateToViewer,
@@ -290,6 +292,11 @@ extension _RecallPageView on _RecallPageState {
               onShareModelToCommunity: _shareModelToCommunity,
               onRenameModel: _renameModel,
               onDeleteCloudModel: _deleteCloudModel,
+            ),
+          if (_isOpeningViewer)
+            _RecallViewerOpeningOverlay(
+              isDark: isDark,
+              label: _openingViewerLabel ?? '正在打开模型',
             ),
         ],
       ),

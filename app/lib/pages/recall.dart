@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'dart:convert';
 import 'dart:io';
 
@@ -117,6 +118,8 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   DateTime? _agentRunFinishedAt;
   DateTime? _agentFirstRemoteEventAt;
   bool _isLoading = true;
+  bool _isOpeningViewer = false;
+  String? _openingViewerLabel;
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = false;
   bool _isLocalModelLoading = false;

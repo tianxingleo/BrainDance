@@ -20,6 +20,111 @@ class _ParsedLocalModelOutput {
   final String answer;
 }
 
+class _RecallViewerOpeningOverlay extends StatelessWidget {
+  const _RecallViewerOpeningOverlay({
+    required this.isDark,
+    required this.label,
+  });
+
+  final bool isDark;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final panelColor = isDark
+        ? const Color(0xCC10161F)
+        : const Color(0xEAF7FAFD);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.14);
+    final textColor = isDark ? const Color(0xFFFFFFFF) : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.72)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: AnimatedOpacity(
+          opacity: 1,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: ColoredBox(
+              color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+              child: Center(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0.96, end: 1),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, child) {
+                    return Transform.scale(scale: value, child: child);
+                  },
+                  child: Container(
+                    width: 220,
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                    decoration: BoxDecoration(
+                      color: panelColor,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.14),
+                          blurRadius: 28,
+                          offset: const Offset(0, 14),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.6,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              isDark
+                                  ? const Color(0xFF7CE4EF)
+                                  : const Color(0xFF59B0B6),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          '正在打开模型',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AgentProcessPanel extends StatefulWidget {
   const _AgentProcessPanel({
     required this.chatMessage,
