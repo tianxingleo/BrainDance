@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount, shallowRef } from 'vue';
 
+import TimelineElastic from './TimelineElastic.vue';
+
 const props = defineProps({
   models: { type: Array, default: () => [] },
   activeModelId: { type: String, default: '' },
@@ -26,7 +28,8 @@ let dragMoved = false;
 
 const modelItems = shallowRef([]);
 
-const showTabs = computed(() => props.hasModels);
+// 只要有时间维度数据，就保留切换入口；单个模型也要能进入时间视图。
+const showTabs = computed(() => props.models.length > 0);
 
 // 自动切换到可用 tab（仅当模型 tab 不可用时切换，视角为空时保留空状态）
 watch([() => props.hasModels, () => props.hasPoses], () => {
@@ -165,38 +168,15 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <!-- 模型模式 -->
+        <!-- 模型模式 (Timeline) -->
         <template v-if="mode === 'model'">
-          <div
-            v-for="model in modelItems"
-            :key="model.id"
-            class="bs-item"
-            :class="{ 'bs-item--active': model.id === activeModelId }"
-            @click="onClickModel(model)"
-          >
-            <img
-              v-if="model.previewImg"
-              :src="model.previewImg"
-              class="bs-thumb"
-              :class="{ 'bs-thumb--loaded': loadedThumbs[model.previewImg] }"
-              @load="loadedThumbs[model.previewImg] = true"
-              draggable="false"
-              loading="eager"
-              decoding="async"
-              fetchpriority="low"
-            />
-            <div v-else class="bs-thumb bs-thumb--empty">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-              </svg>
-            </div>
-            <div class="bs-time">{{ model.formattedTime }}</div>
-          </div>
+          <TimelineElastic
+            :items="modelItems"
+            :active-id="activeModelId"
+            @select="onClickModel"
+          />
         </template>
       </div>
-      <!-- 左右渐隐 -->
-      <div class="bs-fade bs-fade--left"></div>
-      <div class="bs-fade bs-fade--right"></div>
     </div>
   </div>
 </template>
@@ -261,6 +241,8 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
 }
 
 .bs-track {
@@ -375,25 +357,4 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
-/* 左右渐隐 */
-.bs-fade {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 40px;
-  pointer-events: none;
-  z-index: 2;
-}
-.bs-fade--left {
-  left: 0;
-  background: linear-gradient(to right,
-    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
-    transparent 100%);
-}
-.bs-fade--right {
-  right: 0;
-  background: linear-gradient(to left,
-    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
-    transparent 100%);
-}
 </style>
