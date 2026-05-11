@@ -2611,6 +2611,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       cameraPoses.value = [];
     }
 
+    setDefaultViewModeForScene(cameraPoses.value.length > 0);
     rebuildCenterModeBounds();
     if (isOrbitMode.value) {
       syncOrbitTarget();
@@ -3011,6 +3012,10 @@ const switchViewMode = (mode) => {
   if (isOrbitMode.value) {
     syncOrbitTarget();
   }
+};
+
+const setDefaultViewModeForScene = (hasPoses) => {
+  currentViewMode.value = hasPoses ? VIEW_MODE.FREE : VIEW_MODE.ORBIT;
 };
 
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
