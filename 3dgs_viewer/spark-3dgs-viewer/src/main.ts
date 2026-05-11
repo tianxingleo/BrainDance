@@ -7,6 +7,7 @@ import App from './App.vue'
 // 真实实现在 SparkGaussianViewer.vue 的 onMounted 中定义
 window.setModelListForTimePeeling = window.setModelListForTimePeeling || function() {}
 window.loadModelFromFlutter = window.loadModelFromFlutter || function() {}
+window.setThemeFromFlutter = window.setThemeFromFlutter || function() {}
 
 const postBridgeMessage = (payload: Record<string, unknown>) => {
   window.BrainDanceChannel?.postMessage?.(JSON.stringify(payload))

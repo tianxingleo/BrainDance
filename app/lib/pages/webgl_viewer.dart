@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
+import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -25,6 +26,7 @@ class WebGLViewerPage extends StatefulWidget {
   final List<double>? initialPose;
   final String? initialPoseId;
   final bool useSparkViewer;
+  final bool initialMarkerArMode;
   final List<Map<String, dynamic>> timePeelingModels;
 
   const WebGLViewerPage({
@@ -60,6 +62,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String? _localModelPath;
   bool _downloadCancelled = false;
   late bool _useSparkViewer;
+  bool _isMarkerArMode = false;
 
   void _attachViewerHeaders(HttpResponse response) {
     response.headers.add('Access-Control-Allow-Origin', '*');
@@ -71,13 +74,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel =>
-      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
     super.initState();
-    _useSparkViewer = widget.useSparkViewer;
+    _useSparkViewer = widget.useSparkViewer || widget.initialMarkerArMode;
+    _isMarkerArMode = widget.initialMarkerArMode;
 
     // Flutter Web is not supported here. Desktop uses the external browser mode.
     if (kIsWeb) {
@@ -268,8 +271,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -409,11 +411,44 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     };
   }
 
+  Map<String, String> _buildViewerQueryParameters({required bool cacheBust}) {
+    final params = <String, String>{
+      'mode': _isMarkerArMode ? 'marker-ar' : 'viewer',
+    };
+
+    if (cacheBust) {
+      params['v'] = DateTime.now().millisecondsSinceEpoch.toString();
+    }
+
+    if (_isMarkerArMode) {
+      final payload = _buildViewerPayload();
+      final modelUrl = payload['ply']?.toString() ?? '';
+      if (modelUrl.isNotEmpty) {
+        params['model'] = modelUrl;
+      }
+      params['target'] = '/targets/braindance-card.mind';
+    } else {
+      final payload = _buildViewerPayload();
+      if (payload.isNotEmpty) {
+        params['payload'] = jsonEncode(payload);
+      }
+    }
+
+    return params;
+  }
+
+  Uri _buildViewerUri({required bool cacheBust}) {
+    return Uri(
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: _localPort,
+      path: '/index.html',
+      queryParameters: _buildViewerQueryParameters(cacheBust: cacheBust),
+    );
+  }
+
   Future<void> _openInExternalBrowser() async {
-    final payload = _buildViewerPayload();
-    final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
-    final url =
-        'http://127.0.0.1:$_localPort/index.html?payload=$encodedPayload';
+    final url = _buildViewerUri(cacheBust: false).toString();
     _externalViewerUrl = url;
 
     if (_didAttemptExternalOpen) {
@@ -474,6 +509,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           } else if (data['status'] == 'error') {
             debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
+              if (!_isWebReady) {
+                setState(() => _isWebReady = true);
+              }
               showAppToast(context, textLocalize('viewer_spark_error'));
             }
           } else if (data['status'] == 'info') {
@@ -507,8 +545,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   Future<void> _loadLocalHtml() async {
     try {
       await _controller?.clearCache();
-      final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
+      final url = _buildViewerUri(cacheBust: true).toString();
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
@@ -533,7 +570,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendThemeToVue() {
     final theme = AppConfig.isNightMode ? 'dark' : 'light';
-    _controller?.runJavaScript("window.setThemeFromFlutter('$theme')");
+    _controller?.runJavaScript(
+      "window.setThemeFromFlutter && window.setThemeFromFlutter('$theme')",
+    );
   }
 
   void _sendTimePeelingList() {
@@ -561,7 +600,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
       _controller?.runJavaScript(
-          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
+      );
       return;
     }
 
@@ -614,7 +654,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName = model['display_name']?.toString() ??
+      final displayName =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
@@ -633,7 +674,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
     _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '$currentModelId')");
+      "window.setModelListForTimePeeling($json, '$currentModelId')",
+    );
   }
 
   String _findCurrentModelId() {
@@ -750,6 +792,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
+  // ignore: unused_element
   Future<void> _switchViewer(bool useSpark) async {
     if (_useSparkViewer == useSpark) return;
     setState(() {
@@ -766,6 +809,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
 
     await _loadLocalHtml();
+  }
+
+  Future<bool> _ensureRuntimeCameraPermission() async {
+    try {
+      final cameras = await availableCameras();
+      return cameras.isNotEmpty;
+    } on CameraException {
+      return false;
+    }
   }
 
   Future<void> _switchMarkerArMode() async {
@@ -970,8 +1022,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
-                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text(
+                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
+                      ),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),

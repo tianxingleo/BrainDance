@@ -11,6 +11,10 @@ declare module 'mind-ar/dist/mindar-image-three.prod.js' {
 }
 
 interface Window {
+  BrainDanceChannel?: {
+    postMessage?: (message: string) => void
+  }
   setModelListForTimePeeling?: (...args: unknown[]) => void
   loadModelFromFlutter?: (...args: unknown[]) => void
+  setThemeFromFlutter?: (...args: unknown[]) => void
 }
