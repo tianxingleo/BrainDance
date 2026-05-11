@@ -376,6 +376,7 @@ enum Language {
       "create_guide_subtitle": "选择一种方式开始创建新的记忆。",
       "create_record_desc": "使用相机拍摄并记录空间场景。",
       "create_generate_desc": "通过素材生成记忆模型。",
+      "create_community_desc": "浏览社区中的公开记忆与地图探索。",
       "timepeeling": "时间切片",
       "coming_soon": "即将推出",
       "gen_text_generating": "正在生成中",
@@ -831,6 +832,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
           "Use the camera to capture and record spatial scenes.",
       "create_generate_desc":
           "Generate memory models from images, text, or video.",
+      "create_community_desc":
+          "Browse public memories and explore the community map.",
       "timepeeling": "Time Peeling",
       "coming_soon": "Coming soon",
       "gen_text_generating": "Generating...",
