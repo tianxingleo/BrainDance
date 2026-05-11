@@ -6,6 +6,30 @@ import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
 
+PageRoute<T> _verticalSlideRoute<T>({
+  required WidgetBuilder builder,
+  required bool fromTop, // true = 新页面从上进（相机），false = 从下进（图文生成）
+}) {
+  return PageRouteBuilder<T>(
+    transitionDuration: BDMotion.durationNormal,
+    reverseTransitionDuration: BDMotion.durationNormal,
+    opaque: true,
+    pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final double dir = fromTop ? -1.0 : 1.0;
+      // 新页面入场：从 dir 方向滑入
+      final enterAnim = CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic);
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(0, dir),
+          end: Offset.zero,
+        ).animate(enterAnim),
+        child: child,
+      );
+    },
+  );
+}
+
 /// Create 引导页 — record 和 generate 的统一入口
 class CreateGuidePage extends StatelessWidget {
   const CreateGuidePage({super.key});
@@ -16,7 +40,7 @@ class CreateGuidePage extends StatelessWidget {
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
         child: SafeArea(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.only(bottom: 96.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -26,36 +50,38 @@ class CreateGuidePage extends StatelessWidget {
                   subtitle: textLocalize('create_guide_subtitle'),
                 ),
                 const SizedBox(height: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        _buildEntryCard(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      _buildEntryCard(
+                        context,
+                        icon: Icons.camera_rounded,
+                        title: textLocalize('record'),
+                        subtitle: textLocalize('create_record_desc'),
+                        onTap: () => Navigator.push(
                           context,
-                          icon: Icons.camera_rounded,
-                          title: textLocalize('record'),
-                          subtitle: textLocalize('create_record_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const RecordPage()),
+                          _verticalSlideRoute(
+                            builder: (_) => const RecordPage(),
+                            fromTop: true,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        _buildEntryCard(
+                      ),
+                      const SizedBox(height: 16),
+                      _buildEntryCard(
+                        context,
+                        icon: Icons.auto_awesome_rounded,
+                        title: textLocalize('generate'),
+                        subtitle: textLocalize('create_generate_desc'),
+                        onTap: () => Navigator.push(
                           context,
-                          icon: Icons.auto_awesome_rounded,
-                          title: textLocalize('generate'),
-                          subtitle: textLocalize('create_generate_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const GeneratePage()),
+                          _verticalSlideRoute(
+                            builder: (_) => const GeneratePage(),
+                            fromTop: false,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ],

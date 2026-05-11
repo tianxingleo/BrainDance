@@ -4,12 +4,12 @@ import 'dart:io';
 import 'package:braindance/configs/app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../services/download_event_bus.dart';
 
@@ -25,17 +25,16 @@ class WebGLViewerPage extends StatefulWidget {
   final List<double>? initialPose;
   final String? initialPoseId;
   final bool useSparkViewer;
-  final bool initialMarkerArMode;
   final List<Map<String, dynamic>> timePeelingModels;
 
   const WebGLViewerPage({
     super.key,
-    this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.initialModelUrl = '',
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
     this.initialPoseId,
-    this.useSparkViewer = true,
+    this.useSparkViewer = false,
     this.initialMarkerArMode = false,
     this.timePeelingModels = const [],
   });
@@ -45,13 +44,6 @@ class WebGLViewerPage extends StatefulWidget {
 }
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
-  static const int _downloadProgressThrottleMs = 100;
-  static const String _defaultMarkerTargetPath = '/targets/braindance-card.mind';
-  static const String _markerArDebugVersion = 'marker-ar-debug-20260503-3';
-  static const String _viewerBuildVersion = 'viewer-20260509';
-  static const MethodChannel _cameraPermissionChannel = MethodChannel(
-    'braindance/camera_permission',
-  );
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -59,7 +51,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _isOpeningExternalViewer = false;
   bool _didAttemptExternalOpen = false;
   String? _externalViewerUrl;
-  String? _lastLoadedViewerUrl;
   HttpServer? _localServer;
   int _localPort = 0;
   bool _isDownloading = false;
@@ -68,27 +59,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   int _totalBytes = -1;
   String? _localModelPath;
   bool _downloadCancelled = false;
-  int _lastDownloadUiUpdate = 0;
   late bool _useSparkViewer;
-  late bool _isMarkerArMode;
-
-  Future<bool> _ensureRuntimeCameraPermission() async {
-    // Android WebView getUserMedia 依赖宿主 App 已拿到运行时 CAMERA 权限。
-    // 这里只请求权限，不再预打开 CameraX；否则部分 Oplus/Chromium 相机栈会在
-    // 原生相机刚释放后立即 getUserMedia 时触发 cameraDevice encountered an error。
-    try {
-      if (defaultTargetPlatform != TargetPlatform.android) {
-        return true;
-      }
-      return await _cameraPermissionChannel.invokeMethod<bool>(
-            'ensureCameraPermission',
-          ) ??
-          false;
-    } catch (error) {
-      debugPrint('Request runtime camera permission failed: $error');
-      return false;
-    }
-  }
 
   void _attachViewerHeaders(HttpResponse response) {
     response.headers.add('Access-Control-Allow-Origin', '*');
@@ -97,31 +68,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     response.headers.add('Cross-Origin-Resource-Policy', 'cross-origin');
   }
 
-  bool _isModelAssetPath(String path) {
-    final lower = path.toLowerCase();
-    return lower.endsWith('.ply') ||
-        lower.endsWith('.splat') ||
-        lower.endsWith('.ksplat') ||
-        lower.endsWith('.spz') ||
-        lower.endsWith('.rad') ||
-        lower.endsWith('.sog');
-  }
-
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel => _isMarkerArMode
-      ? 'Marker AR'
-      : (_useSparkViewer ? 'Spark' : '\u539f\u7248');
+  String get _viewerLabel =>
+      _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
     super.initState();
     _useSparkViewer = widget.useSparkViewer;
-    _isMarkerArMode = widget.initialMarkerArMode;
-    if (_isMarkerArMode) {
-      _useSparkViewer = true;
-    }
 
     // Flutter Web is not supported here. Desktop uses the external browser mode.
     if (kIsWeb) {
@@ -190,8 +146,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
         } catch (e) {
+          debugPrint('[WebGLViewer] proxy error: $e');
           request.response.statusCode = HttpStatus.badGateway;
-          request.response.write('Proxy error: $e');
+          request.response.write('Proxy error');
         }
         await request.response.close();
         return;
@@ -205,73 +162,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         final file = File(filePath);
         if (await file.exists()) {
           _attachViewerHeaders(request.response);
-
-          if (_isModelAssetPath(filePath)) {
+          if (filePath.endsWith('.ply') ||
+              filePath.endsWith('.splat') ||
+              filePath.endsWith('.ksplat')) {
             request.response.headers.contentType = ContentType(
               'application',
               'octet-stream',
             );
           }
-
-          // ── HTTP Range support for .rad / .spz streaming ──
-          final fileLength = await file.length();
-          final rangeHeader = request.headers.value('range');
-
-          if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
-            // Parse "bytes=START-END" (END is optional)
-            final rangeSpec = rangeHeader.substring(6);
-            final parts = rangeSpec.split('-');
-
-            int start = 0;
-            int end = fileLength - 1;
-
-            if (parts.length == 2) {
-              if (parts[0].isNotEmpty) {
-                start = int.tryParse(parts[0]) ?? 0;
-              }
-              if (parts[1].isNotEmpty) {
-                end = int.tryParse(parts[1]) ?? (fileLength - 1);
-              }
-            }
-
-            // Clamp range
-            if (start < 0) start = 0;
-            if (end >= fileLength) end = fileLength - 1;
-            if (start > end) start = end;
-
-            final contentLength = end - start + 1;
-
-            request.response.statusCode = HttpStatus.partialContent;
-            request.response.headers.set(
-              'Content-Range',
-              'bytes $start-$end/$fileLength',
-            );
-            request.response.headers.set('Accept-Ranges', 'bytes');
-            request.response.contentLength = contentLength;
-
-            // Read only the requested byte range
-            final raf = await file.open(mode: FileMode.read);
-            try {
-              await raf.setPosition(start);
-              var remaining = contentLength;
-              const chunkSize = 64 * 1024; // 64KB chunks
-              while (remaining > 0) {
-                final toRead = remaining > chunkSize ? chunkSize : remaining;
-                final buffer = await raf.read(toRead);
-                request.response.add(buffer);
-                remaining -= buffer.length;
-                if (buffer.length < toRead) break;
-              }
-            } finally {
-              await raf.close();
-            }
-          } else {
-            // No Range header — serve full file with Accept-Ranges hint
-            request.response.headers.set('Accept-Ranges', 'bytes');
-            request.response.contentLength = fileLength;
-            await request.response.addStream(file.openRead());
-          }
-
+          await request.response.addStream(file.openRead());
           await request.response.close();
           return;
         }
@@ -285,11 +184,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       }
 
       final assetPath = '$_viewerAssetRoot$path';
-      if (path == '/index.html' ||
-          path.endsWith('.js') ||
-          path.endsWith('.mind')) {
-        debugPrint('Viewer asset request: $assetPath');
-      }
 
       try {
         final data = await rootBundle.load(assetPath);
@@ -306,36 +200,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           contentType = 'image/png';
         } else if (path.endsWith('.ico')) {
           contentType = 'image/x-icon';
-        } else if (path.endsWith('.mind')) {
-          contentType = 'application/octet-stream';
-        } else if (_isModelAssetPath(path)) {
+        } else if (path.endsWith('.ply') ||
+            path.endsWith('.splat') ||
+            path.endsWith('.ksplat')) {
           contentType = 'application/octet-stream';
         }
 
         request.response.headers.contentType = ContentType.parse(contentType);
-        if (path == '/index.html') {
-          request.response.headers.set(
-            'Cache-Control',
-            'no-store, no-cache, must-revalidate, max-age=0',
-          );
-          request.response.headers.set('Pragma', 'no-cache');
-          request.response.headers.set('Expires', '0');
-        } else if (path.startsWith('/assets/')) {
-          request.response.headers.set(
-            'Cache-Control',
-            'public, max-age=31536000, immutable',
-          );
-        } else if (_isModelAssetPath(path)) {
-          request.response.headers.set('Accept-Ranges', 'bytes');
-          request.response.headers.set('Cache-Control', 'no-cache');
-        } else {
-          request.response.headers.set('Cache-Control', 'no-cache');
-        }
         _attachViewerHeaders(request.response);
         request.response.add(bytes);
         await request.response.close();
       } catch (_) {
-        debugPrint('Viewer asset missing: $assetPath');
         request.response.statusCode = HttpStatus.notFound;
         request.response.write('Not Found');
         await request.response.close();
@@ -393,7 +268,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 && response.statusCode != 206) {
+          } else if (response.statusCode != 200 &&
+              response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -443,13 +319,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
               }
               sink.add(chunk);
               receivedBytes += chunk.length;
-              if (totalBytes > 0) {
+              if (totalBytes > 0 && mounted) {
                 final progress = receivedBytes / totalBytes;
-                _updateDownloadProgress(
-                  progress: progress,
-                  downloadedBytes: receivedBytes,
-                  totalBytes: totalBytes,
-                );
+                setState(() {
+                  _downloadProgress = progress;
+                  _downloadedBytes = receivedBytes;
+                });
                 downloadEventBus.add(
                   ModelDownloadEvent(
                     url: originalUrl,
@@ -488,44 +363,18 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           }
         }
       } catch (e) {
-        debugPrint('Download error: $e');
+        debugPrint('[WebGLViewer] download error: $e');
         if (mounted) {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText(
-            '\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e',
-            context: context,
-          );
+          showAppToast(context, textLocalize('viewer_download_fail'));
           _launchViewer();
         }
       }
     } else {
       if (mounted) _launchViewer();
     }
-  }
-
-  void _updateDownloadProgress({
-    required double progress,
-    required int downloadedBytes,
-    required int totalBytes,
-    bool force = false,
-  }) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (!force &&
-        now - _lastDownloadUiUpdate < _downloadProgressThrottleMs &&
-        downloadedBytes < totalBytes) {
-      return;
-    }
-    _lastDownloadUiUpdate = now;
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _downloadProgress = progress;
-      _downloadedBytes = downloadedBytes;
-      _totalBytes = totalBytes;
-    });
   }
 
   void _launchViewer() {
@@ -536,54 +385,22 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _initWebView();
   }
 
-  /// Resolve the best model URL for Spark 2.0.
-  /// Priority: .rad > .spz > .ksplat > .ply
-  /// Checks the local cache for optimized formats before falling back.
-  String _resolveBestModelUrl(String originalUrl) {
-    if (!_useSparkViewer) return originalUrl;
-
-    // If local model is cached, check for optimized format variants
-    if (_localModelPath != null) {
-      final baseName = _localModelPath!.replaceAll(
-        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
-        '',
-      );
-
-      // Priority order: .rad > .spz > .ksplat > original
-      const extensions = ['.rad', '.spz', '.ksplat'];
-      for (final ext in extensions) {
-        final candidate = File('$baseName$ext');
-        if (candidate.existsSync()) {
-          debugPrint('Using optimized model format: $ext');
-          return 'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(candidate.path)}';
-        }
-      }
-    }
-
-    return originalUrl;
-  }
-
   Map<String, dynamic> _buildViewerPayload() {
-    String rawUrl;
+    String targetUrl;
     if (_localModelPath != null) {
-      rawUrl =
+      targetUrl =
           'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(_localModelPath!)}';
     } else if (widget.initialModelUrl.startsWith('http://') ||
         widget.initialModelUrl.startsWith('https://')) {
-      rawUrl =
+      targetUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      rawUrl = widget.initialModelUrl;
+      // 相对路径或空路径：不传给 JS，让查看器以空状态打开
+      targetUrl = '';
     }
 
-    // Try to resolve a better format for Spark 2.0
-    final targetUrl = _resolveBestModelUrl(rawUrl);
-
     return {
-      'modelUrl': targetUrl,
-      'ply': targetUrl,
-      if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
-        'posesUrl': widget.posesUrl,
+      if (targetUrl.isNotEmpty) 'ply': targetUrl,
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,
@@ -593,36 +410,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   Future<void> _openInExternalBrowser() async {
-    if (_isMarkerArMode) {
-      final url = _buildViewerUrl(_viewerBuildVersion);
-      _externalViewerUrl = url;
-
-      if (_didAttemptExternalOpen) {
-        if (mounted) setState(() {});
-        return;
-      }
-
-      _didAttemptExternalOpen = true;
-      if (mounted) {
-        setState(() {
-          _isOpeningExternalViewer = true;
-        });
-      }
-
-      try {
-        await _openUrlOnDesktop(url);
-      } catch (e) {
-        debugPrint('Open external Marker AR viewer failed: $e');
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isOpeningExternalViewer = false;
-          });
-        }
-      }
-      return;
-    }
-
     final payload = _buildViewerPayload();
     final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
     final url =
@@ -677,32 +464,17 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ..addJavaScriptChannel(
         'BrainDanceChannel',
         onMessageReceived: (JavaScriptMessage message) {
+          final data = jsonDecode(message.message);
           debugPrint('BrainDanceChannel: ${message.message}');
-          final dynamic decoded;
-          try {
-            decoded = jsonDecode(message.message);
-          } catch (error) {
-            debugPrint('BrainDanceChannel parse error: $error');
-            return;
-          }
-          if (decoded is! Map<String, dynamic>) {
-            debugPrint('BrainDanceChannel ignored non-object payload');
-            return;
-          }
-          final data = decoded;
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            if (!_isMarkerArMode) {
-              _sendModelToVue();
-            }
+            _sendModelToVue();
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
+            debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
-              TDToast.showText(
-                'Spark \u9519\u8bef: ${data['msg']}',
-                context: context,
-              );
+              showAppToast(context, textLocalize('viewer_spark_error'));
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');
@@ -711,68 +483,22 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (String url) {
-            debugPrint('WebView page started: $url marker=$_isMarkerArMode');
-          },
           onPageFinished: (String url) {
-            debugPrint('WebView page finished: $url marker=$_isMarkerArMode');
-            // 注入 overscroll 防护脚本：在 Android/iOS WebView 层面强化禁用弹性边界效果，
-            // 防止拖动 WebGL canvas 时出现浏览器特征的画面拉伸（overscroll bounce）。
-            // canvas 上的 touchmove 已由 GestureHandler（gestures.ts）调用 e.preventDefault() 处理，
-            // 此处只需确保 html/body 的 overscroll 被彻底关闭。
-            _controller?.runJavaScript('''
-              (function() {
-                var html = document.documentElement;
-                var body = document.body;
-                html.style.overflow = 'hidden';
-                body.style.overflow = 'hidden';
-                html.style.overscrollBehavior = 'none';
-                body.style.overscrollBehavior = 'none';
-                html.style.touchAction = 'none';
-                body.style.touchAction = 'none';
-              })();
-            ''');
-
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
-                  'WebView: no ready signal received, triggering manually ($_markerArDebugVersion)',
-                );
-                debugPrint(
-                  'WebView fallback detail: marker=$_isMarkerArMode url=$_lastLoadedViewerUrl',
+                  'WebView: no ready signal received, triggering manually',
                 );
                 setState(() => _isWebReady = true);
-                if (!_isMarkerArMode) {
-                  _sendModelToVue();
-                }
+                _sendModelToVue();
               }
             });
           },
           onWebResourceError: (WebResourceError error) {
-            debugPrint(
-              'WebView error: code=${error.errorCode} type=${error.errorType} main=${error.isForMainFrame} url=${error.url} desc=${error.description}',
-            );
+            debugPrint('WebView error: ${error.description}');
           },
         ),
       );
-
-    final platformController = _controller?.platform;
-    if (platformController is AndroidWebViewController) {
-      platformController.setMediaPlaybackRequiresUserGesture(false);
-      platformController.setOnConsoleMessage((message) {
-        debugPrint('WebView console [${message.level.name}]: ${message.message}');
-      });
-      platformController.setOnPlatformPermissionRequest((request) {
-        if (!_isMarkerArMode) {
-          request.deny();
-          return;
-        }
-
-        // Marker AR 运行在内置 WebView 中，需要把网页 camera 权限请求
-        // 明确转交给 Android WebView，否则 MindAR 无法启动摄像头。
-        request.grant();
-      });
-    }
 
     if (mounted) setState(() {});
     _loadLocalHtml();
@@ -780,57 +506,23 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   Future<void> _loadLocalHtml() async {
     try {
-      // 本地 WebGL viewer 文件名和内容会频繁更新，进入页面时强制清理 WebView 缓存，
-      // 避免 Android WebView 继续执行旧的构建产物导致相机修复看起来没有生效。
-      if (kDebugMode) {
-        await _controller?.clearCache();
-      }
-      final url = _buildViewerUrl(_viewerBuildVersion);
-      _lastLoadedViewerUrl = url;
-      debugPrint('Loading WebGL viewer URL: $url');
+      await _controller?.clearCache();
+      final cacheBust = DateTime.now().millisecondsSinceEpoch;
+      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
     }
   }
 
-  String _buildViewerUrl(String version) {
-    if (_isMarkerArMode) {
-      final payload = _buildViewerPayload();
-      return Uri(
-        scheme: 'http',
-        host: '127.0.0.1',
-        port: _localPort,
-        path: '/index.html',
-        queryParameters: {
-          'mode': 'marker-ar',
-          'model': payload['modelUrl']?.toString() ?? payload['ply']?.toString() ?? '',
-          'target': _defaultMarkerTargetPath,
-          'v': '$_markerArDebugVersion-$version',
-        },
-      ).toString();
-    }
-
-    return 'http://127.0.0.1:$_localPort/index.html?v=$version';
-  }
-
   void _sendModelToVue() {
-    if (_isMarkerArMode) return;
     if (!_isWebReady) return;
     final payloadData = _buildViewerPayload();
+    final targetUrl = payloadData['ply'];
 
-    debugPrint('Sending model payload to WebView: ${payloadData['modelUrl'] ?? payloadData['ply']}');
+    debugPrint('Sending model URL to WebView: $targetUrl');
     final payload = jsonEncode(payloadData);
-    _controller?.runJavaScript('''
-      (function() {
-        var payload = $payload;
-        if (window.loadViewerPayload) {
-          window.loadViewerPayload(payload);
-        } else if (window.loadModelFromFlutter) {
-          window.loadModelFromFlutter(payload);
-        }
-      })();
-    ''');
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
 
     // 发送 TimePeeling 模型列表（无条件发送，空列表时 JS 端显示空态）
     _sendTimePeelingList();
@@ -841,16 +533,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendThemeToVue() {
     final theme = AppConfig.isNightMode ? 'dark' : 'light';
-    _controller?.runJavaScript('''
-      (function() {
-        var theme = '$theme';
-        if (window.setViewerTheme) {
-          window.setViewerTheme(theme);
-        } else if (window.setThemeFromFlutter) {
-          window.setThemeFromFlutter(theme);
-        }
-      })();
-    ''');
+    _controller?.runJavaScript("window.setThemeFromFlutter('$theme')");
   }
 
   void _sendTimePeelingList() {
@@ -869,9 +552,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         {
           'id': widget.sceneId,
           'name': widget.sceneId,
-          'modelUrl': plyUrl,
           'ply': plyUrl,
-          'posesUrl': widget.posesUrl ?? '',
           'poses': widget.posesUrl ?? '',
           'previewImg': '',
           'createdAt': '',
@@ -879,17 +560,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ];
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
-      _controller?.runJavaScript('''
-        (function() {
-          var list = $json;
-          var currentId = ${jsonEncode(widget.sceneId)};
-          if (window.setViewerModelList) {
-            window.setViewerModelList(list, currentId);
-          } else if (window.setModelListForTimePeeling) {
-            window.setModelListForTimePeeling(list, currentId);
-          }
-        })();
-      ''');
+      _controller?.runJavaScript(
+          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
       return;
     }
 
@@ -942,17 +614,14 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName =
-          model['display_name']?.toString() ??
+      final displayName = model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
       return {
         'id': model['id']?.toString() ?? model['scene_id']?.toString() ?? '',
         'name': displayName,
-        'modelUrl': plyUrl,
         'ply': plyUrl,
-        'posesUrl': posesUrl ?? '',
         'poses': posesUrl ?? '',
         'previewImg': previewUrl,
         'createdAt': model['created_at']?.toString() ?? '',
@@ -963,17 +632,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     // 找出当前加载的模型 ID
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
-    _controller?.runJavaScript('''
-      (function() {
-        var list = $json;
-        var currentId = ${jsonEncode(currentModelId)};
-        if (window.setViewerModelList) {
-          window.setViewerModelList(list, currentId);
-        } else if (window.setModelListForTimePeeling) {
-          window.setModelListForTimePeeling(list, currentId);
-        }
-      })();
-    ''');
+    _controller?.runJavaScript(
+        "window.setModelListForTimePeeling($json, '$currentModelId')");
   }
 
   String _findCurrentModelId() {
@@ -1037,23 +697,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     String targetUrl;
     if (await localFile.exists()) {
       debugPrint('TimePeeling: model cached locally');
-
-      // Try optimized format variants (.rad > .spz > .ksplat > original)
-      final basePath = localFile.path.replaceAll(
-        RegExp(r'\.(ply|splat|ksplat|spz|rad|sog)$'),
-        '',
-      );
-      String resolvedPath = localFile.path;
-      for (final ext in ['.rad', '.spz', '.ksplat']) {
-        final candidate = File('$basePath$ext');
-        if (await candidate.exists()) {
-          debugPrint('TimePeeling: using optimized format $ext');
-          resolvedPath = candidate.path;
-          break;
-        }
-      }
       targetUrl =
-          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(resolvedPath)}';
+          'http://127.0.0.1:$_localPort/local_models/${Uri.encodeComponent(localFile.path)}';
     } else {
       // 未缓存，下载模型
       debugPrint('TimePeeling: downloading model...');
@@ -1098,25 +743,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     }
 
     // 通知 WebView 加载模型
-    final payloadData = <String, String>{
-      'modelUrl': targetUrl,
+    final payload = jsonEncode({
       'ply': targetUrl,
-    };
-    if (posesUrl != null) {
-      payloadData['posesUrl'] = posesUrl;
-      payloadData['poses'] = posesUrl;
-    }
-    final payload = jsonEncode(payloadData);
-    _controller?.runJavaScript('''
-      (function() {
-        var payload = $payload;
-        if (window.loadViewerPayload) {
-          window.loadViewerPayload(payload);
-        } else if (window.loadModelFromFlutter) {
-          window.loadModelFromFlutter(payload);
-        }
-      })();
-    ''');
+      if (posesUrl != null) 'poses': posesUrl,
+    });
+    _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
   Future<void> _switchViewer(bool useSpark) async {
@@ -1200,53 +831,52 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     );
   }
 
-  Widget _buildFloatingViewerToggle(bool isDark) {
-    return Material(
-      color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
-      borderRadius: BorderRadius.circular(18),
-      elevation: 10,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: ToggleButtons(
-          isSelected: [!_useSparkViewer, _useSparkViewer],
-          onPressed: (index) {
-            _switchViewer(index == 1);
-          },
-          borderRadius: BorderRadius.circular(14),
-          constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
-          fillColor: isDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : AppConfig.primaryColor.withValues(alpha: 0.10),
-          selectedColor: isDark
-              ? const Color(0xFFF7F7FB)
-              : const Color(0xFF202226),
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.74)
-              : const Color(0xFF5B6470),
-          children: const [
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('\u539f\u7248'),
-            ),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('Spark'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // \u6682\u65f6\u6ce8\u91ca\u6389\u539f\u7248/Spark \u6e32\u67d3\u5668\u5207\u6362\u6309\u94ae\uff0c\u9ed8\u8ba4\u4f7f\u7528\u539f\u7248\u6e32\u67d3\u5668
+  // Widget _buildFloatingViewerToggle(bool isDark) {
+  //   return Material(
+  //     color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
+  //     borderRadius: BorderRadius.circular(18),
+  //     elevation: 10,
+  //     shadowColor: Colors.black.withValues(alpha: 0.18),
+  //     child: Padding(
+  //       padding: const EdgeInsets.all(4),
+  //       child: ToggleButtons(
+  //         isSelected: [!_useSparkViewer, _useSparkViewer],
+  //         onPressed: (index) {
+  //           _switchViewer(index == 1);
+  //         },
+  //         borderRadius: BorderRadius.circular(14),
+  //         constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
+  //         fillColor: isDark
+  //             ? Colors.white.withValues(alpha: 0.12)
+  //             : AppConfig.primaryColor.withValues(alpha: 0.10),
+  //         selectedColor: isDark
+  //             ? const Color(0xFFF7F7FB)
+  //             : const Color(0xFF202226),
+  //         color: isDark
+  //             ? Colors.white.withValues(alpha: 0.74)
+  //             : const Color(0xFF5B6470),
+  //         children: const [
+  //           Padding(
+  //             padding: EdgeInsets.symmetric(horizontal: 10),
+  //             child: Text('\u539f\u7248'),
+  //           ),
+  //           Padding(
+  //             padding: EdgeInsets.symmetric(horizontal: 10),
+  //             child: Text('Spark'),
+  //           ),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
 
   Widget _buildMarkerArButton(bool isDark) {
     return _buildFloatingCircleButton(
       icon: _isMarkerArMode
           ? Icons.view_in_ar_rounded
           : Icons.view_in_ar_outlined,
-      onPressed: _useSparkViewer || _isMarkerArMode
-          ? _switchMarkerArMode
-          : null,
+      onPressed: _switchMarkerArMode,
       isDark: isDark,
       tooltip: _isMarkerArMode ? '退出 Marker AR' : '进入 Marker AR',
     );
@@ -1340,12 +970,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0
-                          ? null
-                          : _openInExternalBrowser,
-                      child: const Text(
-                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
-                      ),
+                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
+                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),
@@ -1472,8 +1098,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               _buildMarkerArButton(isDark),
-                              const SizedBox(width: 10),
-                              _buildFloatingViewerToggle(isDark),
+                              // 暂时注释掉渲染器切换按钮
+                              // const SizedBox(width: 10),
+                              // _buildFloatingViewerToggle(isDark),
                             ],
                           ),
                         ],

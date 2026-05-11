@@ -182,20 +182,21 @@ ai_engine/**/*.obj
 ai_engine/**/*.glb
 ai_engine/**/*.gltf
 
-# 忽略 app/assets/webgl/models 下的模型文件
-app/assets/webgl/models/*.ply
-app/assets/webgl/models/*.splat
-app/assets/webgl/models/*.obj
-app/assets/webgl/models/*.glb
-app/assets/webgl/models/*.gltf
-# 忽略 app/assets/webgl/models 下的图片文件
-app/assets/webgl/models/images/
+# 忽略 app/assets/webgl/models
+app/assets/webgl/models/
+# 忽略 app/assets/webgl/favicon.ico
+app/assets/webgl/favicon.ico
 
 # 忽略 app/assets/webgl/assets/ 下的构建产物
 app/assets/webgl/assets/index-*.js
 app/assets/webgl/assets/index-*.css
 # 忽略 WebGL Demo 的 HTML 文件
 app/assets/webgl/index.html
+
+# 忽略 app/assets/webgl_spark/models
+app/assets/webgl_spark/models/
+# 忽略 app/assets/webgl_spark/favicon.ico
+app/assets/webgl_spark/favicon.ico
 
 # 忽略 app/assets/webgl_spark/assets/ 下的构建产物
 app/assets/webgl_spark/assets/index-*.js

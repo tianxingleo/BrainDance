@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_protected_member
 part of '../recall.dart';
 
 extension _RecallPageLocalAi on _RecallPageState {
@@ -65,7 +64,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    _refreshState(() {
+    setState(() {
       _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
       if (downloadedPath != null) {
         _localModelPathController.text = downloadedPath;
@@ -131,7 +130,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     final query = _searchController.text.trim();
     if (!mounted) return;
     if (showLoadingIndicator) {
-      _refreshState(() {
+      setState(() {
         _isLoading = true;
       });
     }
@@ -191,7 +190,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         : savedPath;
     final hasLocalFile = await File(effectivePath).exists();
     if (!mounted) return;
-    _refreshState(() {
+    setState(() {
       _localModelPathController.text = effectivePath;
       _localModelUrlController.text = effectiveUrl;
       _selectedLocalModelUrl = effectiveUrl;
@@ -218,7 +217,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
 
-    _refreshState(() {
+    setState(() {
       _localModelCatalog = catalog;
       _downloadedLocalModelPathsByUrl
         ..clear()
@@ -310,7 +309,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    _refreshState(() {
+    setState(() {
       _selectedLocalModelUrl = modelUrl;
       _localModelUrlController.text = modelUrl;
       _localModelPathController.text = modelPath;
@@ -324,12 +323,12 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _downloadModelToPrivateDir() async {
     final modelUrl = _localModelUrlController.text.trim();
     if (modelUrl.isEmpty) {
-      TDToast.showText(context: context, '请先填写模型下载链接');
+      showAppToast(context, textLocalize('local_model_fill_url'));
       return;
     }
 
     final modelPath = await _getPrivateModelPathForUrl(modelUrl);
-    _refreshState(() {
+    setState(() {
       _isModelDownloading = true;
       _modelDownloadProgress = 0;
       _modelDownloadedBytes = 0;
@@ -354,7 +353,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         ),
         onReceiveProgress: (received, total) {
           if (!mounted) return;
-          _refreshState(() {
+          setState(() {
             _modelDownloadedBytes = received;
             _modelDownloadTotalBytes = total > 0 ? total : null;
             _modelDownloadProgress = total > 0 ? received / total : null;
@@ -364,7 +363,7 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final fileSize = await File(modelPath).length();
       if (!mounted) return;
-      _refreshState(() {
+      setState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
@@ -374,17 +373,18 @@ extension _RecallPageLocalAi on _RecallPageState {
         _localAnswerStatus =
             '模型下载完成：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
       });
-      TDToast.showText(context: context, '模型已下载到应用私有目录');
+      showAppToast(context, textLocalize('local_model_download_success'));
     } catch (e) {
       if (!mounted) return;
-      _refreshState(() {
+      debugPrint('[RecallLocalAI] model download error: $e');
+      setState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = null;
         _modelDownloadedBytes = 0;
         _modelDownloadTotalBytes = null;
-        _localAnswerStatus = '模型下载失败：$e';
+        _localAnswerStatus = textLocalize('local_model_download_fail');
       });
-      TDToast.showText(context: context, '模型下载失败：$e');
+      showAppToast(context, textLocalize('local_model_download_fail'));
     }
   }
 
@@ -413,11 +413,11 @@ extension _RecallPageLocalAi on _RecallPageState {
           modelPath.isEmpty ? _RecallPageState._defaultModelFileName : modelPath,
         );
     if (modelPath.isEmpty) {
-      TDToast.showText(context: context, '请先填写 GGUF 模型路径');
+      showAppToast(context, textLocalize('local_model_fill_path'));
       return;
     }
 
-    _refreshState(() {
+    setState(() {
       _isLocalModelLoading = true;
       _isLocalModelReady = false;
       _localAnswer = '';
@@ -432,12 +432,12 @@ extension _RecallPageLocalAi on _RecallPageState {
       final modelFile = File(modelPath);
       final exists = await modelFile.exists();
       if (!exists) {
-        throw Exception('模型文件不存在：$modelPath');
+        throw Exception('model file not found: $modelPath');
       }
       final modelSize = await modelFile.length();
       if (modelSize < 100 * 1024 * 1024) {
         throw Exception(
-          '模型文件体积异常：${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB，可能不是完整 GGUF',
+          'model file too small: ${(modelSize / 1024 / 1024).toStringAsFixed(1)} MB',
         );
       }
 
@@ -479,7 +479,7 @@ extension _RecallPageLocalAi on _RecallPageState {
           return;
         }
         await fallbackLlama.setNativeLogLevel(LlamaLogLevel.info);
-        _refreshState(() {
+        setState(() {
           _localQnaModel = fallbackLlama;
           _isLocalModelLoading = false;
           _isLocalModelReady = true;
@@ -496,7 +496,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         return;
       }
 
-      _refreshState(() {
+      setState(() {
         _localQnaModel = llama;
         _isLocalModelLoading = false;
         _isLocalModelReady = true;
@@ -509,13 +509,14 @@ extension _RecallPageLocalAi on _RecallPageState {
       if (!mounted) {
         return;
       }
-      _refreshState(() {
+      setState(() {
         _isLocalModelLoading = false;
         _isLocalModelReady = false;
         _activeLocalModelUrl = null;
-        _localAnswerStatus = '模型加载失败：$e';
+        _localAnswerStatus = textLocalize('local_model_load_fail');
       });
-      TDToast.showText(context: context, '端侧模型加载失败：$e');
+      debugPrint('[RecallLocalAI] model load error: $e');
+      showAppToast(context, textLocalize('local_model_load_fail'));
     }
   }
 
@@ -532,11 +533,11 @@ extension _RecallPageLocalAi on _RecallPageState {
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
     if (userQuestion.isEmpty) {
-      TDToast.showText(context: context, '请输入要提问的问题');
+      showAppToast(context, textLocalize('local_model_fill_question'));
       return;
     }
     if (_localQnaModel == null || !_isLocalModelReady) {
-      TDToast.showText(context: context, '请先加载本地 GGUF 模型');
+      showAppToast(context, textLocalize('local_model_load_first'));
       return;
     }
 
@@ -555,7 +556,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         '<|im_start|>assistant\n'
         '请直接给出最终回答；如果你仍然生成 <think> 思考链，系统会将其与正式回答分离，仅正式回答会作为最终结果展示。\n';
 
-    _refreshState(() {
+    setState(() {
       _localAnswer = '';
       _localReasoning = '';
       // 预览上下文现在展示构建好的 JSON，方便调试
@@ -603,7 +604,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               streamedAnswer = nextRaw;
               lockedAnswer =
                   nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
-              _refreshState(() {
+              setState(() {
                 _localReasoning = nextReasoning;
                 _localAnswer = nextAnswer;
               });
@@ -615,7 +616,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               if (!mounted) {
                 return;
               }
-              _refreshState(() {
+              setState(() {
                 _localAnswerStatus = '端侧问答失败：$error';
               });
             },
@@ -623,7 +624,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               if (!mounted) {
                 return;
               }
-              _refreshState(() {
+              setState(() {
                 if (_localAnswer.trim().isEmpty) {
                   _localAnswer = '我不知道';
                 }
@@ -636,10 +637,11 @@ extension _RecallPageLocalAi on _RecallPageState {
       if (!mounted) {
         return;
       }
-      _refreshState(() {
-        _localAnswerStatus = '端侧问答失败：$e';
+      debugPrint('[RecallLocalAI] Q&A error: $e');
+      setState(() {
+        _localAnswerStatus = textLocalize('local_model_qa_fail');
       });
-      TDToast.showText(context: context, '端侧问答失败：$e');
+      showAppToast(context, textLocalize('local_model_qa_fail'));
     }
   }
 

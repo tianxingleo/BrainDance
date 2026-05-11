@@ -30,7 +30,6 @@ class ThemeAnimationNotifier extends StateNotifier<ThemeAnimationState> {
   ThemeAnimationNotifier() : super(ThemeAnimationState());
 
   void startBase(ui.Image screenshot, Offset center) {
-    state.screenshot?.dispose();
     state = ThemeAnimationState(
       screenshot: screenshot,
       center: center,
@@ -39,16 +38,16 @@ class ThemeAnimationNotifier extends StateNotifier<ThemeAnimationState> {
   }
 
   void end() {
-    final screenshot = state.screenshot;
+    final oldScreenshot = state.screenshot;
     state = state.copyWith(isAnimating: false, screenshot: null);
-    screenshot?.dispose();
+    oldScreenshot?.dispose();
   }
 }
 
 final themeAnimationProvider =
     StateNotifierProvider<ThemeAnimationNotifier, ThemeAnimationState>((ref) {
-      return ThemeAnimationNotifier();
-    });
+  return ThemeAnimationNotifier();
+});
 
 // Key used to capture the RepaintBoundary
 final GlobalKey themeAnimationKey = GlobalKey();

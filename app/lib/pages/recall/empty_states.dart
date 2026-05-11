@@ -90,10 +90,26 @@ class RecallEmptyState extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => WebGLViewerPage(
+                  PageRouteBuilder(
+                    transitionDuration: const Duration(milliseconds: 320),
+                    reverseTransitionDuration: const Duration(milliseconds: 320),
+                    opaque: true,
+                    pageBuilder: (_, __, ___) => WebGLViewerPage(
                       sceneId: textLocalize('recall_demo_title'),
                     ),
+                    transitionsBuilder: (_, animation, __, child) {
+                      final curved = CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeInOutCubic,
+                      );
+                      return SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, -1),
+                          end: Offset.zero,
+                        ).animate(curved),
+                        child: child,
+                      );
+                    },
                   ),
                 );
               },

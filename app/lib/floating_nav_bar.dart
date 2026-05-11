@@ -1,10 +1,10 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
-import 'package:braindance/widgets/bd_surfaces.dart';
 
 /// BrainDance 的悬浮式底部导航栏组件
 /// create 按钮嵌入导航栏中间，recall 和 manage 在两侧。
@@ -17,12 +17,14 @@ class FloatingNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final List<NavIslandItem> items;
+  final bool skipBlur;
 
   const FloatingNavBar({
     super.key,
     required this.currentIndex,
     required this.onTap,
     required this.items,
+    this.skipBlur = false,
   });
 
   @override
@@ -37,12 +39,12 @@ class _FloatingNavBarState extends State<FloatingNavBar>
   double _prevPillLeft = 0.0;
   double _prevPillWidth = 0.0;
   bool _initialized = false;
-  bool _pillUpdateScheduled = false;
-  final Map<String, double> _labelWidthCache = <String, double>{};
+  int _prevIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _prevIndex = widget.currentIndex;
     _pillController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
@@ -54,6 +56,9 @@ class _FloatingNavBarState extends State<FloatingNavBar>
   @override
   void didUpdateWidget(covariant FloatingNavBar oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.currentIndex != oldWidget.currentIndex) {
+      _prevIndex = oldWidget.currentIndex;
+    }
   }
 
   @override
@@ -76,40 +81,16 @@ class _FloatingNavBarState extends State<FloatingNavBar>
     _prevPillWidth = targetWidth;
   }
 
-  void _schedulePillUpdate(double targetLeft, double targetWidth) {
-    if (_pillUpdateScheduled) {
-      return;
-    }
-    _pillUpdateScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _pillUpdateScheduled = false;
-      if (!mounted) {
-        return;
-      }
-
-      if (!_initialized) {
-        _initialized = true;
-        _prevPillLeft = targetLeft;
-        _prevPillWidth = targetWidth;
-        _pillLeftAnim = AlwaysStoppedAnimation(targetLeft);
-        _pillWidthAnim = AlwaysStoppedAnimation(targetWidth);
-        setState(() {});
-        return;
-      }
-
-      final leftChanged = (_prevPillLeft - targetLeft).abs() > 0.5;
-      final widthChanged = (_prevPillWidth - targetWidth).abs() > 0.5;
-      if (!leftChanged && !widthChanged) {
-        return;
-      }
-      _animatePill(targetLeft, targetWidth);
-      setState(() {});
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+    final navBackground = isDark
+        ? AppTheme.darkSurface.withValues(alpha: 0.55)
+        : BDDesign.colorPaperWhite.withValues(alpha: 0.52);
+    final navBorder = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.10);
+    final navShadow = Colors.black.withValues(alpha: isDark ? 0.22 : 0.05);
     final selectedBackground = isDark
         ? const Color(0xFFAEBAC7).withValues(alpha: 0.14)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.09);
@@ -136,169 +117,191 @@ class _FloatingNavBarState extends State<FloatingNavBar>
               bottom: 0,
               left: 0,
               right: 0,
-              child: BDGlassSurface(
+              child: ClipRRect(
                 borderRadius: BDDesign.radiusLarge,
-                variant: BDGlassVariant.floating,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8.0,
-                  vertical: 8.0,
-                ),
-                child: SizedBox(
-                  height: _kNavBarInnerHeight - 16.0,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final compact = constraints.maxWidth < 420;
-                      final normalItems = widget.items
-                          .where((i) => !i.isLarge)
-                          .toList();
-                      final normalCount = normalItems.length;
-                      final createDockWidth = _kCreateSize + 16.0;
-                      final contentWidth =
-                          constraints.maxWidth - createDockWidth;
-                      final normalSlotWidth = normalCount > 0
-                          ? math.max(0.0, contentWidth / normalCount)
-                          : 0.0;
+                child: Builder(
+                  builder: (ctx) {
+                    final navBarContent = Container(
+                      height: _kNavBarInnerHeight,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8.0,
+                        vertical: 8.0,
+                      ),
+                      decoration: BoxDecoration(
+                        color: navBackground,
+                        borderRadius: BDDesign.radiusLarge,
+                        border: Border.all(color: navBorder, width: 1.0),
+                        boxShadow: [
+                          BoxShadow(
+                            color: navShadow,
+                            blurRadius: 28,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final compact = constraints.maxWidth < 420;
+                        final normalItems = widget.items
+                            .where((i) => !i.isLarge)
+                            .toList();
+                        final normalCount = normalItems.length;
+                        final createDockWidth = _kCreateSize + 16.0;
+                        final contentWidth =
+                            constraints.maxWidth - createDockWidth;
+                        final normalSlotWidth = normalCount > 0
+                            ? math.max(0.0, contentWidth / normalCount)
+                            : 0.0;
 
-                      final selectedItem = widget.items[widget.currentIndex];
-                      final showSelectedPill = !selectedItem.isLarge;
+                        final selectedItem = widget.items[widget.currentIndex];
+                        final showSelectedPill = !selectedItem.isLarge;
 
-                      // Calculate pill target position
-                      double targetLeft = 0.0;
-                      double targetWidth = 0.0;
-                      if (showSelectedPill) {
-                        int normalIdx = 0;
-                        for (int i = 0; i < widget.currentIndex; i++) {
-                          if (!widget.items[i].isLarge) normalIdx++;
+                        // Calculate pill target position
+                        double targetLeft = 0.0;
+                        double targetWidth = 0.0;
+                        if (showSelectedPill) {
+                          int normalIdx = 0;
+                          for (int i = 0; i < widget.currentIndex; i++) {
+                            if (!widget.items[i].isLarge) normalIdx++;
+                          }
+                          final createIdx = widget.items.indexWhere(
+                            (i) => i.isLarge,
+                          );
+                          if (widget.currentIndex < createIdx) {
+                            targetLeft = normalIdx * normalSlotWidth;
+                          } else {
+                            targetLeft =
+                                normalIdx * normalSlotWidth + createDockWidth;
+                          }
+                          targetWidth = normalSlotWidth;
                         }
-                        final createIdx = widget.items.indexWhere(
-                          (i) => i.isLarge,
+
+                        final labelStyle = TextStyle(
+                          color: selectedColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: compact ? 13.0 : 14.0,
+                          height: 1.0,
                         );
-                        if (widget.currentIndex < createIdx) {
-                          targetLeft = normalIdx * normalSlotWidth;
-                        } else {
-                          targetLeft =
-                              normalIdx * normalSlotWidth + createDockWidth;
+                        final measuredLabelWidth = _measureLabelWidth(
+                          text: selectedItem.label,
+                          style: labelStyle,
+                        );
+                        // pill 宽度需要和选中态真实内容宽度保持一致，
+                        // 否则右侧补偿过大时会造成内容中心偏离 pill 中心。
+                        final minPillWidth = _estimateSelectedContentWidth(
+                          compact: compact,
+                          labelWidth: measuredLabelWidth,
+                        );
+                        final pillWidth = showSelectedPill
+                            ? math.min(
+                                contentWidth - 8.0,
+                                math.max(
+                                  minPillWidth,
+                                  targetWidth - (compact ? 8.0 : 10.0),
+                                ),
+                              )
+                            : 0.0;
+                        final pillLeft = showSelectedPill
+                            ? (targetLeft + (targetWidth - pillWidth) / 2)
+                                  .clamp(
+                                    2.0,
+                                    constraints.maxWidth - pillWidth - 2.0,
+                                  )
+                            : 0.0;
+
+                        // Trigger animation when pill position changes
+                        if (!_initialized) {
+                          _prevPillLeft = pillLeft;
+                          _prevPillWidth = pillWidth;
+                          _pillLeftAnim = AlwaysStoppedAnimation(pillLeft);
+                          _pillWidthAnim = AlwaysStoppedAnimation(pillWidth);
+                          _initialized = true;
+                        } else if (widget.currentIndex != _prevIndex ||
+                            (_prevPillLeft - pillLeft).abs() > 1.0) {
+                          _animatePill(pillLeft, pillWidth);
+                          _prevIndex = widget.currentIndex;
                         }
-                        targetWidth = normalSlotWidth;
-                      }
 
-                      final labelStyle = TextStyle(
-                        color: selectedColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: compact ? 13.0 : 14.0,
-                        height: 1.0,
-                      );
-                      final measuredLabelWidth = _measureLabelWidth(
-                        text: selectedItem.label,
-                        style: labelStyle,
-                      );
-                      // pill 宽度需要和选中态真实内容宽度保持一致，
-                      // 否则右侧补偿过大时会造成内容中心偏离 pill 中心。
-                      final minPillWidth = _estimateSelectedContentWidth(
-                        compact: compact,
-                        labelWidth: measuredLabelWidth,
-                      );
-                      final pillWidth = showSelectedPill
-                          ? math.min(
-                              contentWidth - 8.0,
-                              math.max(
-                                minPillWidth,
-                                targetWidth - (compact ? 8.0 : 10.0),
-                              ),
-                            )
-                          : 0.0;
-                      final pillLeft = showSelectedPill
-                          ? (targetLeft + (targetWidth - pillWidth) / 2).clamp(
-                              2.0,
-                              constraints.maxWidth - pillWidth - 2.0,
-                            )
-                          : 0.0;
+                        return AnimatedBuilder(
+                          animation: _pillController,
+                          builder: (context, _) {
+                            final animLeft = _pillLeftAnim.value;
+                            final animWidth = _pillWidthAnim.value;
 
-                      if (showSelectedPill) {
-                        final targetChanged =
-                            !_initialized ||
-                            (_prevPillLeft - pillLeft).abs() > 0.5 ||
-                            (_prevPillWidth - pillWidth).abs() > 0.5;
-                        if (targetChanged) {
-                          _schedulePillUpdate(pillLeft, pillWidth);
-                        }
-                      }
-
-                      return AnimatedBuilder(
-                        animation: _pillController,
-                        builder: (context, _) {
-                          final animLeft = _initialized
-                              ? _pillLeftAnim.value
-                              : pillLeft;
-                          final animWidth = _initialized
-                              ? _pillWidthAnim.value
-                              : pillWidth;
-
-                          return Stack(
-                            children: [
-                              if (showSelectedPill && animWidth > 0)
-                                Positioned.fill(
-                                  child: IgnorePointer(
-                                    child: Transform.translate(
-                                      offset: Offset(animLeft, 0),
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: SizedBox(
-                                          key: const ValueKey(
-                                            'floating-nav-pill',
+                            return Stack(
+                              children: [
+                                if (showSelectedPill && animWidth > 0)
+                                  Positioned(
+                                    left: animLeft,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: SizedBox(
+                                      key: const ValueKey('floating-nav-pill'),
+                                      width: animWidth,
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: selectedBackground,
+                                          borderRadius: BorderRadius.circular(
+                                            22.0,
                                           ),
-                                          width: animWidth,
-                                          height: double.infinity,
-                                          child: RepaintBoundary(
-                                            child: CustomPaint(
-                                              painter: _NavPillPainter(
-                                                left: 0,
-                                                width: animWidth,
-                                                color: selectedBackground,
-                                                shadowColor: selectedColor
-                                                    .withValues(alpha: 0.05),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: selectedColor.withValues(
+                                                alpha: 0.05,
                                               ),
+                                              blurRadius: 16,
+                                              offset: const Offset(0, 6),
                                             ),
-                                          ),
+                                          ],
                                         ),
                                       ),
                                     ),
                                   ),
+                                Row(
+                                  children: List.generate(widget.items.length, (
+                                    index,
+                                  ) {
+                                    final item = widget.items[index];
+                                    if (item.isLarge) {
+                                      return SizedBox(width: createDockWidth);
+                                    }
+                                    final isSelected =
+                                        widget.currentIndex == index;
+                                    return SizedBox(
+                                      width: normalSlotWidth,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 2.0,
+                                        ),
+                                        child: _NavBarItem(
+                                          item: item,
+                                          compact: compact,
+                                          isSelected: isSelected,
+                                          onTap: () => widget.onTap(index),
+                                          selectedColor: selectedColor,
+                                          unselectedColor: unselectedColor,
+                                        ),
+                                      ),
+                                    );
+                                  }),
                                 ),
-                              Row(
-                                children: List.generate(widget.items.length, (
-                                  index,
-                                ) {
-                                  final item = widget.items[index];
-                                  if (item.isLarge) {
-                                    return SizedBox(width: createDockWidth);
-                                  }
-                                  final isSelected =
-                                      widget.currentIndex == index;
-                                  return SizedBox(
-                                    width: normalSlotWidth,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 2.0,
-                                      ),
-                                      child: _NavBarItem(
-                                        item: item,
-                                        compact: compact,
-                                        isSelected: isSelected,
-                                        onTap: () => widget.onTap(index),
-                                        selectedColor: selectedColor,
-                                        unselectedColor: unselectedColor,
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ),
-                            ],
+                              ],
+                            );
+                          },
+                        );
+                      },
+                      ),
+                    );
+                    return widget.skipBlur
+                        ? navBarContent
+                        : BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX: 24.0,
+                              sigmaY: 24.0,
+                            ),
+                            child: navBarContent,
                           );
-                        },
-                      );
-                    },
-                  ),
+                  },
                 ),
               ),
             ),
@@ -325,19 +328,11 @@ class _FloatingNavBarState extends State<FloatingNavBar>
   }
 
   double _measureLabelWidth({required String text, required TextStyle style}) {
-    final cacheKey =
-        '$text|${style.fontSize}|${style.fontWeight?.value ?? -1}|'
-        '${style.letterSpacing ?? 0}';
-    final cached = _labelWidthCache[cacheKey];
-    if (cached != null) {
-      return cached;
-    }
     final painter = TextPainter(
       text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
       maxLines: 1,
     )..layout();
-    _labelWidthCache[cacheKey] = painter.width;
     return painter.width;
   }
 
@@ -355,41 +350,6 @@ class _FloatingNavBarState extends State<FloatingNavBar>
         labelGap +
         labelWidth +
         itemOuterPadding;
-  }
-}
-
-class _NavPillPainter extends CustomPainter {
-  final double left;
-  final double width;
-  final Color color;
-  final Color shadowColor;
-
-  const _NavPillPainter({
-    required this.left,
-    required this.width,
-    required this.color,
-    required this.shadowColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(left, 0, width, size.height);
-    final pill = RRect.fromRectAndRadius(rect, const Radius.circular(22));
-    final shadowPaint = Paint()
-      ..color = shadowColor
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-    canvas.drawRRect(pill.shift(const Offset(0, 6)), shadowPaint);
-
-    final paint = Paint()..color = color;
-    canvas.drawRRect(pill, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _NavPillPainter oldDelegate) {
-    return oldDelegate.left != left ||
-        oldDelegate.width != width ||
-        oldDelegate.color != color ||
-        oldDelegate.shadowColor != shadowColor;
   }
 }
 

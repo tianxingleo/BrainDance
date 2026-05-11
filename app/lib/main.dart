@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/scheduler.dart';
+import 'package:camera/camera.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:braindance/configs/reco_config.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
@@ -16,13 +16,15 @@ import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
+import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
-import 'services/download_event_bus.dart';
 import 'services/task_notification_service.dart';
+import 'services/network_service.dart';
 import 'floating_nav_bar.dart';
 import 'widgets/bd_surfaces.dart';
+import 'widgets/network_bubble.dart';
 import 'widgets/theme_animation_overlay.dart';
 
 //App Data
@@ -31,6 +33,8 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
+final pageAnimatingProvider = StateProvider<bool>((ref) => false);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(
@@ -46,214 +50,69 @@ final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   TDTheme.needMultiTheme(true);
-  AppConfig.initializeAppConfig();
-  if (!kReleaseMode) {
-    installFrameTimingLogger();
-  }
-  runApp(const _AppBootstrap());
-}
 
-void installFrameTimingLogger() {
-  SchedulerBinding.instance.addTimingsCallback((timings) {
-    for (final t in timings) {
-      final buildMs = t.buildDuration.inMicroseconds / 1000.0;
-      final rasterMs = t.rasterDuration.inMicroseconds / 1000.0;
-      final totalMs = buildMs + rasterMs;
-      if (totalMs > 16.6) {
-        final currentRoute = taskNotificationService.currentRoute ?? '';
-        debugPrint(
-          '[JANK][${currentRoute.isEmpty ? 'unknown' : currentRoute}] '
-          'build=${buildMs.toStringAsFixed(1)}ms '
-          'raster=${rasterMs.toStringAsFixed(1)}ms '
-          'total=${totalMs.toStringAsFixed(1)}ms',
-        );
+  /// 开启多套主题功能
+  AppConfig.initializeAppConfig(); //加载默认数据
+  await dotenv.load(fileName: ".env");
+  final supabaseResolution = await SupabaseConfig.resolveEndpoint();
+  SupabaseConfig.applyRuntimeResolution(supabaseResolution);
+  if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
+    debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
+  }
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.apiKey,
+  ); //Supabase
+
+  // 初始化全局任务通知服务
+  taskNotificationService.setNavigatorKey(navigatorKey);
+  await taskNotificationService.init();
+
+  // 初始化全局网络状态监测服务
+  networkService.setNavigatorKey(navigatorKey);
+  await networkService.init();
+  //Camera
+  try {
+    final List<CameraDescription> camsTemp = await availableCameras();
+    //摄像机分类。
+    for (var cam in camsTemp) {
+      switch (cam.lensDirection) {
+        case CameraLensDirection.front:
+          RecoConfig.frontCameras.add(cam);
+          break;
+        case CameraLensDirection.back:
+          RecoConfig.backCameras.add(cam);
+          break;
+        case CameraLensDirection.external:
+          RecoConfig.externalCameras.add(cam);
+          break;
       }
     }
-  });
-}
-
-class _AppBootstrap extends StatefulWidget {
-  const _AppBootstrap();
-
-  @override
-  State<_AppBootstrap> createState() => _AppBootstrapState();
-}
-
-class _AppBootstrapState extends State<_AppBootstrap> {
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
+    RecoConfig.cameras = camsTemp;
+    RecoConfig.cameraEnabled = camsTemp.isNotEmpty;
+  } catch (e) {
+    //print(e.toString()); *未来考虑添加根据不同异常信息，改变相机页面错误信息
+    RecoConfig.cameras = [];
+    RecoConfig.frontCameras = [];
+    RecoConfig.backCameras = [];
+    RecoConfig.externalCameras = [];
+    RecoConfig.cameraEnabled = false;
   }
-
-  Future<void> _init() async {
-    try {
-      await dotenv.load(fileName: ".env");
-      final supabaseResolution = await SupabaseConfig.resolveEndpoint();
-      SupabaseConfig.applyRuntimeResolution(supabaseResolution);
-      if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
-        debugPrint(
-          'Supabase bootstrap: ${supabaseResolution.diagnosticMessage}',
-        );
-      }
-      await Supabase.initialize(
-        url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.apiKey,
-      );
-    } catch (e) {
-      debugPrint('Bootstrap env/supabase error: $e');
-    }
-
-    try {
-      taskNotificationService.setNavigatorKey(navigatorKey);
-      await taskNotificationService.init();
-    } catch (e) {
-      debugPrint('Bootstrap notification error: $e');
-    }
-
-    if (mounted) setState(() => _ready = true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) {
-      return MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: const _SplashScreen(),
-      );
-    }
-    return const ProviderScope(child: MyApp());
-  }
-}
-
-class _SplashScreen extends StatefulWidget {
-  const _SplashScreen();
-
-  @override
-  State<_SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<_SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnim;
-  late Animation<double> _scaleAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    // 档案系统风格：缓慢、克制的进场
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200));
-    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
-    _scaleAnim = Tween<double>(begin: 0.95, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = MediaQuery.of(context).platformBrightness == Brightness.dark;
-    final backgroundColor =
-        isDark ? AppTheme.darkBackground : const Color(0xFFF7F8FA);
-    final textColor = isDark ? AppConfig.accentColor : const Color(0xFF1F2329);
-
-    return Scaffold(
-      backgroundColor: backgroundColor,
-      body: Center(
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Opacity(
-              opacity: _fadeAnim.value,
-              child: Transform.scale(
-                scale: _scaleAnim.value,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.view_in_ar_outlined,
-                      size: 48,
-                      color: AppConfig.primaryColor,
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'BRAIN DANCE',
-                      style: TextStyle(
-                        fontFamily: AppConfig.fontFamily,
-                        fontSize: 20,
-                        letterSpacing: 8.0,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.0,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          AppConfig.primaryColor.withValues(alpha: 0.6),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'INITIALIZING ARCHIVE...',
-                      style: TextStyle(
-                        fontFamily: AppConfig.fontFamily,
-                        fontSize: 10,
-                        letterSpacing: 2.0,
-                        fontWeight: FontWeight.w500,
-                        color: AppConfig.primaryColor.withValues(alpha: 0.6),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
+  //
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 //App定义
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget with WidgetsBindingObserver {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    disposeDownloadEventBus();
-    super.dispose();
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addObserver(this); // 注册观察者
+    return const Home();
   }
 
   @override
@@ -271,9 +130,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       default:
     }
   }
-
-  @override
-  Widget build(BuildContext context) => const Home();
 }
 
 class Home extends ConsumerWidget {
@@ -317,15 +173,54 @@ class Home extends ConsumerWidget {
       initialRoute: canEnterApp
           ? '/'
           : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
-      routes: {
-        // 路由表：路径 -> 页面构建器
-        '/': (context) {
-          loadSettings(ref);
-          return MainScreen();
-        }, // 根路径对应主屏幕
-        '/login': (context) => const LoginPage(), // 登录页
-        '/example': (context) => RecallPage(), // "/example"路径对应....
-        '/tasks': (context) => const TaskListPage(), // 任务列表页
+      onGenerateRoute: (settings) {
+        WidgetBuilder builder;
+        bool useSlide = false;
+        switch (settings.name) {
+          case '/':
+            builder = (context) {
+              loadSettings(ref);
+              return MainScreen();
+            };
+          case '/login':
+            builder = (_) => const LoginPage();
+          case '/example':
+            builder = (_) => RecallPage();
+          case '/tasks':
+            builder = (_) => const TaskListPage();
+            useSlide = true;
+          default:
+            return null;
+        }
+        if (useSlide) {
+          return PageRouteBuilder(
+            settings: settings,
+            transitionDuration: BDMotion.durationNormal,
+            reverseTransitionDuration: BDMotion.durationNormal,
+            opaque: true,
+            pageBuilder: (ctx, _, _) => builder(ctx),
+            transitionsBuilder: (_, animation, _a, child) {
+              final curved = animation.drive(
+                CurveTween(curve: Curves.easeInOutCubic),
+              );
+              return AnimatedBuilder(
+                animation: curved,
+                builder: (ctx, child) {
+                  final screenHeight = MediaQuery.of(ctx).size.height;
+                  return Transform.translate(
+                    offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                    child: child,
+                  );
+                },
+                child: child,
+              );
+            },
+          );
+        }
+        return MaterialPageRoute(
+          settings: settings,
+          builder: builder,
+        );
       },
       // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
       builder: (context, child) {
@@ -334,9 +229,10 @@ class Home extends ConsumerWidget {
           child: ThemeAnimationOverlay(
             child: Stack(
               children: [
-                child ?? const SizedBox.shrink(),
+                child!,
                 // 语言切换时一并重建全局通知和页面树，避免旧文案残留
                 const GlobalNotificationOverlay(),
+                const NetworkBubbleOverlay(),
               ],
             ),
           ),
@@ -371,8 +267,6 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
   Timer? _autoHideTimer;
-  TaskNotificationData? _activeNotification;
-  bool _isNotificationVisible = false;
 
   @override
   void initState() {
@@ -406,64 +300,53 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
         taskNotificationService.hideNotification();
       }
     });
-
-    taskNotificationService.addListener(_handleNotificationChanged);
   }
 
   @override
   void dispose() {
-    taskNotificationService.removeListener(_handleNotificationChanged);
     _autoHideTimer?.cancel();
     _showController.dispose();
     _hideController.dispose();
     super.dispose();
   }
 
-  void _handleNotificationChanged() {
-    final notification = taskNotificationService.currentNotification;
-    final currentRoute = taskNotificationService.currentRoute;
-    final canShow =
-        notification != null &&
-        taskNotificationService.isNotificationEnabledForRoute(currentRoute);
-
-    if (!canShow) {
-      _autoHideTimer?.cancel();
-      _activeNotification = null;
-      _isNotificationVisible = false;
-      _showController.reset();
-      _hideController.reset();
-      if (mounted) {
-        setState(() {});
-      }
-      return;
-    }
-
-    final isSameNotification = identical(notification, _activeNotification);
-    _activeNotification = notification;
-    _isNotificationVisible = true;
-
-    if (!isSameNotification) {
-      _autoHideTimer?.cancel();
-      _hideController.reset();
-      _showController.forward(from: 0);
-      _autoHideTimer = Timer(const Duration(seconds: 1), () {
-        if (mounted && taskNotificationService.currentNotification != null) {
-          _hideController.forward(from: 0);
-        }
-      });
-    }
-
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (!_isNotificationVisible || _activeNotification == null) {
-      return const SizedBox.shrink();
-    }
-    return _buildNotificationWidget(_activeNotification!);
+    return ListenableBuilder(
+      listenable: taskNotificationService,
+      builder: (context, child) {
+        final notification = taskNotificationService.currentNotification;
+        if (notification == null) {
+          // 重置动画控制器
+          _showController.reset();
+          _hideController.reset();
+          _autoHideTimer?.cancel();
+          return const SizedBox.shrink();
+        }
+
+        // 检查当前路由是否允许显示通知
+        final currentRoute = taskNotificationService.currentRoute;
+        if (!taskNotificationService.isNotificationEnabledForRoute(
+          currentRoute,
+        )) {
+          return const SizedBox.shrink();
+        }
+
+        // 显示动画：滑入
+        _showController.forward();
+
+        // 启动1秒后开始淡出动画（总显示时间约2秒）
+        _autoHideTimer?.cancel();
+        _autoHideTimer = Timer(const Duration(seconds: 1), () {
+          // 等待显示动画完成后，开始1秒淡出动画
+          if (mounted && taskNotificationService.currentNotification != null) {
+            _hideController.forward(from: 0);
+          }
+        });
+
+        return _buildNotificationWidget(notification);
+      },
+    );
   }
 
   Widget _buildNotificationWidget(TaskNotificationData notification) {
@@ -591,9 +474,52 @@ class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
   static const int _pageCount = 3;
 
+  int _previousIndex = 0;
+  int _lastTabIndex = 0; // 上次不同的 tab，用于同 tab 重复点击时回退
+  int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
+
+  late final AnimationController _animController;
+  late final Animation<double> _curvedAnimation;
+  bool _isAnimating = false;
+
   /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
   final List<Widget?> _cachedPages = List.filled(_pageCount, null);
   final Set<int> _builtPages = {0}; // 首屏默认构建
+
+  @override
+  void initState() {
+    super.initState();
+    _animController =
+        AnimationController(
+          duration: BDMotion.durationNormal,
+          vsync: this,
+        )..addStatusListener((status) {
+          if (status == AnimationStatus.completed) {
+            ref.read(pageAnimatingProvider.notifier).state = false;
+            if (mounted) {
+              setState(() {
+                _isAnimating = false;
+                _previousIndex = ref.read(pageIndexProvider);
+              });
+            }
+          }
+        });
+    _curvedAnimation = _animController.drive(
+      CurveTween(curve: Curves.easeInOutCubic),
+    );
+
+    // 首帧只渲染当前页，首帧结束后立即预热其余 Tab 页面（Offstage），消除首次切换掉帧
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _builtPages.addAll({1, 2}));
+    });
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
 
   Widget _ensurePage(int index) {
     if (_cachedPages[index] != null) return _cachedPages[index]!;
@@ -613,8 +539,25 @@ class _MainScreenState extends ConsumerState<MainScreen>
   }
 
   void _switchToPage(int newIndex) {
-    if (newIndex == ref.read(pageIndexProvider)) return;
-    _builtPages.add(newIndex);
+    final oldIndex = ref.read(pageIndexProvider);
+    if (newIndex == oldIndex) {
+      if (newIndex == 1 && _lastTabIndex != oldIndex) {
+        _switchToPage(_lastTabIndex);
+      } else if (newIndex == 0) {
+        ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
+      }
+      return;
+    }
+
+    _lastTabIndex = oldIndex;
+    ref.read(pageAnimatingProvider.notifier).state = true;
+    setState(() {
+      _slideDirection = newIndex > oldIndex ? 1 : -1;
+      _previousIndex = oldIndex;
+      _builtPages.add(newIndex);
+      _isAnimating = true;
+    });
+    _animController.forward(from: 0);
     ref.read(pageIndexProvider.notifier).state = newIndex;
   }
 
@@ -624,7 +567,19 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
 
-    _builtPages.add(pageIndex);
+    // 外部改 pageIndex 时（如 provider 直接修改），同步方向
+    if (pageIndex != _previousIndex && !_isAnimating) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(pageAnimatingProvider.notifier).state = true;
+        setState(() {
+          _slideDirection = pageIndex > _previousIndex ? 1 : -1;
+          _builtPages.add(pageIndex);
+          _isAnimating = true;
+        });
+        _animController.forward(from: 0);
+      });
+    }
 
     return Scaffold(
       extendBody: true,
@@ -633,21 +588,44 @@ class _MainScreenState extends ConsumerState<MainScreen>
             ? const Center(child: CircularProgressIndicator())
             : Stack(
                 children: [
+                  // ── 页面槽位：保证每个页面的 State 不被销毁 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
                       return const SizedBox.shrink();
                     }
-                    final isActive = i == pageIndex;
-                    return Offstage(
-                      offstage: !isActive,
-                      child: TickerMode(
-                        enabled: isActive,
-                        child: RepaintBoundary(child: _ensurePage(i)),
-                      ),
+
+                    return AnimatedBuilder(
+                      animation: _curvedAnimation,
+                      builder: (context, child) {
+                        final bool isActive = i == pageIndex;
+                        final bool isLeaving = _isAnimating && i == _previousIndex && i != pageIndex;
+                        final double t = _curvedAnimation.value;
+                        double dx = 0;
+
+                        if (_isAnimating && isActive) {
+                          dx = _slideDirection * (1.0 - t) * MediaQuery.of(context).size.width;
+                        } else if (isLeaving) {
+                          dx = -_slideDirection * t * MediaQuery.of(context).size.width;
+                        }
+
+                        final bool isVisible = isActive || isLeaving;
+                        return Offstage(
+                          offstage: !isVisible,
+                          child: IgnorePointer(
+                            ignoring: !isActive,
+                            child: Transform.translate(
+                              offset: Offset(dx, 0),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: RepaintBoundary(child: _ensurePage(i)),
                     );
                   }),
                   if (!isRecording)
                     FloatingNavBar(
+                      skipBlur: _isAnimating,
                       currentIndex: pageIndex,
                       onTap: _switchToPage,
                       items: [

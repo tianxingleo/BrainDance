@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_protected_member
 part of '../recall.dart';
 
 extension _RecallPageSearch on _RecallPageState {
@@ -54,7 +53,7 @@ extension _RecallPageSearch on _RecallPageState {
         _resetAgentUiState();
       }
       if (!mounted) return;
-      _refreshState(() {
+      setState(() {
         _models = List<Map<String, dynamic>>.from(_allModels);
         if (_searchMode == RecallSearchMode.localAi) {
           _localAnswer = '';
@@ -78,7 +77,7 @@ extension _RecallPageSearch on _RecallPageState {
         now.difference(cached.createdAt) < const Duration(minutes: 2)) {
       _lastSearchKey = cacheKey;
       if (!mounted) return;
-      _refreshState(() {
+      setState(() {
         _models = cached.results
             .map((item) => Map<String, dynamic>.from(item))
             .toList();
@@ -93,7 +92,7 @@ extension _RecallPageSearch on _RecallPageState {
 
     final requestId = ++_searchRequestId;
     _lastSearchKey = cacheKey;
-    _refreshState(() {
+    setState(() {
       _isLoading = true;
     });
 
@@ -116,19 +115,17 @@ extension _RecallPageSearch on _RecallPageState {
         }).key;
         _searchCache.remove(oldestKey);
       }
-      _refreshState(() {
+      setState(() {
         _models = results;
         _isLoading = false;
       });
     } catch (e) {
       if (mounted && requestId == _searchRequestId) {
-        _refreshState(() {
+        setState(() {
           _isLoading = false;
         });
-        TDToast.showText(
-          '${textLocalize("recall_error_search")}$e',
-          context: context,
-        );
+        debugPrint('[RecallSearch] search error: $e');
+        showAppToast(context, textLocalize("recall_error_search"));
       }
     }
   }
@@ -159,7 +156,7 @@ extension _RecallPageSearch on _RecallPageState {
     _agentLatestSubmittedQuery = trimmedQuery;
     final executionMode = _resolveAgentExecutionMode(trimmedQuery);
 
-    _refreshState(() {
+    setState(() {
       _isAgentSearching = true;
       _agentResult = null;
       _agentChatMessage = ChatMessage(
@@ -176,7 +173,7 @@ extension _RecallPageSearch on _RecallPageState {
       if (!mounted) return;
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
-      _refreshState(() {
+      setState(() {
         _isAgentSearching = true;
       });
       _ensureAgentRunTrackingTimer();
@@ -189,7 +186,7 @@ extension _RecallPageSearch on _RecallPageState {
           sessionState: _agentSessionState,
         );
         if (!mounted) return;
-        _refreshState(() {
+        setState(() {
           _agentResult = result;
           _agentChatMessage!.finalAnswer = result.answer;
           _isAgentSearching = false;
@@ -202,14 +199,12 @@ extension _RecallPageSearch on _RecallPageState {
         _completeAgentRun();
       } catch (ex) {
         if (!mounted) return;
-        _refreshState(() {
+        setState(() {
           _isAgentSearching = false;
           _finishAgentRunTracking();
         });
-        TDToast.showText(
-          '${textLocalize('agent_search_failed')}: $ex',
-          context: context,
-        );
+        debugPrint('[RecallSearch] agent search error: $ex');
+        showAppToast(context, textLocalize('agent_search_failed'));
       }
     }
 
@@ -235,9 +230,9 @@ extension _RecallPageSearch on _RecallPageState {
             if (data is Map) {
               final eventData = Map<String, dynamic>.from(data);
               _consumeAgentEvent(eventData);
-              _refreshState(); // 强制刷新 UI，体现最新状态
+              setState(() {}); // 强制刷新 UI，体现最新状态
               if (eventData['event']?.toString() == 'done') {
-                _refreshState(() {
+                setState(() {
                   _isAgentSearching = false;
                   _finishAgentRunTracking();
                 });
@@ -249,24 +244,22 @@ extension _RecallPageSearch on _RecallPageState {
         },
         onError: (e) {
           if (!mounted) return;
-          _refreshState(() {
+          setState(() {
             _isAgentSearching = false;
           });
           _agentBootstrapTimer?.cancel();
           _agentBootstrapTimer = null;
+          debugPrint('[RecallSearch] agent stream error: $e');
           _updateAgentLiveStatus(
             textLocalize('agent_status_stream_fallback'),
             detail: '$e',
           );
-          TDToast.showText(
-            '${textLocalize('agent_stream_failed')}: $e',
-            context: context,
-          );
+          showAppToast(context, textLocalize('agent_stream_failed'));
           fallback();
         },
         onDone: () {
           if (mounted) {
-            _refreshState(() {
+            setState(() {
               _isAgentSearching = false;
               _finishAgentRunTracking();
             });
@@ -280,19 +273,17 @@ extension _RecallPageSearch on _RecallPageState {
       );
     } catch (e) {
       if (!mounted) return;
-      _refreshState(() {
+      setState(() {
         _isAgentSearching = false;
       });
       _agentBootstrapTimer?.cancel();
       _agentBootstrapTimer = null;
+      debugPrint('[RecallSearch] agent stream start error: $e');
       _updateAgentLiveStatus(
         textLocalize('agent_status_stream_start_fallback'),
         detail: '$e',
       );
-      TDToast.showText(
-        '${textLocalize('agent_stream_start_failed')}: $e',
-        context: context,
-      );
+      showAppToast(context, textLocalize('agent_stream_start_failed'));
       fallback();
     }
   }
@@ -308,7 +299,7 @@ extension _RecallPageSearch on _RecallPageState {
         .firstOrNull;
 
     if (openScene == null || openScene.ply == null || openScene.ply!.isEmpty) {
-      TDToast.showText('缺少 open_scene.ply，无法打开 Viewer', context: context);
+      showAppToast(context, '缺少 open_scene.ply，无法打开 Viewer');
       return;
     }
 
@@ -436,7 +427,7 @@ extension _RecallPageSearch on _RecallPageState {
     if (_searchMode == mode) {
       return;
     }
-    _refreshState(() {
+    setState(() {
       _searchMode = mode;
       if (mode != RecallSearchMode.localAi) {
         _localAnswer = '';
@@ -484,8 +475,8 @@ extension _RecallPageSearch on _RecallPageState {
         ),
       ),
       backgroundColor: isDark
-          ? Colors.white.withValues(alpha: 0.05)
-          : Colors.black.withValues(alpha: 0.05),
+          ? Colors.white.withOpacity(0.05)
+          : Colors.black.withOpacity(0.05),
       side: BorderSide.none,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       onPressed: () {
@@ -545,7 +536,6 @@ extension _RecallPageSearch on _RecallPageState {
               MarkdownBody(
                 data: fallbackAnswer,
                 builders: {'code': _CodeElementBuilder(isDark, context)},
-                extensionSet: md.ExtensionSet.gitHubWeb,
               ),
             ],
             if (topCandidates.isNotEmpty) ...[
@@ -972,6 +962,141 @@ extension _RecallPageSearch on _RecallPageState {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final iconColor = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(20),
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TDImage(
+              assetUrl: 'assets/sprites/empty_state.png',
+              width: 120,
+              height: 120,
+              errorWidget: Icon(
+                TDIcons.time_filled,
+                size: 80,
+                color: iconColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            TDText(
+              textLocalize("home_page"),
+              font: theme.fontTitleLarge,
+              textColor: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            TDText(
+              textLocalize("recall_empty_title"),
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
+            ),
+            const SizedBox(height: 40),
+            TDButton(
+              text: textLocalize("recall_open_demo"),
+              iconWidget: Icon(
+                TDIcons.view_module,
+                color: Colors.white,
+                size: 20,
+              ),
+              type: TDButtonType.fill,
+              theme: TDButtonTheme.primary,
+              shape: TDButtonShape.round,
+              size: TDButtonSize.large,
+              onTap: () {
+                unawaited(
+                  openViewer(
+                    context,
+                    initialModelUrl: '',
+                    sceneId: textLocalize("recall_demo_title"),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchEmptyState(TDThemeData theme, bool isDark) {
+    final textColor = isDark
+        ? const Color(0xFFFFFFFF)
+        : const Color(0xFF333333);
+    final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
+    return Center(
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.85,
+        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+        decoration: BoxDecoration(
+          color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
+          borderRadius: BorderRadius.circular(32.0),
+          border: Border.all(
+            color: isDark ? darkBorder : theme.whiteColor1,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.travel_explore_rounded,
+              size: 56,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.8)
+                  : BDDesign.colorMutedBlue,
+            ),
+            const SizedBox(height: 18),
+            TDText(
+              _searchModeTitle(_searchMode),
+              font: theme.fontTitleLarge,
+              textColor: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            TDText(
+              switch (_searchMode) {
+                RecallSearchMode.local => textLocalize('recall_local_empty'),
+                RecallSearchMode.cloud => textLocalize('recall_cloud_empty'),
+                RecallSearchMode.localAi => textLocalize(
+                  'recall_local_ai_empty',
+                ),
+                RecallSearchMode.agent => textLocalize('recall_agent_empty'),
+              },
+              font: theme.fontBodyMedium,
+              textColor: hintTextColor,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -11,15 +11,18 @@ import 'package:braindance/main.dart' show isRecordingProvider;
 import 'package:braindance/pages/video_submit.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../configs/motion_tokens.dart';
 import 'record/record_hud_painter.dart';
+import 'package:flutter_riverpod/legacy.dart';
 part 'record/record_ui_widgets.dart';
 part 'record/record_motion_guidance_card.dart';
 
@@ -32,33 +35,22 @@ const double _kJerkThreshold = 0.95;
 const int _kAccelHistoryLength = 40;
 const double _kFloatingNavReservedHeight = 112.0;
 
+/// 加速度过快 → 顶部横幅
+final showAccelBannerProvider = StateProvider<bool>((ref) => false);
+
+/// 保存到相册失败 → 中下方悬浮气泡（null = 隐藏）
+final saveFailBubbleProvider = StateProvider<String?>((ref) => null);
+
+/// 录制时间过短 → 中央气泡
+final showTooShortBubbleProvider = StateProvider<bool>((ref) => false);
+
+/// 流式拍摄完成气泡（null = 隐藏）
+final streamingDoneBubbleProvider = StateProvider<String?>((ref) => null);
+
+/// 流式传输模式开关
+final streamingModeProvider = StateProvider<bool>((ref) => false);
+
 enum _MotionState { steady, ideal, caution, danger }
-
-class _MotionHudViewData {
-  const _MotionHudViewData({
-    required this.motionMeter,
-    required this.motionState,
-    required this.motionHint,
-    required this.motionDetail,
-    required this.isWarning,
-    required this.isCaution,
-  });
-
-  const _MotionHudViewData.initial()
-    : motionMeter = 0,
-      motionState = _MotionState.steady,
-      motionHint = '',
-      motionDetail = '',
-      isWarning = false,
-      isCaution = false;
-
-  final double motionMeter;
-  final _MotionState motionState;
-  final String motionHint;
-  final String motionDetail;
-  final bool isWarning;
-  final bool isCaution;
-}
 
 class RecordPage extends ConsumerStatefulWidget {
   const RecordPage({super.key});
@@ -69,7 +61,6 @@ class RecordPage extends ConsumerStatefulWidget {
 
 class _RecordPageState extends ConsumerState<RecordPage>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  static const int _motionUiThrottleMs = 100;
   late AnimationController _buttonAnimController;
   late Animation<double> _buttonScaleAnimation;
   late AnimationController _hudAnimController; // HUD animation
@@ -81,6 +72,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
   Timer? _recordTimer;
   int _recordSeconds = 0;
+  bool _isToggling = false;
+  DateTime? _recordingStartTime;
+  static const _minRecordingMs = 500;
+
+  // ---- streaming mode state ----
+  Timer? _streamingTimer;
+  String? _streamingSceneId;
+  int _streamingFrameIndex = 0;
+  final List<Future> _pendingUploads = [];
+  int _streamingSuccessCount = 0;
+  int _streamingFailCount = 0;
+  static const _streamingIntervalSec = 1;
+  static const _streamingMaxDurationSec = 600; // 10 min
+  bool _streamingUploading = false;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -96,14 +101,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
   double _smoothedLinearAccel = 0;
   double _peakLinearAccel = 0;
   double _motionMeter = 0;
+  String _motionHint = textLocalize('reco_motion_steady');
+  String _motionDetail = textLocalize('reco_motion_detail');
   int _lastFastToastTime = 0;
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
   _MotionState _motionState = _MotionState.steady;
-  int _lastMotionUiUpdateTime = 0;
 
   final List<double> _accelHistory = [];
-  late final ValueNotifier<_MotionHudViewData> _motionHudNotifier;
 
   @override
   void initState() {
@@ -123,17 +128,18 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _hudAnimController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 1),
-    );
-    _motionHudNotifier = ValueNotifier<_MotionHudViewData>(
-      const _MotionHudViewData.initial(),
-    );
+    )..repeat(reverse: true);
+
+    if (!RecoConfig.cameraEnabled) {
+      return;
+    }
 
     RecoConfig.onUpdate = () {
       if (mounted) {
         setState(() {});
       }
     };
-    unawaited(_initializeCamera());
+    RecoConfig.cameraInitialize();
   }
 
   @override
@@ -141,13 +147,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
     WidgetsBinding.instance.removeObserver(this);
     _recordTimer?.cancel();
     _recordTimer = null;
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
     _stopSensors();
     _setGlobalRecording(false);
     _buttonAnimController.dispose();
     _hudAnimController.dispose();
-    _motionHudNotifier.dispose();
     RecoConfig.onUpdate = () {};
-    unawaited(RecoConfig.disposeCamera());
+    RecoConfig.disposeCamera();
     super.dispose();
   }
 
@@ -163,23 +170,22 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
 
       if (controller != null && controller.value.isInitialized) {
-        if (controller.value.isRecordingVideo) {
+        if (ref.read(streamingModeProvider) && _streamingTimer != null) {
+          _stopStreaming();
+        } else if (controller.value.isRecordingVideo) {
           _stopVideoRecording(
             controller,
             showToast: false,
             navigateToSubmit: true,
           ).whenComplete(() {
-            unawaited(RecoConfig.disposeCamera());
+            RecoConfig.disposeCamera();
             if (mounted) {
               setState(() {});
-              TDToast.showText(
-                context: context,
-                textLocalize('reco_app_switch'),
-              );
+              showAppToast(context, textLocalize('reco_app_switch'));
             }
           });
         } else {
-          unawaited(RecoConfig.disposeCamera());
+          RecoConfig.disposeCamera();
           if (mounted) {
             setState(() {});
           }
@@ -207,7 +213,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
   void _resetRecordingState({bool updateUi = false}) {
     _recordTimer?.cancel();
     _recordTimer = null;
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
+    _streamingSceneId = null;
+    _pendingUploads.clear();
+    _streamingUploading = false;
     _recordSeconds = 0;
+    _recordingStartTime = null;
     _setGlobalRecording(false);
     if (updateUi && mounted) {
       setState(() {});
@@ -219,21 +231,38 @@ class _RecordPageState extends ConsumerState<RecordPage>
     bool showToast = true,
     bool navigateToSubmit = true,
   }) async {
+    final startTime = _recordingStartTime;
     _resetRecordingState(updateUi: true);
 
     if (!controller.value.isRecordingVideo) {
       return;
     }
-    var file = await controller.stopVideoRecording();
 
-    if (showToast && mounted) {
-      TDToast.showText(textLocalize('reco_done'), context: context);
+    if (startTime != null) {
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      if (elapsed < _minRecordingMs) {
+        _isToggling = true;
+        await Future.delayed(Duration(milliseconds: _minRecordingMs - elapsed));
+        _isToggling = false;
+      }
+    }
+
+    XFile file;
+    try {
+      file = await controller.stopVideoRecording();
+    } catch (_) {
+      if (showToast && mounted) {
+        ref.read(showTooShortBubbleProvider.notifier).state = true;
+      }
+      return;
     }
 
     final permissionState = await PhotoManager.requestPermissionExtend();
     if (!permissionState.isAuth) {
       if (showToast && mounted) {
-        TDToast.showText(textLocalize('reco_save_fail'), context: context);
+        ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+          'reco_save_fail',
+        );
       }
     } else {
       try {
@@ -246,11 +275,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
         if (savedFile != null) {
           file = XFile(savedFile.path);
         } else if (mounted) {
-          TDToast.showText(textLocalize('reco_save_error'), context: context);
+          ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+            'reco_save_error',
+          );
         }
       } catch (_) {
         if (mounted) {
-          TDToast.showText(textLocalize('reco_save_error'), context: context);
+          ref.read(saveFailBubbleProvider.notifier).state = textLocalize(
+            'reco_save_error',
+          );
         }
       }
     }
@@ -261,11 +294,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
     } catch (_) {}
 
     if (thumbPath.startsWith('assets/')) {
-      if (mounted) {
-        TDToast.showText(
-          textLocalize('reco_record_too_short'),
-          context: context,
-        );
+      if (showToast && mounted) {
+        ref.read(showTooShortBubbleProvider.notifier).state = true;
       }
       return;
     }
@@ -273,47 +303,210 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (navigateToSubmit && mounted) {
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) =>
+        PageRouteBuilder(
+          transitionDuration: BDMotion.durationNormal,
+          reverseTransitionDuration: BDMotion.durationNormal,
+          opaque: true,
+          pageBuilder: (_, __, ___) =>
               VideoSubmitPage(videoPath: file.path, thumbnailPath: thumbPath),
+          transitionsBuilder: (ctx, animation, __, child) {
+            final curved = animation.drive(
+              CurveTween(curve: Curves.easeInOutCubic),
+            );
+            return AnimatedBuilder(
+              animation: curved,
+              builder: (_, child) {
+                final screenHeight = MediaQuery.of(ctx).size.height;
+                return Transform.translate(
+                  offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                  child: child,
+                );
+              },
+              child: child,
+            );
+          },
         ),
       );
     }
   }
 
   Future<void> _toggleVideoRecording() async {
+    if (_isToggling) return;
+    _isToggling = true;
+
     final controller = RecoConfig.cameraController;
     if (controller == null || !controller.value.isInitialized) {
+      _isToggling = false;
       return;
     }
 
-    final isVideoRecording = ref.read(isRecordingProvider);
-    if (isVideoRecording) {
-      await _stopVideoRecording(controller);
-      return;
-    }
-
-    _resetRecordingState(updateUi: false);
-    _setGlobalRecording(true);
-    try {
-      await controller.startVideoRecording();
-    } catch (_) {
-      _resetRecordingState(updateUi: true);
-      rethrow;
-    }
-    try {
-      await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
-    } catch (_) {}
-    _recordSeconds = 0;
-
-    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _recordSeconds++;
-      if (_recordSeconds >= 180) {
-        _stopVideoRecording(controller);
-      } else if (mounted) {
-        setState(() {});
+    final isRecording = ref.read(isRecordingProvider);
+    if (isRecording) {
+      try {
+        if (ref.read(streamingModeProvider)) {
+          await _stopStreaming();
+        } else {
+          await _stopVideoRecording(controller);
+        }
+      } finally {
+        _isToggling = false;
       }
+      return;
+    }
+
+    if (ref.read(streamingModeProvider)) {
+      await _startStreaming(controller);
+    } else {
+      _resetRecordingState(updateUi: false);
+      _setGlobalRecording(true);
+      try {
+        await controller.startVideoRecording();
+      } catch (_) {
+        _resetRecordingState(updateUi: true);
+        _isToggling = false;
+        rethrow;
+      }
+      try {
+        await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
+      } catch (_) {}
+      _recordSeconds = 0;
+      _recordingStartTime = DateTime.now();
+
+      _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _recordSeconds++;
+        if (_recordSeconds >= 600) {
+          _stopVideoRecording(controller);
+        } else if (mounted) {
+          setState(() {});
+        }
+      });
+    }
+
+    _isToggling = false;
+  }
+
+  String _generateStreamingSceneId() {
+    final time = DateTime.now();
+    final r = Random();
+    return 'stream_'
+        '${time.year}'
+        '${time.month.toString().padLeft(2, '0')}'
+        '${time.day.toString().padLeft(2, '0')}'
+        '${time.hour.toString().padLeft(2, '0')}'
+        '${time.minute.toString().padLeft(2, '0')}'
+        '_'
+        '${r.nextInt(1000000).toString().padLeft(6, '0')}';
+  }
+
+  Future<void> _startStreaming(CameraController controller) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      _isToggling = false;
+      return;
+    }
+
+    _streamingSceneId = _generateStreamingSceneId();
+    _streamingFrameIndex = 0;
+    _streamingSuccessCount = 0;
+    _streamingFailCount = 0;
+    _pendingUploads.clear();
+    _streamingUploading = false;
+    _recordSeconds = 0;
+    _setGlobalRecording(true);
+
+    // Capture first frame immediately, then every 1s
+    _captureAndUploadFrame(controller, user.id);
+    _streamingTimer = Timer.periodic(
+      const Duration(seconds: _streamingIntervalSec),
+      (_) {
+        _recordSeconds++;
+        if (_recordSeconds >= _streamingMaxDurationSec) {
+          _stopStreaming();
+          return;
+        }
+        if (mounted) {
+          setState(() {});
+          _captureAndUploadFrame(controller, user.id);
+        }
+      },
+    );
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _captureAndUploadFrame(
+    CameraController controller,
+    String userId,
+  ) async {
+    if (_streamingUploading) return;
+    _streamingUploading = true;
+
+    final sceneId = _streamingSceneId!;
+    final frameIndex = ++_streamingFrameIndex;
+    final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
+
+    XFile? photo;
+    try {
+      photo = await controller.takePicture();
+    } catch (e) {
+      debugPrint('[_captureAndUpload] takePicture failed: $e');
+      _streamingFailCount++;
+      _streamingUploading = false;
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final file = File(photo.path);
+    final storagePath = '$userId/$sceneId/raw/$frameLabel.png';
+
+    final uploadFuture = Supabase.instance.client.storage
+        .from('braindance-assets')
+        .upload(storagePath, file)
+        .then((result) {
+      _streamingSuccessCount++;
+      debugPrint('[_captureAndUpload] uploaded $frameLabel → $result');
+    }).catchError((e) {
+      _streamingFailCount++;
+      debugPrint('[_captureAndUpload] upload failed: $e');
+    }).whenComplete(() {
+      try {
+        file.deleteSync();
+      } catch (_) {}
     });
+
+    _pendingUploads.add(uploadFuture);
+
+    // Cleanup old futures (keep last 5)
+    while (_pendingUploads.length > 5) {
+      _pendingUploads.removeAt(0);
+    }
+
+    _streamingUploading = false;
+  }
+
+  Future<void> _stopStreaming() async {
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
+    _setGlobalRecording(false);
+
+    if (!mounted) return;
+
+    // Wait for pending uploads
+    await Future.wait(_pendingUploads);
+
+    if (!mounted) return;
+
+    final message = _streamingFailCount == 0
+        ? '流式拍摄完成：$_streamingSuccessCount 张照片已上传'
+        : '拍摄完成：$_streamingSuccessCount 张成功，$_streamingFailCount 张失败';
+
+    debugPrint('[streaming] done. scene=$_streamingSceneId $message');
+    ref.read(streamingDoneBubbleProvider.notifier).state = message;
+
+    _pendingUploads.clear();
+    _streamingSceneId = null;
+
+    if (mounted) setState(() {});
   }
 
   void _computeOrientation() {
@@ -384,14 +577,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _hudAnimController.duration = _isMovingTooFast
           ? const Duration(milliseconds: 150)
           : const Duration(seconds: 1);
-      if (_isMotionHudEnabled) {
-        _hudAnimController.repeat(reverse: true);
-      }
+      _hudAnimController.repeat(reverse: true);
     }
 
-    if (_isMovingTooFast && mounted && now - _lastFastToastTime > 1800) {
+    if (_isMovingTooFast &&
+        mounted &&
+        !ref.read(showAccelBannerProvider) &&
+        now - _lastFastToastTime > 1800) {
       _lastFastToastTime = now;
-      TDToast.showText(context: context, textLocalize('reco_accel_warning'));
+      ref.read(showAccelBannerProvider.notifier).state = true;
     }
 
     _syncMotionHaptics(effectiveState);
@@ -405,30 +599,29 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
     _accelHistory.add(motionMeter);
 
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final shouldRefreshUi =
-        _isMotionHudEnabled &&
-        (forceRefresh ||
-            currentWarning != _isMovingTooFast ||
-            nowMs - _lastMotionUiUpdateTime >= _motionUiThrottleMs);
-
-    if (shouldRefreshUi) {
-      _lastMotionUiUpdateTime = nowMs;
-      _motionHudNotifier.value = _MotionHudViewData(
-        motionMeter: displayMotionMeter,
-        motionState: effectiveState,
-        motionHint: nextHint,
-        motionDetail: nextDetail,
-        isWarning: currentWarning,
-        isCaution: effectiveState == _MotionState.caution,
-      );
+    if (mounted) {
+      setState(() {
+        _linearAccel = linearAccel;
+        _smoothedLinearAccel = smoothedAccel;
+        _peakLinearAccel = nextPeak;
+        _motionMeter = displayMotionMeter;
+        _motionHint = nextHint;
+        _motionDetail = nextDetail;
+        _motionState = effectiveState;
+      });
+    } else {
+      _linearAccel = linearAccel;
+      _smoothedLinearAccel = smoothedAccel;
+      _peakLinearAccel = nextPeak;
+      _motionMeter = displayMotionMeter;
+      _motionHint = nextHint;
+      _motionDetail = nextDetail;
+      _motionState = effectiveState;
     }
 
-    _linearAccel = linearAccel;
-    _smoothedLinearAccel = smoothedAccel;
-    _peakLinearAccel = nextPeak;
-    _motionMeter = displayMotionMeter;
-    _motionState = effectiveState;
+    if (forceRefresh && mounted) {
+      setState(() {});
+    }
   }
 
   void _syncMotionHaptics(_MotionState state) {
@@ -480,39 +673,12 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _smoothedLinearAccel = 0;
     _peakLinearAccel = 0;
     _motionMeter = 0;
+    _motionHint = textLocalize('reco_motion_steady');
+    _motionDetail = textLocalize('reco_motion_detail');
     _motionState = _MotionState.steady;
     _isMovingTooFast = false;
     _warningEndTime = 0;
-    _lastMotionUiUpdateTime = 0;
     _accelHistory.clear();
-    _motionHudNotifier.value = _MotionHudViewData(
-      motionMeter: 0,
-      motionState: _MotionState.steady,
-      motionHint: textLocalize('reco_motion_steady'),
-      motionDetail: textLocalize('reco_motion_detail'),
-      isWarning: false,
-      isCaution: false,
-    );
-  }
-
-  Future<void> _initializeCamera() async {
-    final ready = await RecoConfig.cameraInitialize();
-    if (!ready && mounted) {
-      setState(() {});
-    }
-  }
-
-  void _startHudAnimation() {
-    if (!_hudAnimController.isAnimating) {
-      _hudAnimController.repeat(reverse: true);
-    }
-  }
-
-  void _stopHudAnimation() {
-    if (_hudAnimController.isAnimating) {
-      _hudAnimController.stop();
-    }
-    _hudAnimController.value = 0;
   }
 
   void _startSensors() {
@@ -563,11 +729,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _isMotionHudEnabled = !_isMotionHudEnabled;
       if (_isMotionHudEnabled) {
         _resetMotionState();
-        _startHudAnimation();
         _startSensors();
       } else {
         _stopSensors();
-        _stopHudAnimation();
         _resetMotionState();
       }
     });
@@ -601,7 +765,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
     if (targetIndex == null || targetIndex == RecoConfig.camNum) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+        showAppToast(context, textLocalize('reco_no_switch'));
       }
       return;
     }
@@ -618,7 +782,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
     } catch (_) {
       if (mounted) {
-        TDToast.showText(textLocalize('reco_no_switch'), context: context);
+        showAppToast(context, textLocalize('reco_no_switch'));
       }
     }
   }
@@ -659,7 +823,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
       cameraView = Transform.scale(
         scale: scale,
-        child: RepaintBoundary(child: Center(child: CameraPreview(controller))),
+        child: Center(child: CameraPreview(controller)),
       );
     }
 
@@ -675,136 +839,127 @@ class _RecordPageState extends ConsumerState<RecordPage>
         mediaQuery.padding.bottom +
         (isAnyRecording ? 36 : _kFloatingNavReservedHeight + 18);
 
-    return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(child: cameraView),
-          if (_isMotionHudEnabled)
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        backgroundColor: isDark ? const Color(0xFF101014) : Colors.black,
+        body: Stack(
+          children: [
+            Positioned.fill(child: cameraView),
             Positioned.fill(
-              child: ValueListenableBuilder<_MotionHudViewData>(
-                valueListenable: _motionHudNotifier,
-                builder: (context, hud, _) {
-                  return RepaintBoundary(
-                    child: CustomPaint(
-                      painter: RecordHUDPainter(
-                        isWarning: hud.isWarning,
-                        isCaution: hud.isCaution,
-                        motionValue: hud.motionMeter,
-                        animation: _hudAnimController,
-                      ),
-                    ),
-                  );
-                },
+              child: CustomPaint(
+                painter: RecordHUDPainter(
+                  isWarning: _isMotionHudEnabled && _isMovingTooFast,
+                  isCaution:
+                      _isMotionHudEnabled &&
+                      _motionState == _MotionState.caution,
+                  motionValue: _isMotionHudEnabled ? _motionMeter : 0,
+                  animation: _hudAnimController,
+                ),
               ),
             ),
-          Positioned(
-            top: mediaQuery.padding.top + 16,
-            left: 16,
-            child: AnimatedSwitcher(
-              duration: BDMotion.durationFast,
-              switchInCurve: BDMotion.curveEnter,
-              switchOutCurve: BDMotion.curveExit,
-              child: !_isMotionHudEnabled
-                  ? const SizedBox.shrink()
-                  : ValueListenableBuilder<_MotionHudViewData>(
-                      key: const ValueKey<String>('motion-guidance-enabled'),
-                      valueListenable: _motionHudNotifier,
-                      builder: (context, hud, _) {
-                        return RepaintBoundary(
-                          child: _SimpleMotionGuidanceCard(
-                            motionMeter: hud.motionMeter,
-                            motionState: hud.motionState,
-                            motionHint: hud.motionHint,
-                            motionDetail: hud.motionDetail,
-                          ),
-                        );
-                      },
-                    ),
+            Positioned(
+              top: mediaQuery.padding.top + 16,
+              left: 16,
+              child: AnimatedSwitcher(
+                duration: BDMotion.durationFast,
+                switchInCurve: BDMotion.curveEnter,
+                switchOutCurve: BDMotion.curveExit,
+                child: !_isMotionHudEnabled
+                    ? const SizedBox.shrink()
+                    : _SimpleMotionGuidanceCard(
+                        motionMeter: _motionMeter,
+                        motionState: _motionState,
+                        motionHint: _motionHint,
+                        motionDetail: _motionDetail,
+                      ),
+              ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: bottomOffset,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isVideoRecording) ...[
-                  AnimatedSwitcher(
-                    duration: BDMotion.durationFast,
-                    switchInCurve: BDMotion.curveEnter,
-                    switchOutCurve: BDMotion.curveExit,
-                    child: _StatusPill(
-                      key: ValueKey<String>('rec_$_recordSeconds'),
-                      label:
-                          'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
-                      color: Colors.redAccent,
-                      backgroundColor: darkInput,
-                      isSquareDot: true,
-                      compact: true,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: bottomOffset,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isVideoRecording) ...[
+                    AnimatedSwitcher(
+                      duration: BDMotion.durationFast,
+                      switchInCurve: BDMotion.curveEnter,
+                      switchOutCurve: BDMotion.curveExit,
+                      child: _StatusPill(
+                        key: ValueKey<String>('rec_$_recordSeconds'),
+                        label:
+                            'REC ${_recordSeconds ~/ 60}:${(_recordSeconds % 60).toString().padLeft(2, '0')}',
+                        color: Colors.redAccent,
+                        backgroundColor: darkInput,
+                        isSquareDot: true,
+                        compact: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                Center(
-                  child: GestureDetector(
-                    onTapDown: (_) => _buttonAnimController.forward(),
-                    onTapUp: (_) async {
-                      _buttonAnimController.reverse();
-                      await _onRecordTap();
-                    },
-                    onTapCancel: () => _buttonAnimController.reverse(),
-                    child: ScaleTransition(
-                      scale: _buttonScaleAnimation,
-                      child: AnimatedContainer(
-                        duration: BDMotion.durationFast,
-                        curve: BDMotion.curveEnter,
-                        width: 78,
-                        height: 78,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isAnyRecording
-                              ? Colors.redAccent
-                              : BDDesign.colorPaperWhite,
-                          border: Border.all(
-                            color: BDDesign.colorInkBlack,
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  (isAnyRecording
-                                          ? Colors.redAccent
-                                          : BDDesign.colorMutedBlue)
-                                      .withAlpha(isAnyRecording ? 92 : 46),
-                              blurRadius: 14,
-                              spreadRadius: isAnyRecording ? 2 : 0,
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: AnimatedContainer(
-                            duration: BDMotion.durationFast,
-                            curve: BDMotion.curveEnter,
-                            width: 60,
-                            height: 60,
-                            decoration: const BoxDecoration(
+                    const SizedBox(height: 10),
+                  ],
+                  Center(
+                    child: GestureDetector(
+                      onTapDown: (_) => _buttonAnimController.forward(),
+                      onTapUp: (_) async {
+                        _buttonAnimController.reverse();
+                        await _onRecordTap();
+                      },
+                      onTapCancel: () => _buttonAnimController.reverse(),
+                      child: ScaleTransition(
+                        scale: _buttonScaleAnimation,
+                        child: AnimatedContainer(
+                          duration: BDMotion.durationFast,
+                          curve: BDMotion.curveEnter,
+                          width: 78,
+                          height: 78,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isAnyRecording
+                                ? Colors.redAccent
+                                : BDDesign.colorPaperWhite,
+                            border: Border.all(
                               color: BDDesign.colorInkBlack,
-                              shape: BoxShape.circle,
+                              width: 2,
                             ),
-                            child: Center(
-                              child: AnimatedContainer(
-                                duration: BDMotion.durationFast,
-                                curve: BDMotion.curveEnter,
-                                width: isAnyRecording ? 26 : 22,
-                                height: isAnyRecording ? 26 : 22,
-                                decoration: BoxDecoration(
-                                  color: isAnyRecording
-                                      ? Colors.redAccent
-                                      : BDDesign.colorPaperWhite,
-                                  borderRadius: BorderRadius.circular(
-                                    isAnyRecording ? 4 : 12,
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    (isAnyRecording
+                                            ? Colors.redAccent
+                                            : BDDesign.colorMutedBlue)
+                                        .withAlpha(isAnyRecording ? 92 : 46),
+                                blurRadius: 14,
+                                spreadRadius: isAnyRecording ? 2 : 0,
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: AnimatedContainer(
+                              duration: BDMotion.durationFast,
+                              curve: BDMotion.curveEnter,
+                              width: 60,
+                              height: 60,
+                              decoration: const BoxDecoration(
+                                color: BDDesign.colorInkBlack,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: AnimatedContainer(
+                                  duration: BDMotion.durationFast,
+                                  curve: BDMotion.curveEnter,
+                                  width: isAnyRecording ? 26 : 22,
+                                  height: isAnyRecording ? 26 : 22,
+                                  decoration: BoxDecoration(
+                                    color: isAnyRecording
+                                        ? Colors.redAccent
+                                        : BDDesign.colorPaperWhite,
+                                    borderRadius: BorderRadius.circular(
+                                      isAnyRecording ? 4 : 12,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -814,215 +969,232 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            left: 16,
-            bottom: cornerControlBottom,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _RecordOverlayPanel(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 4,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      currentLensDirection == CameraLensDirection.front
-                          ? Icons.camera_front
-                          : Icons.camera_rear,
-                      color: canSwitchPrimaryCamera
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorAshGray,
-                      size: 24,
-                    ),
-                    onPressed: canSwitchPrimaryCamera
-                        ? _switchPrimaryCamera
-                        : null,
-                  ),
-                ),
-                if (!isVideoRecording) ...[
-                  const SizedBox(width: 12),
+            Positioned(
+              left: 16,
+              bottom: cornerControlBottom,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   _RecordOverlayPanel(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 4,
                     ),
                     child: IconButton(
-                      icon: const Icon(
-                        Icons.close,
-                        color: BDDesign.colorAshGray,
+                      icon: Icon(
+                        currentLensDirection == CameraLensDirection.front
+                            ? Icons.camera_front
+                            : Icons.camera_rear,
+                        color: canSwitchPrimaryCamera
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorAshGray,
                         size: 24,
                       ),
-                      onPressed: () => Navigator.maybePop(context),
+                      onPressed: canSwitchPrimaryCamera
+                          ? _switchPrimaryCamera
+                          : null,
                     ),
                   ),
+                  if (!isVideoRecording) ...[
+                    const SizedBox(width: 12),
+                    _RecordOverlayPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          ref.watch(streamingModeProvider)
+                              ? Icons.photo_camera
+                              : Icons.videocam_outlined,
+                          color: ref.watch(streamingModeProvider)
+                              ? BDDesign.colorPaperWhite
+                              : BDDesign.colorAshGray,
+                          size: 24,
+                        ),
+                        onPressed: () {
+                          ref
+                              .read(streamingModeProvider.notifier)
+                              .state = !ref.read(streamingModeProvider);
+                          if (mounted) setState(() {});
+                        },
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          Positioned(
-            right: 16,
-            bottom: cornerControlBottom,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isVideoRecording) ...[
+            Positioned(
+              right: 16,
+              bottom: cornerControlBottom,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!isVideoRecording) ...[
+                    _RecordOverlayPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.info_outline,
+                          color: BDDesign.colorAshGray,
+                          size: 24,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showTips = true;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   _RecordOverlayPanel(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 4,
                     ),
                     child: IconButton(
-                      icon: const Icon(
-                        Icons.info_outline,
-                        color: BDDesign.colorAshGray,
+                      icon: Icon(
+                        _isMotionHudEnabled
+                            ? Icons.speed_rounded
+                            : Icons.speed_outlined,
+                        color: _isMotionHudEnabled
+                            ? BDDesign.colorPaperWhite
+                            : BDDesign.colorAshGray,
                         size: 24,
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _showTips = true;
-                        });
-                      },
+                      onPressed: _toggleMotionHud,
                     ),
                   ),
-                  const SizedBox(width: 12),
                 ],
-                _RecordOverlayPanel(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 4,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      _isMotionHudEnabled
-                          ? Icons.speed_rounded
-                          : Icons.speed_outlined,
-                      color: _isMotionHudEnabled
-                          ? BDDesign.colorPaperWhite
-                          : BDDesign.colorAshGray,
-                      size: 24,
-                    ),
-                    onPressed: _toggleMotionHud,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          if (_showTips)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withAlpha(176),
-                padding: const EdgeInsets.only(bottom: 80),
-                child: Center(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.all(24),
-                    constraints: BoxConstraints(
-                      maxHeight: mediaQuery.size.height * 0.70,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BDDesign.radiusNormal,
-                      border: Border.all(color: Colors.white.withAlpha(20)),
-                      boxShadow: [BDDesign.shadowElevated],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                textLocalize('reco_scan_tip'),
-                                style: TextStyle(
-                                  color: BDDesign.colorPaperWhite,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
+            if (_showTips)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withAlpha(176),
+                  padding: const EdgeInsets.only(bottom: 80),
+                  child: Center(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 32),
+                      padding: const EdgeInsets.all(24),
+                      constraints: BoxConstraints(
+                        maxHeight: mediaQuery.size.height * 0.70,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E1E),
+                        borderRadius: BDDesign.radiusNormal,
+                        border: Border.all(color: Colors.white.withAlpha(20)),
+                        boxShadow: [BDDesign.shadowElevated],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  textLocalize('reco_scan_tip'),
+                                  style: TextStyle(
+                                    color: BDDesign.colorPaperWhite,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
-                            _StatusPill(
-                              label: _isMotionHudEnabled
-                                  ? textLocalize('sensor_on')
-                                  : textLocalize('sensor_off'),
-                              color: _isMotionHudEnabled
-                                  ? BDDesign.colorFadedOlive
-                                  : BDDesign.colorMutedBlueLight,
-                              backgroundColor: const Color(0xFF23232A),
-                              compact: true,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Flexible(
-                          child: SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title1'),
-                                  body: textLocalize('reco_tip1'),
-                                ),
-                                const SizedBox(height: 12),
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title2'),
-                                  body: textLocalize('reco_tip2'),
-                                ),
-                                const SizedBox(height: 12),
-                                _TipBlock(
-                                  title: textLocalize('reco_tip_title3'),
-                                  body: textLocalize('reco_tip3'),
-                                ),
-                              ],
+                              _StatusPill(
+                                label: _isMotionHudEnabled
+                                    ? textLocalize('sensor_on')
+                                    : textLocalize('sensor_off'),
+                                color: _isMotionHudEnabled
+                                    ? BDDesign.colorFadedOlive
+                                    : BDDesign.colorMutedBlueLight,
+                                backgroundColor: const Color(0xFF23232A),
+                                compact: true,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title1'),
+                                    body: textLocalize('reco_tip1'),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title2'),
+                                    body: textLocalize('reco_tip2'),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _TipBlock(
+                                    title: textLocalize('reco_tip_title3'),
+                                    body: textLocalize('reco_tip3'),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                textLocalize('reco_scan_before'),
-                                style: TextStyle(
-                                  color: Colors.white.withAlpha(168),
-                                  fontSize: 12.5,
-                                  height: 1.35,
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  textLocalize('reco_scan_before'),
+                                  style: TextStyle(
+                                    color: Colors.white.withAlpha(168),
+                                    fontSize: 12.5,
+                                    height: 1.35,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            TDButton(
-                              onTap: () {
-                                SetConfig.setHasReadRecordTip(true);
-                                setState(() {
-                                  _showTips = false;
-                                });
-                              },
-                              text: textLocalize('reco_scan_ok'),
-                              style: TDButtonStyle(
-                                backgroundColor: BDDesign.colorMutedBlue,
-                                textColor: Colors.white,
-                                radius: BorderRadius.circular(18),
+                              const SizedBox(width: 12),
+                              TDButton(
+                                onTap: () {
+                                  SetConfig.setHasReadRecordTip(true);
+                                  setState(() {
+                                    _showTips = false;
+                                  });
+                                },
+                                text: textLocalize('reco_scan_ok'),
+                                style: TDButtonStyle(
+                                  backgroundColor: BDDesign.colorMutedBlue,
+                                  textColor: Colors.white,
+                                  radius: BorderRadius.circular(18),
+                                ),
+                                type: TDButtonType.fill,
+                                shape: TDButtonShape.rectangle,
+                                theme: TDButtonTheme.primary,
+                                size: TDButtonSize.small,
                               ),
-                              type: TDButtonType.fill,
-                              shape: TDButtonShape.rectangle,
-                              theme: TDButtonTheme.primary,
-                              size: TDButtonSize.small,
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
+            const _AccelWarningBanner(),
+            const _SaveFailBubble(),
+            _CenterBubble(
+              provider: showTooShortBubbleProvider,
+              message: textLocalize('reco_record_too_short'),
+              icon: Icons.info_outline_rounded,
+              iconColor: Colors.white.withAlpha(180),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

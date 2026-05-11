@@ -166,13 +166,13 @@ extension _RecallPageDataSync on _RecallPageState {
       final response = await Supabase.instance.client
           .from('model_assets')
           .select(
-            'id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at',
+            'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at',
           )
           .order('created_at', ascending: false);
 
       final models = List<Map<String, dynamic>>.from(response);
 
-      // 从 processing_tasks 获取 display_name 并合并
+      // Merge display_name from processing_tasks as fallback for rows missing it
       try {
         final sceneIds = models
             .map((m) => m['scene_id']?.toString())
@@ -186,14 +186,17 @@ extension _RecallPageDataSync on _RecallPageState {
           final tasksList = List<Map<String, dynamic>>.from(tasksResp);
           final displayNameMap = <String, String>{};
           for (final t in tasksList) {
-            final dn = t['display_name']?.toString();
-            if (dn != null && dn.isNotEmpty) {
+            final dn = t['display_name']?.toString() ?? '';
+            if (dn.isNotEmpty) {
               displayNameMap[t['scene_id'].toString()] = dn;
             }
           }
           for (final m in models) {
             final sid = m['scene_id']?.toString();
-            if (sid != null && displayNameMap.containsKey(sid)) {
+            final existingDn = m['display_name']?.toString() ?? '';
+            if (sid != null &&
+                existingDn.isEmpty &&
+                displayNameMap.containsKey(sid)) {
               m['display_name'] = displayNameMap[sid];
             }
           }
@@ -256,10 +259,8 @@ extension _RecallPageDataSync on _RecallPageState {
         });
         _updateOverviewProvider();
         if (showErrorToast) {
-          TDToast.showText(
-            '${textLocalize('recall_error_offline')} [${SupabaseConfig.modeLabel}] $e',
-            context: context,
-          );
+          debugPrint('[RecallDataSync] offline error: $e');
+          showAppToast(context, textLocalize('recall_error_offline'));
         }
       }
       _searchCache.clear();

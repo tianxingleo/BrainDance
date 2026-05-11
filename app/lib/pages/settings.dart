@@ -1,6 +1,9 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:braindance/extra_func/theme_animation_notifier.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/set_config.dart';
@@ -12,7 +15,7 @@ import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../main.dart' show overviewLocalIndexingProvider, overviewStatsProvider;
+import '../main.dart' show overviewStatsProvider, pageAnimatingProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -23,8 +26,6 @@ class SettingsPage extends ConsumerStatefulWidget {
 
 class _SettingsPageState extends ConsumerState<SettingsPage>
     with TickerProviderStateMixin {
-  static const bool _enableFancyThemeTransition = true;
-  static const double _themeCaptureScale = 0.5;
   late final TabController tabController;
   int _currentTabIndex = 0;
   final GlobalKey _themeSwitchKey = GlobalKey();
@@ -69,44 +70,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   title: textLocalize('manage'),
                   trailing: GestureDetector(
                     onTap: () async {
+                      if (ref.read(themeAnimationProvider).isAnimating) return;
+
                       // 1. Capture the UI before changing theme
                       final boundary =
                           themeAnimationKey.currentContext?.findRenderObject()
                               as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final mediaQuery = MediaQuery.of(context);
-                          final pixelRatio =
-                              (mediaQuery.devicePixelRatio * _themeCaptureScale)
-                                  .clamp(1.0, 2.0);
-                          if (_enableFancyThemeTransition &&
-                              !mediaQuery.disableAnimations) {
-                            final image = await boundary.toImage(
-                              pixelRatio: pixelRatio,
-                            );
+                          final image = await boundary.toImage(pixelRatio: 1.0);
 
-                            final RenderBox? buttonBox =
-                                _themeSwitchKey.currentContext
-                                        ?.findRenderObject()
-                                    as RenderBox?;
+                          final RenderBox? buttonBox =
+                              _themeSwitchKey.currentContext?.findRenderObject()
+                                  as RenderBox?;
 
-                            if (buttonBox != null) {
-                              final offset = buttonBox.localToGlobal(
-                                Offset.zero,
-                              );
-                              final center =
-                                  offset +
-                                  Offset(
-                                    buttonBox.size.width / 2,
-                                    buttonBox.size.height / 2,
-                                  );
+                          if (buttonBox != null) {
+                            final offset = buttonBox.localToGlobal(Offset.zero);
+                            final center =
+                                offset +
+                                Offset(
+                                  buttonBox.size.width / 2,
+                                  buttonBox.size.height / 2,
+                                );
 
-                              ref
-                                  .read(themeAnimationProvider.notifier)
-                                  .startBase(image, center);
-                            } else {
-                              image.dispose();
-                            }
+                            ref
+                                .read(themeAnimationProvider.notifier)
+                                .startBase(image, center);
                           }
                         } catch (e) {
                           debugPrint('Theme transition error: $e');
@@ -114,8 +103,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       }
 
                       SetConfig.setNightMode(!AppConfig.isNightMode, ref);
-                      SetConfig.saveMsgToFile();
-                      onUpdate();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        SetConfig.saveMsgToFile();
+                      });
                     },
                     child: BDStatusPill(
                       key: _themeSwitchKey,
@@ -125,9 +115,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                       icon: isDark
                           ? Icons.dark_mode_rounded
                           : Icons.wb_sunny_rounded,
-                      color: isDark
-                          ? BDDesign.colorMutedBlueLight
-                          : BDDesign.colorMutedBlue,
+                      color: textColor,
                     ),
                   ),
                 ),
@@ -135,22 +123,40 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                 Consumer(
                   builder: (context, ref, _) {
                     final stats = ref.watch(overviewStatsProvider);
-                    final isIndexing = ref.watch(overviewLocalIndexingProvider);
                     return RecallOverviewCard(
                       isDark: isDark,
                       textColor: textColor,
                       recentCount: stats['recentCount'] ?? 0,
                       allModelCount: stats['allModelCount'] ?? 0,
                       processingTaskCount: stats['processingTaskCount'] ?? 0,
-                      ragCount: stats['ragCount'] ?? 0,
-                      isLocalIndexing: isIndexing,
                       onOpenTasks: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const TaskListPage(),
+                          PageRouteBuilder(
+                            transitionDuration: BDMotion.durationNormal,
+                            reverseTransitionDuration: BDMotion.durationNormal,
+                            opaque: true,
+                            pageBuilder: (_, __, ___) => const TaskListPage(),
+                            transitionsBuilder: (ctx, animation, __, child) {
+                              final curved = animation.drive(
+                                CurveTween(curve: Curves.easeInOutCubic),
+                              );
+                              return AnimatedBuilder(
+                                animation: curved,
+                                builder: (_, child) {
+                                  final screenHeight = MediaQuery.of(ctx).size.height;
+                                  return Transform.translate(
+                                    offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                                    child: child,
+                                  );
+                                },
+                                child: child,
+                              );
+                            },
                           ),
-                        );
+                        ).then((_) {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                        });
                       },
                     );
                   },
@@ -167,12 +173,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     );
   }
 
-  void onUpdate() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
   void _handleTabChange() {
     final nextIndex = tabController.index;
     if (_currentTabIndex == nextIndex) {
@@ -184,20 +184,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 
   Widget _buildTabContent(BuildContext context, WidgetRef ref) {
-    return AnimatedSwitcher(
-      duration: BDMotion.durationNormal,
-      switchInCurve: BDMotion.curveEnter,
-      switchOutCurve: BDMotion.curveExit,
-      transitionBuilder: (child, animation) {
-        return FadeTransition(opacity: animation, child: child);
-      },
-      child: KeyedSubtree(
-        key: ValueKey<int>(_currentTabIndex),
-        child: switch (_currentTabIndex) {
-          0 => setTab1(context, ref),
-          1 => setTab3(context),
-          _ => const SizedBox.shrink(),
-        },
+    return SizedBox(
+      width: double.infinity,
+      child: BDTabSwitcher(
+        index: _currentTabIndex,
+        children: [setTab1(context, ref), setTab3(context)],
       ),
     );
   }
@@ -231,69 +222,86 @@ class _SettingsTabSwitch extends StatelessWidget {
         ? const Color(0xFFB4BEC9)
         : const Color(0xFF9AA3AD);
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      height: 56,
-      child: Container(
-        padding: const EdgeInsets.all(4.0),
-        decoration: BoxDecoration(
-          color: navBackground,
-          borderRadius: BDDesign.radiusLarge,
-          border: Border.all(color: navBorder, width: 1.0),
-          boxShadow: [
-            BoxShadow(
-              color: navShadow,
-              blurRadius: 28,
-              offset: const Offset(0, 8),
+    return Consumer(
+      builder: (_, ref, child) {
+        final skipBlur = ref.watch(pageAnimatingProvider);
+        final content = Container(
+          padding: const EdgeInsets.all(4.0),
+          decoration: BoxDecoration(
+            color: navBackground,
+            borderRadius: BDDesign.radiusLarge,
+            border: Border.all(color: navBorder, width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: navShadow,
+                blurRadius: 28,
+                offset: const Offset(0, 8),
+              ),
+            ],
             ),
-          ],
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final tabWidth = constraints.maxWidth / 2;
-            return Stack(
-              children: [
-                AnimatedBuilder(
-                  animation: controller.animation!,
-                  builder: (context, child) {
-                    final double offset =
-                        controller.animation!.value * tabWidth;
-                    return Positioned(
-                      left: offset,
-                      width: tabWidth,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: selectedBackground,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final tabWidth = constraints.maxWidth / 2;
+                return Stack(
                   children: [
-                    _buildTabItem(
-                      0,
-                      textLocalize('set_tab1'),
-                      selectedColor,
-                      unselectedColor,
+                    AnimatedBuilder(
+                      animation: controller.animation!,
+                      builder: (context, child) {
+                        final double offset =
+                            controller.animation!.value * tabWidth;
+                        return Positioned(
+                          left: offset,
+                          width: tabWidth,
+                          top: 0,
+                          bottom: 0,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: selectedBackground,
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                    _buildTabItem(
-                      1,
-                      textLocalize('set_tab3'),
-                      selectedColor,
-                      unselectedColor,
+                    Row(
+                      children: [
+                        _buildTabItem(
+                          0,
+                          textLocalize('set_tab1'),
+                          selectedColor,
+                          unselectedColor,
+                        ),
+                        _buildTabItem(
+                          1,
+                          textLocalize('set_tab3'),
+                          selectedColor,
+                          unselectedColor,
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
+                );
+              },
+            ),
+          );
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            height: 56,
+            child: ClipRRect(
+              borderRadius: BDDesign.radiusLarge,
+              child: skipBlur
+                  ? content
+                  : BackdropFilter(
+                      filter: ui.ImageFilter.blur(
+                        sigmaX: 24.0,
+                        sigmaY: 24.0,
+                      ),
+                      child: content,
+                    ),
+            ),
+          );
+        },
+      );
   }
 
   Widget _buildTabItem(
