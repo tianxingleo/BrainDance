@@ -73,12 +73,14 @@ const ORBIT_RECENTER_DURATION = 1.5;
 const ORBIT_RADIUS_SMOOTHING = 0.22;
 const ORBIT_RADIUS_MIN_STEP = 0.02;
 const INTRO_PARTICLE_FADE_IN_START = 0.04;
-const INTRO_PARTICLE_FADE_OUT_START = 0.82;
-const INTRO_PARTICLE_FADE_OUT_END = 0.965;
+const INTRO_SPLAT_REVEAL_START = 0.24;
+const INTRO_SPLAT_REVEAL_END = 0.9;
+const INTRO_PARTICLE_FADE_OUT_START = 0.22;
+const INTRO_PARTICLE_FADE_OUT_END = 0.88;
 const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
-const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.24;
+const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.14;
 const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
-const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 0.92;
+const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 1.08;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
@@ -1596,9 +1598,10 @@ const createParticleSystem = (splatMesh) => {
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        float pointScale = clamp(uCameraScale, 0.48, 1.12);
+        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛，避免入场粒子显得过粗。
+        float pointScale = clamp(uCameraScale, 0.14, 1.12);
         gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
-        float minPointSize = max(0.85, 1.2 * min(pointScale, 1.0));
+        float minPointSize = mix(0.35, 0.85, smoothstep(0.14, 0.6, pointScale));
         float maxPointSize = max(minPointSize, 18.0 * min(pointScale, 1.0));
         gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
@@ -2692,14 +2695,12 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         updateIntroParticleCameraScale();
 
         const pointT = smoothstep01(rawT / 0.24);
-        const morphT = smoothstep01((rawT - 0.12) / 0.60);
+        const morphT = smoothstep01(
+          (rawT - INTRO_SPLAT_REVEAL_START) / Math.max(INTRO_SPLAT_REVEAL_END - INTRO_SPLAT_REVEAL_START, 0.001)
+        );
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = morphT;
-        globalUniforms.uIntroSplatAlpha.value = THREE.MathUtils.clamp(
-          (rawT - INTRO_PARTICLE_FADE_IN_START) / Math.max(INTRO_PARTICLE_FADE_OUT_START - INTRO_PARTICLE_FADE_IN_START, 0.001),
-          0,
-          1,
-        );
+        globalUniforms.uIntroSplatAlpha.value = morphT;
         globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
@@ -2708,9 +2709,9 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         if (particleSystem && particleSystem.material) {
           const fadeOutT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_OUT_START, INTRO_PARTICLE_FADE_OUT_END);
           const fadeInT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_IN_START, 0.14);
-          particleSystem.material.opacity = THREE.MathUtils.clamp((1 - fadeOutT) * (0.25 + (1 - fadeInT) * 0.75), 0, 1);
-          particleSystem.visible = particleSystem.material.opacity > 0.02;
-          if (!particleSystemRevealDone && rawT >= INTRO_PARTICLE_FADE_OUT_START) {
+          particleSystem.material.opacity = THREE.MathUtils.clamp((1 - fadeOutT) * fadeInT, 0, 1);
+          particleSystem.visible = particleSystem.material.opacity > 0.01;
+          if (!particleSystemRevealDone && rawT >= INTRO_PARTICLE_FADE_OUT_END) {
             particleSystemRevealDone = true;
           }
         }
