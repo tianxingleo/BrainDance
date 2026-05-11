@@ -3469,7 +3469,11 @@ onMounted(() => {
     window.setModelListForTimePeeling = (list, currentId) => {
       console.log('[Flutter->WebGL] 收到模型列表:', list, '当前模型:', currentId);
       if (Array.isArray(list)) {
-        modelList.value = list;
+        // 兼容不同上游字段命名，确保预览图不会因为字段名变体而丢失。
+        modelList.value = list.map((model) => ({
+          ...model,
+          previewImg: model.previewImg || model.previewImage || model.preview_url || model.preview || '',
+        }));
         if (currentId) {
           activeModelId.value = currentId;
         } else if (list.length > 0 && !activeModelId.value) {

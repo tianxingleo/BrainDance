@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
               :class="{ 'bs-thumb--loaded': loadedThumbs[pose.image_url] }"
               @load="loadedThumbs[pose.image_url] = true"
               draggable="false"
-              loading="lazy"
+              loading="eager"
               decoding="async"
               fetchpriority="low"
             />
@@ -181,7 +181,7 @@ onBeforeUnmount(() => {
               :class="{ 'bs-thumb--loaded': loadedThumbs[model.previewImg] }"
               @load="loadedThumbs[model.previewImg] = true"
               draggable="false"
-              loading="lazy"
+              loading="eager"
               decoding="async"
               fetchpriority="low"
             />
