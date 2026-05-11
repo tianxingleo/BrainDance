@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/main.dart' show pageIndexProvider;
+import 'package:braindance/main.dart' show pageIndexProvider, pendingSubmitTitleProvider;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,6 +34,7 @@ class VideoSubmitPage extends ConsumerStatefulWidget {
 class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final TextEditingController nameController = TextEditingController();
   bool _isUploading = false;
+  bool _didPrefillTitle = false;
   double _uploadProgress = 0.0;
   int _uploadedBytes = 0;
   int _totalFileSize = 0;
@@ -180,6 +181,14 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_didPrefillTitle) {
+      _didPrefillTitle = true;
+      final pending = ref.read(pendingSubmitTitleProvider);
+      if (pending != null && pending.isNotEmpty) {
+        nameController.text = pending;
+        ref.read(pendingSubmitTitleProvider.notifier).state = null;
+      }
+    }
     return Scaffold(
       appBar: AppBar(title: Text(textLocalize('video_submit_title'))),
       body: Stack(

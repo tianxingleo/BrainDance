@@ -30,6 +30,7 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+final pendingSubmitTitleProvider = StateProvider<String?>((ref) => null);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(

@@ -37,6 +37,8 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
+const showTopMenu = ref(false);
+const topMenuRef = ref(null);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -1459,6 +1461,16 @@ const toggleCinematicPanel = () => {
   showCinematicPanel.value = !showCinematicPanel.value;
 };
 
+const toggleTopMenu = () => {
+  showTopMenu.value = !showTopMenu.value;
+};
+
+const onDocumentClickForMenu = (e) => {
+  if (!showTopMenu.value) return;
+  if (topMenuRef.value && topMenuRef.value.contains(e.target)) return;
+  showTopMenu.value = false;
+};
+
 const rebuildCinematicAtCurrentProgress = () => {
   const nextTrajectory = buildCinematicTrajectory();
   if (!nextTrajectory) return;
@@ -2011,6 +2023,7 @@ const getTouchDistance = (touchA, touchB) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (showTopMenu.value) showTopMenu.value = false;
   interruptCinematicPlayback();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
@@ -2245,6 +2258,7 @@ function onTimePeelingSelect(model) {
 }
 
 onMounted(() => {
+  document.addEventListener('click', onDocumentClickForMenu, true);
   if (containerRef.value) {
     checkProtocol();
 
@@ -2314,6 +2328,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(async () => {
+  document.removeEventListener('click', onDocumentClickForMenu, true);
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
@@ -2354,88 +2369,101 @@ onBeforeUnmount(async () => {
     />
 
     <div class="top-hud">
-      <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-        <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
-          class="search-input" />
-        <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
-      </div>
-
-      <div class="top-actions">
-        <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
-            @click="switchViewMode(VIEW_MODE.FREE)">
-            自由模式
-          </button>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
-            @click="switchViewMode(VIEW_MODE.ORBIT)">
-            Orbit 模式
-          </button>
+      <div class="top-hud-row">
+        <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
+            class="search-input" />
+          <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
         </div>
-        <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
-        </button>
-        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
-          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          <span class="cinematic-trigger-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path
-                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
-            </svg>
-          </span>
-          <span>运镜</span>
-        </button>
-        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-          <div class="cinematic-head">
-            <div>
-              <div class="eyebrow">Camera Move</div>
-              <div class="cinematic-title">自动运镜</div>
-            </div>
-            <div class="cinematic-head-actions">
-              <label class="cinematic-loop-toggle">
-                <input type="checkbox" v-model="cinematicLoop" />
-                <span>循环</span>
-              </label>
-              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
-                ×
+
+        <div class="top-menu-wrapper" ref="topMenuRef"
+          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <button class="top-menu-btn archive-btn archive-btn--ghost"
+            :class="{ active: showTopMenu }" @click="toggleTopMenu">
+            <span class="top-menu-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" fill="none"/>
+              </svg>
+            </span>
+          </button>
+
+          <div class="top-menu-dropdown archive-card" :class="{ open: showTopMenu }">
+            <div class="view-mode-switch">
+              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
+                @click="switchViewMode(VIEW_MODE.FREE)">
+                自由模式
+              </button>
+              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
+                @click="switchViewMode(VIEW_MODE.ORBIT)">
+                Orbit 模式
               </button>
             </div>
-          </div>
-          <div class="cinematic-actions">
-            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
-              {{ cinematicButtonLabel }}
+            <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings">
+              {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
             </button>
-            <button class="archive-btn archive-btn--ghost cinematic-secondary"
-              @click="stopCinematicPlayback()"
-              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
-              停止
+            <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
+              :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel">
+              <span class="cinematic-trigger-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
+                </svg>
+              </span>
+              <span>运镜</span>
             </button>
+            <div class="cinematic-panel" v-if="canPlayCinematic && showCinematicPanel">
+              <div class="cinematic-head">
+                <div>
+                  <div class="eyebrow">Camera Move</div>
+                  <div class="cinematic-title">自动运镜</div>
+                </div>
+                <div class="cinematic-head-actions">
+                  <label class="cinematic-loop-toggle">
+                    <input type="checkbox" v-model="cinematicLoop" />
+                    <span>循环</span>
+                  </label>
+                  <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div class="cinematic-actions">
+                <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
+                  {{ cinematicButtonLabel }}
+                </button>
+                <button class="archive-btn archive-btn--ghost cinematic-secondary"
+                  @click="stopCinematicPlayback()"
+                  :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
+                  停止
+                </button>
+              </div>
+              <div class="cinematic-progress-row">
+                <span>进度</span>
+                <span>{{ Math.round(cinematicProgress * 100) }}%</span>
+              </div>
+              <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
+                step="1" disabled />
+              <div class="cinematic-progress-row">
+                <span>速度</span>
+                <span>{{ cinematicSpeed.toFixed(2) }}x</span>
+              </div>
+              <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
+                @input="onCinematicSpeedChange" />
+              <div class="cinematic-progress-row">
+                <span>平滑</span>
+                <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
+              </div>
+              <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
+                step="0.05" @input="onCinematicStyleChange" />
+              <label class="cinematic-focus-toggle">
+                <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
+                <span>主体锁定</span>
+              </label>
+            </div>
           </div>
-          <div class="cinematic-progress-row">
-            <span>进度</span>
-            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
-          </div>
-          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
-            step="1" disabled />
-          <div class="cinematic-progress-row">
-            <span>速度</span>
-            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
-            @input="onCinematicSpeedChange" />
-          <div class="cinematic-progress-row">
-            <span>平滑</span>
-            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
-            step="0.05" @input="onCinematicStyleChange" />
-          <label class="cinematic-focus-toggle">
-            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
-            <span>主体锁定</span>
-          </label>
         </div>
+
         <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
     </div>
@@ -2677,8 +2705,8 @@ onBeforeUnmount(async () => {
   position: absolute;
   top: calc(var(--flutter-safe-top) + 56px);
   left: var(--flutter-safe-left);
-  right: auto;
-  width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
+  right: var(--flutter-safe-right);
+  width: auto;
   z-index: 120;
   display: flex;
   flex-direction: column;
@@ -2686,16 +2714,81 @@ onBeforeUnmount(async () => {
   gap: 12px;
 }
 
-.top-actions {
+.top-hud-row {
   display: flex;
-  width: auto;
-  max-width: 100%;
   align-items: center;
   gap: 8px;
+  width: 100%;
+}
+
+.top-menu-wrapper {
+  position: relative;
   flex: 0 0 auto;
-  align-self: flex-start;
-  justify-content: flex-start;
-  flex-wrap: wrap;
+}
+
+.top-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.top-menu-btn.active {
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+}
+
+.top-menu-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.top-menu-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.top-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 130;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.top-menu-dropdown.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.top-menu-dropdown .view-mode-switch {
+  width: 100%;
+  justify-content: center;
+}
+
+.top-menu-dropdown .cinematic-panel {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--card-border);
+  position: static;
+  border-radius: 0;
 }
 
 .view-mode-switch {
@@ -3202,17 +3295,23 @@ input[type='range'] {
 
   .top-hud {
     left: var(--flutter-safe-left);
-    right: auto;
-    width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
+    right: var(--flutter-safe-right);
+    width: auto;
     gap: 8px;
   }
 
-  .top-actions {
-    width: auto;
-    max-width: 100%;
-    align-self: flex-start;
-    justify-content: flex-start;
-    gap: 8px;
+  .top-hud-row {
+    gap: 6px;
+  }
+
+  .top-menu-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  }
+
+  .top-menu-dropdown {
+    min-width: 180px;
   }
 
   .view-mode-switch {

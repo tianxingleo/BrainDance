@@ -211,6 +211,7 @@ extension _RecallPageView on _RecallPageState {
                         _showModelActions(model, imageOnly: imageOnly);
                       },
                       onAddNewTask: (name) {
+                        ref.read(pendingSubmitTitleProvider.notifier).state = name;
                         ref.read(pageIndexProvider.notifier).state = 1;
                       },
                     ),

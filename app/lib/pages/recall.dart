@@ -24,7 +24,8 @@ import '../main.dart'
     show
         overviewStatsProvider,
         overviewLocalIndexingProvider,
-        pageIndexProvider;
+        pageIndexProvider,
+        pendingSubmitTitleProvider;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
 import '../services/local_rag_index.dart';
