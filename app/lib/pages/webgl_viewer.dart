@@ -434,6 +434,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         params['model'] = modelUrl;
       }
       params['target'] = '/targets/braindance-card.mind';
+      params['mode'] = 'marker-ar';
     } else {
       final payload = _buildViewerPayload();
       if (payload.isNotEmpty) {
@@ -528,7 +529,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           debugPrint('BrainDanceChannel: ${message.message}');
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            _sendModelToVue();
+            if (!_isMarkerArMode) {
+              _sendModelToVue();
+            }
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
           } else if (data['status'] == 'error') {
@@ -547,6 +550,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
+            if (_isMarkerArMode) {
+              if (mounted && !_isWebReady) {
+                setState(() => _isWebReady = true);
+              }
+              return;
+            }
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
@@ -580,6 +589,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendModelToVue() {
     if (!_isWebReady) return;
+    if (_isMarkerArMode) return;
     final payloadData = _buildViewerPayload();
     final targetUrl = payloadData['ply'];
 
