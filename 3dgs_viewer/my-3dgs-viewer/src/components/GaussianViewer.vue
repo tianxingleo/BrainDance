@@ -67,6 +67,11 @@ const CINEMATIC_MAX_KEYFRAMES = 18;
 const CINEMATIC_MIN_KEYFRAMES = 6;
 const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
 const ORBIT_RECENTER_DURATION = 1.5;
+const ORBIT_RADIUS_SMOOTHING = 0.22;
+const ORBIT_RADIUS_MIN_STEP = 0.02;
+const INTRO_PARTICLE_FADE_IN_START = 0.04;
+const INTRO_PARTICLE_FADE_OUT_START = 0.82;
+const INTRO_PARTICLE_FADE_OUT_END = 0.965;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
 const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
@@ -141,6 +146,7 @@ const searchAndFly = () => {
 
 let viewer;
 let particleSystem;
+let particleSystemRevealDone = false;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
@@ -1423,11 +1429,11 @@ const createParticleSystem = (splatMesh) => {
   // 2. 自适应粒子大小
   // 逻辑：模型越大，单个粒子在世界空间中应该越大才能被看见。
   // 系数 150.0 是经验值，表示将最大边长切分多少份。
-  let adaptiveSize = (maxDim / 95.0) * window.devicePixelRatio;
+  let adaptiveSize = (maxDim / 120.0) * window.devicePixelRatio;
   // 限制最小值，防止极小模型看不见
-  const minParticleSize = isMobileDevice() ? 1.8 : 2.4;
+  const minParticleSize = isMobileDevice() ? 0.9 : 1.2;
   if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
-  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 7.0 : 10.0);
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.0 : 5.4);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
@@ -1511,10 +1517,9 @@ const createParticleSystem = (splatMesh) => {
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        // 距离衰减 (20.0 是透视缩放因子，配合世界单位的 uSize 使用)
-        gl_PointSize = uSize * (44.0 / max(-mvPosition.z, 0.001));
-        if(gl_PointSize < 2.0) gl_PointSize = 2.0;
-        if(gl_PointSize > 32.0) gl_PointSize = 32.0;
+        gl_PointSize = uSize * (34.0 / max(-mvPosition.z, 0.001));
+        if(gl_PointSize < 1.2) gl_PointSize = 1.2;
+        if(gl_PointSize > 18.0) gl_PointSize = 18.0;
       }
     `,
     fragmentShader: `
@@ -1614,6 +1619,7 @@ const resetIntroUniforms = () => {
     if (viewer?.threeScene) viewer.threeScene.remove(particleSystem);
     particleSystem = null;
   }
+  particleSystemRevealDone = false;
 };
 
 const resetIntroAnimationVisuals = () => {
@@ -1626,6 +1632,7 @@ const resetIntroAnimationVisuals = () => {
     particleSystem.visible = true;
     if (particleSystem.material) particleSystem.material.opacity = 1;
   }
+  particleSystemRevealDone = false;
 };
 
 const finalizeIntroAnimation = () => {
@@ -1907,6 +1914,11 @@ const beginIntroAnimationToResolvedPose = () => {
     applyFocalLengthPx(targetCameraState.fl_y);
   } else {
     applyFocalLengthPx(DEFAULT_FOCAL_PX);
+  }
+
+  if (!targetPose || !targetCameraState) {
+    finalizeIntroAnimation();
+    return;
   }
 
   beginIntroAnimation(targetCameraState, targetPose, introStartState);
@@ -2592,15 +2604,24 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const morphT = smoothstep01((rawT - 0.12) / 0.60);
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = morphT;
-        globalUniforms.uIntroSplatAlpha.value = morphT;
+        globalUniforms.uIntroSplatAlpha.value = THREE.MathUtils.clamp(
+          (rawT - INTRO_PARTICLE_FADE_IN_START) / Math.max(INTRO_PARTICLE_FADE_OUT_START - INTRO_PARTICLE_FADE_IN_START, 0.001),
+          0,
+          1,
+        );
         globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
         if (splatMesh) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = THREE.MathUtils.clamp(1 - morphT, 0, 1);
-          particleSystem.visible = rawT < 0.96;
+          const fadeOutT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_OUT_START, INTRO_PARTICLE_FADE_OUT_END);
+          const fadeInT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_IN_START, 0.14);
+          particleSystem.material.opacity = THREE.MathUtils.clamp((1 - fadeOutT) * (0.25 + (1 - fadeInT) * 0.75), 0, 1);
+          particleSystem.visible = particleSystem.material.opacity > 0.02;
+          if (!particleSystemRevealDone && rawT >= INTRO_PARTICLE_FADE_OUT_START) {
+            particleSystemRevealDone = true;
+          }
         }
 
         if (rawT >= 1) {
@@ -2753,8 +2774,11 @@ const stepInteractionInertia = (now) => {
 
   if (interactionState.zoomInertiaActive) {
     if (Math.abs(interactionState.orbitZoomVelocity) > 0.0002) {
-      const zoomStep = THREE.MathUtils.clamp(interactionState.orbitZoomVelocity * dt * 5.5, -0.18, 0.18);
-      orbitState.targetRadius *= Math.exp(zoomStep);
+      const zoomStep = THREE.MathUtils.clamp(interactionState.orbitZoomVelocity * dt * 4.1, -0.12, 0.12);
+      orbitState.targetRadius = Math.max(
+        getOrbitMinRadius(),
+        orbitState.targetRadius * Math.exp(zoomStep),
+      );
       needsNextFrame = true;
     } else {
       interactionState.zoomInertiaActive = false;
@@ -2764,26 +2788,27 @@ const stepInteractionInertia = (now) => {
   if (centerModeBounds && !interactionState.zoomInertiaActive) {
     const boundedTargetRadius = clampOrbitRadius(orbitState.targetRadius);
     if (Math.abs(boundedTargetRadius - orbitState.targetRadius) > 1e-5) {
-      const spring = 1 - Math.exp(-dt * 8);
+      const spring = 1 - Math.exp(-dt * 4.2);
       orbitState.targetRadius = THREE.MathUtils.lerp(orbitState.targetRadius, boundedTargetRadius, spring);
       needsNextFrame = true;
     }
   }
 
   if (isOrbitMode.value) {
-    const alpha = 1 - Math.exp(-dt * 18);
+    const alpha = 1 - Math.exp(-dt * 12);
+    const targetRadius = clampOrbitRadius(orbitState.targetRadius);
     orbitState.yaw = THREE.MathUtils.lerp(orbitState.yaw, orbitState.targetYaw, alpha);
     orbitState.pitch = THREE.MathUtils.lerp(orbitState.pitch, orbitState.targetPitch, alpha);
     orbitState.radius = THREE.MathUtils.lerp(
       orbitState.radius,
-      clampOrbitRadius(orbitState.targetRadius),
-      alpha,
+      targetRadius,
+      THREE.MathUtils.clamp(alpha * ORBIT_RADIUS_SMOOTHING, ORBIT_RADIUS_MIN_STEP, 0.45),
     );
     applyOrbitCamera();
     if (
       Math.abs(orbitState.yaw - orbitState.targetYaw) > 0.00001 ||
       Math.abs(orbitState.pitch - orbitState.targetPitch) > 0.00001 ||
-      Math.abs(orbitState.radius - clampOrbitRadius(orbitState.targetRadius)) > 0.0002
+      Math.abs(orbitState.radius - targetRadius) > 0.0002
     ) {
       needsNextFrame = true;
     }
@@ -2844,7 +2869,7 @@ const orbitZoom = (zoomFactor) => {
   if (isOrbitRecenterFlightActive) return;
   interruptCameraFlightFromUserInput();
   const delta = -Math.log(zoomFactor);
-  interactionState.orbitZoomVelocity += delta * 3.2;
+  interactionState.orbitZoomVelocity += delta * 2.0;
   interactionState.zoomInertiaActive = true;
   scheduleInteractionFrame();
 };

@@ -274,9 +274,9 @@ export function buildCenterModeBounds(
       up: fallbackUp.clone(),
       basisX: new THREE.Vector3(1, 0, 0),
       basisY: new THREE.Vector3(0, 0, -1),
-      radiusMin: Math.max(sceneRadius * 0.12, 0.08),
-      radiusMax: Math.max(sceneRadius * 4, 1.2),
-      radiusElastic: Math.max(sceneRadius * 0.08, 0.08),
+      radiusMin: Math.max(sceneRadius * 0.06, 0.05),
+      radiusMax: Math.max(sceneRadius * 5.5, 1.6),
+      radiusElastic: Math.max(sceneRadius * 0.12, 0.12),
       yawIntervals: [],
       yawElastic: THREE.MathUtils.degToRad(16),
       pitchMin: THREE.MathUtils.degToRad(-82),
@@ -349,14 +349,17 @@ export function buildCenterModeBounds(
   const useOrbitAngles = topology === 'full_orbit' || topology === 'semi_orbit';
   const useForwardAngles = topology === 'panorama_anchor';
   const yawSource = useOrbitAngles ? orbitYawAngles : useForwardAngles ? forwardYawAngles : orbitYawAngles;
+  const yawSourceForClamp = topology === 'semi_orbit'
+    ? yawSource.map((angle) => wrapAngle(angle + Math.PI))
+    : yawSource;
   const pitchSource = useOrbitAngles ? orbitPitchAngles : useForwardAngles ? forwardPitchAngles : forwardPitchAngles;
 
   const yawIntervals = buildCircularInterval(
-    yawSource,
-    THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : topology === 'semi_orbit' ? 14 : 22),
+    yawSourceForClamp,
+    THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 16 : 22),
   );
 
-  const pitchMarginDeg = topology === 'full_orbit' ? 8 : topology === 'semi_orbit' ? 12 : 16;
+  const pitchMarginDeg = topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 14 : 16;
   const pitchMin = THREE.MathUtils.clamp(
     percentile(pitchSource, 0.05) - THREE.MathUtils.degToRad(pitchMarginDeg),
     -Math.PI / 2 + 0.03,
@@ -368,17 +371,17 @@ export function buildCenterModeBounds(
     Math.PI / 2 - 0.03,
   );
 
-  const radiusLowerPct = topology === 'full_orbit' ? 0.03 : topology === 'semi_orbit' ? 0.05 : 0.08;
-  const radiusUpperPct = topology === 'full_orbit' ? 0.97 : topology === 'semi_orbit' ? 0.95 : 0.92;
-  const lowerPadding = Math.max(sceneRadius * 0.05, radiusStd * 0.35, 0.05);
-  const upperPadding = Math.max(sceneRadius * 0.1, radiusStd * 0.55, 0.08);
+  const radiusLowerPct = topology === 'full_orbit' ? 0.02 : topology === 'semi_orbit' ? 0.04 : 0.06;
+  const radiusUpperPct = topology === 'full_orbit' ? 0.98 : topology === 'semi_orbit' ? 0.96 : 0.94;
+  const lowerPadding = Math.max(sceneRadius * 0.03, radiusStd * 0.22, 0.03);
+  const upperPadding = Math.max(sceneRadius * 0.08, radiusStd * 0.42, 0.06);
   const radiusMin = Math.max(
     percentile(radii, radiusLowerPct) - lowerPadding,
-    sceneRadius * 0.05,
+    sceneRadius * 0.03,
   );
   const radiusMax = Math.max(
     percentile(radii, radiusUpperPct) + upperPadding,
-    radiusMin + Math.max(sceneRadius * 0.18, 0.22),
+    radiusMin + Math.max(sceneRadius * 0.14, 0.18),
   );
   const radiusSpan = Math.max(radiusMax - radiusMin, 0.12);
 
@@ -390,12 +393,12 @@ export function buildCenterModeBounds(
     basisY: orbitFrame.basisY,
     radiusMin,
     radiusMax,
-    radiusElastic: Math.max(radiusSpan * 0.55, sceneRadius * 0.12, radiusStd * 0.3, 0.14),
+    radiusElastic: Math.max(radiusSpan * 0.38, sceneRadius * 0.08, radiusStd * 0.2, 0.08),
     yawIntervals,
-    yawElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : 12),
+    yawElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 10 : 14),
     pitchMin,
     pitchMax,
-    pitchElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 6 : 10),
+    pitchElastic: THREE.MathUtils.degToRad(topology === 'full_orbit' ? 8 : 12),
   };
 }
 
