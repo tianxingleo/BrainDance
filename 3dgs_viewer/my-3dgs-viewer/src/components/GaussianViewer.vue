@@ -2430,8 +2430,15 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   sceneMetadata.value = {};
 
   // 更新 URL（如果有新传入的值）
+  const hasExplicitModelSwitch = Boolean(plyUrl) && plyUrl !== currentPlyUrl;
   if (plyUrl) currentPlyUrl = plyUrl;
-  if (posesUrl) currentPosesUrl = posesUrl;
+  if (posesUrl !== undefined && posesUrl !== null) {
+    currentPosesUrl = posesUrl;
+  } else if (hasExplicitModelSwitch) {
+    // 单图 SHARP 这类产物如果没有单独的镜头 JSON，就不要复用上一场景的位姿。
+    // 否则会把旧场景的相机飞行逻辑套到当前模型上，表现为进度到 100% 但画面始终看不到模型。
+    currentPosesUrl = '';
+  }
 
   try {
     if (viewer) {
