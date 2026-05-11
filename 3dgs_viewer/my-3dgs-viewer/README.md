@@ -73,6 +73,8 @@ npm run preview
 
 如果 Flutter 侧没有传入 `poses`，viewer 会按“单模型资源”处理，不再自动补一个 `webgl_poses.json`。
 
+如果传了 `poses` 但解析不出有效的镜头数组，viewer 也会直接把它当成无位姿场景，不会再把原始 JSON 继续喂给相机逻辑。
+
 ## 3DGS 渲染性能策略
 
 查看器会在传入 `.ply` 时优先探测同名 `.ksplat` 和 `.splat`，存在则优先加载优化格式，失败后自动回退原始 URL。生产流水线建议同时保留原始 `.ply` 归档，并额外产出 Web 优先的 `.ksplat`。
