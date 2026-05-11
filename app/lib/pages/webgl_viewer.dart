@@ -415,6 +415,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     };
   }
 
+  bool get _hasPosesResource =>
+      widget.posesUrl != null && widget.posesUrl!.isNotEmpty;
+
   Map<String, String> _buildViewerQueryParameters({required bool cacheBust}) {
     final params = <String, String>{
       'mode': _isMarkerArMode ? 'marker-ar' : 'viewer',
@@ -615,7 +618,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           'id': widget.sceneId,
           'name': widget.sceneId,
           'ply': plyUrl,
-          'poses': widget.posesUrl ?? '',
+          if (_hasPosesResource) 'poses': widget.posesUrl,
           'previewImg': '',
           'createdAt': '',
         },
