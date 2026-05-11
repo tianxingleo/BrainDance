@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ArControlPanel from './ArControlPanel.vue'
 import { applyArTransform, cloneArTransform } from '../ar/arTransform'
-import { parseArParams } from '../ar/parseArParams'
+import { parseArParams } from '../ar/parseArParams.ts'
 import type { ArTransform } from '../types/ar'
 
 type ThreeModule = typeof import('three')
@@ -106,7 +106,7 @@ const buildMainBackConstraints = (constraints: MediaStreamConstraints, deviceId?
         ...advanced,
       ],
     },
-  } as MediaStreamConstraints
+  } as unknown as MediaStreamConstraints
 }
 
 const getVideoInputDevices = async () => {
@@ -340,6 +340,32 @@ const getVideoDiagnostics = () => {
   }
 }
 
+const ensureCameraVideoPlayback = async () => {
+  const video = containerRef.value?.querySelector('video') as HTMLVideoElement | null
+  if (!video) return
+
+  // MindAR 会在内部创建摄像头 video，但 WebView 里经常会停在 paused 状态。
+  // 这里显式补齐自动播放属性，并主动触发 play，避免“有权限、有流、但黑屏”的情况。
+  video.autoplay = true
+  video.playsInline = true
+  video.muted = true
+  video.setAttribute('autoplay', 'true')
+  video.setAttribute('playsinline', 'true')
+  video.setAttribute('muted', 'true')
+
+  if (video.paused) {
+    try {
+      await video.play()
+    } catch (error) {
+      postBridgeMessage({
+        status: 'info',
+        msg: 'Marker AR video play retry failed',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+}
+
 const normalizeMindArLayers = () => {
   const container = containerRef.value
   if (!container) return
@@ -530,6 +556,7 @@ onMounted(async () => {
     status.value = '请允许摄像头权限，并将纸板放入画面'
     postBridgeMessage({ status: 'info', msg: 'Marker AR starting camera' })
     normalizeMindArLayers()
+    await ensureCameraVideoPlayback()
     status.value = '请将纸板放入画面'
     postBridgeMessage({
       status: 'ready',
@@ -550,6 +577,7 @@ onMounted(async () => {
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return
       normalizeMindArLayers()
+      void ensureCameraVideoPlayback()
       renderer.render(scene, camera)
     })
   } catch (error) {
