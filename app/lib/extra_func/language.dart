@@ -422,10 +422,7 @@ enum Language {
       "recall_share_community": "分享到社区",
       // Streaming capture
       "stream_progress": "已拍摄 %d 张",
-      "stream_finalizing": "正在完成拍摄...",
       "stream_success": "流式拍摄完成，任务已创建",
-      "stream_fail_zip": "帧压缩失败",
-      "stream_fail_upload": "压缩包上传失败",
       "stream_fail_task": "任务创建失败",
     },
   ),
@@ -905,10 +902,7 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "recall_share_community": "Share to Community",
       // Streaming capture
       "stream_progress": "%d frames captured",
-      "stream_finalizing": "Finalizing capture...",
       "stream_success": "Streaming capture complete, task created",
-      "stream_fail_zip": "Frame compression failed",
-      "stream_fail_upload": "Archive upload failed",
       "stream_fail_task": "Task creation failed",
     },
   );

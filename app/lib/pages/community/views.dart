@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 
 // ============================================================
-// Explore Tab — 地图探索
+// Explore Tab
 // ============================================================
 
 class CommunityExploreView extends StatelessWidget {
@@ -39,9 +39,7 @@ class CommunityExploreView extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
 
-    if (posts.isEmpty) {
-      return const _CommunityEmptyState();
-    }
+    if (posts.isEmpty) return const _CommunityEmptyState();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
@@ -228,9 +226,8 @@ class CommunityExploreView extends StatelessWidget {
                               ? const Color(0xFF2E7CF6)
                               : (isDark
                                   ? Colors.white.withValues(alpha: 0.06)
-                                  : BDDesign.colorMutedBlue.withValues(
-                                      alpha: 0.08,
-                                    )),
+                                  : BDDesign.colorMutedBlue
+                                      .withValues(alpha: 0.08)),
                         ),
                       ),
                       child: Row(
@@ -246,26 +243,20 @@ class CommunityExploreView extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  post.placeName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
+                                Text(post.placeName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: textColor,
+                                        fontWeight: FontWeight.w700)),
                                 const SizedBox(height: 6),
-                                Text(
-                                  post.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color:
-                                        textColor.withValues(alpha: 0.86),
-                                    height: 1.25,
-                                  ),
-                                ),
+                                Text(post.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: textColor
+                                            .withValues(alpha: 0.86),
+                                        height: 1.25)),
                                 const Spacer(),
                                 BDStatusPill(
                                   label: post.modelName,
@@ -292,26 +283,18 @@ class CommunityExploreView extends StatelessWidget {
 }
 
 // ============================================================
-// Discover Tab — 标签筛选 + 模型卡片列表
+// Discover Tab — 双列网格 + 标签筛选
 // ============================================================
 
 class CommunityDiscoverView extends StatelessWidget {
   final List<CommunityPost> posts;
   final Set<String> selectedTags;
   final ValueChanged<String> onToggleTag;
-  final ValueChanged<CommunityPost> onOpenViewer;
+  final ValueChanged<CommunityPost> onTapPost;
 
   static const presetTags = [
-    '街景',
-    '建筑',
-    '自然',
-    '室内',
-    '夜景',
-    '人物',
-    '美食',
-    '旅行',
-    '城市',
-    '水景',
+    '街景', '建筑', '自然', '室内', '夜景',
+    '人物', '美食', '旅行', '城市', '水景',
   ];
 
   const CommunityDiscoverView({
@@ -319,7 +302,7 @@ class CommunityDiscoverView extends StatelessWidget {
     required this.posts,
     required this.selectedTags,
     required this.onToggleTag,
-    required this.onOpenViewer,
+    required this.onTapPost,
   });
 
   @override
@@ -344,10 +327,9 @@ class CommunityDiscoverView extends StatelessWidget {
                   Text(
                     textLocalize('community_discover_filter'),
                     style: TextStyle(
-                      color: textColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -368,9 +350,7 @@ class CommunityDiscoverView extends StatelessWidget {
                       duration: BDMotion.durationFast,
                       curve: BDMotion.curveFluid,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
+                          horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
                         color: selected
                             ? const Color(0xFF2E7CF6)
@@ -405,15 +385,21 @@ class CommunityDiscoverView extends StatelessWidget {
         Expanded(
           child: posts.isEmpty
               ? const _CommunityEmptyState()
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 104),
+              : GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 0.72,
+                  ),
                   itemCount: posts.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final post = posts[index];
-                    return _CommunityDiscoverCard(
+                    return _DiscoverCard(
                       post: post,
-                      onOpenViewer: () => onOpenViewer(post),
+                      onTap: () => onTapPost(post),
                     );
                   },
                 ),
@@ -423,14 +409,11 @@ class CommunityDiscoverView extends StatelessWidget {
   }
 }
 
-class _CommunityDiscoverCard extends StatelessWidget {
+class _DiscoverCard extends StatelessWidget {
   final CommunityPost post;
-  final VoidCallback onOpenViewer;
+  final VoidCallback onTap;
 
-  const _CommunityDiscoverCard({
-    required this.post,
-    required this.onOpenViewer,
-  });
+  const _DiscoverCard({required this.post, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -441,99 +424,57 @@ class _CommunityDiscoverCard extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.55)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.72);
 
-    return BDPanelCard(
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _CommunityThumbnail(
-            imageUrl: post.coverUrl,
-            height: 96,
-            width: 96,
-            icon: Icons.terrain_rounded,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  post.title,
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${post.authorName} · ${post.placeName}',
-                  style: TextStyle(color: hintColor, fontSize: 12.5),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  post.caption,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: textColor.withValues(alpha: 0.78),
-                    height: 1.35,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 4,
+    return GestureDetector(
+      onTap: onTap,
+      child: BDPanelCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Thumbnail
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22)),
+              child: _CommunityThumbnail(
+                imageUrl: post.coverUrl,
+                height: 140,
+                width: double.infinity,
+                icon: Icons.terrain_rounded,
+              ),
+            ),
+            // Title + author
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    ...post.tags.take(4).map(
-                          (tag) => _TagChip(label: tag, isDark: isDark),
-                        ),
-                    TextButton.icon(
-                      onPressed: onOpenViewer,
-                      icon: const Icon(
-                        Icons.play_circle_fill_rounded,
-                        size: 18,
+                    Text(
+                      post.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
                       ),
-                      label: Text(
-                        textLocalize('community_enter_memory'),
-                        style: const TextStyle(fontSize: 13),
-                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      post.authorName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: hintColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TagChip extends StatelessWidget {
-  final String label;
-  final bool isDark;
-
-  const _TagChip({required this.label, required this.isDark});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.06)
-            : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: BDDesign.colorMutedBlue,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+          ],
         ),
       ),
     );
@@ -541,12 +482,13 @@ class _TagChip extends StatelessWidget {
 }
 
 // ============================================================
-// Submit Tab — 发布表单
+// Submit Tab — 多模型选择 + 草稿 + 发布
 // ============================================================
 
 class CommunitySubmitView extends StatelessWidget {
-  final CommunityModelOption? selectedModel;
-  final VoidCallback onPickModel;
+  final List<CommunityModelOption> shareableModels;
+  final List<CommunityModelOption> selectedModels;
+  final ValueChanged<CommunityModelOption> onToggleModel;
   final TextEditingController titleController;
   final TextEditingController captionController;
   final TextEditingController placeController;
@@ -554,6 +496,7 @@ class CommunitySubmitView extends StatelessWidget {
   final TextEditingController lngController;
   final bool isSubmitting;
   final VoidCallback onSubmit;
+  final VoidCallback onSaveDraft;
 
   static const _presets = <_LocationPreset>[
     _LocationPreset('西湖', 30.243, 120.150),
@@ -565,8 +508,9 @@ class CommunitySubmitView extends StatelessWidget {
 
   const CommunitySubmitView({
     super.key,
-    required this.selectedModel,
-    required this.onPickModel,
+    required this.shareableModels,
+    required this.selectedModels,
+    required this.onToggleModel,
     required this.titleController,
     required this.captionController,
     required this.placeController,
@@ -574,6 +518,7 @@ class CommunitySubmitView extends StatelessWidget {
     required this.lngController,
     required this.isSubmitting,
     required this.onSubmit,
+    required this.onSaveDraft,
   });
 
   @override
@@ -597,72 +542,90 @@ class CommunitySubmitView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 模型选择器
+          // 模型选择区
           Text(
             textLocalize('community_select_model_label'),
             style: TextStyle(
-              color: textColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
+                color: textColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
-          GestureDetector(
-            onTap: onPickModel,
-            child: BDPanelCard(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? AppTheme.darkSurfaceElevated
-                          : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-                      borderRadius: BDDesign.radiusSmall,
-                    ),
-                    child: Icon(
-                      selectedModel != null
-                          ? Icons.view_in_ar_rounded
-                          : Icons.add_photo_alternate_rounded,
-                      color: hintColor,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          selectedModel?.sceneId ??
-                              textLocalize('community_select_model_hint'),
-                          style: TextStyle(
-                            color:
-                                selectedModel != null ? textColor : hintColor,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
+          if (shareableModels.isEmpty)
+            BDPanelCard(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                '还没有可分享的模型，请先在创作页面生成记忆模型。',
+                style: TextStyle(color: hintColor, height: 1.4),
+              ),
+            )
+          else
+            BDPanelCard(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                children: shareableModels.map((model) {
+                  final isSelected =
+                      selectedModels.any((m) => m.id == model.id);
+                  return GestureDetector(
+                    onTap: () => onToggleModel(model),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      margin: const EdgeInsets.only(bottom: 4),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFF2E7CF6)
+                                .withValues(alpha: 0.10)
+                            : Colors.transparent,
+                        borderRadius: BDDesign.radiusLarge,
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFF2E7CF6)
+                              : Colors.transparent,
                         ),
-                        if (selectedModel != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            selectedModel!.description,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                TextStyle(color: hintColor, fontSize: 12),
+                      ),
+                      child: Row(
+                        children: [
+                          _CommunityThumbnail(
+                            imageUrl: model.coverUrl,
+                            height: 40,
+                            width: 40,
+                            icon: Icons.view_in_ar_rounded,
                           ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(model.sceneId,
+                                    style: TextStyle(
+                                        color: textColor,
+                                        fontWeight: FontWeight.w600)),
+                                if (model.description.isNotEmpty)
+                                  Text(model.description,
+                                      maxLines: 1,
+                                      overflow:
+                                          TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: hintColor,
+                                          fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          if (isSelected)
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF2E7CF6),
+                              size: 22,
+                            ),
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  Icon(Icons.chevron_right_rounded, color: hintColor),
-                ],
+                  );
+                }).toList(),
               ),
             ),
-          ),
           const SizedBox(height: 16),
           // 标题
           TextField(
@@ -688,13 +651,11 @@ class CommunitySubmitView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          // 快速地点预设
+          // 地点预设
           Text(
             textLocalize('community_location_preset'),
             style: TextStyle(
-              color: textColor,
-              fontWeight: FontWeight.w600,
-            ),
+                color: textColor, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -732,9 +693,7 @@ class CommunitySubmitView extends StatelessWidget {
                 child: TextField(
                   controller: latController,
                   keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
+                      decimal: true, signed: true),
                   decoration: InputDecoration(
                     labelText: textLocalize('community_input_lat'),
                     filled: true,
@@ -748,9 +707,7 @@ class CommunitySubmitView extends StatelessWidget {
                 child: TextField(
                   controller: lngController,
                   keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
+                      decimal: true, signed: true),
                   decoration: InputDecoration(
                     labelText: textLocalize('community_input_lng'),
                     filled: true,
@@ -762,239 +719,55 @@ class CommunitySubmitView extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          // 发布按钮
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed:
-                  (selectedModel == null || isSubmitting) ? null : onSubmit,
-              icon: isSubmitting
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send_rounded),
-              label: Text(
-                isSubmitting
-                    ? textLocalize('community_publishing')
-                    : textLocalize('community_publish'),
-              ),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BDDesign.radiusLarge,
+          // 存草稿 + 发布按钮
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onSaveDraft,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('存草稿'),
+                  style: OutlinedButton.styleFrom(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BDDesign.radiusLarge,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed: (selectedModels.isEmpty || isSubmitting)
+                      ? null
+                      : onSubmit,
+                  icon: isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_rounded),
+                  label: Text(
+                    isSubmitting
+                        ? textLocalize('community_publishing')
+                        : textLocalize('community_publish'),
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BDDesign.radiusLarge,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ============================================================
-// Model Picker Bottom Sheet
-// ============================================================
-
-class CommunityModelPickerSheet extends StatefulWidget {
-  final List<CommunityModelOption> models;
-  final CommunityModelOption? selectedModel;
-
-  const CommunityModelPickerSheet({
-    super.key,
-    required this.models,
-    this.selectedModel,
-  });
-
-  @override
-  State<CommunityModelPickerSheet> createState() =>
-      _CommunityModelPickerSheetState();
-}
-
-class _CommunityModelPickerSheetState
-    extends State<CommunityModelPickerSheet> {
-  String _query = '';
-  final TextEditingController _searchController = TextEditingController();
-
-  List<CommunityModelOption> get _filtered {
-    if (_query.isEmpty) return widget.models;
-    final q = _query.toLowerCase();
-    return widget.models
-        .where((m) =>
-            m.sceneId.toLowerCase().contains(q) ||
-            m.description.toLowerCase().contains(q))
-        .toList();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-    final models = _filtered;
-
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.7,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
-        builder: (context, scrollController) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-            child: BDPanelCard(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-              child: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            textLocalize('community_model_picker_title'),
-                            style: TextStyle(
-                              color: textColor,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon:
-                              Icon(Icons.close_rounded, color: textColor),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _searchController,
-                      onChanged: (v) => setState(() => _query = v),
-                      decoration: InputDecoration(
-                        hintText: textLocalize('community_search_model'),
-                        prefixIcon: const Icon(Icons.search_rounded),
-                        filled: true,
-                        fillColor: isDark
-                            ? AppTheme.darkSurfaceElevated
-                            : const Color(0xFFF7FAFD),
-                        border: OutlineInputBorder(
-                          borderRadius: BDDesign.radiusLarge,
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Flexible(
-                      child: models.isEmpty
-                          ? Center(
-                              child: Text(
-                                textLocalize('community_no_model_found'),
-                                style: TextStyle(color: hintColor),
-                              ),
-                            )
-                          : ListView.separated(
-                              controller: scrollController,
-                              shrinkWrap: true,
-                              itemCount: models.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 8),
-                              itemBuilder: (context, index) {
-                                final model = models[index];
-                                final isSelected =
-                                    widget.selectedModel?.id == model.id;
-                                return InkWell(
-                                  onTap: () =>
-                                      Navigator.pop(context, model),
-                                  borderRadius: BDDesign.radiusLarge,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? const Color(0xFF2E7CF6)
-                                              .withValues(alpha: 0.12)
-                                          : Colors.transparent,
-                                      borderRadius: BDDesign.radiusLarge,
-                                      border: Border.all(
-                                        color: isSelected
-                                            ? const Color(0xFF2E7CF6)
-                                            : (isDark
-                                                ? Colors.white
-                                                    .withValues(alpha: 0.06)
-                                                : Colors.transparent),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        _CommunityThumbnail(
-                                          imageUrl: model.coverUrl,
-                                          height: 44,
-                                          width: 44,
-                                          icon: Icons.view_in_ar_rounded,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                model.sceneId,
-                                                style: TextStyle(
-                                                  color: textColor,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                              if (model.description
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  model.description,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: hintColor,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                        if (isSelected)
-                                          const Icon(
-                                            Icons.check_circle_rounded,
-                                            color: Color(0xFF2E7CF6),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -1044,28 +817,21 @@ class CommunityLocationHubRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  post.title,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                Text(post.title,
+                    style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
-                Text(
-                  '${post.authorName} · ${post.modelName}',
-                  style: TextStyle(color: hintColor, fontSize: 12.5),
-                ),
+                Text('${post.authorName} · ${post.modelName}',
+                    style: TextStyle(
+                        color: hintColor, fontSize: 12.5)),
                 const SizedBox(height: 8),
-                Text(
-                  post.caption,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: textColor.withValues(alpha: 0.82),
-                    height: 1.3,
-                  ),
-                ),
+                Text(post.caption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: textColor.withValues(alpha: 0.82),
+                        height: 1.3)),
               ],
             ),
           ),
@@ -1097,38 +863,30 @@ class CommunityMetricCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.58)
-                  : BDDesign.colorMutedBlue,
-              fontWeight: FontWeight.w700,
-              fontSize: 12.5,
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.58)
+                      : BDDesign.colorMutedBlue,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5)),
           const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: isDark
-                  ? BDDesign.colorPaperWhite
-                  : BDDesign.colorInkBlack,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          Text(value,
+              style: TextStyle(
+                  color: isDark
+                      ? BDDesign.colorPaperWhite
+                      : BDDesign.colorInkBlack,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
-          Text(
-            hint,
-            style: TextStyle(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.54)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.86),
-              height: 1.35,
-              fontSize: 12.5,
-            ),
-          ),
+          Text(hint,
+              style: TextStyle(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.54)
+                      : BDDesign.colorMutedBlue
+                          .withValues(alpha: 0.86),
+                  height: 1.35,
+                  fontSize: 12.5)),
         ],
       ),
     );
@@ -1176,35 +934,29 @@ class _SelectedLocationCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      post.placeName,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    Text(post.placeName,
+                        style: TextStyle(
+                            color: textColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700)),
                     const SizedBox(height: 4),
                     Text(
-                      '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
-                      style: TextStyle(color: hintColor, fontSize: 12.5),
-                    ),
+                        '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
+                        style: TextStyle(
+                            color: hintColor, fontSize: 12.5)),
                     const SizedBox(height: 10),
-                    Text(
-                      post.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: textColor,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                    ),
+                    Text(post.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.w700,
+                            height: 1.2)),
                     const SizedBox(height: 8),
                     Text(
-                      '这一地点已聚合 $relatedCount 条记忆，优先展示当前最热的 3D 模型。',
-                      style: TextStyle(color: hintColor, height: 1.35),
-                    ),
+                        '这一地点已聚合 $relatedCount 条记忆，优先展示当前最热的 3D 模型。',
+                        style: TextStyle(
+                            color: hintColor, height: 1.35)),
                   ],
                 ),
               ),
@@ -1217,7 +969,8 @@ class _SelectedLocationCard extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onOpenViewer,
                   icon: const Icon(Icons.travel_explore_rounded),
-                  label: Text(textLocalize('community_open_model')),
+                  label: Text(
+                      textLocalize('community_open_model')),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1225,7 +978,8 @@ class _SelectedLocationCard extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onOpenLocationHub,
                   icon: const Icon(Icons.map_rounded),
-                  label: Text(textLocalize('community_view_location')),
+                  label: Text(
+                      textLocalize('community_view_location')),
                 ),
               ),
             ],
@@ -1334,7 +1088,8 @@ class _CommunityEmptyState extends StatelessWidget {
                 style: TextStyle(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.62)
-                      : BDDesign.colorMutedBlue.withValues(alpha: 0.88),
+                      : BDDesign.colorMutedBlue
+                          .withValues(alpha: 0.88),
                   height: 1.4,
                 ),
               ),
@@ -1371,7 +1126,8 @@ class _WorldMapPainter extends CustomPainter {
 
     void drawLand(List<Offset> points) {
       final path = Path()
-        ..moveTo(points.first.dx * size.width, points.first.dy * size.height);
+        ..moveTo(
+            points.first.dx * size.width, points.first.dy * size.height);
       for (final point in points.skip(1)) {
         path.lineTo(point.dx * size.width, point.dy * size.height);
       }

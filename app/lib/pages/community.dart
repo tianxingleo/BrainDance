@@ -1,6 +1,7 @@
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/pages/community/detail.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
@@ -30,8 +31,8 @@ class _CommunityPageState extends State<CommunityPage>
   // Discover tab
   final Set<String> _selectedTags = {};
 
-  // Submit tab
-  CommunityModelOption? _selectedSubmitModel;
+  // Submit tab — multi-model
+  final List<CommunityModelOption> _selectedSubmitModels = [];
   late final TextEditingController _submitTitleController;
   late final TextEditingController _submitCaptionController;
   late final TextEditingController _submitPlaceController;
@@ -50,6 +51,7 @@ class _CommunityPageState extends State<CommunityPage>
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
     _loadCommunity();
+    _loadDraft();
   }
 
   void _onTabChanged() {
@@ -82,6 +84,49 @@ class _CommunityPageState extends State<CommunityPage>
           posts.isEmpty ? 0 : _selectedMapIndex.clamp(0, posts.length - 1);
       _isLoading = false;
     });
+  }
+
+  Future<void> _loadDraft() async {
+    final draft = await _repository.loadDraft();
+    if (!mounted || draft.isEmpty) return;
+    setState(() {
+      _submitTitleController.text = draft.title;
+      _submitCaptionController.text = draft.caption;
+      _submitPlaceController.text = draft.placeName;
+      _submitLatController.text =
+          draft.latitude != 0 ? draft.latitude.toStringAsFixed(3) : '';
+      _submitLngController.text =
+          draft.longitude != 0 ? draft.longitude.toStringAsFixed(3) : '';
+      _selectedSubmitModels.clear();
+      for (final mid in draft.modelIds) {
+        final model = _shareableModels.where((m) => m.id == mid);
+        if (model.isNotEmpty) _selectedSubmitModels.add(model.first);
+      }
+    });
+  }
+
+  void _openDetail(CommunityPost post) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        transitionDuration: BDMotion.durationNormal,
+        reverseTransitionDuration: BDMotion.durationNormal,
+        opaque: true,
+        pageBuilder: (_, __, ___) => CommunityDetailPage(post: post),
+        transitionsBuilder: (_, animation, __, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                  parent: animation, curve: Curves.easeInOutCubic),
+            ),
+            child: child,
+          );
+        },
+      ),
+    );
   }
 
   void _openViewer(CommunityPost post) {
@@ -126,29 +171,23 @@ class _CommunityPageState extends State<CommunityPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              seedPost.placeName,
-                              style: TextStyle(
-                                color: textColor,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+                            Text(seedPost.placeName,
+                                style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700)),
                             const SizedBox(height: 6),
                             Text(
-                              '这里收集了 ${peers.length} 个来自不同用户的空间记忆，点进任何一个都可以直接进入 3D 模型。',
-                              style: TextStyle(
-                                color: hintColor,
-                                height: 1.4,
-                              ),
-                            ),
+                                '这里收集了 ${peers.length} 个来自不同用户的空间记忆。',
+                                style: TextStyle(
+                                    color: hintColor, height: 1.4)),
                           ],
                         ),
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon:
-                            Icon(Icons.close_rounded, color: textColor),
+                        icon: Icon(Icons.close_rounded,
+                            color: textColor),
                       ),
                     ],
                   ),
@@ -167,7 +206,8 @@ class _CommunityPageState extends State<CommunityPage>
                             Navigator.pop(ctx);
                             _openViewer(post);
                           },
-                          child: CommunityLocationHubRow(post: post),
+                          child:
+                              CommunityLocationHubRow(post: post),
                         );
                       },
                     ),
@@ -181,36 +221,50 @@ class _CommunityPageState extends State<CommunityPage>
     );
   }
 
-  void _showModelPicker() {
-    if (_shareableModels.isEmpty) {
-      showAppToast(context, '还没有可分享的模型，请先在创作页面生成记忆模型。');
-      return;
-    }
-    showModalBottomSheet<CommunityModelOption>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => CommunityModelPickerSheet(
-        models: _shareableModels,
-        selectedModel: _selectedSubmitModel,
-      ),
-    ).then((model) {
-      if (model != null && mounted) {
-        setState(() => _selectedSubmitModel = model);
+  void _toggleSubmitModel(CommunityModelOption model) {
+    setState(() {
+      if (_selectedSubmitModels.any((m) => m.id == model.id)) {
+        _selectedSubmitModels.removeWhere((m) => m.id == model.id);
+      } else {
+        _selectedSubmitModels.add(model);
       }
     });
   }
 
+  Future<void> _saveDraft() async {
+    final lat =
+        double.tryParse(_submitLatController.text.trim()) ?? 0;
+    final lng =
+        double.tryParse(_submitLngController.text.trim()) ?? 0;
+    final draft = CommunityDraft(
+      modelIds:
+          _selectedSubmitModels.map((m) => m.id).toList(),
+      title: _submitTitleController.text.trim(),
+      caption: _submitCaptionController.text.trim(),
+      placeName: _submitPlaceController.text.trim(),
+      latitude: lat,
+      longitude: lng,
+    );
+    await _repository.saveDraft(draft);
+    if (!mounted) return;
+    showAppToast(context, '草稿已保存');
+    _tabController.animateTo(2); // stay on submit tab
+  }
+
   Future<void> _submitPost() async {
-    final model = _selectedSubmitModel;
-    final lat = double.tryParse(_submitLatController.text.trim());
-    final lng = double.tryParse(_submitLngController.text.trim());
+    if (_selectedSubmitModels.isEmpty) {
+      showAppToast(context, textLocalize('community_fill_all'));
+      return;
+    }
+    final lat =
+        double.tryParse(_submitLatController.text.trim());
+    final lng =
+        double.tryParse(_submitLngController.text.trim());
     final title = _submitTitleController.text.trim();
     final caption = _submitCaptionController.text.trim();
     final place = _submitPlaceController.text.trim();
 
-    if (model == null ||
-        lat == null ||
+    if (lat == null ||
         lng == null ||
         title.isEmpty ||
         caption.isEmpty ||
@@ -227,7 +281,12 @@ class _CommunityPageState extends State<CommunityPage>
       placeName: place,
       latitude: lat,
       longitude: lng,
-      model: model,
+      models: _selectedSubmitModels,
+      tags: _selectedSubmitModels
+          .expand((m) => m.description.split(RegExp(r'[\s,，]+')))
+          .where((t) => t.trim().length >= 2)
+          .take(5)
+          .toList(),
     );
     final created = await _repository.createPost(result);
 
@@ -236,7 +295,7 @@ class _CommunityPageState extends State<CommunityPage>
     setState(() {
       _posts = [created, ..._posts];
       _isSubmitting = false;
-      _selectedSubmitModel = null;
+      _selectedSubmitModels.clear();
       _submitTitleController.clear();
       _submitCaptionController.clear();
       _submitPlaceController.clear();
@@ -244,6 +303,7 @@ class _CommunityPageState extends State<CommunityPage>
       _submitLngController.clear();
     });
 
+    await _repository.clearDraft();
     showAppToast(context, textLocalize('community_joined'));
   }
 
@@ -291,7 +351,8 @@ class _CommunityPageState extends State<CommunityPage>
               ),
               const SizedBox(height: 12),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20),
                 child: BDPanelCard(
                   padding: const EdgeInsets.all(6),
                   child: TabBar(
@@ -312,9 +373,15 @@ class _CommunityPageState extends State<CommunityPage>
                         ? Colors.white.withValues(alpha: 0.56)
                         : BDDesign.colorMutedBlue,
                     tabs: [
-                      Tab(text: textLocalize('community_tab_explore')),
-                      Tab(text: textLocalize('community_tab_discover')),
-                      Tab(text: textLocalize('community_tab_submit')),
+                      Tab(
+                          text: textLocalize(
+                              'community_tab_explore')),
+                      Tab(
+                          text: textLocalize(
+                              'community_tab_discover')),
+                      Tab(
+                          text: textLocalize(
+                              'community_tab_submit')),
                     ],
                   ),
                 ),
@@ -322,17 +389,19 @@ class _CommunityPageState extends State<CommunityPage>
               const SizedBox(height: 10),
               Expanded(
                 child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(
+                        child: CircularProgressIndicator())
                     : IndexedStack(
                         index: _tabIndex,
                         children: [
                           CommunityExploreView(
                             posts: _posts,
                             selectedIndex: _selectedMapIndex,
-                            onSelect: (i) =>
-                                setState(() => _selectedMapIndex = i),
+                            onSelect: (i) => setState(
+                                () => _selectedMapIndex = i),
                             onOpenViewer: _openViewer,
-                            onOpenLocationHub: _openLocationHub,
+                            onOpenLocationHub:
+                                _openLocationHub,
                             selectedPost: selectedPost,
                           ),
                           CommunityDiscoverView(
@@ -340,25 +409,34 @@ class _CommunityPageState extends State<CommunityPage>
                             selectedTags: _selectedTags,
                             onToggleTag: (tag) {
                               setState(() {
-                                if (_selectedTags.contains(tag)) {
-                                  _selectedTags.remove(tag);
-                                } else {
-                                  _selectedTags.add(tag);
-                                }
+                                _selectedTags.contains(tag)
+                                    ? _selectedTags
+                                        .remove(tag)
+                                    : _selectedTags.add(tag);
                               });
                             },
-                            onOpenViewer: _openViewer,
+                            onTapPost: _openDetail,
                           ),
                           CommunitySubmitView(
-                            selectedModel: _selectedSubmitModel,
-                            onPickModel: _showModelPicker,
-                            titleController: _submitTitleController,
-                            captionController: _submitCaptionController,
-                            placeController: _submitPlaceController,
-                            latController: _submitLatController,
-                            lngController: _submitLngController,
+                            shareableModels:
+                                _shareableModels,
+                            selectedModels:
+                                _selectedSubmitModels,
+                            onToggleModel:
+                                _toggleSubmitModel,
+                            titleController:
+                                _submitTitleController,
+                            captionController:
+                                _submitCaptionController,
+                            placeController:
+                                _submitPlaceController,
+                            latController:
+                                _submitLatController,
+                            lngController:
+                                _submitLngController,
                             isSubmitting: _isSubmitting,
                             onSubmit: _submitPost,
+                            onSaveDraft: _saveDraft,
                           ),
                         ],
                       ),
