@@ -7,6 +7,7 @@ import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
 
@@ -391,7 +392,7 @@ class _CommunityPageState extends State<CommunityPage>
                 child: _isLoading
                     ? const Center(
                         child: CircularProgressIndicator())
-                    : IndexedStack(
+                    : BDTabSwitcher(
                         index: _tabIndex,
                         children: [
                           CommunityExploreView(

@@ -174,12 +174,16 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          BDPageBackdrop(
-            child: SafeArea(
-              child: SingleChildScrollView(
-                controller: _scrollController,
-                padding: const EdgeInsets.only(bottom: 100),
-                child: Column(
+          Column(
+            children: [
+              Expanded(
+                child: BDPageBackdrop(
+              child: SafeArea(
+                bottom: false,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(
@@ -354,22 +358,21 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                 ),
               ),
             ),
+            ),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? AppTheme.darkSurface
-                          .withValues(alpha: 0.96)
-                      : Colors.white.withValues(alpha: 0.94),
-                  border: Border(
-                    top: BorderSide(
+          Container(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              10,
+              16,
+              10 + MediaQuery.of(context).padding.bottom,
+            ),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppTheme.darkSurface.withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.94),
+              border: Border(
+                top: BorderSide(
                       color: isDark
                           ? Colors.white.withValues(alpha: 0.06)
                           : BDDesign.colorMutedBlue
@@ -428,29 +431,33 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                   ],
                 ),
               ),
-            ),
+            ],
           ),
-          Positioned(
-            left: 16,
-            top: MediaQuery.of(context).padding.top + 8,
-            child: GestureDetector(
-              onTap: () => Navigator.pop(context),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.arrow_back_rounded,
-                  color: Colors.white,
-                  size: 22,
-                ),
-              ),
-            ),
-          ),
+          _buildBackButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBackButton() {
+    return Positioned(
+      left: 16,
+      top: MediaQuery.of(context).padding.top + 8,
+      child: GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.arrow_back_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
       ),
     );
   }
