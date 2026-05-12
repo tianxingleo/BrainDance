@@ -88,7 +88,11 @@ class CommunityPost {
     this.likeCount = 0,
     this.favoriteCount = 0,
     this.commentCount = 0,
+    this.extraImages = const [],
   });
+
+  /// Additional model images per post (from metadata.images).
+  final List<Map<String, dynamic>> extraImages;
 
   CommunityPost copyWith({
     int? likeCount,
@@ -113,6 +117,7 @@ class CommunityPost {
       likeCount: likeCount ?? this.likeCount,
       favoriteCount: favoriteCount ?? this.favoriteCount,
       commentCount: commentCount ?? this.commentCount,
+      extraImages: extraImages,
     );
   }
 

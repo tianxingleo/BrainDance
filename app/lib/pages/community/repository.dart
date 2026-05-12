@@ -90,6 +90,8 @@ class CommunityRepository {
           isPublic: metadata['is_public'] != false,
           likeCount: (metadata['likes'] as List?)?.length ?? 0,
           favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
+          extraImages: List<Map<String, dynamic>>.from(
+              metadata['images'] ?? []),
           commentCount: (metadata['comments'] as List?)?.length ?? 0,
         );
       }).toList();
@@ -172,7 +174,23 @@ class CommunityRepository {
       createdAt: DateTime.now(),
       tags: draft.tags,
       isPublic: draft.isPublic,
+      extraImages: draft.models.skip(1).map((m) => {
+        'coverUrl': m.coverUrl ?? '',
+        'modelName': m.sceneId,
+        'modelUrl': m.modelUrl,
+        'posesUrl': m.posesUrl ?? '',
+        'tags': _extractTags(m.description, draft.placeName),
+      }).toList(),
     );
+
+    // Build extra images metadata for multi-model posts
+    final extraImagesMeta = draft.models.skip(1).map((m) => {
+      'coverUrl': m.coverUrl ?? '',
+      'modelName': m.sceneId,
+      'modelUrl': m.modelUrl,
+      'posesUrl': m.posesUrl ?? '',
+      'tags': _extractTags(m.description, draft.placeName),
+    }).toList();
 
     try {
       await _client.from('community_posts').insert({
@@ -190,6 +208,7 @@ class CommunityRepository {
           'likes': <String>[],
           'favorites': <String>[],
           'comments': <Map<String, dynamic>>[],
+          'images': extraImagesMeta,
         },
       });
       return optimistic;

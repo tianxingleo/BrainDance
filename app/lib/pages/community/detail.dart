@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/services/thumbnail_cache.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
@@ -22,8 +25,11 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
   final CommunityRepository _repository = CommunityRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _commentController = TextEditingController();
+  final PageController _pageController = PageController();
 
   late CommunityPost _post;
+  List<Map<String, dynamic>> _imageEntries = const [];
+  int _currentImageIndex = 0;
   List<CommunityComment> _comments = const [];
   Map<String, dynamic> _metadata = {};
   bool _isLiked = false;
@@ -33,14 +39,53 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
   void initState() {
     super.initState();
     _post = widget.post;
+    _buildImageEntries();
     _loadMetadata();
     _loadComments();
+  }
+
+  void _buildImageEntries() {
+    _imageEntries = [
+      // Primary image
+      {
+        'coverUrl': _post.coverUrl ?? '',
+        'modelName': _post.modelName,
+        'modelUrl': _post.modelUrl,
+        'posesUrl': _post.posesUrl ?? '',
+        'tags': _post.tags,
+      },
+      ..._post.extraImages,
+    ];
+  }
+
+  List<String> get _currentTags {
+    if (_imageEntries.isEmpty) return _post.tags;
+    final entry = _imageEntries[_currentImageIndex];
+    final tags = entry['tags'];
+    if (tags is List) return List<String>.from(tags);
+    return _post.tags;
+  }
+
+  String get _currentModelUrl {
+    if (_imageEntries.isEmpty) return _post.modelUrl;
+    return _imageEntries[_currentImageIndex]['modelUrl']?.toString() ?? _post.modelUrl;
+  }
+
+  String? get _currentPosesUrl {
+    if (_imageEntries.isEmpty) return _post.posesUrl;
+    return _imageEntries[_currentImageIndex]['posesUrl']?.toString();
+  }
+
+  String get _currentModelName {
+    if (_imageEntries.isEmpty) return _post.modelName;
+    return _imageEntries[_currentImageIndex]['modelName']?.toString() ?? _post.modelName;
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
     _commentController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -188,9 +233,53 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                   children: [
                     SizedBox(
                       height: 320,
-                      child: _DetailThumbnail(
-                        imageUrl: _post.coverUrl,
-                        height: 320,
+                      child: Stack(
+                        children: [
+                          PageView.builder(
+                            controller: _pageController,
+                            itemCount: _imageEntries.length,
+                            onPageChanged: (i) {
+                              setState(() => _currentImageIndex = i);
+                            },
+                            itemBuilder: (context, index) {
+                              final entry = _imageEntries[index];
+                              return _CachedThumbnail(
+                                url: entry['coverUrl']
+                                        ?.toString() ??
+                                    '',
+                                height: 320,
+                              );
+                            },
+                          ),
+                          if (_imageEntries.length > 1)
+                            Positioned(
+                              bottom: 12,
+                              left: 0,
+                              right: 0,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.center,
+                                children: List.generate(
+                                  _imageEntries.length,
+                                  (i) => Container(
+                                    width: 6,
+                                    height: 6,
+                                    margin: const EdgeInsets
+                                        .symmetric(
+                                        horizontal: 3),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _currentImageIndex == i
+                                          ? Colors.white
+                                          : Colors.white
+                                              .withValues(
+                                                  alpha: 0.4),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     Padding(
@@ -278,7 +367,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                             Wrap(
                               spacing: 6,
                               runSpacing: 6,
-                              children: _post.tags.map((tag) {
+                              children: _currentTags.map((tag) {
                                 return Container(
                                   padding:
                                       const EdgeInsets.symmetric(
@@ -370,7 +459,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
             decoration: BoxDecoration(
               color: isDark
                   ? AppTheme.darkSurface.withValues(alpha: 0.96)
-                  : Colors.white.withValues(alpha: 0.94),
+                  : const Color(0xFFF7FAFD),
               border: Border(
                 top: BorderSide(
                       color: isDark
@@ -465,58 +554,91 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
   void _enterViewer() {
     openViewer(
       context,
-      initialModelUrl: _post.modelUrl,
-      posesUrl: _post.posesUrl,
-      sceneId: _post.modelName,
+      initialModelUrl: _currentModelUrl,
+      posesUrl: _currentPosesUrl,
+      sceneId: _currentModelName,
     );
   }
 }
 
-class _DetailThumbnail extends StatelessWidget {
-  final String? imageUrl;
+class _CachedThumbnail extends StatefulWidget {
+  final String url;
   final double height;
 
-  const _DetailThumbnail({
-    required this.imageUrl,
-    required this.height,
-  });
+  const _CachedThumbnail({required this.url, required this.height});
+
+  @override
+  State<_CachedThumbnail> createState() => _CachedThumbnailState();
+}
+
+class _CachedThumbnailState extends State<_CachedThumbnail> {
+  String? _localPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CachedThumbnail old) {
+    super.didUpdateWidget(old);
+    if (old.url != widget.url) _load();
+  }
+
+  Future<void> _load() async {
+    final path =
+        await ThumbnailCache().getPath(widget.url);
+    if (mounted) setState(() => _localPath = path);
+  }
+
+  static final _fallback = Container(
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color(0xFF8BA8C5),
+          Color(0xFF536C8B),
+          Color(0xFF38485F),
+        ],
+      ),
+    ),
+    child: Center(
+      child: Icon(Icons.terrain_rounded,
+          size: 48, color: Colors.white.withValues(alpha: 0.7)),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    final fallback = Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF8BA8C5),
-            Color(0xFF536C8B),
-            Color(0xFF38485F),
-          ],
+    final path = _localPath;
+    if (path != null) {
+      return SizedBox(
+        height: widget.height,
+        width: double.infinity,
+        child: Image.file(
+          File(path),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) =>
+              SizedBox(height: widget.height, child: _fallback),
         ),
-      ),
-      child: Center(
-        child: Icon(
-          Icons.terrain_rounded,
-          size: 48,
-          color: Colors.white.withValues(alpha: 0.7),
-        ),
-      ),
-    );
-
-    final url = imageUrl;
-    if (url == null || url.isEmpty) {
-      return SizedBox(height: height, child: fallback);
+      );
     }
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: Image.network(
-        url,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => fallback,
-      ),
-    );
+    // Show network image while caching; cache will be used next time
+    if (widget.url.isNotEmpty) {
+      return SizedBox(
+        height: widget.height,
+        width: double.infinity,
+        child: Image.network(
+          widget.url,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) =>
+              SizedBox(height: widget.height, child: _fallback),
+        ),
+      );
+    }
+    return SizedBox(height: widget.height, child: _fallback);
   }
 }
 
