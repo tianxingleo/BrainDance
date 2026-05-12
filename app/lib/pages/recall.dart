@@ -25,6 +25,7 @@ import '../main.dart'
         overviewStatsProvider,
         overviewLocalIndexingProvider,
         pageIndexProvider,
+        pendingSubmitTitleProvider,
         recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
@@ -108,8 +109,24 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _agentConversationSummary;
   String? _agentLatestSubmittedQuery;
   AgentSessionState? _agentSessionState;
-  AgentRecallResponse? _agentResult;
-  ChatMessage? _agentChatMessage;
+  Map<String, dynamic>? _agentShortTermMemory;
+  final List<AgentConversationEntry> _agentConversationHistory = [];
+
+  ChatMessage? get _agentChatMessage =>
+      _agentConversationHistory.isNotEmpty
+          ? _agentConversationHistory.first.agentMessage
+          : null;
+
+  AgentRecallResponse? get _agentResult =>
+      _agentConversationHistory.isNotEmpty
+          ? _agentConversationHistory.first.agentResult
+          : null;
+
+  set _agentResult(AgentRecallResponse? value) {
+    if (_agentConversationHistory.isNotEmpty) {
+      _agentConversationHistory.first.agentResult = value;
+    }
+  }
   AgentStep? _agentBootstrapStep;
   DateTime? _agentRunStartedAt;
   DateTime? _agentRunFinishedAt;

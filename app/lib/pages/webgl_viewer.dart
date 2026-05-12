@@ -470,6 +470,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             _sendModelToVue();
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
+          } else if (data['action'] == 'exit') {
+            if (mounted) Navigator.of(context).pop();
+          } else if (data['action'] == 'switchViewer') {
+            final useSpark = data['useSpark'] == true;
+            _switchViewer(useSpark);
           } else if (data['status'] == 'error') {
             debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
@@ -528,6 +533,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     // 同步当前主题到 WebView
     _sendThemeToVue();
+
+    // 同步渲染器状态到 WebView
+    _controller?.runJavaScript(
+        "window.setRendererStateFromFlutter($_useSparkViewer)");
   }
 
   void _sendThemeToVue() {
@@ -1034,27 +1043,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                       ),
                     ),
                   )
-                else if (!_isWebReady && _controller != null)
+                else if (!_isDownloading && !_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
-                if (!_isDownloading)
-                  SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildFloatingCircleButton(
-                            icon: Icons.arrow_back_rounded,
-                            onPressed: () => Navigator.of(context).pop(),
-                            isDark: isDark,
-                            tooltip: '\u8fd4\u56de',
-                          ),
-                          const Spacer(),
-                          _buildFloatingViewerToggle(isDark),
-                        ],
-                      ),
-                    ),
-                  ),
               ],
             ),
     );

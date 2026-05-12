@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/main.dart' show pageIndexProvider, pendingSubmitTitleProvider;
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:dio/dio.dart';
@@ -38,6 +39,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   final FocusNode _nameFocusNode = FocusNode();
   bool _nameFocused = false;
   bool _isUploading = false;
+  bool _didPrefillTitle = false;
   double _uploadProgress = 0.0;
   int _uploadedBytes = 0;
   int _totalFileSize = 0;
@@ -346,6 +348,14 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_didPrefillTitle) {
+      _didPrefillTitle = true;
+      final pending = ref.read(pendingSubmitTitleProvider);
+      if (pending != null && pending.isNotEmpty) {
+        nameController.text = pending;
+        ref.read(pendingSubmitTitleProvider.notifier).state = null;
+      }
+    }
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
     final hintColor = isDark

@@ -37,6 +37,9 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
+const showTopMenu = ref(false);
+const topMenuRef = ref(null);
+const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -204,10 +207,13 @@ const focalMax = computed(() => {
 
 const toggleFocalSettings = () => {
   showFocalSettings.value = !showFocalSettings.value;
-  if (showFocalSettings.value && !manualFocalPx.value) {
-    manualFocalPx.value = Number(
-      (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
-    );
+  if (showFocalSettings.value) {
+    showCinematicPanel.value = false;
+    if (!manualFocalPx.value) {
+      manualFocalPx.value = Number(
+        (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
+      );
+    }
   }
 };
 
@@ -1457,6 +1463,33 @@ const toggleCinematicPlayback = () => {
 const toggleCinematicPanel = () => {
   if (!canPlayCinematic.value) return;
   showCinematicPanel.value = !showCinematicPanel.value;
+  if (showCinematicPanel.value) {
+    showFocalSettings.value = false;
+  }
+};
+
+const toggleTopMenu = () => {
+  showTopMenu.value = !showTopMenu.value;
+};
+
+const exitViewer = () => {
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'exit' }));
+  }
+};
+
+const switchRenderer = (useSpark) => {
+  if (useSparkRenderer.value === useSpark) return;
+  useSparkRenderer.value = useSpark;
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'switchViewer', useSpark }));
+  }
+};
+
+const onDocumentClickForMenu = (e) => {
+  if (!showTopMenu.value) return;
+  if (topMenuRef.value && topMenuRef.value.contains(e.target)) return;
+  showTopMenu.value = false;
 };
 
 const rebuildCinematicAtCurrentProgress = () => {
@@ -2011,6 +2044,7 @@ const getTouchDistance = (touchA, touchB) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (showTopMenu.value) showTopMenu.value = false;
   interruptCinematicPlayback();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
@@ -2245,6 +2279,7 @@ function onTimePeelingSelect(model) {
 }
 
 onMounted(() => {
+  document.addEventListener('click', onDocumentClickForMenu, true);
   if (containerRef.value) {
     checkProtocol();
 
@@ -2289,6 +2324,10 @@ onMounted(() => {
       }
     };
 
+    window.setRendererStateFromFlutter = (useSpark) => {
+      useSparkRenderer.value = !!useSpark;
+    };
+
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -2314,6 +2353,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(async () => {
+  document.removeEventListener('click', onDocumentClickForMenu, true);
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
@@ -2354,90 +2394,140 @@ onBeforeUnmount(async () => {
     />
 
     <div class="top-hud">
-      <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-        <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
-          class="search-input" />
-        <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
-      </div>
+      <div class="top-hud-row">
+        <button class="exit-btn" @click="exitViewer"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
 
-      <div class="top-actions">
-        <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
-            @click="switchViewMode(VIEW_MODE.FREE)">
-            自由模式
-          </button>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
-            @click="switchViewMode(VIEW_MODE.ORBIT)">
-            Orbit 模式
-          </button>
+        <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
+            class="search-input" />
+          <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
         </div>
-        <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
-        </button>
-        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
-          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          <span class="cinematic-trigger-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path
-                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
-            </svg>
-          </span>
-          <span>运镜</span>
-        </button>
-        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-          <div class="cinematic-head">
-            <div>
-              <div class="eyebrow">Camera Move</div>
-              <div class="cinematic-title">自动运镜</div>
-            </div>
-            <div class="cinematic-head-actions">
-              <label class="cinematic-loop-toggle">
-                <input type="checkbox" v-model="cinematicLoop" />
-                <span>循环</span>
-              </label>
-              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
-                ×
+
+        <div class="top-menu-wrapper" ref="topMenuRef"
+          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <button class="top-menu-btn archive-btn archive-btn--ghost"
+            :class="{ active: showTopMenu }" @click="toggleTopMenu">
+            <span class="top-menu-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" fill="none"/>
+              </svg>
+            </span>
+          </button>
+
+          <div class="top-menu-dropdown archive-card" :class="{ open: showTopMenu }">
+            <div class="renderer-switch">
+              <button class="mode-chip" :class="{ active: !useSparkRenderer }"
+                @click="switchRenderer(false)">
+                原版
+              </button>
+              <button class="mode-chip" :class="{ active: useSparkRenderer }"
+                @click="switchRenderer(true)">
+                Spark
               </button>
             </div>
-          </div>
-          <div class="cinematic-actions">
-            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
-              {{ cinematicButtonLabel }}
+            <div class="menu-divider"></div>
+            <div class="view-mode-switch">
+              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
+                @click="switchViewMode(VIEW_MODE.FREE)">
+                自由模式
+              </button>
+              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
+                @click="switchViewMode(VIEW_MODE.ORBIT)">
+                Orbit 模式
+              </button>
+            </div>
+            <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings">
+              {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
             </button>
-            <button class="archive-btn archive-btn--ghost cinematic-secondary"
-              @click="stopCinematicPlayback()"
-              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
-              停止
+            <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
+              :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel">
+              <span class="cinematic-trigger-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
+                </svg>
+              </span>
+              <span>运镜</span>
             </button>
+            <div class="cinematic-panel" v-if="canPlayCinematic && showCinematicPanel">
+              <div class="cinematic-head">
+                <div>
+                  <div class="eyebrow">Camera Move</div>
+                  <div class="cinematic-title">自动运镜</div>
+                </div>
+                <div class="cinematic-head-actions">
+                  <label class="cinematic-loop-toggle">
+                    <input type="checkbox" v-model="cinematicLoop" />
+                    <span>循环</span>
+                  </label>
+                  <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div class="cinematic-actions">
+                <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
+                  {{ cinematicButtonLabel }}
+                </button>
+                <button class="archive-btn archive-btn--ghost cinematic-secondary"
+                  @click="stopCinematicPlayback()"
+                  :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
+                  停止
+                </button>
+              </div>
+              <div class="cinematic-progress-row">
+                <span>进度</span>
+                <span>{{ Math.round(cinematicProgress * 100) }}%</span>
+              </div>
+              <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
+                step="1" disabled />
+              <div class="cinematic-progress-row">
+                <span>速度</span>
+                <span>{{ cinematicSpeed.toFixed(2) }}x</span>
+              </div>
+              <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
+                @input="onCinematicSpeedChange" />
+              <div class="cinematic-progress-row">
+                <span>平滑</span>
+                <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
+              </div>
+              <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
+                step="0.05" @input="onCinematicStyleChange" />
+              <label class="cinematic-focus-toggle">
+                <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
+                <span>主体锁定</span>
+              </label>
+            </div>
+            <div class="focal-panel-inline" v-if="showFocalSettings">
+              <div class="eyebrow">Lens Control</div>
+              <div class="focal-title">镜头焦距</div>
+              <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
+                @input="onManualFocalChange" />
+              <div class="focal-row">
+                <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
+                  step="1" @change="onManualFocalChange" />
+                <span>px</span>
+              </div>
+              <div class="focal-row">
+                <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
+              </div>
+              <div class="focal-row">
+                <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
+              </div>
+              <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
+            </div>
           </div>
-          <div class="cinematic-progress-row">
-            <span>进度</span>
-            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
-          </div>
-          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
-            step="1" disabled />
-          <div class="cinematic-progress-row">
-            <span>速度</span>
-            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
-            @input="onCinematicSpeedChange" />
-          <div class="cinematic-progress-row">
-            <span>平滑</span>
-            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
-            step="0.05" @input="onCinematicStyleChange" />
-          <label class="cinematic-focus-toggle">
-            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
-            <span>主体锁定</span>
-          </label>
         </div>
-        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
+
       </div>
+      <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
     </div>
 
     <div v-if="isLoading" class="loading-overlay">
@@ -2466,26 +2556,6 @@ onBeforeUnmount(async () => {
       <button @click="toggleAutoRotate" :class="{ active: isAutoRotate }">
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
-    </div>
-
-    <div class="focal-settings-panel" v-if="showFocalSettings"
-      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-      <div class="eyebrow">Lens Control</div>
-      <div class="focal-title">镜头焦距</div>
-      <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
-        @input="onManualFocalChange" />
-      <div class="focal-row">
-        <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
-          step="1" @change="onManualFocalChange" />
-        <span>px</span>
-      </div>
-      <div class="focal-row">
-        <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
-      </div>
-      <div class="focal-row">
-        <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
-      </div>
-      <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -2548,9 +2618,9 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container {
-  --flutter-safe-top: 92px;
+  --flutter-safe-top: 56px;
   --flutter-safe-left: 14px;
-  --flutter-safe-right: 154px;
+  --flutter-safe-right: 14px;
 
   --bg-gradient-1: rgba(228, 232, 237, 0.16);
   --bg-gradient-2: rgba(107, 122, 143, 0.14);
@@ -2675,27 +2745,137 @@ onBeforeUnmount(async () => {
 
 .top-hud {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: var(--flutter-safe-top);
   left: var(--flutter-safe-left);
-  right: auto;
-  width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
-  z-index: 120;
+  right: var(--flutter-safe-left);
+  width: auto;
+  z-index: 160;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 12px;
 }
 
-.top-actions {
+.top-hud-row {
   display: flex;
-  width: auto;
-  max-width: 100%;
   align-items: center;
   gap: 8px;
+  width: 100%;
+}
+
+.top-menu-wrapper {
+  position: relative;
   flex: 0 0 auto;
-  align-self: flex-start;
-  justify-content: flex-start;
-  flex-wrap: wrap;
+}
+
+.top-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border-radius: 16px;
+}
+
+.top-menu-btn.active {
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+}
+
+.top-menu-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+}
+
+.top-menu-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.exit-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  border: none;
+  cursor: pointer;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 4px 12px var(--card-shadow);
+  backdrop-filter: blur(18px);
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.exit-btn:active {
+  transform: scale(0.92);
+}
+
+.exit-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.renderer-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--chip-hover-bg);
+}
+
+.renderer-switch .mode-chip {
+  flex: 1;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--card-border);
+  margin: 2px 0;
+}
+
+.top-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+
+.top-menu-dropdown.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.top-menu-dropdown .view-mode-switch {
+  width: 100%;
+  justify-content: center;
+}
+
+.top-menu-dropdown .cinematic-panel {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  backdrop-filter: none;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--card-border);
+  position: static;
+  border-radius: 0;
 }
 
 .view-mode-switch {
@@ -3019,22 +3199,12 @@ button.active {
   z-index: auto;
 }
 
-.focal-settings-panel {
-  position: absolute;
-  top: calc(var(--flutter-safe-top) + 130px);
-  right: var(--flutter-safe-right);
-  z-index: 120;
-  width: 236px;
-  background: var(--card-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--card-border);
-  border-radius: 20px;
-  padding: 14px;
+.focal-panel-inline {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 16px 28px var(--card-shadow);
-  backdrop-filter: blur(16px);
+  padding: 10px 0 0;
+  border-top: 1px solid var(--card-border);
 }
 
 .focal-title {
@@ -3066,7 +3236,7 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: calc(var(--flutter-safe-top) + 68px);
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
@@ -3168,6 +3338,7 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
+  align-self: flex-start;
   color: var(--text-primary);
   background: var(--fps-bg);
   border: 1px solid var(--card-border);
@@ -3195,24 +3366,40 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   .app-container {
-    --flutter-safe-top: 84px;
+    --flutter-safe-top: 48px;
     --flutter-safe-left: 12px;
-    --flutter-safe-right: 144px;
+    --flutter-safe-right: 12px;
   }
 
   .top-hud {
     left: var(--flutter-safe-left);
-    right: auto;
-    width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
+    right: var(--flutter-safe-left);
+    width: auto;
     gap: 8px;
   }
 
-  .top-actions {
-    width: auto;
-    max-width: 100%;
-    align-self: flex-start;
-    justify-content: flex-start;
-    gap: 8px;
+  .top-hud-row {
+    gap: 6px;
+  }
+
+  .exit-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .exit-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .top-menu-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .top-menu-dropdown {
+    min-width: 180px;
   }
 
   .view-mode-switch {
@@ -3251,16 +3438,13 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: calc(var(--flutter-safe-top) + 48px);
+    top: calc(var(--flutter-safe-top) + 56px);
     right: 12px;
     width: 112px;
     min-width: 112px;
     padding: 7px;
   }
 
-  .focal-settings-panel {
-    top: calc(var(--flutter-safe-top) + 122px);
-  }
 }
 
 @media (prefers-color-scheme: dark) {

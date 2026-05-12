@@ -33,6 +33,7 @@ final themeData = TDTheme.defaultData();
 final pageIndexProvider = StateProvider((ref) => 0);
 final loadingProvider = StateProvider((ref) => true);
 final isRecordingProvider = StateProvider((ref) => false);
+final pendingSubmitTitleProvider = StateProvider<String?>((ref) => null);
 final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
 final pageAnimatingProvider = StateProvider<bool>((ref) => false);
 

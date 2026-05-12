@@ -6,6 +6,9 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Building Vite project..." -ForegroundColor Cyan
 Write-Host "====================================="
 
+$scriptDir = $PSScriptRoot
+Push-Location $scriptDir
+
 npm run build-only
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
@@ -17,7 +20,6 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Syncing to Flutter assets..." -ForegroundColor Cyan
 Write-Host "====================================="
 
-$scriptDir = $PSScriptRoot
 $targets = @(
     (Join-Path $scriptDir "..\..\app\assets\webgl")
 )
@@ -37,3 +39,5 @@ foreach ($target in $targets) {
 Write-Host ""
 Write-Host "Done! Flutter app will use the new production build." -ForegroundColor Green
 Write-Host "Run 'flutter run' in the app/ directory." -ForegroundColor Green
+
+Pop-Location
