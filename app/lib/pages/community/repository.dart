@@ -305,6 +305,17 @@ class CommunityRepository {
     }).toList();
   }
 
+  Future<void> setMetadata(
+    String postId,
+    Map<String, dynamic> metadata,
+  ) async {
+    try {
+      await _client
+          .from('community_posts')
+          .update({'metadata': metadata}).eq('id', postId);
+    } catch (_) {}
+  }
+
   Future<void> _updateMetadata(
     String postId,
     Map<String, dynamic> metadata,

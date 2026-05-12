@@ -4,6 +4,7 @@ import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models.dart';
 import 'repository.dart';
@@ -52,6 +53,12 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
       _isLiked = (meta['likes'] as List?)?.contains(uid) ?? false;
       _isFavorited =
           (meta['favorites'] as List?)?.contains(uid) ?? false;
+      // Sync counts from server metadata so they never go stale
+      _post = _post.copyWith(
+        likeCount: (meta['likes'] as List?)?.length ?? 0,
+        favoriteCount: (meta['favorites'] as List?)?.length ?? 0,
+        commentCount: (meta['comments'] as List?)?.length ?? 0,
+      );
     });
   }
 
@@ -61,46 +68,86 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
     setState(() => _comments = comments);
   }
 
-  Future<void> _toggleLike() async {
-    final updated =
-        await _repository.toggleLike(_post.id, _metadata);
-    if (!mounted) return;
+  void _toggleLike() {
     final uid = _repository.currentUserId;
-    final likes = List<String>.from(updated['likes'] ?? []);
+    final likes = List<String>.from(_metadata['likes'] ?? []);
+    final wasLiked = likes.contains(uid);
+    if (wasLiked) {
+      likes.remove(uid);
+    } else {
+      likes.add(uid);
+    }
+
+    // Optimistic UI update — fire immediately, no waiting
+    final optimisticMeta = {..._metadata, 'likes': likes};
     setState(() {
-      _metadata = updated;
+      _metadata = optimisticMeta;
+      _isLiked = !wasLiked;
       _post = _post.copyWith(likeCount: likes.length);
-      _isLiked = likes.contains(uid);
     });
+
+    // Async persist in background
+    _repository.setMetadata(_post.id, optimisticMeta);
   }
 
-  Future<void> _toggleFavorite() async {
-    final updated =
-        await _repository.toggleFavorite(_post.id, _metadata);
-    if (!mounted) return;
+  void _toggleFavorite() {
     final uid = _repository.currentUserId;
     final favorites =
-        List<String>.from(updated['favorites'] ?? []);
+        List<String>.from(_metadata['favorites'] ?? []);
+    final wasFavorited = favorites.contains(uid);
+    if (wasFavorited) {
+      favorites.remove(uid);
+    } else {
+      favorites.add(uid);
+    }
+
+    // Optimistic UI update
+    final optimisticMeta = {
+      ..._metadata,
+      'favorites': favorites,
+    };
     setState(() {
-      _metadata = updated;
+      _metadata = optimisticMeta;
+      _isFavorited = !wasFavorited;
       _post = _post.copyWith(favoriteCount: favorites.length);
-      _isFavorited = favorites.contains(uid);
     });
+
+    // Async persist in background
+    _repository.setMetadata(_post.id, optimisticMeta);
   }
 
-  Future<void> _submitComment() async {
+  void _submitComment() {
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
     _commentController.clear();
-    final comments = await _repository.addComment(
-      _post.id,
-      text,
-      _metadata,
+
+    final now = DateTime.now();
+    final uid = _repository.currentUserId;
+    final userName =
+        Supabase.instance.client.auth.currentUser?.email ?? '匿名用户';
+    final optimisticComment = CommunityComment(
+      id: 'c-$uid-${now.microsecondsSinceEpoch}',
+      postId: _post.id,
+      userId: uid,
+      userName: userName,
+      text: text,
+      createdAt: now,
     );
-    if (!mounted) return;
+
+    // Optimistic UI update — show comment immediately
+    final comments = <CommunityComment>[optimisticComment, ..._comments];
     setState(() {
       _comments = comments;
       _post = _post.copyWith(commentCount: comments.length);
+    });
+
+    // Async persist in background, then sync metadata
+    _repository.addComment(_post.id, text, _metadata).then((_) {
+      if (!mounted) return;
+      _repository.fetchPostMetadata(_post.id).then((meta) {
+        if (!mounted) return;
+        setState(() => _metadata = meta);
+      });
     });
   }
 
