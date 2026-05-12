@@ -539,7 +539,7 @@ class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
       if (next != null) {
         _dismissTimer?.cancel();
         _ctrl.forward();
-        _dismissTimer = Timer(const Duration(seconds: 4), () {
+        _dismissTimer = Timer(const Duration(seconds: 6), () {
           if (mounted) _ctrl.reverse();
         });
       }

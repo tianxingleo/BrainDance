@@ -86,12 +86,13 @@ class VideoPreprocessor {
 
   /// Preprocess a video file with the given config.
   ///
-  /// The output file is written to the app's temporary directory.
-  /// The caller should delete it when no longer needed.
+  /// If [outputFile] is not provided, a temp file is created automatically.
+  /// The caller should delete the output file when no longer needed.
   static Future<VideoPreprocessResult> preprocess(
     File inputFile, {
     VideoPreprocessConfig config = const VideoPreprocessConfig(),
     void Function(double progress)? onProgress,
+    File? outputFile,
   }) async {
     await ensureInitialized();
 
@@ -100,10 +101,16 @@ class VideoPreprocessor {
     }
 
     final inputSize = await inputFile.length();
-    final tempDir = await getTemporaryDirectory();
-    final outputName =
-        'preprocessed_${DateTime.now().millisecondsSinceEpoch}.mp4';
-    final outputFile = File('${tempDir.path}/$outputName');
+
+    final File resolvedOutput;
+    if (outputFile != null) {
+      resolvedOutput = outputFile;
+    } else {
+      final tempDir = await getTemporaryDirectory();
+      final outputName =
+          'preprocessed_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      resolvedOutput = File('${tempDir.path}/$outputName');
+    }
 
     final videoEncoder = _hevcEncoder();
 
@@ -126,7 +133,7 @@ class VideoPreprocessor {
       '-c:a', _audioEncoder(),
       '-b:a', config.audioBitrate,
       movflags,
-      outputFile.path,
+      resolvedOutput.path,
     ].where((s) => s.isNotEmpty).join(' ');
 
     final startMs = DateTime.now().millisecondsSinceEpoch;
@@ -176,9 +183,9 @@ class VideoPreprocessor {
 
     if (ReturnCode.isSuccess(returnCode)) {
       final outputSize =
-          await outputFile.exists() ? await outputFile.length() : 0;
+          await resolvedOutput.exists() ? await resolvedOutput.length() : 0;
       return VideoPreprocessResult(
-        outputFile: outputFile,
+        outputFile: resolvedOutput,
         durationMs: elapsed,
         inputSizeBytes: inputSize,
         outputSizeBytes: outputSize,

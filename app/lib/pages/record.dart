@@ -50,6 +50,9 @@ final streamingDoneBubbleProvider = StateProvider<String?>((ref) => null);
 /// 流式传输模式开关
 final streamingModeProvider = StateProvider<bool>((ref) => false);
 
+/// 流式拍摄实时帧计数
+final streamingFrameCountProvider = StateProvider<int>((ref) => 0);
+
 enum _MotionState { steady, ideal, caution, danger }
 
 class RecordPage extends ConsumerStatefulWidget {
@@ -171,7 +174,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
       if (controller != null && controller.value.isInitialized) {
         if (ref.read(streamingModeProvider) && _streamingTimer != null) {
-          _stopStreaming();
+          _stopStreaming(finalize: false);
         } else if (controller.value.isRecordingVideo) {
           _stopVideoRecording(
             controller,
@@ -388,12 +391,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
   String _generateStreamingSceneId() {
     final time = DateTime.now();
     final r = Random();
-    return 'stream_'
+    return 'scene_'
         '${time.year}'
         '${time.month.toString().padLeft(2, '0')}'
         '${time.day.toString().padLeft(2, '0')}'
-        '${time.hour.toString().padLeft(2, '0')}'
-        '${time.minute.toString().padLeft(2, '0')}'
         '_'
         '${r.nextInt(1000000).toString().padLeft(6, '0')}';
   }
@@ -413,6 +414,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _streamingUploading = false;
     _recordSeconds = 0;
     _setGlobalRecording(true);
+
+    if (mounted) {
+      ref.read(streamingFrameCountProvider.notifier).state = 0;
+    }
 
     // Capture first frame immediately, then every 1s
     _captureAndUploadFrame(controller, user.id);
@@ -457,7 +462,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     final file = File(photo.path);
-    final storagePath = '$userId/$sceneId/raw/$frameLabel.png';
+    final storagePath = '$userId/$sceneId/raw/$frameLabel.jpg';
 
     final uploadFuture = Supabase.instance.client.storage
         .from('braindance-assets')
@@ -481,32 +486,78 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _pendingUploads.removeAt(0);
     }
 
+    if (mounted) {
+      ref.read(streamingFrameCountProvider.notifier).state =
+          _streamingSuccessCount + _streamingFailCount;
+    }
+
     _streamingUploading = false;
   }
 
-  Future<void> _stopStreaming() async {
+  Future<void> _stopStreaming({bool finalize = true}) async {
     _streamingTimer?.cancel();
     _streamingTimer = null;
     _setGlobalRecording(false);
 
     if (!mounted) return;
 
-    // Wait for pending uploads
     await Future.wait(_pendingUploads);
 
     if (!mounted) return;
 
-    final message = _streamingFailCount == 0
-        ? '流式拍摄完成：$_streamingSuccessCount 张照片已上传'
-        : '拍摄完成：$_streamingSuccessCount 张成功，$_streamingFailCount 张失败';
+    if (!finalize) {
+      debugPrint('[streaming] stopped (background). scene=$_streamingSceneId '
+          'success=$_streamingSuccessCount fail=$_streamingFailCount');
+      final message = _streamingFailCount == 0
+          ? '流式拍摄已暂停：$_streamingSuccessCount 张照片已上传'
+          : '拍摄已暂停：$_streamingSuccessCount 张成功，$_streamingFailCount 张失败';
+      ref.read(streamingDoneBubbleProvider.notifier).state = message;
+      _pendingUploads.clear();
+      _streamingSceneId = null;
+      if (mounted) setState(() {});
+      return;
+    }
 
-    debugPrint('[streaming] done. scene=$_streamingSceneId $message');
-    ref.read(streamingDoneBubbleProvider.notifier).state = message;
+    final user = Supabase.instance.client.auth.currentUser;
+    final sceneId = _streamingSceneId;
+    if (user == null || sceneId == null) {
+      _pendingUploads.clear();
+      _streamingSceneId = null;
+      if (mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            textLocalize('stream_fail_task');
+      }
+      return;
+    }
 
-    _pendingUploads.clear();
-    _streamingSceneId = null;
+    try {
+      await Supabase.instance.client.from('processing_tasks').insert({
+        'scene_id': sceneId,
+        'user_id': user.id,
+        'task_type': 'sparse2dgs',
+        'task_params': {
+          'image_count': _streamingSuccessCount,
+        },
+        'status': 'pending',
+      });
 
-    if (mounted) setState(() {});
+      _pendingUploads.clear();
+      _streamingSceneId = null;
+      _streamingFrameIndex = 0;
+      _streamingSuccessCount = 0;
+      _streamingFailCount = 0;
+      if (mounted) {
+        ref.read(streamingFrameCountProvider.notifier).state = 0;
+        showAppToast(context, textLocalize('stream_success'));
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      debugPrint('[_stopStreaming] task creation error: $e');
+      if (mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            textLocalize('stream_fail_task');
+      }
+    }
   }
 
   void _computeOrientation() {
@@ -896,6 +947,26 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         color: Colors.redAccent,
                         backgroundColor: darkInput,
                         isSquareDot: true,
+                        compact: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  if (isVideoRecording && ref.watch(streamingModeProvider)) ...[
+                    AnimatedSwitcher(
+                      duration: BDMotion.durationFast,
+                      switchInCurve: BDMotion.curveEnter,
+                      switchOutCurve: BDMotion.curveExit,
+                      child: _StatusPill(
+                        key: ValueKey<int>(
+                            ref.watch(streamingFrameCountProvider)),
+                        label: textLocalize('stream_progress').replaceFirst(
+                            '%d',
+                            ref
+                                .watch(streamingFrameCountProvider)
+                                .toString()),
+                        color: BDDesign.colorFadedOlive,
+                        backgroundColor: darkInput,
                         compact: true,
                       ),
                     ),
