@@ -123,7 +123,7 @@ extension _RecallPageView on _RecallPageState {
                               ),
                             ),
                             if (_searchMode == RecallSearchMode.agent &&
-                                _agentChatMessage == null &&
+                                _agentConversationHistory.isEmpty &&
                                 !_isAgentSearching)
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(
@@ -156,7 +156,7 @@ extension _RecallPageView on _RecallPageState {
                                   20,
                                   8,
                                 ),
-                                child: _buildAgentResultCard(isDark, textColor),
+                                child: _buildAgentConversationList(isDark, textColor),
                               ),
                             if (_processingTasks.isNotEmpty)
                               RepaintBoundary(

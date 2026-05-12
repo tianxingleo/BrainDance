@@ -39,6 +39,7 @@ const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
 const showTopMenu = ref(false);
 const topMenuRef = ref(null);
+const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -206,10 +207,13 @@ const focalMax = computed(() => {
 
 const toggleFocalSettings = () => {
   showFocalSettings.value = !showFocalSettings.value;
-  if (showFocalSettings.value && !manualFocalPx.value) {
-    manualFocalPx.value = Number(
-      (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
-    );
+  if (showFocalSettings.value) {
+    showCinematicPanel.value = false;
+    if (!manualFocalPx.value) {
+      manualFocalPx.value = Number(
+        (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
+      );
+    }
   }
 };
 
@@ -1459,10 +1463,27 @@ const toggleCinematicPlayback = () => {
 const toggleCinematicPanel = () => {
   if (!canPlayCinematic.value) return;
   showCinematicPanel.value = !showCinematicPanel.value;
+  if (showCinematicPanel.value) {
+    showFocalSettings.value = false;
+  }
 };
 
 const toggleTopMenu = () => {
   showTopMenu.value = !showTopMenu.value;
+};
+
+const exitViewer = () => {
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'exit' }));
+  }
+};
+
+const switchRenderer = (useSpark) => {
+  if (useSparkRenderer.value === useSpark) return;
+  useSparkRenderer.value = useSpark;
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'switchViewer', useSpark }));
+  }
 };
 
 const onDocumentClickForMenu = (e) => {
@@ -2303,6 +2324,10 @@ onMounted(() => {
       }
     };
 
+    window.setRendererStateFromFlutter = (useSpark) => {
+      useSparkRenderer.value = !!useSpark;
+    };
+
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -2370,6 +2395,14 @@ onBeforeUnmount(async () => {
 
     <div class="top-hud">
       <div class="top-hud-row">
+        <button class="exit-btn" @click="exitViewer"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+
         <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
           <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
             class="search-input" />
@@ -2389,6 +2422,17 @@ onBeforeUnmount(async () => {
           </button>
 
           <div class="top-menu-dropdown archive-card" :class="{ open: showTopMenu }">
+            <div class="renderer-switch">
+              <button class="mode-chip" :class="{ active: !useSparkRenderer }"
+                @click="switchRenderer(false)">
+                原版
+              </button>
+              <button class="mode-chip" :class="{ active: useSparkRenderer }"
+                @click="switchRenderer(true)">
+                Spark
+              </button>
+            </div>
+            <div class="menu-divider"></div>
             <div class="view-mode-switch">
               <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
                 @click="switchViewMode(VIEW_MODE.FREE)">
@@ -2461,11 +2505,29 @@ onBeforeUnmount(async () => {
                 <span>主体锁定</span>
               </label>
             </div>
+            <div class="focal-panel-inline" v-if="showFocalSettings">
+              <div class="eyebrow">Lens Control</div>
+              <div class="focal-title">镜头焦距</div>
+              <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
+                @input="onManualFocalChange" />
+              <div class="focal-row">
+                <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
+                  step="1" @change="onManualFocalChange" />
+                <span>px</span>
+              </div>
+              <div class="focal-row">
+                <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
+              </div>
+              <div class="focal-row">
+                <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
+              </div>
+              <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
+            </div>
           </div>
         </div>
 
-        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
+      <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
     </div>
 
     <div v-if="isLoading" class="loading-overlay">
@@ -2494,26 +2556,6 @@ onBeforeUnmount(async () => {
       <button @click="toggleAutoRotate" :class="{ active: isAutoRotate }">
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
-    </div>
-
-    <div class="focal-settings-panel" v-if="showFocalSettings"
-      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-      <div class="eyebrow">Lens Control</div>
-      <div class="focal-title">镜头焦距</div>
-      <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
-        @input="onManualFocalChange" />
-      <div class="focal-row">
-        <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
-          step="1" @change="onManualFocalChange" />
-        <span>px</span>
-      </div>
-      <div class="focal-row">
-        <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
-      </div>
-      <div class="focal-row">
-        <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
-      </div>
-      <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -2576,9 +2618,9 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container {
-  --flutter-safe-top: 92px;
+  --flutter-safe-top: 56px;
   --flutter-safe-left: 14px;
-  --flutter-safe-right: 154px;
+  --flutter-safe-right: 14px;
 
   --bg-gradient-1: rgba(228, 232, 237, 0.16);
   --bg-gradient-2: rgba(107, 122, 143, 0.14);
@@ -2703,11 +2745,11 @@ onBeforeUnmount(async () => {
 
 .top-hud {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: var(--flutter-safe-top);
   left: var(--flutter-safe-left);
-  right: var(--flutter-safe-right);
+  right: var(--flutter-safe-left);
   width: auto;
-  z-index: 120;
+  z-index: 160;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -2730,10 +2772,10 @@ onBeforeUnmount(async () => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 52px;
+  height: 52px;
   padding: 0;
-  border-radius: 14px;
+  border-radius: 16px;
 }
 
 .top-menu-btn.active {
@@ -2743,13 +2785,58 @@ onBeforeUnmount(async () => {
 
 .top-menu-icon {
   display: inline-flex;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
 }
 
 .top-menu-icon svg {
   width: 100%;
   height: 100%;
+}
+
+.exit-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  border: none;
+  cursor: pointer;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 4px 12px var(--card-shadow);
+  backdrop-filter: blur(18px);
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.exit-btn:active {
+  transform: scale(0.92);
+}
+
+.exit-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.renderer-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--chip-hover-bg);
+}
+
+.renderer-switch .mode-chip {
+  flex: 1;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--card-border);
+  margin: 2px 0;
 }
 
 .top-menu-dropdown {
@@ -2761,7 +2848,7 @@ onBeforeUnmount(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 130;
+  z-index: 200;
   opacity: 0;
   transform: translateY(-6px);
   pointer-events: none;
@@ -3112,22 +3199,12 @@ button.active {
   z-index: auto;
 }
 
-.focal-settings-panel {
-  position: absolute;
-  top: calc(var(--flutter-safe-top) + 130px);
-  right: var(--flutter-safe-right);
-  z-index: 120;
-  width: 236px;
-  background: var(--card-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--card-border);
-  border-radius: 20px;
-  padding: 14px;
+.focal-panel-inline {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 16px 28px var(--card-shadow);
-  backdrop-filter: blur(16px);
+  padding: 10px 0 0;
+  border-top: 1px solid var(--card-border);
 }
 
 .focal-title {
@@ -3159,7 +3236,7 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: calc(var(--flutter-safe-top) + 68px);
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
@@ -3261,6 +3338,7 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
+  align-self: flex-start;
   color: var(--text-primary);
   background: var(--fps-bg);
   border: 1px solid var(--card-border);
@@ -3288,14 +3366,14 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   .app-container {
-    --flutter-safe-top: 84px;
+    --flutter-safe-top: 48px;
     --flutter-safe-left: 12px;
-    --flutter-safe-right: 144px;
+    --flutter-safe-right: 12px;
   }
 
   .top-hud {
     left: var(--flutter-safe-left);
-    right: var(--flutter-safe-right);
+    right: var(--flutter-safe-left);
     width: auto;
     gap: 8px;
   }
@@ -3304,10 +3382,20 @@ input[type='range'] {
     gap: 6px;
   }
 
+  .exit-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .exit-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
   .top-menu-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
   }
 
   .top-menu-dropdown {
@@ -3350,16 +3438,13 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: calc(var(--flutter-safe-top) + 48px);
+    top: calc(var(--flutter-safe-top) + 56px);
     right: 12px;
     width: 112px;
     min-width: 112px;
     padding: 7px;
   }
 
-  .focal-settings-panel {
-    top: calc(var(--flutter-safe-top) + 122px);
-  }
 }
 
 @media (prefers-color-scheme: dark) {

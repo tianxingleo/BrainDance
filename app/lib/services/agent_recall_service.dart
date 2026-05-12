@@ -115,6 +115,23 @@ class ChatMessage extends ChangeNotifier {
   }
 }
 
+class AgentConversationEntry {
+  final String userQuery;
+  final DateTime timestamp;
+  final ChatMessage agentMessage;
+  AgentRecallResponse? agentResult;
+  Duration? elapsed;
+
+  AgentConversationEntry({
+    required this.userQuery,
+    required this.timestamp,
+    required this.agentMessage,
+  });
+
+  bool get isComplete =>
+      agentResult != null || agentMessage.finalAnswer.isNotEmpty;
+}
+
 class AgentRecallResponse {
   final String mode;
   final String answer;
@@ -132,6 +149,7 @@ class AgentRecallResponse {
   final AgentSessionState? sessionState;
   final AgentFollowUp? followUp;
   final String? conversationSummary;
+  final Map<String, dynamic>? shortTermMemory;
 
   AgentRecallResponse({
     required this.mode,
@@ -150,6 +168,7 @@ class AgentRecallResponse {
     this.sessionState,
     this.followUp,
     this.conversationSummary,
+    this.shortTermMemory,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -218,6 +237,9 @@ class AgentRecallResponse {
             )
           : null,
       conversationSummary: json['conversation_summary']?.toString(),
+      shortTermMemory: json['short_term_memory'] is Map
+          ? Map<String, dynamic>.from(json['short_term_memory'] as Map)
+          : null,
     );
   }
 }
@@ -549,6 +571,7 @@ class AgentRecallService {
     String? sessionId,
     String? conversationSummary,
     AgentSessionState? sessionState,
+    Map<String, dynamic>? shortTermMemory,
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -594,6 +617,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
@@ -613,10 +637,11 @@ class AgentRecallService {
         eventBuffer.write(chunk);
         final rawBuffer = eventBuffer.toString();
         final parsed = _drainStreamingEvents(rawBuffer);
-        if (parsed.remaining != rawBuffer.length) {
-          eventBuffer
-            ..clear()
-            ..write(rawBuffer.substring(parsed.remaining));
+        if (parsed.remaining > 0) {
+          eventBuffer.clear();
+          if (parsed.remaining < rawBuffer.length) {
+            eventBuffer.write(rawBuffer.substring(parsed.remaining));
+          }
         }
         for (final event in parsed.events) {
           yield event;
@@ -646,6 +671,7 @@ class AgentRecallService {
           sessionId: sessionId,
           conversationSummary: conversationSummary,
           sessionState: sessionState,
+          shortTermMemory: shortTermMemory,
         );
         yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
       } catch (fallbackError) {
@@ -670,6 +696,7 @@ class AgentRecallService {
     String? sessionId,
     String? conversationSummary,
     AgentSessionState? sessionState,
+    Map<String, dynamic>? shortTermMemory,
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -690,6 +717,7 @@ class AgentRecallService {
           if (sessionId != null) 'sessionId': sessionId,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
+          if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );

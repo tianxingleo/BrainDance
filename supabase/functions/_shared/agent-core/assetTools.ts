@@ -828,10 +828,11 @@ function buildBundleAnswer(rows: ModelAssetBundle[]): string {
     return "当前没有读取到可用的模型资产摘要。";
   }
 
-  const intro = rows.length === 1
+  const displayed = rows.slice(0, 5);
+  const intro = displayed.length === 1
     ? "我先整理出 1 个可参考的模型："
-    : `我先整理出 ${rows.length} 个可参考的模型：`;
-  const details = rows.slice(0, 5).map((row, index) => {
+    : `我先整理出 ${displayed.length} 个可参考的模型：`;
+  const details = displayed.map((row, index) => {
     const name = row.display_name?.trim() || row.scene_id;
     const segments = [
       row.description?.trim() || null,
@@ -840,8 +841,11 @@ function buildBundleAnswer(rows: ModelAssetBundle[]): string {
     ].filter((item): item is string => Boolean(item));
     return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
   }).join("\n");
+  const suffix = rows.length > displayed.length
+    ? `\n（共 ${rows.length} 个，已展示前 ${displayed.length} 个）\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。`
+    : "\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。";
 
-  return `${intro}\n${details}\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。`;
+  return `${intro}\n${details}${suffix}`;
 }
 
 function buildListAnswer(rows: ListedModelAsset[]): string {
@@ -849,10 +853,11 @@ function buildListAnswer(rows: ListedModelAsset[]): string {
     return "当前没有找到匹配的模型资产。";
   }
 
-  const intro = rows.length === 1
+  const displayed = rows.slice(0, 5);
+  const intro = displayed.length === 1
     ? "当前找到 1 个候选模型："
-    : `当前找到 ${rows.length} 个候选模型：`;
-  const details = rows.slice(0, 5).map((row, index) => {
+    : `当前找到 ${displayed.length} 个候选模型：`;
+  const details = displayed.map((row, index) => {
     const name = row.display_name?.trim() || row.scene_id;
     const segments = [
       row.description?.trim() || null,
@@ -860,8 +865,11 @@ function buildListAnswer(rows: ListedModelAsset[]): string {
     ].filter((item): item is string => Boolean(item));
     return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
   }).join("\n");
+  const suffix = rows.length > displayed.length
+    ? `\n（共 ${rows.length} 个，已展示前 ${displayed.length} 个）\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`
+    : "\n如果你需要，我可以继续读取其中某几个模型的详细摘要。";
 
-  return `${intro}\n${details}\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`;
+  return `${intro}\n${details}${suffix}`;
 }
 
 export function buildReadModelAssetsTool(
@@ -1213,7 +1221,13 @@ export function collectAssetToolResult(
   state.lastToolName = toolName;
 
   if (parsed.kind === "list_model_assets") {
-    state.list = parsed.rows;
+    if (!state.list) {
+      state.list = parsed.rows;
+    } else {
+      const seen = new Set(state.list.map((r) => r.id));
+      const newRows = parsed.rows.filter((r) => !seen.has(r.id));
+      state.list = [...state.list, ...newRows];
+    }
     return state.list.length;
   }
   if (parsed.kind === "model_asset_bundle") {

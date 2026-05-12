@@ -96,6 +96,35 @@ export function buildAgentContextBlock(
     }
   }
 
+  if (options.shortTermMemory) {
+    const mem = options.shortTermMemory;
+    if (mem.entities.length > 0) {
+      parts.push("\n=== 短期记忆：实体追踪 ===");
+      parts.push(
+        '以下是本次会话中提到过的实体。当用户使用指代词（"那个"、"上面的"、"刚才的"、"这个模型"）时，优先指代 mentionedAt 最大的实体：',
+      );
+      for (const e of mem.entities) {
+        parts.push(
+          `  - [${e.kind}] ${e.label} (id: ${e.id}, 第${e.mentionedAt}轮)`,
+        );
+      }
+    }
+    const prefs = mem.preferences;
+    if (prefs.regions?.length || prefs.assetTypes?.length || prefs.timeRange) {
+      parts.push("\n=== 短期记忆：用户偏好 ===");
+      parts.push("本次会话中观察到的用户搜索偏好（可用于优化搜索参数）：");
+      if (prefs.regions?.length) {
+        parts.push(`  - 偏好区域: ${prefs.regions.join("、")}`);
+      }
+      if (prefs.assetTypes?.length) {
+        parts.push(`  - 偏好资产类型: ${prefs.assetTypes.join("、")}`);
+      }
+      if (prefs.timeRange) {
+        parts.push(`  - 偏好时间范围: ${prefs.timeRange}`);
+      }
+    }
+  }
+
   if (options.conversationSummary) {
     parts.push(`\n=== 历史会话摘要 ===`);
     parts.push(`${options.conversationSummary}`);

@@ -158,10 +158,17 @@ extension _RecallPageSearch on _RecallPageState {
 
     setState(() {
       _isAgentSearching = true;
-      _agentResult = null;
-      _agentChatMessage = ChatMessage(
+      final newMessage = ChatMessage(
         isUser: false,
         liveStatus: '已提交请求，正在连接 Agent 服务',
+      );
+      _agentConversationHistory.insert(
+        0,
+        AgentConversationEntry(
+          userQuery: trimmedQuery,
+          timestamp: DateTime.now(),
+          agentMessage: newMessage,
+        ),
       );
     });
     _startAgentRunTracking();
@@ -184,6 +191,7 @@ extension _RecallPageSearch on _RecallPageState {
           sessionId: _agentSessionId,
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
+          shortTermMemory: _agentShortTermMemory,
         );
         if (!mounted) return;
         setState(() {
@@ -219,6 +227,7 @@ extension _RecallPageSearch on _RecallPageState {
         sessionId: _agentSessionId,
         conversationSummary: _agentConversationSummary,
         sessionState: _agentSessionState,
+        shortTermMemory: _agentShortTermMemory,
       );
       _agentStreamSubscription = stream.listen(
         (chunk) {
@@ -485,6 +494,177 @@ extension _RecallPageSearch on _RecallPageState {
     );
   }
 
+  Widget _buildAgentConversationList(bool isDark, Color textColor) {
+    if (_agentConversationHistory.isEmpty && !_isAgentSearching) {
+      final hintColor = isDark
+          ? Colors.white.withValues(alpha: 0.62)
+          : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+      return BDPanelCard(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          textLocalize('recall_agent_panel_hint'),
+          style: TextStyle(color: hintColor, fontSize: 13),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        for (int i = 0; i < _agentConversationHistory.length; i++) ...[
+          _buildUserBubble(
+            _agentConversationHistory[i].userQuery,
+            isDark,
+            textColor,
+          ),
+          const SizedBox(height: 8),
+          if (i == 0)
+            _buildAgentResultCard(isDark, textColor)
+          else
+            RepaintBoundary(
+              child: _buildCompletedAgentCard(
+                _agentConversationHistory[i],
+                isDark,
+                textColor,
+              ),
+            ),
+          if (i < _agentConversationHistory.length - 1)
+            const SizedBox(height: 16),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildUserBubble(String query, bool isDark, Color textColor) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(4),
+            bottomLeft: Radius.circular(16),
+            bottomRight: Radius.circular(16),
+          ),
+        ),
+        child: Text(
+          query,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 14,
+            height: 1.4,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompletedAgentCard(
+    AgentConversationEntry entry,
+    bool isDark,
+    Color textColor,
+  ) {
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.62)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+    final result = entry.agentResult;
+    final answer = entry.agentMessage.finalAnswer.trim();
+    final hasActions =
+        result != null && result.actions.any((a) => a.type == 'open_scene');
+    final topCandidates = result?.candidates.take(3).toList() ?? [];
+
+    return BDPanelCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.travel_explore_rounded,
+                size: 18,
+                color: BDDesign.colorMutedBlue,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  textLocalize('recall_agent_rag'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (entry.elapsed != null)
+                Text(
+                  _formatDuration(entry.elapsed!),
+                  style: TextStyle(color: hintColor, fontSize: 11.5),
+                ),
+            ],
+          ),
+          if (answer.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _AnimatedMarkdownAnswer(
+              data: answer,
+              isDark: isDark,
+              textColor: textColor,
+              hintColor: hintColor,
+            ),
+          ],
+          if (topCandidates.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final candidate in topCandidates)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
+                  style: TextStyle(
+                    color: hintColor,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+          ],
+          if (hasActions) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: BDDesign.colorMutedBlue,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () => _openAgentRecallResult(result!),
+                icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                label: const Text('打开场景', style: TextStyle(fontSize: 14)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration d) {
+    if (d.inSeconds < 60) return '${d.inSeconds}s';
+    return '${d.inMinutes}m ${d.inSeconds % 60}s';
+  }
+
   Widget _buildAgentResultCard(bool isDark, Color textColor) {
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
@@ -493,13 +673,7 @@ extension _RecallPageSearch on _RecallPageState {
     final chatMessage = _agentChatMessage;
 
     if (chatMessage == null && _agentResult == null && !_isAgentSearching) {
-      return BDPanelCard(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          textLocalize('recall_agent_panel_hint'),
-          style: TextStyle(color: hintColor, fontSize: 13),
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     final hasActions =
