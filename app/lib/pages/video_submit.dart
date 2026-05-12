@@ -2,7 +2,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
-import 'package:braindance/main.dart' show pageIndexProvider, pendingSubmitTitleProvider;
+import 'package:braindance/main.dart'
+    show pageIndexProvider, pendingSubmitTitleProvider;
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:dio/dio.dart';
@@ -11,8 +12,10 @@ import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:ffmpeg_kit_extended_flutter/ffmpeg_kit_extended_flutter.dart';
 
 import '../configs/supabase_config.dart';
+import '../services/video_preprocessor.dart';
 
 class DateFormat {
   static String format(int number, int length) {
@@ -40,13 +43,18 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   bool _nameFocused = false;
   bool _isUploading = false;
   bool _didPrefillTitle = false;
+  bool _isPreprocessing = false;
   double _uploadProgress = 0.0;
+  double _preprocessProgress = 0.0;
   int _uploadedBytes = 0;
   int _totalFileSize = 0;
   CancelToken? _cancelToken;
   bool _dialogShowing = false;
   bool _shouldClosePage = false;
   bool _deleteVideo = true;
+  bool _preprocessCancelled = false;
+  VideoPreprocessResult? _preprocessResult;
+  String? _uploadedStoragePath;
 
   static final Random _rdg = Random();
 
@@ -58,6 +66,22 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         '${DateFormat.format(time.day, 2)}'
         '_'
         '${DateFormat.format(_rdg.nextInt(1000000), 6)}';
+  }
+
+  static const _preprocessConfig = VideoPreprocessConfig(
+    targetFps: 5,
+    maxHeight: 1080,
+    videoBitrate: '2M',
+    audioBitrate: '96k',
+    enableFastStart: true,
+  );
+
+  String _progressHint() {
+    final c = _preprocessConfig;
+    return textLocalize('video_preprocess_progress')
+        .replaceFirst('%s', c.videoBitrate)
+        .replaceFirst('%d', c.targetFps.toString())
+        .replaceFirst('%d', c.maxHeight.toString());
   }
 
   Future<bool> _showCancelUploadDialog() async {
@@ -76,9 +100,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           ),
           content: Text(
             textLocalize('video_upload_cancel_message'),
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
           actions: [
             TextButton(
@@ -87,12 +109,83 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.redAccent,
-              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               child: Text(textLocalize('video_upload_cancel_confirm')),
             ),
           ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Future<bool> _showCancelPreprocessDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return StatefulBuilder(
+          builder: (builderContext, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                textLocalize('video_preprocess_cancel_title'),
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    textLocalize('video_preprocess_cancel_message'),
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: _deleteVideo,
+                          onChanged: (v) {
+                            _deleteVideo = v ?? true;
+                            setDialogState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        textLocalize('video_exit_delete_checkbox'),
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(textLocalize('video_preprocess_cancel_continue')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
+                  child: Text(textLocalize('video_preprocess_cancel_confirm')),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -158,7 +251,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                 ),
                 TextButton(
                   onPressed: () {
-                    debugPrint('[VideoSubmit] exit confirmed, deleteVideo=$_deleteVideo');
+                    debugPrint(
+                      '[VideoSubmit] exit confirmed, deleteVideo=$_deleteVideo',
+                    );
                     Navigator.of(ctx).pop(true);
                   },
                   style: TextButton.styleFrom(
@@ -199,6 +294,35 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     }
   }
 
+  void _cleanupPreprocess() {
+    if (_preprocessResult == null) return;
+    try {
+      final f = _preprocessResult!.outputFile;
+      if (f.existsSync()) {
+        f.deleteSync();
+        debugPrint('[VideoSubmit] deleted preprocessed temp file');
+      }
+    } catch (e) {
+      debugPrint('[VideoSubmit] error deleting preprocessed file: $e');
+    }
+    _preprocessResult = null;
+  }
+
+  Future<void> _deleteUploadedContent() async {
+    if (_uploadedStoragePath == null) return;
+    try {
+      final client = Supabase.instance.client;
+      await client.storage.from('braindance-assets').remove([
+        _uploadedStoragePath!,
+      ]);
+      debugPrint(
+        '[VideoSubmit] deleted uploaded content: $_uploadedStoragePath',
+      );
+    } catch (e) {
+      debugPrint('[VideoSubmit] error deleting uploaded content: $e');
+    }
+  }
+
   Future<void> _submit() async {
     final client = Supabase.instance.client;
     var user = client.auth.currentUser;
@@ -227,16 +351,58 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     }
 
     _cancelToken = CancelToken();
+    _preprocessCancelled = false;
 
     setState(() {
       _isUploading = true;
+      _isPreprocessing = true;
+      _preprocessProgress = 0.0;
     });
 
+    // --- Phase 1: Preprocessing ---
+    VideoPreprocessResult? preprocessResult;
+    try {
+      preprocessResult = await VideoPreprocessor.preprocess(
+        File(widget.videoPath),
+        config: _preprocessConfig,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() {
+              _preprocessProgress = progress;
+            });
+          }
+        },
+      );
+    } catch (e) {
+      if (_preprocessCancelled) {
+        debugPrint('[VideoSubmit] preprocessing cancelled by user');
+        return;
+      }
+      debugPrint('[VideoSubmit] preprocessing error: $e');
+      if (mounted) {
+        showAppToast(context, textLocalize('video_preprocess_fail'));
+        setState(() {
+          _isUploading = false;
+          _isPreprocessing = false;
+        });
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _isPreprocessing = false;
+      _preprocessResult = preprocessResult;
+    });
+
+    // --- Phase 2: Upload ---
     try {
       final sceneId = _generateSceneId();
 
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
-      final file = File(widget.videoPath);
+      _uploadedStoragePath = videoStoragePath;
+      final file = preprocessResult.outputFile;
       final fileSize = await file.length();
       final url =
           '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
@@ -284,36 +450,44 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           'mapper_type': 'da3',
         },
         'status': 'pending',
-        if (nameController.text.isNotEmpty) 'display_name': nameController.text,
       });
+
+      _cleanupPreprocess();
 
       if (mounted) {
         showAppToast(context, textLocalize('gen_submit_success'));
         if (_dialogShowing) {
           _shouldClosePage = true;
-          Navigator.of(context).pop(); // dismiss dialog, callback handles page pop
+          Navigator.of(context).pop();
         } else {
-          Navigator.of(context).pop(); // pop page directly
+          Navigator.of(context).pop();
         }
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
+        debugPrint('[VideoSubmit] upload cancelled by user');
+        _deleteUploadedContent();
+        _cleanupPreprocess();
         return;
       }
+      debugPrint('[VideoSubmit] error: $e');
       if (mounted) {
-        debugPrint('[VideoSubmit] error: $e');
         showAppToast(context, textLocalize('gen_submit_fail'));
       }
+      _cleanupPreprocess();
     } catch (e) {
+      debugPrint('[VideoSubmit] error: $e');
       if (mounted) {
-        debugPrint('[VideoSubmit] error: $e');
         showAppToast(context, textLocalize('gen_submit_fail'));
       }
+      _cleanupPreprocess();
     } finally {
       _cancelToken = null;
+      _uploadedStoragePath = null;
       if (mounted) {
         setState(() {
           _isUploading = false;
+          _isPreprocessing = false;
         });
       }
     }
@@ -357,7 +531,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       }
     }
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
@@ -370,8 +546,34 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         final navigator = Navigator.of(context);
-        if (_isUploading) {
-          debugPrint('[VideoSubmit] back intercepted while uploading, showing upload cancel dialog');
+        if (_isPreprocessing) {
+          debugPrint(
+            '[VideoSubmit] back intercepted while preprocessing, showing cancel dialog',
+          );
+          _dialogShowing = true;
+          final shouldCancel = await _showCancelPreprocessDialog();
+          if (!mounted) return;
+          _dialogShowing = false;
+          if (shouldCancel) {
+            debugPrint(
+              '[VideoSubmit] preprocessing cancelled by user via back button',
+            );
+            _preprocessCancelled = true;
+            FFmpegKitExtended.cancelAllSessions();
+            setState(() {
+              _isUploading = false;
+              _isPreprocessing = false;
+            });
+            _deleteRecordedVideo();
+            navigator.pop();
+          } else if (_shouldClosePage) {
+            _shouldClosePage = false;
+            navigator.pop();
+          }
+        } else if (_isUploading) {
+          debugPrint(
+            '[VideoSubmit] back intercepted while uploading, showing upload cancel dialog',
+          );
           _dialogShowing = true;
           final shouldCancel = await _showCancelUploadDialog();
           if (!mounted) return;
@@ -379,6 +581,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           if (shouldCancel) {
             debugPrint('[VideoSubmit] upload cancelled by user');
             _cancelToken?.cancel();
+            _deleteUploadedContent();
+            _cleanupPreprocess();
             setState(() {
               _isUploading = false;
             });
@@ -388,7 +592,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             navigator.pop();
           }
         } else {
-          debugPrint('[VideoSubmit] back intercepted before upload, showing exit confirm dialog');
+          debugPrint(
+            '[VideoSubmit] back intercepted before upload, showing exit confirm dialog',
+          );
           final shouldExit = await _showExitConfirmDialog();
           if (!mounted) return;
           if (shouldExit) {
@@ -427,7 +633,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: LinearProgressIndicator(
-                                  value: _uploadProgress,
+                                  value: _isPreprocessing
+                                      ? _preprocessProgress
+                                      : _uploadProgress,
                                   minHeight: 5,
                                   backgroundColor: isDark
                                       ? Colors.white.withAlpha(20)
@@ -442,16 +650,32 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                               const SizedBox(height: 6),
                               Row(
                                 children: [
-                                  Icon(Icons.cloud_upload_outlined, size: 12, color: hintColor),
+                                  Icon(
+                                    _isPreprocessing
+                                        ? Icons.video_settings_outlined
+                                        : Icons.cloud_upload_outlined,
+                                    size: 12,
+                                    color: hintColor,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                                    style: TextStyle(fontSize: 12, color: hintColor),
+                                    _isPreprocessing
+                                        ? '${(_preprocessProgress * 100).toStringAsFixed(0)}%'
+                                        : '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: hintColor,
+                                    ),
                                   ),
                                   const Spacer(),
                                   Text(
-                                    '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                                    style: TextStyle(fontSize: 11, color: hintColor),
+                                    _isPreprocessing
+                                        ? _progressHint()
+                                        : '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: hintColor,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -502,13 +726,33 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                         top: 4,
                         child: GestureDetector(
                           onTap: () {
-                            if (_isUploading) {
+                            if (_isPreprocessing) {
+                              _dialogShowing = true;
+                              _showCancelPreprocessDialog().then((
+                                shouldCancel,
+                              ) {
+                                if (!mounted) return;
+                                _dialogShowing = false;
+                                if (shouldCancel) {
+                                  _preprocessCancelled = true;
+                                  FFmpegKitExtended.cancelAllSessions();
+                                  setState(() {
+                                    _isUploading = false;
+                                    _isPreprocessing = false;
+                                  });
+                                  _deleteRecordedVideo();
+                                  Navigator.of(context).pop();
+                                }
+                              });
+                            } else if (_isUploading) {
                               _dialogShowing = true;
                               _showCancelUploadDialog().then((shouldCancel) {
                                 if (!mounted) return;
                                 _dialogShowing = false;
                                 if (shouldCancel) {
                                   _cancelToken?.cancel();
+                                  _deleteUploadedContent();
+                                  _cleanupPreprocess();
                                   setState(() {
                                     _isUploading = false;
                                   });
@@ -559,10 +803,16 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                     onTap: _isUploading ? () {} : _submit,
                     style: TDButtonStyle(
                       backgroundColor: _isUploading
-                          ? (isDark ? const Color(0xFF1A1A1E) : const Color(0xFFD8D8DF))
-                          : (isDark ? const Color(0xFF2A2A2E) : BDDesign.colorMutedBlue),
+                          ? (isDark
+                                ? const Color(0xFF1A1A1E)
+                                : const Color(0xFFD8D8DF))
+                          : (isDark
+                                ? const Color(0xFF2A2A2E)
+                                : BDDesign.colorMutedBlue),
                       textColor: _isUploading
-                          ? (isDark ? Colors.white.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.45))
+                          ? (isDark
+                                ? Colors.white.withValues(alpha: 0.28)
+                                : Colors.white.withValues(alpha: 0.45))
                           : Colors.white,
                       radius: BorderRadius.circular(18),
                     ),
@@ -571,7 +821,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                     theme: TDButtonTheme.primary,
                     size: TDButtonSize.large,
                     width: double.infinity,
-                    text: _isUploading
+                    text: _isPreprocessing
+                        ? '${textLocalize('video_preprocess_cancel_title')}...'
+                        : _isUploading
                         ? '${textLocalize('gen_uploading')}...'
                         : textLocalize('video_submit_btn'),
                   ),
@@ -616,8 +868,8 @@ class _NameTextField extends StatelessWidget {
           color: focused
               ? BDDesign.colorMutedBlue
               : (isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
           width: focused ? 1.5 : 1,
         ),
       ),
