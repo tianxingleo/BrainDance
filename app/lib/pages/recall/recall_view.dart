@@ -123,7 +123,7 @@ extension _RecallPageView on _RecallPageState {
                               ),
                             ),
                             if (_searchMode == RecallSearchMode.agent &&
-                                _agentChatMessage == null &&
+                                _agentConversationHistory.isEmpty &&
                                 !_isAgentSearching)
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(
@@ -156,7 +156,7 @@ extension _RecallPageView on _RecallPageState {
                                   20,
                                   8,
                                 ),
-                                child: _buildAgentResultCard(isDark, textColor),
+                                child: _buildAgentConversationList(isDark, textColor),
                               ),
                             if (_processingTasks.isNotEmpty)
                               RepaintBoundary(
@@ -239,10 +239,9 @@ extension _RecallPageView on _RecallPageState {
                           isSameModel: _isSameModel,
                           onNavigateToViewer: _navigateToViewer,
                           toPublicUrl: _toPublicUrl,
-                          onShowModelActions:
-                              (model, {bool imageOnly = false}) {
-                                _showModelActions(model, imageOnly: imageOnly);
-                              },
+                          onShowModelActions: (model, {bool imageOnly = false}) {
+                            _showModelActions(model, imageOnly: imageOnly);
+                          },
                         )
                       else
                         TimePeelingList(
@@ -255,11 +254,11 @@ extension _RecallPageView on _RecallPageState {
                           modelCardKeyFor: _modelCardKeyFor,
                           isSameModel: _isSameModel,
                           onNavigateToViewer: _navigateToViewer,
-                          onShowModelActions:
-                              (model, {bool imageOnly = false}) {
-                                _showModelActions(model, imageOnly: imageOnly);
-                              },
+                          onShowModelActions: (model, {bool imageOnly = false}) {
+                            _showModelActions(model, imageOnly: imageOnly);
+                          },
                           onAddNewTask: (name) {
+                            ref.read(pendingSubmitTitleProvider.notifier).state = name;
                             ref.read(pageIndexProvider.notifier).state = 1;
                           },
                         ),

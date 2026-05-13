@@ -14,14 +14,14 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     _agentFirstRemoteEventAt = null;
     _agentLatestSubmittedQuery = null;
     _isAgentSearching = false;
-    _agentResult = null;
     _agentBootstrapStep = null;
-    _agentChatMessage = null;
 
     if (!preserveSession) {
       _agentSessionId = null;
       _agentConversationSummary = null;
       _agentSessionState = null;
+      _agentShortTermMemory = null;
+      _agentConversationHistory.clear();
     }
   }
 
@@ -46,6 +46,12 @@ extension _RecallPageAgentRuntime on _RecallPageState {
     _agentElapsedTimer = null;
     if (_agentRunStartedAt != null && _agentRunFinishedAt == null) {
       _agentRunFinishedAt = DateTime.now();
+    }
+    if (_agentConversationHistory.isNotEmpty &&
+        _agentRunStartedAt != null &&
+        _agentRunFinishedAt != null) {
+      _agentConversationHistory.first.elapsed =
+          _agentRunFinishedAt!.difference(_agentRunStartedAt!);
     }
   }
 
@@ -340,6 +346,7 @@ extension _RecallPageAgentRuntime on _RecallPageState {
 
   void _rememberAgentResponse(String query, AgentRecallResponse response) {
     _agentSessionState = response.sessionState;
+    _agentShortTermMemory = response.shortTermMemory;
     _agentConversationSummary = _mergeAgentConversationSummary(
       previous: _agentConversationSummary,
       query: query,

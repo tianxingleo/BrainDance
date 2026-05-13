@@ -154,3 +154,8 @@ flutter:
         - asset: assets/fonts/HarmonyOS_Sans_SC_Regular.ttf
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+ffmpeg_kit_extended_config:
+  type: "video_hw"
+  gpl: false
+  small: false

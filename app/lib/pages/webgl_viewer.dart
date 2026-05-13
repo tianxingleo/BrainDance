@@ -534,6 +534,11 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             }
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
+          } else if (data['action'] == 'exit') {
+            if (mounted) Navigator.of(context).pop();
+          } else if (data['action'] == 'switchViewer') {
+            final useSpark = data['useSpark'] == true;
+            _switchViewer(useSpark);
           } else if (data['status'] == 'error') {
             debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
@@ -602,6 +607,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     // 同步当前主题到 WebView
     _sendThemeToVue();
+
+    // 同步渲染器状态到 WebView
+    _controller?.runJavaScript(
+        "window.setRendererStateFromFlutter($_useSparkViewer)");
   }
 
   void _sendThemeToVue() {
@@ -1187,7 +1196,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                       ),
                     ),
                   )
-                else if (!_isWebReady && _controller != null)
+                else if (!_isDownloading && !_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
                 if (!_isDownloading)
                   SafeArea(

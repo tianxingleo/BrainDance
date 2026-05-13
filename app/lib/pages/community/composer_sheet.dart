@@ -327,7 +327,8 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
         placeName: place,
         latitude: latitude,
         longitude: longitude,
-        model: model,
+        models: [model],
+        tags: [],
       ),
     );
   }
