@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as THREE from 'three'
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js'
 import { deriveVrConfigUrl, getInitialPayload, normalizePayload, resolveRelativeAssetUrl } from '../engine/payload'
 import { getPreviewMode, switchPreviewMode, type PreviewMode } from '../engine/previewMode'
 import { loadVrConfig } from '../engine/vrConfig'
@@ -67,7 +69,26 @@ type HudAction = {
   onActivate: () => void
 }
 
+type ControllerHudState = {
+  triggerActive?: boolean
+  gripActive?: boolean
+  stickActive?: boolean
+  menuActive?: boolean
+}
+
+type ControllerRigItem = {
+  hand: ControllerHand
+  controller: THREE.Group
+  grip: THREE.Group
+  hud: THREE.Mesh
+  fallback: THREE.Group
+  officialModel: THREE.Object3D
+  state: ControllerHudState
+  modelCheckTimer?: number
+}
+
 const containerRef = ref<HTMLDivElement | null>(null)
+const spectatorCanvasRef = ref<HTMLCanvasElement | null>(null)
 const status = ref('等待初始化')
 const errorMessage = ref('')
 const fps = ref(0)
@@ -97,7 +118,7 @@ const isMenuOpen = ref(persistedClientState.isMenuOpen ?? true)
 const isDesktopPanelOpen = ref(true)
 const interactionMode = ref<InteractionMode>(persistedClientState.interactionMode || 'explore')
 const sceneScaleMode = ref<SceneScaleMode>(persistedClientState.sceneScaleMode || 'room')
-const turnMode = ref<TurnMode>(persistedClientState.turnMode || 'snap')
+const turnMode = ref<TurnMode>(persistedClientState.turnMode || 'smooth')
 const hudView = ref<HudView>(persistedClientState.hudView || 'controls')
 const moveSpeed = ref(1.15)
 const snapTurnAngle = ref(30)
@@ -130,7 +151,11 @@ let currentControllerFrame = 0
 let xrSession: XRSession | null = null
 let leftController: THREE.Group | null = null
 let rightController: THREE.Group | null = null
-let controllerRay: THREE.Line | null = null
+let leftControllerGrip: THREE.Group | null = null
+let rightControllerGrip: THREE.Group | null = null
+let controllerModelFactory: XRControllerModelFactory | null = null
+const controllerRigItems = new Map<ControllerHand, ControllerRigItem>()
+let controllerRay: THREE.Group | null = null
 let controllerTip: THREE.Mesh | null = null
 let hudActions: HudAction[] = []
 let hudHoveredActionId: string | null = null
@@ -154,6 +179,10 @@ let worldRoot: THREE.Group | null = null
 let xrSessionListenersInstalled = false
 let overlayScene: THREE.Scene | null = null
 let originalViewerRender: (() => void) | null = null
+let vrEnvironmentMap: THREE.Texture | null = null
+let spectatorRenderer: THREE.WebGLRenderer | null = null
+let spectatorCamera: THREE.PerspectiveCamera | null = null
+let lastSpectatorRenderTime = 0
 let introGlint: THREE.Points | null = null
 let grabState: GrabState | null = null
 let markerGroup: THREE.Group | null = null
@@ -169,10 +198,15 @@ let lastSnapTurnTime = 0
 let stateSaveTimer = 0
 const buttonLatch = new Map<string, boolean>()
 const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
+const spectatorRenderWidth = 960
+const spectatorRenderHeight = 540
+const spectatorRenderIntervalMs = 1000 / 30
 const hudPlaneWidth = 1.6
 const hudPlaneHeight = 1.0
 const hudRenderOrder = 1000
 const hudPointerRenderOrder = 1002
+const preferStylizedControllerModel = false
+const enableControllerFallbackModel = false
 const splatSceneFormats = {
   splat: 0,
   ksplat: 1,
@@ -416,9 +450,7 @@ function applySceneRotationY(angle: number) {
 
 function rotateSceneAroundUser(angle: number) {
   const runtime = getRuntimeViewer()
-  const camera = runtime?.renderer?.xr?.isPresenting
-    ? runtime.renderer.xr.getCamera()
-    : runtime?.camera
+  const camera = getRenderCamera()
   if (!camera) {
     applySceneRotationY(angle)
     return
@@ -426,10 +458,24 @@ function rotateSceneAroundUser(angle: number) {
 
   const pivot = camera.getWorldPosition(new THREE.Vector3())
   for (const target of getSceneActionTargets()) {
-    target.position.sub(pivot).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).add(pivot)
-    target.rotateY(angle)
+    target.position.sub(pivot).applyAxisAngle(new THREE.Vector3(0, 0, 1), angle).add(pivot)
+    target.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), angle)
   }
   runtime?.forceRenderNextFrame?.()
+}
+
+function rotateSceneAroundView(axis: THREE.Vector3, angle: number) {
+  const runtime = getRuntimeViewer()
+  const camera = getRenderCamera()
+  if (!camera || axis.lengthSq() < 1e-8) return false
+  const pivot = camera.getWorldPosition(new THREE.Vector3())
+  const normalizedAxis = axis.clone().normalize()
+  for (const target of getSceneActionTargets()) {
+    target.position.sub(pivot).applyAxisAngle(normalizedAxis, angle).add(pivot)
+    target.rotateOnWorldAxis(normalizedAxis, angle)
+  }
+  runtime?.forceRenderNextFrame?.()
+  return true
 }
 
 function focusSceneOnPoint(point: THREE.Vector3, offset = 1.45) {
@@ -478,11 +524,21 @@ function disposeViewer() {
   worldRoot = null
   leftController = null
   rightController = null
+  leftControllerGrip = null
+  rightControllerGrip = null
+  controllerModelFactory = null
+  for (const item of controllerRigItems.values()) {
+    if (item.modelCheckTimer) window.clearInterval(item.modelCheckTimer)
+  }
+  controllerRigItems.clear()
   controllerRay = null
   controllerTip = null
   xrSessionListenersInstalled = false
   overlayScene = null
   originalViewerRender = null
+  vrEnvironmentMap?.dispose()
+  vrEnvironmentMap = null
+  disposeSpectatorRenderer()
   hudActions = []
   hudHoveredActionId = null
   hudPointerHit = false
@@ -686,13 +742,117 @@ function stopControllerLoop() {
   controllerRafId = 0
 }
 
+function disposeSpectatorRenderer() {
+  spectatorRenderer?.dispose()
+  spectatorRenderer = null
+  spectatorCamera = null
+}
+
+function ensureSpectatorRenderer() {
+  if (!spectatorCanvasRef.value) return null
+  if (!spectatorRenderer) {
+    spectatorRenderer = new THREE.WebGLRenderer({
+      canvas: spectatorCanvasRef.value,
+      antialias: true,
+      alpha: false,
+    })
+    spectatorRenderer.outputColorSpace = THREE.SRGBColorSpace
+    spectatorRenderer.setClearColor(0x050505, 1)
+  }
+
+  if (!spectatorCamera) {
+    spectatorCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.01, 1000)
+  }
+
+  return {
+    renderer: spectatorRenderer,
+    camera: spectatorCamera,
+  }
+}
+
+function resizeSpectatorRenderer() {
+  const canvas = spectatorCanvasRef.value
+  const setup = ensureSpectatorRenderer()
+  if (!canvas || !setup) return
+
+  setup.renderer.setPixelRatio(1)
+  setup.renderer.setSize(spectatorRenderWidth, spectatorRenderHeight, false)
+  setup.camera.aspect = spectatorRenderWidth / spectatorRenderHeight
+  setup.camera.updateProjectionMatrix()
+}
+
+function getVerticalFovFromProjection(camera: THREE.Camera) {
+  const projection = camera.projectionMatrix.elements
+  const yScale = projection[5]
+  if (!Number.isFinite(yScale) || yScale <= 0) return null
+  return THREE.MathUtils.radToDeg(2 * Math.atan(1 / yScale))
+}
+
+function updateSpectatorHeadsetCamera() {
+  const runtime = getRuntimeViewer()
+  const setup = ensureSpectatorRenderer()
+  if (!runtime?.renderer?.xr?.isPresenting || !runtime.camera || !setup) return false
+
+  const xrCamera = runtime.renderer.xr.getCamera()
+  xrCamera.updateMatrixWorld(true)
+  const eyeCamera = xrCamera.cameras?.[0] || xrCamera
+  setup.camera.position.copy(xrCamera.position)
+  setup.camera.quaternion.copy(xrCamera.quaternion)
+  // WebXR 的实际视场来自单眼投影矩阵；直接沿用桌面相机 fov 会让旁观画面偏广角。
+  setup.camera.fov = getVerticalFovFromProjection(eyeCamera) || runtime.camera.fov
+  setup.camera.near = eyeCamera.near || runtime.camera.near
+  setup.camera.far = eyeCamera.far || runtime.camera.far
+  setup.camera.updateProjectionMatrix()
+  setup.camera.updateMatrixWorld(true)
+  return true
+}
+
 function getRuntimeViewer(): RuntimeGaussianViewer | null {
   return viewer as (GaussianSplats3D.Viewer & RuntimeGaussianViewer) | null
 }
 
 function ensureOverlayScene() {
-  if (!overlayScene) overlayScene = new THREE.Scene()
+  if (!overlayScene) {
+    overlayScene = new THREE.Scene()
+    overlayScene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25))
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.7)
+    keyLight.position.set(2, 4, 3)
+    overlayScene.add(keyLight)
+    const fillLight = new THREE.DirectionalLight(0x88bbff, 0.85)
+    fillLight.position.set(-3, 2, -2)
+    overlayScene.add(fillLight)
+    if (vrEnvironmentMap) overlayScene.environment = vrEnvironmentMap
+  }
   return overlayScene
+}
+
+function setupVrLighting() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer) return vrEnvironmentMap
+  if (!vrEnvironmentMap) {
+    const pmrem = new THREE.PMREMGenerator(runtime.renderer)
+    vrEnvironmentMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    pmrem.dispose()
+  }
+
+  if (runtime.threeScene) {
+    runtime.threeScene.environment = vrEnvironmentMap
+    if (!runtime.threeScene.getObjectByName('braindance-vr-hemi-light')) {
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.1)
+      hemi.name = 'braindance-vr-hemi-light'
+      runtime.threeScene.add(hemi)
+    }
+    if (!runtime.threeScene.getObjectByName('braindance-vr-key-light')) {
+      const key = new THREE.DirectionalLight(0xffffff, 1.45)
+      key.name = 'braindance-vr-key-light'
+      key.position.set(2, 4, 3)
+      runtime.threeScene.add(key)
+    }
+  }
+
+  const overlay = ensureOverlayScene()
+  overlay.environment = vrEnvironmentMap
+  return vrEnvironmentMap
 }
 
 function getRenderCamera() {
@@ -717,6 +877,16 @@ function renderOverlayScene() {
   runtime.forceRenderNextFrame?.()
 }
 
+function renderOverlaySceneWithRenderer(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
+  if (!overlayScene) return
+  if (!overlayScene.children.some((child) => child.visible)) return
+
+  const savedAutoClear = renderer.autoClear
+  renderer.autoClear = false
+  renderer.render(overlayScene, camera)
+  renderer.autoClear = savedAutoClear
+}
+
 function installOverlayRenderHook() {
   const runtime = getRuntimeViewer()
   if (!runtime?.render || originalViewerRender) return
@@ -724,6 +894,7 @@ function installOverlayRenderHook() {
   runtime.render = () => {
     originalViewerRender?.()
     renderOverlayScene()
+    renderSpectatorFrameThrottled()
   }
 }
 
@@ -1374,9 +1545,351 @@ function updateVignette(visible: boolean) {
   vignetteMesh.visible = visible && isVrPresenting.value
 }
 
+function drawRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + width, y, x + width, y + height, radius)
+  ctx.arcTo(x + width, y + height, x, y + height, radius)
+  ctx.arcTo(x, y + height, x, y, radius)
+  ctx.arcTo(x, y, x + width, y, radius)
+  ctx.closePath()
+}
+
+function drawControllerHudLabel(
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  hint: string,
+  x: number,
+  y: number,
+  anchorX: number,
+  anchorY: number,
+  active = false,
+) {
+  ctx.strokeStyle = active ? 'rgba(242, 195, 143, 0.9)' : 'rgba(158, 208, 198, 0.62)'
+  ctx.lineWidth = active ? 4 : 3
+  ctx.beginPath()
+  ctx.moveTo(anchorX, anchorY)
+  ctx.lineTo(x + 16, y + 24)
+  ctx.stroke()
+
+  ctx.fillStyle = active ? 'rgba(42, 34, 24, 0.92)' : 'rgba(7, 10, 18, 0.82)'
+  drawRoundRect(ctx, x, y, 180, 58, 16)
+  ctx.fill()
+  ctx.strokeStyle = active ? 'rgba(242, 195, 143, 0.95)' : 'rgba(135, 165, 255, 0.75)'
+  ctx.lineWidth = 3
+  drawRoundRect(ctx, x, y, 180, 58, 16)
+  ctx.stroke()
+
+  ctx.fillStyle = active ? '#f2c38f' : '#9ed0c6'
+  ctx.font = '700 20px sans-serif'
+  ctx.fillText(label, x + 16, y + 23)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.94)'
+  ctx.font = '18px sans-serif'
+  ctx.fillText(hint, x + 16, y + 47)
+}
+
+function updateControllerHud(item: ControllerRigItem) {
+  const canvas = item.hud.userData.canvas as HTMLCanvasElement | undefined
+  const ctx = item.hud.userData.ctx as CanvasRenderingContext2D | undefined
+  const texture = item.hud.userData.texture as THREE.CanvasTexture | undefined
+  if (!canvas || !ctx || !texture) return
+  const isLeft = item.hand === 'left'
+  const state = item.state
+  const mirror = isLeft ? -1 : 1
+  const mapX = (value: number) => isLeft ? canvas.width - value : value
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#f7f8fb'
+  ctx.font = '700 26px sans-serif'
+  ctx.fillText(isLeft ? '左手柄' : '右手柄', mapX(isLeft ? 392 : 40), 42)
+
+  ctx.strokeStyle = isLeft ? 'rgba(158, 208, 198, 0.8)' : 'rgba(135, 165, 255, 0.8)'
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.ellipse(256, 214, 52, 108, 0.08 * mirror, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.12)'
+  ctx.beginPath()
+  ctx.arc(mapX(304), 128, 18, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(mapX(286), 176, 18, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(mapX(308), 224, 15, 0, Math.PI * 2)
+  ctx.fill()
+
+  drawControllerHudLabel(ctx, 'B键', '呼出 / 返回', mapX(58) - (isLeft ? 180 : 0), 62, mapX(304), 128, state.menuActive)
+  drawControllerHudLabel(ctx, 'A键', isLeft ? '重置视图' : '切换面板', mapX(52) - (isLeft ? 180 : 0), 144, mapX(286), 176, state.menuActive)
+  drawControllerHudLabel(ctx, '摇杆', isLeft ? '水平移动' : '平滑转头', mapX(324) - (isLeft ? 180 : 0), 80, mapX(308), 224, state.stickActive)
+  drawControllerHudLabel(ctx, '侧握', isLeft ? '拖拽物体' : '旋转物体', mapX(314) - (isLeft ? 180 : 0), 240, mapX(210), 248, state.gripActive)
+  drawControllerHudLabel(ctx, '扳机', isLeft ? '沿视线后退' : '沿视线前进', mapX(58) - (isLeft ? 180 : 0), 286, mapX(246), 320, state.triggerActive)
+
+  texture.needsUpdate = true
+}
+
+function createControllerHud(hand: ControllerHand) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 384
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建手柄 HUD Canvas')
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.05), material)
+  panel.name = 'braindance-controller-hud'
+  panel.renderOrder = hudRenderOrder + 3
+  panel.position.set(hand === 'left' ? -0.1 : 0.1, 0.13, -0.12)
+  panel.rotation.set(-0.18, hand === 'left' ? 0.12 : -0.12, 0)
+  panel.scale.setScalar(0.18)
+  panel.userData.canvas = canvas
+  panel.userData.ctx = ctx
+  panel.userData.texture = texture
+  return panel
+}
+
+function createFallbackControllerModel(hand: ControllerHand) {
+  const group = new THREE.Group()
+  group.name = 'braindance-fallback-controller'
+  const shellMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2b3445,
+    roughness: 0.42,
+    metalness: 0.18,
+    emissive: 0x07121a,
+    emissiveIntensity: 0.25,
+    envMapIntensity: 1.5,
+  })
+  const accentMaterial = new THREE.MeshStandardMaterial({
+    color: 0x46d9ff,
+    emissive: 0x159ac2,
+    emissiveIntensity: 0.9,
+    roughness: 0.2,
+    metalness: 0.1,
+    envMapIntensity: 1.6,
+  })
+  const darkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x111827,
+    roughness: 0.55,
+    metalness: 0.05,
+    envMapIntensity: 1,
+  })
+  const buttonMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe8f4ff,
+    roughness: 0.25,
+    metalness: 0.05,
+    envMapIntensity: 1.8,
+  })
+
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.035, 0.11, 8, 20),
+    shellMaterial,
+  )
+  body.rotation.x = Math.PI / 2
+  body.position.set(0, 0, 0)
+
+  const handle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.032, 0.026, 0.13, 24),
+    shellMaterial,
+  )
+  handle.rotation.x = 0.22
+  handle.position.set(0, -0.055, 0.035)
+
+  const topPanel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.07, 0.022, 0.09),
+    darkMaterial,
+  )
+  topPanel.position.set(0, 0.025, -0.025)
+  topPanel.rotation.x = -0.22
+
+  const trigger = new THREE.Mesh(
+    new THREE.BoxGeometry(0.032, 0.018, 0.04),
+    accentMaterial,
+  )
+  trigger.name = 'trigger'
+  trigger.position.set(0, -0.025, -0.055)
+  trigger.rotation.x = 0.35
+
+  const stickBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018, 0.018, 0.008, 32),
+    darkMaterial,
+  )
+  stickBase.rotation.x = Math.PI / 2
+  stickBase.position.set(0, 0.043, -0.045)
+
+  const stick = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.011, 0.014, 0.018, 32),
+    buttonMaterial,
+  )
+  stick.name = 'stick'
+  stick.rotation.x = Math.PI / 2
+  stick.position.set(0, 0.052, -0.045)
+
+  const buttonA = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.01, 0.01, 0.006, 24),
+    buttonMaterial,
+  )
+  buttonA.name = 'button-a'
+  buttonA.rotation.x = Math.PI / 2
+  buttonA.position.set(hand === 'right' ? 0.018 : -0.018, 0.048, -0.005)
+
+  const buttonB = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.01, 0.01, 0.006, 24),
+    buttonMaterial,
+  )
+  buttonB.name = 'button-b'
+  buttonB.rotation.x = Math.PI / 2
+  buttonB.position.set(hand === 'right' ? -0.018 : 0.018, 0.048, 0.015)
+
+  const sideButton = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.01, 20),
+    accentMaterial,
+  )
+  sideButton.name = 'grip-button'
+  sideButton.rotation.z = Math.PI / 2
+  sideButton.position.set(hand === 'left' ? -0.037 : 0.037, -0.018, 0.018)
+
+  const lightStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.008, 0.006, 0.12),
+    accentMaterial,
+  )
+  lightStrip.name = 'light-strip'
+  lightStrip.position.set(hand === 'right' ? 0.035 : -0.035, 0.004, 0)
+
+  const tip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 24, 16),
+    accentMaterial,
+  )
+  tip.name = 'pointer-tip'
+  tip.position.set(0, 0.005, -0.09)
+
+  group.add(body, handle, topPanel, trigger, stickBase, stick, buttonA, buttonB, sideButton, lightStrip, tip)
+  group.scale.setScalar(1.15)
+  return group
+}
+
+function setFallbackButtonState(fallback: THREE.Group, state: ControllerHudState) {
+  const trigger = fallback.getObjectByName('trigger') as THREE.Mesh | undefined
+  if (trigger?.material && !Array.isArray(trigger.material)) {
+    const material = trigger.material as THREE.MeshStandardMaterial
+    material.emissiveIntensity = state.triggerActive ? 2.4 : 0.9
+    trigger.scale.set(1, state.triggerActive ? 0.82 : 1, state.triggerActive ? 0.92 : 1)
+  }
+
+  const grip = fallback.getObjectByName('grip-button') as THREE.Mesh | undefined
+  if (grip?.material && !Array.isArray(grip.material)) {
+    ;(grip.material as THREE.MeshStandardMaterial).emissiveIntensity = state.gripActive ? 1.8 : 0.9
+  }
+
+  const stick = fallback.getObjectByName('stick') as THREE.Mesh | undefined
+  if (stick?.material && !Array.isArray(stick.material)) {
+    ;(stick.material as THREE.MeshStandardMaterial).emissiveIntensity = state.stickActive ? 0.45 : 0
+  }
+}
+
+function updateControllerHudFacing() {
+  // 手柄 HUD 固定在 controllerGrip 的局部空间里，避免随头显转动导致空间关系混乱。
+}
+
+function applyEnvironmentMapToModel(model: THREE.Object3D, envMap: THREE.Texture | null) {
+  const controllerModel = model as THREE.Object3D & { setEnvironmentMap?: (texture: THREE.Texture) => void }
+  if (envMap && controllerModel.setEnvironmentMap) controllerModel.setEnvironmentMap(envMap)
+  model.traverse((child) => {
+    const mesh = child as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      const standardMaterial = material as THREE.MeshStandardMaterial
+      if ('envMap' in standardMaterial && envMap) {
+        standardMaterial.envMap = envMap
+        standardMaterial.envMapIntensity = Math.max(standardMaterial.envMapIntensity || 0, 1.25)
+        standardMaterial.needsUpdate = true
+      }
+    }
+  })
+}
+
+function removeControllerVisuals(grip: THREE.Group) {
+  const removableNames = new Set([
+    'braindance-fallback-controller',
+    'official-controller-model',
+    'braindance-controller-hud',
+  ])
+  const removable = grip.children.filter((child) => removableNames.has(child.name))
+  for (const child of removable) {
+    grip.remove(child)
+    disposeObject3D(child)
+  }
+}
+
+function watchOfficialControllerModel(item: ControllerRigItem) {
+  if (preferStylizedControllerModel) {
+    item.fallback.visible = true
+    item.officialModel.visible = false
+    return
+  }
+  item.fallback.visible = false
+  if (!enableControllerFallbackModel) return
+  let checks = 0
+  item.modelCheckTimer = window.setInterval(() => {
+    checks += 1
+    applyEnvironmentMapToModel(item.officialModel, vrEnvironmentMap)
+    let hasOfficialMesh = false
+    item.officialModel.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) hasOfficialMesh = true
+    })
+    if (hasOfficialMesh) {
+      item.fallback.visible = false
+      window.clearInterval(item.modelCheckTimer)
+      item.modelCheckTimer = undefined
+    } else if (checks > 180) {
+      item.fallback.visible = enableControllerFallbackModel
+      window.clearInterval(item.modelCheckTimer)
+      item.modelCheckTimer = undefined
+    }
+  }, 16)
+}
+
+function createNicePointerRay() {
+  const group = new THREE.Group()
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x55ddff,
+    transparent: true,
+    opacity: 0.45,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const ray = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.002, 0.006, 1.5, 16, 1, true),
+    material,
+  )
+  ray.name = 'pointer-ray-beam'
+  ray.rotation.x = Math.PI / 2
+  ray.position.z = -0.75
+  group.add(ray)
+  group.userData.ray = ray
+  group.visible = false
+  group.renderOrder = hudPointerRenderOrder
+  return group
+}
+
+function getPointerRayMaterial() {
+  const ray = controllerRay?.userData.ray as THREE.Mesh | undefined
+  if (!ray?.material || Array.isArray(ray.material)) return null
+  return ray.material as THREE.MeshBasicMaterial
+}
+
 function updateHud(nowMs: number) {
   if (!hudMesh) return
   placeHudInFrontOfUser()
+  updateControllerHudFacing()
   if (nowMs - lastHudDrawTime > 180) {
     lastHudDrawTime = nowMs
     drawHud()
@@ -1394,35 +1907,60 @@ function ensureControllerRig() {
   if (!runtime?.renderer) return
   if (leftController && rightController) return
 
+  const envMap = setupVrLighting()
+  controllerModelFactory = controllerModelFactory || new XRControllerModelFactory()
   leftController = runtime.renderer.xr.getController(0)
   rightController = runtime.renderer.xr.getController(1)
+  leftControllerGrip = runtime.renderer.xr.getControllerGrip(0)
+  rightControllerGrip = runtime.renderer.xr.getControllerGrip(1)
   const overlay = ensureOverlayScene()
   overlay.add(leftController)
   overlay.add(rightController)
+  overlay.add(leftControllerGrip)
+  overlay.add(rightControllerGrip)
 
-  const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0, 0, -1.5),
-  ])
-  const lineMaterial = new THREE.LineBasicMaterial({
-    color: 0x9ed0c6,
-    depthTest: false,
-    depthWrite: false,
-    transparent: true,
-    opacity: 0.95,
-  })
-  controllerRay = new THREE.Line(lineGeometry, lineMaterial)
-  controllerRay.renderOrder = hudPointerRenderOrder
-  controllerRay.visible = false
+  const grips: Array<{ hand: ControllerHand; grip: THREE.Group; controller: THREE.Group }> = [
+    { hand: 'left', grip: leftControllerGrip, controller: leftController },
+    { hand: 'right', grip: rightControllerGrip, controller: rightController },
+  ]
+  for (const item of grips) {
+    removeControllerVisuals(item.grip)
+    const fallback = createFallbackControllerModel(item.hand)
+    fallback.visible = preferStylizedControllerModel && enableControllerFallbackModel
+    item.grip.add(fallback)
+    const model = controllerModelFactory.createControllerModel(item.grip)
+    model.name = 'official-controller-model'
+    model.visible = !preferStylizedControllerModel
+    applyEnvironmentMapToModel(model, envMap)
+    item.grip.add(model)
+    const hud = createControllerHud(item.hand)
+    item.grip.add(hud)
+    const rigItem: ControllerRigItem = {
+      hand: item.hand,
+      controller: item.controller,
+      grip: item.grip,
+      hud,
+      fallback,
+      officialModel: model,
+      state: {},
+    }
+    controllerRigItems.set(item.hand, rigItem)
+    updateControllerHud(rigItem)
+    watchOfficialControllerModel(rigItem)
+  }
+
+  controllerRay = createNicePointerRay()
   rightController.add(controllerRay)
 
   const tipMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: 0x88f4ff,
     depthTest: false,
     depthWrite: false,
+    transparent: true,
+    opacity: 0.9,
   })
   controllerTip = new THREE.Mesh(
-    new THREE.SphereGeometry(0.018, 16, 16),
+    new THREE.SphereGeometry(0.012, 24, 12),
     tipMaterial,
   )
   controllerTip.renderOrder = hudPointerRenderOrder + 1
@@ -1589,11 +2127,11 @@ function updateHudPointer(triggerPressed: boolean) {
     if (action) {
       const color = action.kind === 'tab' ? 0x87a5ff : action.kind === 'item' ? 0xf2c38f : 0x9ed0c6
       ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(color)
-      ;(controllerRay.material as THREE.LineBasicMaterial).color.setHex(color)
+      getPointerRayMaterial()?.color.setHex(color)
     }
   } else if (controllerTip && controllerRay) {
     ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(0xffffff)
-    ;(controllerRay.material as THREE.LineBasicMaterial).color.setHex(0x9ed0c6)
+    getPointerRayMaterial()?.color.setHex(0x55ddff)
   }
 
   if (previousHoverId !== hudHoveredActionId) {
@@ -1702,9 +2240,20 @@ function updateControllerState(nowMs: number) {
     const menuPressed = isButtonPressed(gamepad, [4, 5, 6, 7])
     if (hand === 'left') leftGrip = gripPressed
     if (hand === 'right') rightGrip = gripPressed
+    const rigItem = controllerRigItems.get(hand)
+    if (rigItem) {
+      rigItem.state = {
+        triggerActive: triggerPressed,
+        gripActive: gripPressed,
+        stickActive: Math.abs(x) > 0 || Math.abs(y) > 0,
+        menuActive: menuPressed,
+      }
+      updateControllerHud(rigItem)
+      setFallbackButtonState(rigItem.fallback, rigItem.state)
+    }
 
-    if (triggerPressed && !isMenuOpen.value) {
-      moving = moveRig(0, 1, dt) || moving
+    if (triggerPressed) {
+      moving = moveRigAlongView(dt, hand === 'left' ? -1 : 1) || moving
     }
 
     if (hand === 'left') {
@@ -1713,7 +2262,7 @@ function updateControllerState(nowMs: number) {
         resetView()
       }
     } else if (hand === 'right') {
-      moving = moveRig(x, -y, dt) || moving
+      moving = turnViewRig(x, y, dt) || moving
       if (wasPressedNow(hand, 'menu', menuPressed)) {
         isMenuOpen.value = !isMenuOpen.value
       }
@@ -1742,27 +2291,51 @@ function startControllerLoop() {
   controllerRafId = window.requestAnimationFrame(tick)
 }
 
-function renderSceneWithCamera(runtime: RuntimeGaussianViewer, camera: THREE.PerspectiveCamera) {
-  if (!runtime.renderer || !runtime.splatMesh) return
+function renderSceneWithCamera(
+  runtime: RuntimeGaussianViewer,
+  camera: THREE.PerspectiveCamera,
+  targetRenderer: THREE.WebGLRenderer = runtime.renderer as THREE.WebGLRenderer,
+) {
+  if (!targetRenderer || !runtime.splatMesh) return
 
-  const savedAutoClear = runtime.renderer.autoClear
+  const savedAutoClear = targetRenderer.autoClear
   if (runtime.threeScene?.children.some((child) => child.visible)) {
-    runtime.renderer.render(runtime.threeScene, camera)
-    runtime.renderer.autoClear = false
+    targetRenderer.render(runtime.threeScene, camera)
+    targetRenderer.autoClear = false
   }
 
-  runtime.renderer.render(runtime.splatMesh, camera)
-  runtime.renderer.autoClear = false
+  targetRenderer.render(runtime.splatMesh, camera)
+  targetRenderer.autoClear = false
 
   const focusOpacity = runtime.sceneHelper?.getFocusMarkerOpacity?.() ?? 0
   if (focusOpacity > 0 && runtime.sceneHelper?.focusMarker) {
-    runtime.renderer.render(runtime.sceneHelper.focusMarker, camera)
+    targetRenderer.render(runtime.sceneHelper.focusMarker, camera)
   }
   if (runtime.showControlPlane && runtime.sceneHelper?.controlPlane) {
-    runtime.renderer.render(runtime.sceneHelper.controlPlane, camera)
+    targetRenderer.render(runtime.sceneHelper.controlPlane, camera)
   }
 
-  runtime.renderer.autoClear = savedAutoClear
+  renderOverlaySceneWithRenderer(targetRenderer, camera)
+  targetRenderer.autoClear = savedAutoClear
+}
+
+function renderSpectatorFrame() {
+  const runtime = getRuntimeViewer()
+  const setup = ensureSpectatorRenderer()
+  if (!runtime?.splatMesh || !setup) return
+
+  resizeSpectatorRenderer()
+  if (!updateSpectatorHeadsetCamera()) {
+    setup.renderer.clear()
+    return
+  }
+  renderSceneWithCamera(runtime, setup.camera, setup.renderer)
+}
+
+function renderSpectatorFrameThrottled(nowMs = performance.now()) {
+  if (nowMs - lastSpectatorRenderTime < spectatorRenderIntervalMs) return
+  lastSpectatorRenderTime = nowMs
+  renderSpectatorFrame()
 }
 
 function startStereoPreviewLoop() {
@@ -2057,6 +2630,7 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
               : THREE.MathUtils.clamp(0.2 + normalized * 0.76, loadProgress.value, 0.96)
             setLoadState('model', loaderStatus === 1 ? '解析并构建高斯数据' : `下载模型数据 ${percentCompleteLabel || ''}`.trim(), progress)
             drawHud()
+            renderSpectatorFrameThrottled()
           }
         },
         position: config.worldPosition,
@@ -2209,6 +2783,7 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
     selfDrivenMode: previewMode.value !== 'stereo',
     useBuiltInControls: previewMode.value !== 'webxr',
   })
+  installOverlayRenderHook()
 
   if (previewMode.value === 'webxr') {
     installXrSessionListeners()
@@ -2396,10 +2971,61 @@ function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
   return true
 }
 
-function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now()) {
+function moveRigAlongView(dt = 1 / 90, directionSign = 1) {
+  const camera = getRenderCamera()
+  if (!camera || interactionMode.value === 'inspect') return false
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  if (direction.lengthSq() < 1e-8) return false
+  const delta = direction.multiplyScalar(moveSpeed.value * directionSign * dt)
+  if (isVrPresenting.value) {
+    applySceneDelta(delta.clone().multiplyScalar(-1))
+  } else if (xrRig) {
+    xrRig.position.add(delta)
+  } else {
+    return false
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  return true
+}
+
+function turnViewRig(yawInput: number, pitchInput: number, dt = 1 / 90) {
+  if (Math.abs(yawInput) <= 0.01 && Math.abs(pitchInput) <= 0.01) return false
+  const camera = getRenderCamera()
+  if (!camera) return false
+  const yawAngle = -yawInput * 1.65 * dt
+  const pitchAngle = -pitchInput * 1.15 * dt
+  let moved = false
+
+  if (Math.abs(yawAngle) > 0.00001) {
+    if (isVrPresenting.value) {
+      moved = rotateSceneAroundView(new THREE.Vector3(0, 0, 1), yawAngle) || moved
+    } else if (xrRig) {
+      xrRig.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -yawAngle)
+      moved = true
+    }
+  }
+
+  if (Math.abs(pitchAngle) > 0.00001) {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 0, 1)).normalize()
+    if (right.lengthSq() > 1e-8) {
+      if (isVrPresenting.value) {
+        moved = rotateSceneAroundView(right, pitchAngle) || moved
+      } else if (xrRig) {
+        xrRig.rotateOnWorldAxis(right, -pitchAngle)
+        moved = true
+      }
+    }
+  }
+
+  if (moved) getRuntimeViewer()?.forceRenderNextFrame?.()
+  return moved
+}
+
+function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now(), mode: TurnMode = turnMode.value) {
   if (!xrRig || Math.abs(turn) <= 0.18) return false
   let angle = -turn * 1.65 * dt
-  if (turnMode.value === 'snap') {
+  if (mode === 'snap') {
     if (nowMs - lastSnapTurnTime < 360) return false
     angle = -Math.sign(turn) * THREE.MathUtils.degToRad(snapTurnAngle.value)
     lastSnapTurnTime = nowMs
@@ -2454,6 +3080,8 @@ function installXrSessionListeners() {
     isVrPresenting.value = true
     xrSession = xr.getSession() || xrSession
     ensureSceneRoots()
+    ensureSpectatorRenderer()
+    resizeSpectatorRenderer()
     refreshHudDisplay()
     startControllerLoop()
     status.value = 'WebXR 会话已启动'
@@ -2463,6 +3091,7 @@ function installXrSessionListeners() {
     xrSession = null
     stopControllerLoop()
     if (hudMesh) hudMesh.visible = false
+    renderSpectatorFrame()
     status.value = 'WebXR 会话已结束'
   })
 }
@@ -2480,6 +3109,8 @@ async function enterVrSession() {
   xrSession = session
   isVrPresenting.value = true
   ensureSceneRoots()
+  ensureSpectatorRenderer()
+  resizeSpectatorRenderer()
   ensureControllerRig()
   refreshHudDisplay()
   startControllerLoop()
@@ -2547,6 +3178,7 @@ function normalizeWindowHooks() {
 onMounted(() => {
   normalizeWindowHooks()
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', resizeSpectatorRenderer)
   startStatsLoop()
   void bootstrap()
 })
@@ -2557,9 +3189,11 @@ onBeforeUnmount(() => {
   stopControllerLoop()
   syncClientStateNow()
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', resizeSpectatorRenderer)
   clearLocalModelState()
   disposeHud()
   disposeIntroGlint()
+  disposeSpectatorRenderer()
   disposeViewer()
 })
 </script>
@@ -2569,6 +3203,13 @@ onBeforeUnmount(() => {
     <input id="vr-local-model-input" class="sr-only-input" type="file" accept=".ply,.splat,.ksplat,.spz" @change="onLocalModelSelected" />
     <input id="vr-local-poses-input" class="sr-only-input" type="file" accept=".json" @change="onLocalPosesSelected" />
     <div ref="containerRef" class="vr-canvas" />
+    <section v-show="previewMode === 'webxr'" class="browser-mirror" :class="{ presenting: isVrPresenting }" aria-label="头显视角旁观窗口">
+      <div class="mirror-header">
+        <span>头显视角</span>
+        <span>{{ isVrPresenting ? 'Live' : '等待 WebXR' }}</span>
+      </div>
+      <canvas ref="spectatorCanvasRef" class="browser-mirror-canvas" />
+    </section>
     <section class="desktop-panel" :class="{ collapsed: !isDesktopPanelOpen }" aria-label="BrainDance VR 状态">
       <header class="panel-header">
         <p class="eyebrow">BrainDance</p>
