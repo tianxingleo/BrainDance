@@ -1829,7 +1829,8 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
         },
         position: config.worldPosition,
         rotation: makeSceneRotationY(config.worldRotationY),
-        // 与 my-3dgs-viewer 保持同一处轴系修正：水平面保持不变，只在加载层镜像 Z 轴。
+        // VR 端沿 Z 轴做一次镜像，把 3DGS 源坐标系对齐到 viewer 坐标系；
+        // 这里如果改成正缩放，模型会相对 xy 平面翻面，桌面等水平结构会出现“朝上看”的倒置现象。
         scale: [config.worldScale, config.worldScale, -config.worldScale],
       })
       return candidate
