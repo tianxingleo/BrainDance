@@ -191,7 +191,6 @@ extension _RecallPageSearch on _RecallPageState {
           sessionId: _agentSessionId,
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
-          shortTermMemory: _agentShortTermMemory,
         );
         if (!mounted) return;
         setState(() {
@@ -227,7 +226,6 @@ extension _RecallPageSearch on _RecallPageState {
         sessionId: _agentSessionId,
         conversationSummary: _agentConversationSummary,
         sessionState: _agentSessionState,
-        shortTermMemory: _agentShortTermMemory,
       );
       _agentStreamSubscription = stream.listen(
         (chunk) {

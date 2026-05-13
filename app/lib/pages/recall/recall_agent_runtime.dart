@@ -20,7 +20,6 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       _agentSessionId = null;
       _agentConversationSummary = null;
       _agentSessionState = null;
-      _agentShortTermMemory = null;
       _agentConversationHistory.clear();
     }
   }
@@ -346,7 +345,6 @@ extension _RecallPageAgentRuntime on _RecallPageState {
 
   void _rememberAgentResponse(String query, AgentRecallResponse response) {
     _agentSessionState = response.sessionState;
-    _agentShortTermMemory = response.shortTermMemory;
     _agentConversationSummary = _mergeAgentConversationSummary(
       previous: _agentConversationSummary,
       query: query,

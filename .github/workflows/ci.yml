@@ -130,6 +130,6 @@ jobs:
       - name: Compileall check (smoke — syntax only)
         run: |
           python -m compileall -q \
-            --exclude 'ai_engine/3dgs/src/libs' \
+            -x 'ai_engine/3dgs/src/libs' \
             ai_engine/ \
             || { echo "::warning::Some Python files have syntax errors"; exit 1; }

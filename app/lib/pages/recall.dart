@@ -113,7 +113,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _agentConversationSummary;
   String? _agentLatestSubmittedQuery;
   AgentSessionState? _agentSessionState;
-  Map<String, dynamic>? _agentShortTermMemory;
   final List<AgentConversationEntry> _agentConversationHistory = [];
 
   ChatMessage? get _agentChatMessage => _agentConversationHistory.isNotEmpty
