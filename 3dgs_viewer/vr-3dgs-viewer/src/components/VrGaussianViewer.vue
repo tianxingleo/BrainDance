@@ -87,6 +87,8 @@ const authSession = ref<BrainDanceAuthSession | null>(persistedClientState.authS
 const modelList = ref<BrainDanceRecallModel[]>([])
 const markers = ref<BrainDanceRecallMarker[]>([])
 const searchResults = ref<BrainDanceRecallSearchResult[]>([])
+const localModelName = ref('')
+const localPosesName = ref('')
 const activeModelId = ref(persistedClientState.activeModelId || '')
 const activeSearchQuery = ref(persistedClientState.activeSearchQuery || '')
 const selectedMarkerId = ref('')
@@ -156,6 +158,8 @@ let clippingPlaneHelper: THREE.Mesh | null = null
 let measurementLine: THREE.Line | null = null
 let measurementLabelMesh: THREE.Sprite | null = null
 let vignetteMesh: THREE.Mesh | null = null
+let localModelObjectUrl: string | null = null
+let localPosesObjectUrl: string | null = null
 let lastSnapTurnTime = 0
 let stateSaveTimer = 0
 const buttonLatch = new Map<string, boolean>()
@@ -230,6 +234,91 @@ const filteredModels = computed(() => {
     return haystack.includes(query)
   })
 })
+
+function revokeObjectUrl(url: string | null) {
+  if (!url) return
+  try {
+    URL.revokeObjectURL(url)
+  } catch {}
+}
+
+function clearLocalModelState() {
+  revokeObjectUrl(localModelObjectUrl)
+  revokeObjectUrl(localPosesObjectUrl)
+  localModelObjectUrl = null
+  localPosesObjectUrl = null
+  localModelName.value = ''
+  localPosesName.value = ''
+}
+
+function resetLocalLabelsIfRemoteModel(model: BrainDanceRecallModel) {
+  const modelUrl = model.modelUrl || model.ply || ''
+  const posesUrl = model.poses || model.posesUrl || ''
+  if (!String(modelUrl).startsWith('blob:')) localModelName.value = ''
+  if (!String(posesUrl).startsWith('blob:')) localPosesName.value = ''
+}
+
+function triggerLocalModelPicker() {
+  document.getElementById('vr-local-model-input')?.click()
+}
+
+function triggerLocalPosesPicker() {
+  document.getElementById('vr-local-poses-input')?.click()
+}
+
+function clearLocalPoses() {
+  revokeObjectUrl(localPosesObjectUrl)
+  localPosesObjectUrl = null
+  localPosesName.value = ''
+}
+
+async function onLocalModelSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  revokeObjectUrl(localModelObjectUrl)
+  localModelObjectUrl = URL.createObjectURL(file)
+  localModelName.value = file.name || '本地模型'
+
+  const localModel: BrainDanceRecallModel = {
+    id: `local-model-${Date.now()}`,
+    name: file.name || '本地模型',
+    displayName: file.name || '本地模型',
+    ply: localModelObjectUrl,
+    modelUrl: localModelObjectUrl,
+    poses: localPosesObjectUrl || undefined,
+    posesUrl: localPosesObjectUrl || undefined,
+    description: '来自本地文件选择',
+  }
+
+  activeModelId.value = localModel.id
+  modelList.value = [localModel, ...modelList.value.filter((item) => !String(item.modelUrl || item.ply).startsWith('blob:'))]
+  await loadModel(localModel)
+  if (input) input.value = ''
+}
+
+async function onLocalPosesSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  revokeObjectUrl(localPosesObjectUrl)
+  localPosesObjectUrl = URL.createObjectURL(file)
+  localPosesName.value = file.name || '本地位姿'
+
+  const current = modelList.value.find((item) => item.id === activeModelId.value) || modelList.value[activeModelIndex] || modelList.value[0]
+  if (current) {
+    const localModel: BrainDanceRecallModel = {
+      ...current,
+      poses: localPosesObjectUrl,
+      posesUrl: localPosesObjectUrl,
+    }
+    modelList.value = modelList.value.map((item) => item.id === current.id ? localModel : item)
+    await loadModel(localModel)
+  }
+  if (input) input.value = ''
+}
 
 function makeSceneRotationY(rotationY: number): [number, number, number, number] {
   const quaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY)
@@ -1829,9 +1918,9 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
         },
         position: config.worldPosition,
         rotation: makeSceneRotationY(config.worldRotationY),
-        // VR 端沿 Z 轴做一次镜像，把 3DGS 源坐标系对齐到 viewer 坐标系；
-        // 这里如果改成正缩放，模型会相对 xy 平面翻面，桌面等水平结构会出现“朝上看”的倒置现象。
-        scale: [config.worldScale, config.worldScale, -config.worldScale],
+        // 这里保持正缩放，避免模型相对 xy 平面发生 z 轴镜像；
+        // 一旦把 Z 改成负值，书桌这类水平结构就会从“朝下看”翻成“朝上看”。
+        scale: [config.worldScale, config.worldScale, config.worldScale],
       })
       return candidate
     } catch (error) {
@@ -1925,6 +2014,7 @@ function normalizeModelPayloadList(payload: BrainDanceViewerPayload) {
 
 async function loadModel(model: BrainDanceRecallModel, options: { preserveState?: boolean } = {}) {
   if (!containerRef.value) return
+  resetLocalLabelsIfRemoteModel(model)
   const payload = activePayload.value || getInitialPayload()
   const config = activeConfig.value || (await loadVrConfig(deriveVrConfigUrl(payload)))
   const nextPayload = {
@@ -2256,6 +2346,7 @@ async function exitVrSession() {
 
 function normalizeWindowHooks() {
   window.loadViewerPayload = (input: unknown) => {
+    clearLocalModelState()
     void bootstrap(input)
   }
   window.setViewerTheme = () => {
@@ -2319,6 +2410,7 @@ onBeforeUnmount(() => {
   stopControllerLoop()
   syncClientStateNow()
   window.removeEventListener('keydown', onKeydown)
+  clearLocalModelState()
   disposeHud()
   disposeIntroGlint()
   disposeViewer()
@@ -2327,6 +2419,8 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="vr-page">
+    <input id="vr-local-model-input" class="sr-only-input" type="file" accept=".ply,.splat,.ksplat,.spz" @change="onLocalModelSelected" />
+    <input id="vr-local-poses-input" class="sr-only-input" type="file" accept=".json" @change="onLocalPosesSelected" />
     <div ref="containerRef" class="vr-canvas" />
     <section class="desktop-panel" :class="{ collapsed: !isMenuOpen }" aria-label="BrainDance VR 状态">
       <header class="panel-header">
@@ -2443,6 +2537,18 @@ onBeforeUnmount(() => {
         <button type="button" @click="exitVrSession">退出 VR</button>
         <button type="button" @click="isMenuOpen = !isMenuOpen">面板</button>
       </div>
+
+      <div class="button-row xr-row">
+        <button type="button" @click="triggerLocalModelPicker">本地模型</button>
+        <button type="button" @click="triggerLocalPosesPicker">本地位姿</button>
+        <button type="button" :disabled="!localPosesName" @click="clearLocalPoses">清位姿</button>
+      </div>
+
+      <p v-if="localModelName || localPosesName" class="hint">
+        {{ localModelName ? `模型：${localModelName}` : '' }}
+        {{ localModelName && localPosesName ? '；' : '' }}
+        {{ localPosesName ? `位姿：${localPosesName}` : '' }}
+      </p>
 
       <div class="tool-panel">
         <div class="button-row">
