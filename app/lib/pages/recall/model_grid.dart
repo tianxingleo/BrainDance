@@ -429,15 +429,32 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail>
             ColoredBox(
               color: widget.backgroundColor,
               child: img != null
-                  ? FittedBox(
-                      fit: BoxFit.cover,
-                      clipBehavior: Clip.hardEdge,
-                      child: SizedBox(
-                        width: img.width.toDouble(),
-                        height: img.height.toDouble(),
-                        child: RawImage(
-                          image: img,
-                          filterQuality: FilterQuality.low,
+                  ? TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0.0, end: 1.0),
+                      duration: BDMotion.durationSlow,
+                      curve: BDMotion.curveEnter,
+                      builder: (context, value, child) {
+                        return Opacity(
+                          opacity: value,
+                          child: Transform.translate(
+                            offset: Offset(0, 8 * (1 - value)),
+                            child: Transform.scale(
+                              scale: 0.985 + 0.015 * value,
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        clipBehavior: Clip.hardEdge,
+                        child: SizedBox(
+                          width: img.width.toDouble(),
+                          height: img.height.toDouble(),
+                          child: RawImage(
+                            image: img,
+                            filterQuality: FilterQuality.low,
+                          ),
                         ),
                       ),
                     )
@@ -515,14 +532,31 @@ class _CoverNetworkImageState extends State<_CoverNetworkImage>
     return ColoredBox(
       color: widget.backgroundColor,
       child: img != null
-          ? ClipRect(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: img.width.toDouble(),
-                  height: img.height.toDouble(),
-                  child: RawImage(image: img, filterQuality: FilterQuality.low),
+          ? TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              duration: BDMotion.durationSlow,
+              curve: BDMotion.curveEnter,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, 6 * (1 - value)),
+                    child: Transform.scale(
+                      scale: 0.985 + 0.015 * value,
+                      child: child,
+                    ),
+                  ),
+                );
+              },
+              child: ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: SizedBox(
+                    width: img.width.toDouble(),
+                    height: img.height.toDouble(),
+                    child: RawImage(image: img, filterQuality: FilterQuality.low),
+                  ),
                 ),
               ),
             )

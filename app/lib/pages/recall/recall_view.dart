@@ -194,15 +194,7 @@ extension _RecallPageView on _RecallPageState {
                       else if (_isLoading)
                         const SliverFillRemaining(
                           hasScrollBody: false,
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 96.0),
-                            child: Center(
-                              child: TDLoading(
-                                size: TDLoadingSize.large,
-                                icon: TDLoadingIcon.circle,
-                              ),
-                            ),
-                          ),
+                          child: SizedBox.shrink(),
                         )
                       else if (_models.isEmpty)
                         SliverFillRemaining(

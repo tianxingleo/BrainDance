@@ -23,10 +23,13 @@ class RecallModelActionOverlay extends StatefulWidget {
   final void Function(Map<String, dynamic>, dynamic) onNavigateToViewer;
   final Future<void> Function(Map<String, dynamic>) onShowModelDetails;
   final Future<void> Function(Map<String, dynamic>) onDownloadModel;
+  final Future<void> Function(Map<String, dynamic>) onDeleteLocalModel;
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
   final Future<void> Function(Map<String, dynamic>) onRenameModel;
   final Future<void> Function(Map<String, dynamic>) onDeleteCloudModel;
   final String Function(String) toPublicUrl;
+  final bool isLocalCached;
+  final bool isOwnModel;
 
   const RecallModelActionOverlay({
     super.key,
@@ -40,10 +43,13 @@ class RecallModelActionOverlay extends StatefulWidget {
     required this.onNavigateToViewer,
     required this.onShowModelDetails,
     required this.onDownloadModel,
+    required this.onDeleteLocalModel,
     required this.onShareModelToCommunity,
     required this.onRenameModel,
     required this.onDeleteCloudModel,
     required this.toPublicUrl,
+    required this.isLocalCached,
+    required this.isOwnModel,
   });
 
   @override
@@ -284,26 +290,48 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                             },
                           ),
                           const SizedBox(height: 6),
-                          ActionMenuItem(
-                            icon: Icons.download_rounded,
-                            label: textLocalize('recall_download_model'),
-                            isDark: widget.isDark,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onDownloadModel(widget.model);
-                            },
-                          ),
-                          const SizedBox(height: 6),
-                          ActionMenuItem(
-                            icon: Icons.delete_outline_rounded,
-                            label: deleteLabel,
-                            isDark: widget.isDark,
-                            destructive: true,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onDeleteCloudModel(widget.model);
-                            },
-                          ),
+                          if (widget.isLocalCached)
+                            ActionMenuItem(
+                              icon: Icons.delete_outline_rounded,
+                              label: textLocalize('recall_delete_local'),
+                              isDark: widget.isDark,
+                              destructive: true,
+                              onTap: () async {
+                                widget.onDismiss();
+                                final confirmed =
+                                    await _showDeleteConfirmDialog(context);
+                                if (confirmed == true) {
+                                  await widget.onDeleteLocalModel(widget.model);
+                                }
+                              },
+                            )
+                          else
+                            ActionMenuItem(
+                              icon: Icons.download_rounded,
+                              label: textLocalize('recall_download_model'),
+                              isDark: widget.isDark,
+                              onTap: () async {
+                                widget.onDismiss();
+                                await widget.onDownloadModel(widget.model);
+                              },
+                            ),
+                          if (widget.isOwnModel) ...[
+                            const SizedBox(height: 6),
+                            ActionMenuItem(
+                              icon: Icons.delete_outline_rounded,
+                              label: deleteLabel,
+                              isDark: widget.isDark,
+                              destructive: true,
+                              onTap: () async {
+                                widget.onDismiss();
+                                final confirmed =
+                                    await _showDeleteConfirmDialog(context);
+                                if (confirmed == true) {
+                                  await widget.onDeleteCloudModel(widget.model);
+                                }
+                              },
+                            ),
+                          ],
                           const SizedBox(height: 6),
                           ActionMenuItem(
                             icon: Icons.public_rounded,
@@ -393,4 +421,46 @@ class ActionMenuItem extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<bool?> _showDeleteConfirmDialog(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  return showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) {
+      return AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          textLocalize('recall_delete_confirm_title'),
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black87,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          textLocalize('recall_delete_confirm_message'),
+          style: TextStyle(
+            color: isDark ? Colors.white70 : Colors.black54,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              textLocalize('recall_delete_confirm_cancel'),
+              style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: Text(textLocalize('recall_delete_confirm_yes')),
+          ),
+        ],
+      );
+    },
+  );
 }
