@@ -164,6 +164,7 @@ let measurementLabelMesh: THREE.Sprite | null = null
 let vignetteMesh: THREE.Mesh | null = null
 let localModelObjectUrl: string | null = null
 let localPosesObjectUrl: string | null = null
+const localModelFormatByUrl = new Map<string, number>()
 let lastSnapTurnTime = 0
 let stateSaveTimer = 0
 const buttonLatch = new Map<string, boolean>()
@@ -172,6 +173,12 @@ const hudPlaneWidth = 1.6
 const hudPlaneHeight = 1.0
 const hudRenderOrder = 1000
 const hudPointerRenderOrder = 1002
+const splatSceneFormats = {
+  splat: 0,
+  ksplat: 1,
+  ply: 2,
+  spz: 3,
+} as const
 
 const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
 const modelLabel = computed(() => {
@@ -243,9 +250,31 @@ const filteredModels = computed(() => {
 
 function revokeObjectUrl(url: string | null) {
   if (!url) return
+  localModelFormatByUrl.delete(url)
   try {
     URL.revokeObjectURL(url)
   } catch {}
+}
+
+function getSceneFormatFromFileName(fileName: string): number | null {
+  const normalized = fileName.toLowerCase()
+  if (normalized.endsWith('.ply')) return splatSceneFormats.ply
+  if (normalized.endsWith('.splat')) return splatSceneFormats.splat
+  if (normalized.endsWith('.ksplat')) return splatSceneFormats.ksplat
+  if (normalized.endsWith('.spz')) return splatSceneFormats.spz
+  return null
+}
+
+function getSceneFormatForUrl(url: string): number | null {
+  const localFormat = localModelFormatByUrl.get(url)
+  if (localFormat != null) return localFormat
+  try {
+    const parsed = new URL(url, window.location.href)
+    const format = getSceneFormatFromFileName(parsed.pathname)
+    return format
+  } catch {
+    return getSceneFormatFromFileName(url)
+  }
 }
 
 function clearLocalModelState() {
@@ -284,7 +313,14 @@ async function onLocalModelSelected(event: Event) {
   if (!file) return
 
   revokeObjectUrl(localModelObjectUrl)
+  const localFormat = getSceneFormatFromFileName(file.name)
+  if (localFormat == null) {
+    errorMessage.value = `不支持的本地模型格式：${file.name}`
+    if (input) input.value = ''
+    return
+  }
   localModelObjectUrl = URL.createObjectURL(file)
+  localModelFormatByUrl.set(localModelObjectUrl, localFormat)
   localModelName.value = file.name || '本地模型'
 
   const localModel: BrainDanceRecallModel = {
@@ -300,8 +336,15 @@ async function onLocalModelSelected(event: Event) {
 
   activeModelId.value = localModel.id
   modelList.value = [localModel, ...modelList.value.filter((item) => !String(item.modelUrl || item.ply).startsWith('blob:'))]
-  await loadModel(localModel)
-  if (input) input.value = ''
+  try {
+    await loadModel(localModel)
+  } catch (error) {
+    console.error('[BrainDance VR] 本地模型加载失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '本地模型加载失败'
+    setLoadState('error', '本地模型加载失败', loadProgress.value)
+  } finally {
+    if (input) input.value = ''
+  }
 }
 
 async function onLocalPosesSelected(event: Event) {
@@ -321,7 +364,13 @@ async function onLocalPosesSelected(event: Event) {
       posesUrl: localPosesObjectUrl,
     }
     modelList.value = modelList.value.map((item) => item.id === current.id ? localModel : item)
-    await loadModel(localModel)
+    try {
+      await loadModel(localModel)
+    } catch (error) {
+      console.error('[BrainDance VR] 本地位姿加载失败:', error)
+      errorMessage.value = error instanceof Error ? error.message : '本地位姿加载失败'
+      setLoadState('error', '本地位姿加载失败', loadProgress.value)
+    }
   }
   if (input) input.value = ''
 }
@@ -1989,9 +2038,11 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
   let lastError: unknown = null
 
   for (const candidate of candidates) {
+    const format = getSceneFormatForUrl(candidate)
     try {
       setLoadState('model', `加载 3DGS 模型：${candidate}`, 0.2)
       await viewer?.addSplatScene(candidate, {
+        ...(format != null ? { format } : {}),
         showLoadingUI: false,
         progressiveLoad: false,
         optimizeSplatData: true,
