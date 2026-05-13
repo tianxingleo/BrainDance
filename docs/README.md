@@ -32,6 +32,7 @@
 - Supabase 层：[supabase/README.md](/ltx-data/BrainDance/supabase/README.md)
 - Dashboard：[dashboard/README.md](/ltx-data/BrainDance/dashboard/README.md)
 - App：[app/README.md](/ltx-data/BrainDance/app/README.md)
+- VR 查看器：[vr-3dgs-viewer/README.md](/ltx-data/BrainDance/vr-3dgs-viewer/README.md)
 
 ## 说明
 
@@ -151,9 +152,9 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 ## 🔄 文档版本与更新
 
-- **文档版本**: v1.1
-- **最后更新**: 2026-04-30
-- **主要更新**: 修正 conda 环境名、同步目录结构说明
+- **文档版本**: v1.2
+- **最后更新**: 2026-05-13
+- **主要更新**: 补充 VR 查看器常用入口、同步架构文档
 
 ---
 

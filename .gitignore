@@ -231,6 +231,15 @@ app/assets/webgl/.vite/
 3dgs_viewer/spark-3dgs-viewer/src/**/*.js
 3dgs_viewer/spark-3dgs-viewer/src/**/*.d.ts
 
+# VR 查看器本地开发产物（已移至根目录）
+vr-3dgs-viewer/node_modules/
+vr-3dgs-viewer/dist/
+vr-3dgs-viewer/.vite/
+vr-3dgs-viewer/**/*.mp4
+vr-3dgs-viewer/**/*.ply
+vr-3dgs-viewer/**/*.splat
+vr-3dgs-viewer/**/*.ksplat
+
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
 ai_engine/exports/

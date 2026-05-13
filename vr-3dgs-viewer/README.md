@@ -45,7 +45,7 @@ vr-3dgs-viewer 的 VR 模式（`?preview=webxr`）依赖以下底层能力：
 ## 运行方式
 
 ```bash
-cd 3dgs_viewer/vr-3dgs-viewer
+cd vr-3dgs-viewer
 npm install
 npm run dev
 ```

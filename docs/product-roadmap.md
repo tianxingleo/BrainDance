@@ -13,6 +13,7 @@
 - 社区功能（发布/浏览帖子）
 - EEG 信号录制页面
 - 深色/浅色主题切换 + 多语言（中/英）
+- VR 入口（Maker VR 按钮跳转 AR 模式）
 
 ### AI Worker (ai_engine/)
 - 3DGS 重建 Pipeline：video_3dgs、single_image_sam3d、single_image_sharp、da3 系列、sparse2dgs
@@ -38,7 +39,9 @@
 
 ### 3DGS Viewer (3dgs_viewer/)
 - 辅助脚本：位姿评估、标签、导出、同步
-- Orbit 相机旋转模式（Flutter WebView 集成）
+- **my-3dgs-viewer**：桌面端 3DGS 查看器，自由/轨道/电影三种相机模式
+- **vr-3dgs-viewer**：独立 VR 查看器，Desktop/Stereo/WebXR 三种预览模式，支持 SteamVR 手柄交互（抓取/缩放/HUD 点选）、本地模型加载、旁观窗口、空间标记导航
+- **spark-3dgs-viewer**：Spark 查看器前端，含 Marker AR 纸板锚定模式
 
 ### 文档 (docs/)
 - 9 个专题目录覆盖入门、部署、LangChain、本地问答等

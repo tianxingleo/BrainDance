@@ -203,9 +203,9 @@ BrainDance/
 │
 ├── 3dgs_viewer/          # [Tools] 3DGS 查看器与辅助工具
 │   ├── my-3dgs-viewer/   #   - Vue 3 桌面端 3DGS 查看器（自由/轨道/电影模式）
-│   ├── vr-3dgs-viewer/   #   - Vue 3 VR 查看器（Desktop/Stereo/WebXR 三模式）
 │   ├── spark-3dgs-viewer/#   - Spark 查看器前端（含 Marker AR 纸板锚定模式）
 │   └── *.py              #   - 位姿导出、图片同步、标签等辅助脚本
+├── vr-3dgs-viewer/       # [VR] Vue 3 VR 查看器（Desktop/Stereo/WebXR 三模式）
 ├── docs/                 # [Doc] 项目文档与技术报告
 └── README.md
 ```
@@ -319,7 +319,7 @@ npm run dev
 VR 查看器是独立 Vue 3 前端，支持 Desktop / Stereo / WebXR 三种模式：
 
 ```bash
-cd 3dgs_viewer/vr-3dgs-viewer
+cd vr-3dgs-viewer
 npm install
 npm run dev
 ```
