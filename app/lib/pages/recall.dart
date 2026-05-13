@@ -65,7 +65,8 @@ class RecallPage extends ConsumerStatefulWidget {
 }
 
 class _RecallPageState extends ConsumerState<RecallPage> {
-  static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
+  static const String _defaultModelFileName =
+      'qwen3-1.7b-braindance-q5-k-m-imatrix.gguf';
   static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
   static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
 
@@ -104,7 +105,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   RealtimeChannel? _realtimeChannel;
   String _localAnswer = '';
   String _localReasoning = '';
-  String _localAnswerStatus = 'Qwen3-1.7B 端侧模型未加载';
+  String _localAnswerStatus = '端侧模型未加载';
   String _localContextPreview = '';
   String _lastOwnModelSignature = '';
   String? _lastSearchKey;
@@ -115,21 +116,20 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _agentShortTermMemory;
   final List<AgentConversationEntry> _agentConversationHistory = [];
 
-  ChatMessage? get _agentChatMessage =>
-      _agentConversationHistory.isNotEmpty
-          ? _agentConversationHistory.first.agentMessage
-          : null;
+  ChatMessage? get _agentChatMessage => _agentConversationHistory.isNotEmpty
+      ? _agentConversationHistory.first.agentMessage
+      : null;
 
-  AgentRecallResponse? get _agentResult =>
-      _agentConversationHistory.isNotEmpty
-          ? _agentConversationHistory.first.agentResult
-          : null;
+  AgentRecallResponse? get _agentResult => _agentConversationHistory.isNotEmpty
+      ? _agentConversationHistory.first.agentResult
+      : null;
 
   set _agentResult(AgentRecallResponse? value) {
     if (_agentConversationHistory.isNotEmpty) {
       _agentConversationHistory.first.agentResult = value;
     }
   }
+
   AgentStep? _agentBootstrapStep;
   DateTime? _agentRunStartedAt;
   DateTime? _agentRunFinishedAt;

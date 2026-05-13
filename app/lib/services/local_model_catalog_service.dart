@@ -227,7 +227,7 @@ class LocalModelCatalogService {
     final defaultUrl = SupabaseConfig.localModelUrl;
     return LocalModelCatalogItem(
       id: SupabaseConfig.localModelObjectPath,
-      name: 'Qwen3-1.7B BrainDance 默认模型',
+      name: 'Qwen3-1.7B BrainDance 移动端默认模型',
       downloadUrl: defaultUrl,
       fileName: _extractFileName(defaultUrl),
       bucket: SupabaseConfig.localModelBucket,

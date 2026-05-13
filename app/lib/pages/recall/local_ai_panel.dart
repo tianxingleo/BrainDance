@@ -284,7 +284,7 @@ class _RecallLocalQnaPanel extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                'Qwen3-1.7B 端侧问答',
+                '端侧本地问答',
                 style: TextStyle(
                   color: textColor,
                   fontSize: 15,
@@ -539,12 +539,21 @@ class _RecallLocalQnaPanel extends StatelessWidget {
           if (reasoningText.isNotEmpty) ...[
             const SizedBox(height: 14),
             Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              data: Theme.of(
+                context,
+              ).copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
-                tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                tilePadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 0,
+                ),
                 minTileHeight: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                collapsedShape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                collapsedShape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 backgroundColor: isDark ? darkInput : theme.grayColor3,
                 collapsedBackgroundColor: isDark ? darkInput : theme.grayColor3,
                 iconColor: hintColor,
@@ -552,7 +561,8 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                 title: Row(
                   children: [
                     Icon(
-                      localAnswerStatus.contains('问答完成') || localAnswerStatus.contains('回答完成')
+                      localAnswerStatus.contains('问答完成') ||
+                              localAnswerStatus.contains('回答完成')
                           ? Icons.psychology_rounded
                           : Icons.stream_rounded,
                       size: 16,
@@ -560,7 +570,8 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      localAnswerStatus.contains('问答完成') || localAnswerStatus.contains('回答完成')
+                      localAnswerStatus.contains('问答完成') ||
+                              localAnswerStatus.contains('回答完成')
                           ? '查看思考过程'
                           : 'Agent 正在思考...',
                       style: TextStyle(
@@ -618,20 +629,44 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                   )
                 : MarkdownBody(
                     data: _prepareStreamingMarkdown(answerText),
-                    builders: {
-                      'code': _CodeElementBuilder(isDark: isDark),
-                    },
+                    builders: {'code': _CodeElementBuilder(isDark: isDark)},
                     styleSheet: MarkdownStyleSheet(
-                      p: TextStyle(color: textColor, fontSize: 13.5, height: 1.5),
-                      h1: TextStyle(color: textColor, fontSize: 18, height: 1.3, fontWeight: FontWeight.w700),
-                      h2: TextStyle(color: textColor, fontSize: 16, height: 1.3, fontWeight: FontWeight.w700),
-                      blockquote: TextStyle(color: hintColor, fontSize: 13, height: 1.5),
-                      code: TextStyle(color: textColor, fontSize: 12.5, fontFamily: 'monospace'),
+                      p: TextStyle(
+                        color: textColor,
+                        fontSize: 13.5,
+                        height: 1.5,
+                      ),
+                      h1: TextStyle(
+                        color: textColor,
+                        fontSize: 18,
+                        height: 1.3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      h2: TextStyle(
+                        color: textColor,
+                        fontSize: 16,
+                        height: 1.3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      blockquote: TextStyle(
+                        color: hintColor,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                      code: TextStyle(
+                        color: textColor,
+                        fontSize: 12.5,
+                        fontFamily: 'monospace',
+                      ),
                       codeblockDecoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF131813) : const Color(0xFFF1F4EA),
+                        color: isDark
+                            ? const Color(0xFF131813)
+                            : const Color(0xFFF1F4EA),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: BDDesign.colorFadedOlive.withValues(alpha: isDark ? 0.28 : 0.18),
+                          color: BDDesign.colorFadedOlive.withValues(
+                            alpha: isDark ? 0.28 : 0.18,
+                          ),
                         ),
                       ),
                     ),
@@ -670,7 +705,8 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
   Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
     if (element.tag != 'code') return null;
 
-    final language = element.attributes['class']?.replaceFirst('language-', '') ?? '';
+    final language =
+        element.attributes['class']?.replaceFirst('language-', '') ?? '';
     final codeText = element.textContent;
 
     // Check if it's an inline code block (without newlines typically, or parent isn't pre)
@@ -686,7 +722,9 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
         color: isDark ? const Color(0xFF12161A) : const Color(0xFFF1F4EA),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: BDDesign.colorFadedOlive.withValues(alpha: isDark ? 0.28 : 0.18),
+          color: BDDesign.colorFadedOlive.withValues(
+            alpha: isDark ? 0.28 : 0.18,
+          ),
         ),
       ),
       child: ClipRRect(

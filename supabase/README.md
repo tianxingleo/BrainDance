@@ -132,6 +132,7 @@ releases/qwen3-0.6b-braindance-round1/*
 - `catalog/model_catalog.json` 用于记录默认推荐模型与候选用途
 - Flutter Recall 本地 AI 默认下载对象为 `releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf`
 - `qwen3-1.7b-braindance-merged/` 与 `qwen3-0.6b-braindance-round1/` 保留为完整发布目录，便于后续做 HF / LoRA 侧部署实验
+- 当前 Flutter 侧本地模型加载参数已经按移动端更保守的上下文、batch 和输出预算做了收紧，避免把桌面评测参数直接带到真机上
 
 注意：
 

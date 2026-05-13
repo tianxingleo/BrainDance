@@ -86,10 +86,12 @@ class SupabaseConfig {
     if (lowerConfigured.startsWith('http://127.0.0.1') ||
         lowerConfigured.startsWith('http://localhost')) {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        candidates.add(configured.replaceFirst(
-          RegExp(r'://(127\.0\.0\.1|localhost)'),
-          '://10.0.2.2',
-        ));
+        candidates.add(
+          configured.replaceFirst(
+            RegExp(r'://(127\.0\.0\.1|localhost)'),
+            '://10.0.2.2',
+          ),
+        );
       }
     }
 
@@ -168,19 +170,12 @@ class SupabaseConfig {
   }
 
   static Future<bool> _isEndpointReachable(Dio dio, String baseUrl) async {
-    final probes = <String>[
-      '$baseUrl/rest/v1/',
-      '$baseUrl/auth/v1/health',
-    ];
+    final probes = <String>['$baseUrl/rest/v1/', '$baseUrl/auth/v1/health'];
     for (final probe in probes) {
       try {
         final response = await dio.get<Object?>(
           probe,
-          options: Options(
-            headers: {
-              if (apiKey.isNotEmpty) 'apikey': apiKey,
-            },
-          ),
+          options: Options(headers: {if (apiKey.isNotEmpty) 'apikey': apiKey}),
         );
         if ((response.statusCode ?? 0) > 0) {
           return true;

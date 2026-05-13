@@ -60,6 +60,7 @@
 - 本地推理引擎：`llamadart`
 - 本地检索索引：`sqflite + hashing embedder`
 - 模型分发：面板中填写下载链接后下载到应用私有目录
+- 默认模型文件名与对象路径仍指向 `qwen3-1.7b-braindance-q5-k-m-imatrix.gguf`
 
 当前代码现状可以概括为：
 
@@ -113,7 +114,7 @@ flutter devices
 - 任务提交默认写入 `processing_tasks`，列表页优先使用 `display_name`
 - 视频与缩略图默认上传到 `braindance-assets/{user_id}/{scene_id}/raw/`
 - Recall 页从 `model_assets` 读取结果，并尝试推导对应的模型与位姿文件 URL
-- Recall 本地 AI 面板默认围绕 `GGUF + llamadart` 链路工作
+- Recall 本地 AI 面板默认围绕 `GGUF + llamadart` 链路工作，默认参数已经收紧为更偏移动端的上下文、batch 和输出长度配置
 - Community 页从 `community_posts` 读取贴文，并通过关联的 `model_assets` 还原模型地址与封面
 
 ## 说明

@@ -110,6 +110,22 @@ class ChatMessage extends ChangeNotifier {
   }
 }
 
+class AgentConversationEntry {
+  AgentConversationEntry({
+    required this.userQuery,
+    required this.timestamp,
+    required this.agentMessage,
+    this.agentResult,
+    this.elapsed,
+  });
+
+  final String userQuery;
+  final DateTime timestamp;
+  final ChatMessage agentMessage;
+  AgentRecallResponse? agentResult;
+  Duration? elapsed;
+}
+
 class AgentRecallResponse {
   final String mode;
   final String answer;
