@@ -170,6 +170,8 @@ const buttonLatch = new Map<string, boolean>()
 const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
 const hudPlaneWidth = 1.6
 const hudPlaneHeight = 1.0
+const hudRenderOrder = 1000
+const hudPointerRenderOrder = 1002
 
 const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
 const modelLabel = computed(() => {
@@ -721,7 +723,7 @@ function createHud() {
     new THREE.PlaneGeometry(1.6, 1.0),
     material,
   )
-  hudMesh.renderOrder = 999
+  hudMesh.renderOrder = hudRenderOrder
   hudMesh.visible = false
   ensureOverlayScene().add(hudMesh)
   updateHudPlaneBasis()
@@ -754,7 +756,7 @@ function intersectHudPlane(origin: THREE.Vector3, direction: THREE.Vector3) {
   return {
     distance: origin.distanceTo(hitPoint),
     point: hitPoint,
-    uv: new THREE.Vector2((u / hudPlaneWidth) + 0.5, 1 - ((v / hudPlaneHeight) + 0.5)),
+    uv: new THREE.Vector2((u / hudPlaneWidth) + 0.5, (v / hudPlaneHeight) + 0.5),
   }
 }
 
@@ -1353,16 +1355,28 @@ function ensureControllerRig() {
     new THREE.Vector3(0, 0, 0),
     new THREE.Vector3(0, 0, -1.5),
   ])
-  const lineMaterial = new THREE.LineBasicMaterial({ color: 0x9ed0c6 })
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: 0x9ed0c6,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.95,
+  })
   controllerRay = new THREE.Line(lineGeometry, lineMaterial)
+  controllerRay.renderOrder = hudPointerRenderOrder
   controllerRay.visible = false
   rightController.add(controllerRay)
 
-  const tipMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff })
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    depthTest: false,
+    depthWrite: false,
+  })
   controllerTip = new THREE.Mesh(
     new THREE.SphereGeometry(0.018, 16, 16),
     tipMaterial,
   )
+  controllerTip.renderOrder = hudPointerRenderOrder + 1
   controllerTip.position.set(0, 0, -1.5)
   rightController.add(controllerTip)
 }
@@ -1411,6 +1425,13 @@ function getControllerWorldPose(controller: THREE.Object3D) {
     position: controller.getWorldPosition(new THREE.Vector3()),
     quaternion: controller.getWorldQuaternion(new THREE.Quaternion()),
   }
+}
+
+function getControllerPointerDirection(controller: THREE.Object3D) {
+  // WebXR 控制器的指向线沿本地 -Z，不能直接用 Object3D.getWorldDirection 的 +Z 结果。
+  return new THREE.Vector3(0, 0, -1)
+    .applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()))
+    .normalize()
 }
 
 function getActiveControllerPoses() {
@@ -1472,7 +1493,7 @@ function updateHudPointer(triggerPressed: boolean) {
   }
 
   const origin = controller.getWorldPosition(new THREE.Vector3())
-  const direction = controller.getWorldDirection(new THREE.Vector3()).normalize()
+  const direction = getControllerPointerDirection(controller)
   hudRaycaster.set(origin, direction)
   hudRaycaster.far = Math.max(6, hudPointerDistance + 2)
   const hit = intersectHudPlane(origin, direction) || null
@@ -1521,6 +1542,9 @@ function updateHudPointer(triggerPressed: boolean) {
       ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(color)
       ;(controllerRay.material as THREE.LineBasicMaterial).color.setHex(color)
     }
+  } else if (controllerTip && controllerRay) {
+    ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(0xffffff)
+    ;(controllerRay.material as THREE.LineBasicMaterial).color.setHex(0x9ed0c6)
   }
 
   if (previousHoverId !== hudHoveredActionId) {
@@ -1630,7 +1654,7 @@ function updateControllerState(nowMs: number) {
     if (hand === 'left') leftGrip = gripPressed
     if (hand === 'right') rightGrip = gripPressed
 
-    if (triggerPressed) {
+    if (triggerPressed && !isMenuOpen.value) {
       moving = moveRig(0, 1, dt) || moving
     }
 
