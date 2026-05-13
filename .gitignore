@@ -227,6 +227,9 @@ app/assets/webgl/.vite/
 3dgs_viewer/spark-3dgs-viewer/dist/
 3dgs_viewer/spark-3dgs-viewer/.vite/
 3dgs_viewer/spark-3dgs-viewer/.tmp/
+# tsc / vue-tsc 编译产物（源码为 .ts / .vue）
+3dgs_viewer/spark-3dgs-viewer/src/**/*.js
+3dgs_viewer/spark-3dgs-viewer/src/**/*.d.ts
 
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
