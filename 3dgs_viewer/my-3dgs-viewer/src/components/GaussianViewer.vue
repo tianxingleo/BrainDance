@@ -1507,12 +1507,12 @@ const createParticleSystem = (splatMesh) => {
 
   // 2. 自适应粒子大小
   // 逻辑：模型越大，单个粒子在世界空间中应该越大才能被看见。
-  // 系数 150.0 是经验值，表示将最大边长切分多少份。
-  let adaptiveSize = (maxDim / 120.0) * window.devicePixelRatio;
+  // 大场景入场时单点原本偏细，这里略提高世界空间基准尺寸，避免远景点云过于稀薄。
+  let adaptiveSize = (maxDim / 96.0) * window.devicePixelRatio;
   // 限制最小值，防止极小模型看不见
   const minParticleSize = isMobileDevice() ? 0.9 : 1.2;
   if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
-  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.0 : 5.4);
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.8 : 6.4);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
@@ -1602,7 +1602,7 @@ const createParticleSystem = (splatMesh) => {
         float pointScale = clamp(uCameraScale, 0.14, 1.12);
         gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
         float minPointSize = mix(0.35, 0.85, smoothstep(0.14, 0.6, pointScale));
-        float maxPointSize = max(minPointSize, 18.0 * min(pointScale, 1.0));
+        float maxPointSize = max(minPointSize, 22.0 * min(pointScale, 1.0));
         gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
     `,
