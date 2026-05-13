@@ -49,6 +49,8 @@ const showCinematicPanel = ref(false);
 const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
+const localModelName = ref('');
+const localPosesName = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
 const hasModelTab = computed(() => modelList.value.length > 1);
 const hasPoseTab = computed(() => !isOrbitMode.value && filteredPoses.value.length > 0);
@@ -122,6 +124,13 @@ const replaceModelExtension = (url, extension) => {
   return `${base.replace(/\.(ply|splat|ksplat)$/i, extension)}${suffix}`;
 };
 
+const revokeObjectUrl = (url) => {
+  if (!url) return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch (_) {}
+};
+
 const isSameOriginUrl = (url) => {
   try {
     return new URL(url, window.location.href).origin === window.location.origin;
@@ -157,6 +166,8 @@ const searchAndFly = () => {
 let viewer;
 let particleSystem;
 let particleSystemRevealDone = false;
+let localModelObjectUrl = null;
+let localPosesObjectUrl = null;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
@@ -376,6 +387,57 @@ const addSplatSceneWithFormatFallback = async (sourceUrl) => {
   }
 
   throw lastError || new Error('模型加载失败');
+};
+
+const getReadableModelLabel = () => {
+  if (activeModelId.value) return activeModelId.value;
+  if (localModelName.value) return localModelName.value;
+  const fallback = String(currentPlyUrl || '').split('/').pop() || '';
+  return fallback || '当前场景';
+};
+
+const triggerLocalModelPicker = () => {
+  document.getElementById('local-model-input')?.click?.();
+};
+
+const triggerLocalPosesPicker = () => {
+  document.getElementById('local-poses-input')?.click?.();
+};
+
+const clearLocalPoses = () => {
+  revokeObjectUrl(localPosesObjectUrl);
+  localPosesObjectUrl = null;
+  localPosesName.value = '';
+  currentPosesUrl = '';
+};
+
+const onLocalModelSelected = async (event) => {
+  const input = event?.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  revokeObjectUrl(localModelObjectUrl);
+  localModelObjectUrl = URL.createObjectURL(file);
+  localModelName.value = file.name || '本地模型';
+  activeModelId.value = '';
+
+  await initViewer(localModelObjectUrl, currentPosesUrl || '', null);
+
+  if (input) input.value = '';
+};
+
+const onLocalPosesSelected = async (event) => {
+  const input = event?.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  revokeObjectUrl(localPosesObjectUrl);
+  localPosesObjectUrl = URL.createObjectURL(file);
+  localPosesName.value = file.name || '本地位姿';
+
+  await initViewer(currentPlyUrl, localPosesObjectUrl, null);
+
+  if (input) input.value = '';
 };
 
 const applyFocalLengthPx = (focalPx, options = {}) => {
@@ -663,7 +725,7 @@ const drawVrHud = () => {
   ctx.fillText('A/X：重置视角    B/Y：退出 VR', 48, 318);
   ctx.fillText(`模式：${currentViewMode.value === VIEW_MODE.ORBIT ? '中心观察' : '自由漫游'}`, 48, 382);
   ctx.fillStyle = 'rgba(247, 248, 251, 0.58)';
-  ctx.fillText(`模型：${activeModelId.value || currentPlyUrl.split('/').pop() || '当前场景'}`, 48, 428);
+  ctx.fillText(`模型：${getReadableModelLabel()}`, 48, 428);
 
   vrHud.texture.needsUpdate = true;
 };
@@ -3461,6 +3523,15 @@ const onCapturedUserCameraInput = () => {
   interruptCameraFlightFromUserInput();
 };
 
+const resetLocalRuntimeSources = () => {
+  if (!String(currentPlyUrl || '').startsWith('blob:')) {
+    localModelName.value = '';
+  }
+  if (!String(currentPosesUrl || '').startsWith('blob:')) {
+    localPosesName.value = '';
+  }
+};
+
 function onTimePeelingSelect(model) {
   activeModelId.value = model.id;
   // 通知 Flutter 切换模型（Flutter 负责下载后回调 loadModelFromFlutter）
@@ -3475,6 +3546,7 @@ function onTimePeelingSelect(model) {
     // 非 Flutter 环境，直接加载
     isLoading.value = false;
     stopCinematicPlayback();
+    resetLocalRuntimeSources();
     initViewer(model.ply || null, model.poses || null, null);
   }
 }
@@ -3506,6 +3578,7 @@ onMounted(() => {
     // 2. loadModelFromFlutter({ply: url, poses: url}) -- 同时传模型和位姿URL
     window.loadModelFromFlutter = (input) => {
       console.log('[Flutter->WebGL] 收到加载请求:', input);
+      resetLocalRuntimeSources();
       if (typeof input === 'string') {
         // 旧版兼容：只传了 PLY URL，位姿使用默认本地路径
         initViewer(input, null, null);
@@ -3536,11 +3609,13 @@ onMounted(() => {
       const initialInput = parseInitialInputFromUrl();
       if (initialInput && !hasInitializedFromExternalInput) {
         hasInitializedFromExternalInput = true;
+        resetLocalRuntimeSources();
         initViewer(initialInput.ply, initialInput.poses, {
           matrix: initialInput.matrix || null,
           imageId: initialInput.imageId || null
         });
       } else {
+        resetLocalRuntimeSources();
         initViewer(null, null);
       }
     }
@@ -3576,6 +3651,10 @@ onBeforeUnmount(async () => {
     try {
       await exitVRSession();
     } catch (_) {}
+    revokeObjectUrl(localModelObjectUrl);
+    revokeObjectUrl(localPosesObjectUrl);
+    localModelObjectUrl = null;
+    localPosesObjectUrl = null;
     destroyVrHud();
     try {
       await viewer.dispose();
@@ -3590,6 +3669,8 @@ onBeforeUnmount(async () => {
     @wheel.prevent="onWheel"
     @mouseleave="onMouseUp" @touchstart="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd"
     @touchcancel="onTouchEnd">
+    <input id="local-model-input" class="sr-only-input" type="file" accept=".ply,.splat,.ksplat,.spz" @change="onLocalModelSelected" />
+    <input id="local-poses-input" class="sr-only-input" type="file" accept=".json" @change="onLocalPosesSelected" />
     <div ref="containerRef" class="viewer-container"></div>
     <div class="viewer-vignette"></div>
 
@@ -3642,6 +3723,18 @@ onBeforeUnmount(async () => {
         <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
           @mousedown.stop @touchstart.stop @touchend.stop>
           {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
+        </button>
+        <button class="archive-btn archive-btn--ghost" @click="triggerLocalModelPicker"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          本地模型
+        </button>
+        <button class="archive-btn archive-btn--ghost" @click="triggerLocalPosesPicker"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          本地位姿
+        </button>
+        <button v-if="localPosesName" class="archive-btn archive-btn--ghost" @click="clearLocalPoses"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          清位姿
         </button>
         <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
           :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
@@ -3706,6 +3799,10 @@ onBeforeUnmount(async () => {
         </div>
       </div>
       <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
+      <div class="local-file-hint" v-if="localModelName || localPosesName">
+        <span v-if="localModelName">模型：{{ localModelName }}</span>
+        <span v-if="localPosesName">位姿：{{ localPosesName }}</span>
+      </div>
     </div>
 
     <div v-if="isLoading" class="loading-overlay">
@@ -3952,6 +4049,18 @@ onBeforeUnmount(async () => {
   backdrop-filter: blur(18px);
 }
 
+.sr-only-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .top-hud {
   position: absolute;
   top: calc(var(--flutter-safe-top) + 56px);
@@ -3975,6 +4084,14 @@ onBeforeUnmount(async () => {
   align-self: flex-start;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.local-file-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .renderer-switch {
