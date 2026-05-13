@@ -227,8 +227,9 @@ function handlePointerUp() {
   cursor: grab;
   touch-action: none;
   user-select: none;
-  margin: 0 10px 2px;
+  margin: 0 10px 0;
   flex: 1;
+  overflow: visible;
 }
 .timeline-elastic-wrap:active {
   cursor: grabbing;
@@ -317,6 +318,7 @@ function handlePointerUp() {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
   opacity: 0;
   transition: opacity 0.3s;
 }

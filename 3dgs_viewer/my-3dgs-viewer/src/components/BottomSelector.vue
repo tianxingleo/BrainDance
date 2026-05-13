@@ -146,6 +146,7 @@ onBeforeUnmount(() => {
     <!-- 缩略图滚动区 -->
     <div class="bs-track-wrap">
       <div class="bs-track"
+        :class="{ 'bs-track--timeline': mode === 'model' }"
         ref="scrollRef"
         @mousedown="onPointerDown"
         @mousemove="onPointerMove"
@@ -201,7 +202,7 @@ onBeforeUnmount(() => {
   right: 16px;
   z-index: 100;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0;
   pointer-events: auto;
   background: var(--card-bg, rgba(249, 249, 248, 0.88));
@@ -210,7 +211,7 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   box-shadow: 0 8px 24px var(--card-shadow, rgba(0, 0, 0, 0.1));
-  padding: 10px 0 10px 12px;
+  padding: 10px 0 14px 12px;
 }
 
 /* 切换按钮 */
@@ -258,7 +259,7 @@ onBeforeUnmount(() => {
 .bs-track {
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: flex-end;
   overflow-x: auto;
   overflow-y: visible;
   padding: 16px 36px 28px;
@@ -268,6 +269,13 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
   mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+}
+.bs-track--timeline {
+  gap: 0;
+  padding-top: 52px;
+  padding-bottom: 14px;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .bs-track::-webkit-scrollbar {
   display: none;
