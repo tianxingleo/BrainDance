@@ -15,7 +15,7 @@
 
 #### An Anti-Entropy Engine for Human Memory
 
-![Flutter](https://img.shields.io/badge/Flutter-Mobile%20Client-02569B?logo=flutter&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-BaaS-3ECF8E?logo=supabase&logoColor=white) ![Python](https://img.shields.io/badge/Python-AI%20Worker-3776AB?logo=python&logoColor=white) ![Vue](https://img.shields.io/badge/Vue-Dashboard-4FC08D?logo=vuedotjs&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?logo=postgresql&logoColor=white) ![pgvector](https://img.shields.io/badge/pgvector-Vector%20Search-6C47FF) ![Three.js](https://img.shields.io/badge/Three.js-3D%20Viewer-000000) ![Deno](https://img.shields.io/badge/Deno-Edge%20Function-000000?logo=deno&logoColor=white) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
+![Flutter](https://img.shields.io/badge/Flutter-Mobile%20Client-02569B?logo=flutter&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-BaaS-3ECF8E?logo=supabase&logoColor=white) ![Python](https://img.shields.io/badge/Python-AI%20Worker-3776AB?logo=python&logoColor=white) ![Vue](https://img.shields.io/badge/Vue-Dashboard-4FC08D?logo=vuedotjs&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?logo=postgresql&logoColor=white) ![pgvector](https://img.shields.io/badge/pgvector-Vector%20Search-6C47FF) ![Three.js](https://img.shields.io/badge/Three.js-3D%20Viewer-000000) ![WebXR](https://img.shields.io/badge/WebXR-VR%20Viewer-FF0266) ![Deno](https://img.shields.io/badge/Deno-Edge%20Function-000000?logo=deno&logoColor=white) ![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)
 
 </div>
 
@@ -32,13 +32,14 @@ BrainDance 用 **3D Gaussian Splatting (高斯泼溅)** 等技术把真实场景
 - **📷 低门槛采集**：用手机视频或图片就能发起空间采集，重建计算放在云端完成。
 - **🔍 空间语义检索**：结合多模态理解、向量检索和空间锚点，在三维场景里查找物体、位置和相关视角。
 - **⏳ 时间维度回看**：围绕同一空间的多次扫描结果，比较不同时间下的变化。
+- **📱 Marker AR 叠加**：基于打印纸板图像识别（MindAR），将 3DGS 重建的三维模型锚定到真实环境中，支持缩放、旋转和高度调节，在移动端 WebView 内完成完整 AR 交互。
 - **☁️ 端云协同链路**：移动端负责采集与查看，Supabase 和 AI Worker 负责存储、调度与重建处理。
 
 ### 技术栈速览
 
 **前端与交互**
 
-![Flutter](https://img.shields.io/badge/Flutter-Mobile-02569B?logo=flutter&logoColor=white) ![Riverpod](https://img.shields.io/badge/Riverpod-State%20Management-0EA5E9) ![WebView](https://img.shields.io/badge/WebView-Model%20Viewer-4B5563) ![Vue 3](https://img.shields.io/badge/Vue%203-Dashboard-4FC08D?logo=vuedotjs&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-Build%20Tool-646CFF?logo=vite&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-Web-3178C6?logo=typescript&logoColor=white) ![Three.js](https://img.shields.io/badge/Three.js-3D%20Rendering-000000) ![ECharts](https://img.shields.io/badge/ECharts-Visualization-AA344D)
+![Flutter](https://img.shields.io/badge/Flutter-Mobile-02569B?logo=flutter&logoColor=white) ![Riverpod](https://img.shields.io/badge/Riverpod-State%20Management-0EA5E9) ![WebView](https://img.shields.io/badge/WebView-Model%20Viewer-4B5563) ![Vue 3](https://img.shields.io/badge/Vue%203-Dashboard-4FC08D?logo=vuedotjs&logoColor=white) ![Vite](https://img.shields.io/badge/Vite-Build%20Tool-646CFF?logo=vite&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-Web-3178C6?logo=typescript&logoColor=white) ![Three.js](https://img.shields.io/badge/Three.js-3D%20Rendering-000000) ![WebXR](https://img.shields.io/badge/WebXR-VR%20Viewer-FF0266) ![ECharts](https://img.shields.io/badge/ECharts-Visualization-AA344D)
 
 **云服务与数据**
 
@@ -110,6 +111,7 @@ Core `supabase/functions/_shared/agent-core/spatialAgent.ts`。这条链路不�
 - **移动端轻采集，云端重计算**：用户在手机端完成视频或图片采集，计算密集型重建任务放在 GPU Worker 执行，更符合移动应用的性能边界。
 - **从 3D 重建走向 3D 检索**：项目不只生成三维模型，还把场景理解、对象标注和向量检索整合进链路，形成可查询的空间记忆系统。
 - **从检索接口走向 Agent 编排**：在 `search-models` 之上新增 LangChain / Agent 统一入口，把空间检索、资产整理、时间对比、创作准备与弱图谱摘要纳入同一协议。
+- **从桌面 3D 走向 AR/VR 沉浸式查看**：新增独立 VR 渲染端 `vr-3dgs-viewer`，基于 WebXR 标准，支持 Desktop / Stereo / WebXR 三种预览模式，可在 SteamVR 头显（PICO Neo 2 等）中完成手柄抓取缩放、HUD 操作、导航点跳转、标记查看与空间测量等全链路 VR 交互；新增 Marker AR 模式（`spark-3dgs-viewer`），基于 MindAR 图像识别与 Spark 3DGS 渲染，通过打印纸板将重建模型锚定到真实环境，支持智能主后置摄像头选择、实时 AR 变换控制（缩放 / 旋转 / 偏移）和 Flutter WebView 摄像头权限桥接。
 - **端云协同的完整闭环**：从素材上传、任务调度、状态回传，到模型浏览和语义搜索，当前仓库已经覆盖完整的软件链路，而不是单点算法演示。
 - **支持多种重建流水线**：除了常规 `video_3dgs`，还接入了 `single_image_sam3d`、`single_image_sharp`、`da3_sugar`、`da3_2dgs`、`sparse2dgs` 等任务类型，便于根据不同输入场景切换方案。
 
@@ -199,7 +201,11 @@ BrainDance/
 │   ├── .env.example      #   - 环境变量模板
 │   └── package.json
 │
-├── 3dgs_viewer/          # [Tools] 3DGS 脚本与辅助工具
+├── 3dgs_viewer/          # [Tools] 3DGS 查看器与辅助工具
+│   ├── my-3dgs-viewer/   #   - Vue 3 桌面端 3DGS 查看器（自由/轨道/电影模式）
+│   ├── vr-3dgs-viewer/   #   - Vue 3 VR 查看器（Desktop/Stereo/WebXR 三模式）
+│   ├── spark-3dgs-viewer/#   - Spark 查看器前端（含 Marker AR 纸板锚定模式）
+│   └── *.py              #   - 位姿导出、图片同步、标签等辅助脚本
 ├── docs/                 # [Doc] 项目文档与技术报告
 └── README.md
 ```
@@ -308,7 +314,40 @@ npm install
 npm run dev
 ```
 
-#### 4. 启动移动端 (App)
+#### 4. 启动 VR 查看器（可选）
+
+VR 查看器是独立 Vue 3 前端，支持 Desktop / Stereo / WebXR 三种模式：
+
+```bash
+cd 3dgs_viewer/vr-3dgs-viewer
+npm install
+npm run dev
+```
+
+日常调试可打开 `https://127.0.0.1:5174/?preview=desktop` 先在普通屏幕上确认模型加载与朝向。启动 SteamVR 后，用 PC Chrome / Edge 打开 `https://127.0.0.1:5174/?preview=webxr`，点击 `Enter VR` 进入沉浸式查看。真实模型建议通过 `payload=<encoded-json>` 传入 `ply / poses / sceneId`。
+
+桌面端查看器：
+
+```bash
+cd 3dgs_viewer/my-3dgs-viewer
+npm install
+npm run dev
+```
+
+##### Marker AR 模式（可选）
+
+Marker AR 模式基于 MindAR 图像识别，将 3DGS 模型通过打印纸板锚定到真实环境中。该模式集成在 `spark-3dgs-viewer` 内，通过 URL 参数 `mode=marker-ar` 激活：
+
+
+移动端 Flutter 应用中，可在模型查看页面右上角点击 AR 按钮一键切换到 Marker AR 模式，系统会自动请求摄像头权限并通过 WebView 加载 AR 场景。
+
+使用前需准备：
+
+1. 生成 MindAR 目标描述文件（`.mind`），放入 `public/targets/`
+2. 打印对应的目标纸板图像
+3. 在移动端打开模型查看器，切换到 Marker AR 模式后对准纸板
+
+#### 5. 启动移动端 (App)
 
 在 `app/.env` 中填入客户端所需的 Supabase 配置后运行：
 
@@ -325,6 +364,7 @@ flutter run
 - 任务状态页
 - Recall 资产页
 - 基于 WebView 的移动端 WebGL 模型查看
+- Marker AR 纸板锚定模式（一键切换，自动请求摄像头权限）
 - `agent-recall` 驱动的 Agent 检索、多轮续聊与流式步骤面板
 - 端侧本地问答模型下载、选择与受约束问答
 
@@ -429,14 +469,52 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 BrainDance 的三维重建与语义理解能力建立在多个优秀开源项目和研究工作的基础上。这里保留项目级简版致谢，详细论文引用、许可证与上游说明见 [`ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md`](./ai_engine/3dgs/THIRD_PARTY_ATTRIBUTIONS.md)。
 
-- [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) - 模块化 NeRF / 3DGS 框架
+### 核心算法与三维重建
+
+- [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio) - 模块化 NeRF / 3DGS 训练框架，本项目训练管线基于 `splatfacto` 模型修改
+- [gsplat](https://github.com/nerfstudio-project/gsplat) - 超快 CUDA 光栅化后端，为云端训练提供性能保障
+- [3D Gaussian Splatting (Inria)](https://github.com/graphdeco-inria/gaussian-splatting) - Inria 原始论文实现，奠定 3DGS 理论基础
 - [2D Gaussian Splatting](https://github.com/hbb1/2d-gaussian-splatting) - 2DGS 表达与几何重建
 - [Sparse2DGS](https://github.com/Wuuu3511/Sparse2DGS) - 稀疏视角下的 2DGS 重建
 - [SuGaR](https://github.com/Anttwo/SuGaR) - 面向网格提取与精修的 Gaussian 表达
 - [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) - 深度估计与视图空间恢复
-- [SHARP](https://github.com/apple/ml-sharp) - 单图快速视图合成与 Gaussian 生成
+- [SHARP](https://github.com/apple/ml-sharp) - Apple 单图快速视图合成与 Gaussian 生成
 - [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects) - 单图 / 少图 3D 物体生成
+- [MoGe (Microsoft)](https://github.com/microsoft/MoGe) - 单目几何估计，SAM 3D Objects 的深度后端
+- [COLMAP](https://colmap.github.io/) - 结构化运动恢复 (SfM)，Nerfstudio 训练管线的前置依赖
+- [GLOMAP](https://github.com/colmap/glomap) - 全局 SfM 重建
+- [PyTorch](https://github.com/pytorch/pytorch) - 深度学习框架，AI 引擎的基础
+- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) - 目标检测与图像分割
+
+### Web 渲染与查看器
+
+- [Three.js](https://github.com/mrdoob/three.js) - WebGL 3D 渲染引擎，所有 Web 查看器的基础
+- [GaussianSplats3D (mkkellogg)](https://github.com/mkkellogg/GaussianSplats3D) - 基于 Three.js 的 Web 3DGS 查看器，移动端 WebView 渲染的灵感来源
+- [Spark (@sparkjsdev)](https://github.com/sparkjsdev/spark) - 3DGS Web 渲染引擎
+- [antimatter15/splat](https://github.com/antimatter15/splat) - 优秀的 WebGL 3DGS 实现，早期概念参考
+- [MindAR.js](https://github.com/hiukim/mind-ar-js) - Web AR 图像识别与跟踪
+- [GSAP](https://gsap.com/) - 专业级 Web 动画库
+- [MediaPipe (Google)](https://github.com/google-ai-edge/mediapipe) - 视觉任务处理（手势识别等）
+
+### 基础设施与 AI 服务
+
 - [Supabase](https://github.com/supabase/supabase) - Auth、Storage、Realtime 与 Edge Functions 基础设施
+- [pgvector](https://github.com/pgvector/pgvector) - PostgreSQL 向量扩展，为项目提供高性能 RAG 检索能力
+- [LangChain](https://github.com/langchain-ai/langchain) - Agent 编排框架，项目后端智能路由与工具调用的核心
+- [OpenAI API](https://github.com/openai/openai-python) - LLM API 服务
+- [Qwen-VL](https://github.com/QwenLM/Qwen-VL) - 通义千问多模态大模型，为 3D 场景提供自动标签与描述能力
+- [DashScope (阿里云)](https://help.aliyun.com/dashscope) - 通义千问模型服务
+- [Deno](https://github.com/denoland/deno) - Supabase Edge Functions 运行时
+
+### 移动端与前端
+
+- [Flutter](https://github.com/flutter/flutter) - 移动端跨平台框架
+- [Vue.js](https://github.com/vuejs/core) - 前端框架，Web 查看器与 Dashboard 均基于 Vue 3
+- [TDesign Flutter (腾讯)](https://github.com/Tencent/tdesign-flutter) - Flutter UI 组件库
+- [Riverpod](https://github.com/riverpod/riverpod) - Flutter 状态管理
+- [Element Plus](https://github.com/element-plus/element-plus) - Vue 3 UI 组件库
+- [ECharts](https://github.com/apache/echarts) - 数据可视化图表库
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) - 端侧 LLM 推理（通过 llamadart Dart 绑定）
 
 ## 版权与开源协议 (License & Copyright)
 

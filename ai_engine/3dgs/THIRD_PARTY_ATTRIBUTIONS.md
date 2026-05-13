@@ -212,6 +212,48 @@ Official repo: <https://github.com/facebookresearch/sam-3d-objects>
 
 ## 补充引用
 
+### MoGe (Microsoft)
+
+**Paper Title**
+[2410.19115] MoGe: Unlocking Accurate Monocular Geometry Estimation
+
+**Paper**
+arXiv:2410.19115
+Submitted: 2024-10-24
+Link: <https://arxiv.org/abs/2410.19115>
+
+**Project**
+Role in BrainDance: 单目几何估计，作为 SAM 3D Objects 的深度后端
+Local path: SAM 3D Objects 子模块的依赖（通过 `pip install git+https://github.com/microsoft/MoGe.git` 安装）
+Official repo: <https://github.com/microsoft/MoGe>
+
+**Citation / License**
+- 官方仓库包含论文链接与 BibTeX
+- License: MIT
+
+**Notes**
+- SAM 3D Objects 推理管线中 `pose_target.py`、`mesh_alignment.py` 等文件直接引用 MoGe 的点图（pointmap）输出
+- 部署文档中记录了 MoGe 的安装路径：`pip install git+https://github.com/microsoft/MoGe.git@a8c37341`
+
+### gsplat
+
+**Paper Title**
+[2408.14636] gsplat: An Open-Source Library for Gaussian Splatting
+
+**Paper**
+arXiv:2408.14636
+Submitted: 2024-08
+Link: <https://arxiv.org/abs/2408.14636>
+
+**Project**
+Role in BrainDance: 超快 CUDA 光栅化后端，SHARP / ml-sharp 的核心渲染引擎
+Local path: `ai_engine/3dgs/src/libs/ml-sharp` 的依赖（`gsplat==1.5.3`）
+Official repo: <https://github.com/nerfstudio-project/gsplat>
+
+**Citation / License**
+- 官方仓库包含论文链接与 BibTeX
+- License: Apache 2.0
+
 ### Segment Anything in 3D Scenes
 
 **Paper Title**  
