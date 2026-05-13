@@ -46,6 +46,7 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
+const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -2314,6 +2315,23 @@ const toggleCinematicPlayback = () => {
 const toggleCinematicPanel = () => {
   if (!canPlayCinematic.value) return;
   showCinematicPanel.value = !showCinematicPanel.value;
+  if (showCinematicPanel.value) {
+    showFocalSettings.value = false;
+  }
+};
+
+const exitViewer = () => {
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'exit' }));
+  }
+};
+
+const switchRenderer = (useSpark) => {
+  if (useSparkRenderer.value === useSpark) return;
+  useSparkRenderer.value = useSpark;
+  if (window.BrainDanceChannel) {
+    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'switchViewer', useSpark }));
+  }
 };
 
 const rebuildCinematicAtCurrentProgress = () => {
@@ -3597,6 +3615,20 @@ onBeforeUnmount(async () => {
       </div>
 
       <div class="top-actions">
+        <button class="exit-btn" @click="exitViewer" @mousedown.stop @touchstart.stop @touchend.stop>
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          </svg>
+        </button>
+        <div class="renderer-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <button class="mode-chip" :class="{ active: !useSparkRenderer }" @click="switchRenderer(false)">
+            原版
+          </button>
+          <button class="mode-chip" :class="{ active: useSparkRenderer }" @click="switchRenderer(true)">
+            Spark
+          </button>
+        </div>
         <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
           <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
             @click="switchViewMode(VIEW_MODE.FREE)">
@@ -3672,8 +3704,8 @@ onBeforeUnmount(async () => {
             <span>主体锁定</span>
           </label>
         </div>
-        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
+      <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
     </div>
 
     <div v-if="isLoading" class="loading-overlay">
@@ -3699,7 +3731,7 @@ onBeforeUnmount(async () => {
       </div>
     </div>
 
-    <div class="controls-ui" v-if="false">
+    <div class="controls-ui" @mousedown.stop @touchstart.stop @touchend.stop>
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
         {{ isVRMode ? '退出 VR' : '进入 VR' }}
       </button>
@@ -3943,6 +3975,18 @@ onBeforeUnmount(async () => {
   align-self: flex-start;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.renderer-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--chip-hover-bg);
+}
+
+.renderer-switch .mode-chip {
+  flex: 1;
 }
 
 .view-mode-switch {
