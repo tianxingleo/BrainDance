@@ -94,6 +94,7 @@ const activeSearchQuery = ref(persistedClientState.activeSearchQuery || '')
 const selectedMarkerId = ref('')
 const selectedSearchResultId = ref('')
 const isMenuOpen = ref(persistedClientState.isMenuOpen ?? true)
+const isDesktopPanelOpen = ref(true)
 const interactionMode = ref<InteractionMode>(persistedClientState.interactionMode || 'explore')
 const sceneScaleMode = ref<SceneScaleMode>(persistedClientState.sceneScaleMode || 'room')
 const turnMode = ref<TurnMode>(persistedClientState.turnMode || 'snap')
@@ -150,6 +151,9 @@ let hudPlaneUp = new THREE.Vector3(0, 1, 0)
 let sceneRoot: THREE.Group | null = null
 let xrRig: THREE.Group | null = null
 let worldRoot: THREE.Group | null = null
+let xrSessionListenersInstalled = false
+let overlayScene: THREE.Scene | null = null
+let originalViewerRender: (() => void) | null = null
 let introGlint: THREE.Points | null = null
 let grabState: GrabState | null = null
 let markerGroup: THREE.Group | null = null
@@ -321,7 +325,10 @@ async function onLocalPosesSelected(event: Event) {
 }
 
 function makeSceneRotationY(rotationY: number): [number, number, number, number] {
-  const quaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY)
+  const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY)
+  // 3DGS 资源在 VR 端需要先绕 X 轴旋转 180 度，纠正“前后反了且上下倒了”的整体朝向。
+  const x180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI)
+  const quaternion = yaw.premultiply(x180)
   return [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
 }
 
@@ -422,6 +429,9 @@ function disposeViewer() {
   rightController = null
   controllerRay = null
   controllerTip = null
+  xrSessionListenersInstalled = false
+  overlayScene = null
+  originalViewerRender = null
   hudActions = []
   hudHoveredActionId = null
   hudPointerHit = false
@@ -629,6 +639,43 @@ function getRuntimeViewer(): RuntimeGaussianViewer | null {
   return viewer as (GaussianSplats3D.Viewer & RuntimeGaussianViewer) | null
 }
 
+function ensureOverlayScene() {
+  if (!overlayScene) overlayScene = new THREE.Scene()
+  return overlayScene
+}
+
+function getRenderCamera() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return null
+  if (runtime.renderer?.xr?.isPresenting) {
+    return runtime.renderer.xr.getCamera()
+  }
+  return runtime.camera
+}
+
+function renderOverlayScene() {
+  const runtime = getRuntimeViewer()
+  const camera = getRenderCamera()
+  if (!runtime?.renderer || !overlayScene || !camera) return
+  if (!overlayScene.children.some((child) => child.visible)) return
+
+  const savedAutoClear = runtime.renderer.autoClear
+  runtime.renderer.autoClear = false
+  runtime.renderer.render(overlayScene, camera)
+  runtime.renderer.autoClear = savedAutoClear
+  runtime.forceRenderNextFrame?.()
+}
+
+function installOverlayRenderHook() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.render || originalViewerRender) return
+  originalViewerRender = runtime.render.bind(runtime)
+  runtime.render = () => {
+    originalViewerRender?.()
+    renderOverlayScene()
+  }
+}
+
 function ensureSceneRoots() {
   const runtime = getRuntimeViewer()
   if (!runtime?.threeScene) return
@@ -643,9 +690,7 @@ function ensureSceneRoots() {
 }
 
 function disposeHud() {
-  if (getRuntimeViewer()?.threeScene && hudMesh) {
-    getRuntimeViewer()!.threeScene!.remove(hudMesh)
-  }
+  if (hudMesh) hudMesh.parent?.remove(hudMesh)
   hudMesh?.geometry?.dispose?.()
   ;(hudMesh?.material as THREE.Material | undefined)?.dispose?.()
   hudTexture?.dispose()
@@ -656,8 +701,7 @@ function disposeHud() {
 }
 
 function createHud() {
-  const runtime = getRuntimeViewer()
-  if (!runtime?.threeScene || hudMesh) return
+  if (hudMesh) return
 
   hudCanvas = document.createElement('canvas')
   hudCanvas.width = 1024
@@ -679,7 +723,7 @@ function createHud() {
   )
   hudMesh.renderOrder = 999
   hudMesh.visible = false
-  runtime.threeScene.add(hudMesh)
+  ensureOverlayScene().add(hudMesh)
   updateHudPlaneBasis()
 }
 
@@ -1233,8 +1277,9 @@ function drawHud() {
 }
 
 function placeHudInFrontOfUser() {
-  if (!hudMesh || !viewer?.renderer?.xr) return
-  const camera = viewer.renderer.xr.getCamera()
+  const camera = getRenderCamera()
+  if (!hudMesh || !camera) return
+  camera.updateMatrixWorld?.()
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
   hudMesh.position.copy(camera.position).addScaledVector(forward, 1.35).add(new THREE.Vector3(0, -0.18, 0))
   hudMesh.quaternion.copy(camera.quaternion)
@@ -1242,9 +1287,15 @@ function placeHudInFrontOfUser() {
   updateHudPlaneBasis()
 }
 
+function refreshHudDisplay() {
+  if (!hudMesh) createHud()
+  placeHudInFrontOfUser()
+  drawHud()
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
 function ensureVignette() {
-  const runtime = getRuntimeViewer()
-  if (!runtime?.threeScene || vignetteMesh) return
+  if (vignetteMesh) return
   vignetteMesh = new THREE.Mesh(
     new THREE.RingGeometry(0.36, 0.82, 64),
     new THREE.MeshBasicMaterial({
@@ -1258,14 +1309,14 @@ function ensureVignette() {
   )
   vignetteMesh.renderOrder = 1000
   vignetteMesh.visible = false
-  runtime.threeScene.add(vignetteMesh)
+  ensureOverlayScene().add(vignetteMesh)
 }
 
 function updateVignette(visible: boolean) {
   if (!vignetteEnabled.value) visible = false
   ensureVignette()
-  if (!vignetteMesh || !viewer?.renderer?.xr) return
-  const camera = viewer.renderer.xr.getCamera()
+  const camera = getRenderCamera()
+  if (!vignetteMesh || !camera) return
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
   vignetteMesh.position.copy(camera.position).addScaledVector(forward, 0.32)
   vignetteMesh.quaternion.copy(camera.quaternion)
@@ -1289,13 +1340,14 @@ function getControllerByHandedness(handedness: XRHandedness) {
 
 function ensureControllerRig() {
   const runtime = getRuntimeViewer()
-  if (!runtime?.renderer || !runtime.threeScene) return
+  if (!runtime?.renderer) return
   if (leftController && rightController) return
 
   leftController = runtime.renderer.xr.getController(0)
   rightController = runtime.renderer.xr.getController(1)
-  runtime.threeScene.add(leftController)
-  runtime.threeScene.add(rightController)
+  const overlay = ensureOverlayScene()
+  overlay.add(leftController)
+  overlay.add(rightController)
 
   const lineGeometry = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
@@ -1325,6 +1377,22 @@ function getSceneManipulationTarget() {
 
 function isButtonPressed(gamepad: Gamepad, indexes: number[]) {
   return indexes.some((index) => Boolean(gamepad.buttons[index]?.pressed))
+}
+
+function applyInputDeadzone(value: number, deadzone = 0.18) {
+  if (!Number.isFinite(value) || Math.abs(value) <= deadzone) return 0
+  return value
+}
+
+function getThumbstickAxes(gamepad: Gamepad) {
+  const axes = gamepad.axes || []
+  const hasSecondaryStick = axes.length >= 4 && (Math.abs(axes[2] || 0) > 0.01 || Math.abs(axes[3] || 0) > 0.01)
+  const rawX = hasSecondaryStick ? axes[2] : axes[0]
+  const rawY = hasSecondaryStick ? axes[3] : axes[1]
+  return {
+    x: applyInputDeadzone(rawX || 0),
+    y: applyInputDeadzone(rawY || 0),
+  }
 }
 
 function wasPressedNow(hand: ControllerHand, action: string, pressed: boolean) {
@@ -1550,35 +1618,34 @@ function updateControllerState(nowMs: number) {
     const gamepad = source.gamepad
     if (!gamepad) continue
     const axes = gamepad.axes || []
-    const x = Math.abs(axes[2] ?? axes[0] ?? 0) > 0.18 ? axes[2] ?? axes[0] ?? 0 : 0
-    const y = Math.abs(axes[3] ?? axes[1] ?? 0) > 0.18 ? axes[3] ?? axes[1] ?? 0 : 0
+    const { x, y } = getThumbstickAxes(gamepad)
     debugLines.push(`${source.handedness || 'unknown'} profiles=${source.profiles?.join(',') || '-'} axes=[${axes.map((axis) => axis.toFixed(2)).join(', ')}] buttons=${gamepad.buttons.map((button, index) => `${index}:${button.pressed ? 'P' : '-'}:${button.value.toFixed(2)}`).join(' ')}`)
     const controller = getControllerByHandedness(source.handedness)
     if (!controller) continue
     const hand = source.handedness === 'left' ? 'left' : source.handedness === 'right' ? 'right' : null
     if (!hand) continue
-    const triggerPressed = isButtonPressed(gamepad, [0, 1, 4])
-    const gripPressed = isButtonPressed(gamepad, [2, 3, 5])
-    const menuPressed = isButtonPressed(gamepad, [3, 4, 5, 6, 7])
+    const triggerPressed = isButtonPressed(gamepad, [0])
+    const gripPressed = isButtonPressed(gamepad, [1])
+    const menuPressed = isButtonPressed(gamepad, [4, 5, 6, 7])
     if (hand === 'left') leftGrip = gripPressed
     if (hand === 'right') rightGrip = gripPressed
 
-    if (source.handedness === 'left') {
+    if (triggerPressed) {
+      moving = moveRig(0, 1, dt) || moving
+    }
+
+    if (hand === 'left') {
       moving = moveRig(x, -y, dt) || moving
       if (wasPressedNow(hand, 'reset', menuPressed)) {
         resetView()
       }
-    } else if (source.handedness === 'right') {
-      moving = turnRig(x, dt, nowMs) || moving
-      if (Math.abs(y) > 0 && !isVrPresenting.value) {
-        moving = moveRig(0, 0, dt, -y) || moving
-      }
+    } else if (hand === 'right') {
+      moving = moveRig(x, -y, dt) || moving
       if (wasPressedNow(hand, 'menu', menuPressed)) {
         isMenuOpen.value = !isMenuOpen.value
       }
       if (wasPressedNow(hand, 'trigger', triggerPressed)) {
         hudTriggerPressed = true
-        if (!isMenuOpen.value) handlePrimarySelect()
       }
     }
   }
@@ -1594,6 +1661,7 @@ function updateControllerState(nowMs: number) {
 }
 
 function startControllerLoop() {
+  stopControllerLoop()
   const tick = (nowMs: number) => {
     updateControllerState(nowMs)
     controllerRafId = window.requestAnimationFrame(tick)
@@ -1918,8 +1986,7 @@ async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, confi
         },
         position: config.worldPosition,
         rotation: makeSceneRotationY(config.worldRotationY),
-        // 这里保持正缩放，避免模型相对 xy 平面发生 z 轴镜像；
-        // 一旦把 Z 改成负值，书桌这类水平结构就会从“朝下看”翻成“朝上看”。
+        // 缩放保持正值，真正的朝向修正在 rotation 里统一做 X180，避免 .splat/.ksplat 路径下负缩放失效。
         scale: [config.worldScale, config.worldScale, config.worldScale],
       })
       return candidate
@@ -2096,7 +2163,7 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
     startStereoPreviewLoop()
   }
   if (xrSession) startControllerLoop()
-  drawHud()
+  refreshHudDisplay()
 }
 
 async function bootstrap(input?: unknown) {
@@ -2242,7 +2309,7 @@ function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
   direction.normalize()
   const right = new THREE.Vector3().crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize()
   const delta = new THREE.Vector3()
-  delta.addScaledVector(direction, -forward * moveSpeed.value * dt)
+  delta.addScaledVector(direction, forward * moveSpeed.value * dt)
   delta.addScaledVector(right, strafe * moveSpeed.value * dt)
   if (!floorLockEnabled.value) delta.y += vertical * 0.85 * dt
   if (isVrPresenting.value) {
@@ -2284,14 +2351,14 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === ']') adjustScale(0.1)
   if (event.key === 'q' || event.key === 'Q') adjustRotation(-0.1)
   if (event.key === 'e' || event.key === 'E') adjustRotation(0.1)
-  if (event.key === 'w' || event.key === 'W') moveRig(0, -1, 1 / 60)
-  if (event.key === 's' || event.key === 'S') moveRig(0, 1, 1 / 60)
+  if (event.key === 'w' || event.key === 'W') moveRig(0, 1, 1 / 60)
+  if (event.key === 's' || event.key === 'S') moveRig(0, -1, 1 / 60)
   if (event.key === 'a' || event.key === 'A') moveRig(-1, 0, 1 / 60)
   if (event.key === 'd' || event.key === 'D') moveRig(1, 0, 1 / 60)
   if (event.key === '1') selectMode('desktop')
   if (event.key === '2') selectMode('stereo')
   if (event.key === '3') selectMode('webxr')
-  if (event.key === 'm' || event.key === 'M') isMenuOpen.value = !isMenuOpen.value
+  if (event.key === 'm' || event.key === 'M') isDesktopPanelOpen.value = !isDesktopPanelOpen.value
   if (event.key === 'x' || event.key === 'X') setInteractionMode(interactionMode.value === 'explore' ? 'inspect' : 'explore')
   if (event.key === 'z' || event.key === 'Z') setSceneScaleMode(sceneScaleMode.value === 'room' ? 'diorama' : 'room')
   if (event.key === 'n' || event.key === 'N') nextNavigationPoint()
@@ -2304,14 +2371,15 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 function installXrSessionListeners() {
+  if (xrSessionListenersInstalled) return
   const xr = viewer?.renderer?.xr
   if (!xr?.addEventListener) return
+  xrSessionListenersInstalled = true
   xr.addEventListener('sessionstart', () => {
     isVrPresenting.value = true
     xrSession = xr.getSession() || xrSession
     ensureSceneRoots()
-    createHud()
-    drawHud()
+    refreshHudDisplay()
     startControllerLoop()
     status.value = 'WebXR 会话已启动'
   })
@@ -2336,6 +2404,10 @@ async function enterVrSession() {
   await runtime.renderer.xr.setSession(session)
   xrSession = session
   isVrPresenting.value = true
+  ensureSceneRoots()
+  ensureControllerRig()
+  refreshHudDisplay()
+  startControllerLoop()
 }
 
 async function exitVrSession() {
@@ -2422,7 +2494,7 @@ onBeforeUnmount(() => {
     <input id="vr-local-model-input" class="sr-only-input" type="file" accept=".ply,.splat,.ksplat,.spz" @change="onLocalModelSelected" />
     <input id="vr-local-poses-input" class="sr-only-input" type="file" accept=".json" @change="onLocalPosesSelected" />
     <div ref="containerRef" class="vr-canvas" />
-    <section class="desktop-panel" :class="{ collapsed: !isMenuOpen }" aria-label="BrainDance VR 状态">
+    <section class="desktop-panel" :class="{ collapsed: !isDesktopPanelOpen }" aria-label="BrainDance VR 状态">
       <header class="panel-header">
         <p class="eyebrow">BrainDance</p>
         <h1>{{ sceneLabel }}</h1>
@@ -2535,7 +2607,7 @@ onBeforeUnmount(() => {
       <div class="button-row xr-row">
         <button type="button" @click="enterVrSession">进入 VR</button>
         <button type="button" @click="exitVrSession">退出 VR</button>
-        <button type="button" @click="isMenuOpen = !isMenuOpen">面板</button>
+        <button type="button" @click="isDesktopPanelOpen = !isDesktopPanelOpen">面板</button>
       </div>
 
       <div class="button-row xr-row">

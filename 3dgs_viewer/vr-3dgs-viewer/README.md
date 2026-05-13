@@ -14,7 +14,7 @@
 
 - 使用相同的 payload JSON 协议字段（`ply / modelUrl`、`poses / posesUrl`、`modelList / timePeelingModels`、`authSession`、`markers`、`searchResults` 等），共享同一套 `BrainDanceViewerPayload` 类型定义。
 - 独立 viewer 通过 `window.loadViewerPayload`、`window.setViewerSession`、`window.setViewerModelList`、`window.setViewerSearchResults`、`window.setViewerMarkers`、`window.setViewerQuery` 等钩子接收桌面调试输入。
-- 采用相同的坐标系修正策略（Z 轴镜像 `scale: [s, s, -s]`），确保模型在两个端的朝向和尺度表现一致。
+- 模型加载保持正缩放，并在 VR 端通过初始旋转修正整体朝向，避免压缩 3DGS 格式下负缩放导致的上下翻面。
 - 共享同一套模型加载策略（`.ksplat` > `.splat` > `.ply` 压缩格式优先链）。
 
 **典型使用场景对比：**
@@ -187,13 +187,14 @@ Viewer 会根据 `poses` URL 推导同目录的 `vr_config.json`。如果加载�
 
 WebXR 控制器映射：
 
-- 左摇杆：水平漫游
-- 右摇杆：转向和升降
+- 左摇杆：按视角方向水平漫游
+- 右摇杆：按视角方向水平漫游
+- 左 / 右 `Trigger`：按住后持续向视角前方移动
 - `A / X` 或等价侧键：重置当前场景
 - `B / Y` 或等价侧键：显示 / 隐藏 VR HUD
-- 单手 `Grip`：抓取移动和旋转场景
+- 单手 `Grip`：抓取移动和旋转模型，手柄回收拉近、向前伸拉远
 - 双手 `Grip`：按双手距离缩放场景
-- HUD 支持控制器光标 + `Trigger` 点选按钮、模型、搜索结果、标记和导航点
+- HUD 支持右手控制器光标 + `Trigger` 点选按钮、模型、搜索结果、标记和导航点
 
 `desktop` 和 `stereo` 模式用于开发调试，不能替代 SteamVR + PICO Neo 2 的真实头显验证。
 
@@ -209,6 +210,6 @@ VR 优先加载压缩格式。传入 `point_cloud.ply` 时会按顺序尝试：
 
 ## 坐标系修正
 
-VR viewer 的 3DGS 加载链路以 `3dgs_viewer/my-3dgs-viewer` 为主参考，而不是 Spark viewer。模型加载时在 `addSplatScene` 的 `scale` 上统一应用 `[worldScale, worldScale, -worldScale]`，只在加载层做 Z 轴镜像，保持 XY 水平面不再额外翻转。
+VR viewer 的 3DGS 加载链路以 `3dgs_viewer/my-3dgs-viewer` 为主参考，而不是 Spark viewer。模型加载时保持 `[worldScale, worldScale, worldScale]` 正缩放，并在初始 `rotation` 中统一叠加 X 轴 180 度修正，用来避免 `.splat / .ksplat` 路径下负缩放不稳定造成的上下翻面。
 
 Recall marker / 搜索结果传入的矩阵和位置也会进入同一套 Z 轴转换。相机跳转时会先套用当前 `splatMesh.matrixWorld` 再分解位姿，避免模型镜像后出现跳转到负 Z 或上下反向的问题。
