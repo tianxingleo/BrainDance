@@ -23,7 +23,7 @@
 
 **BrainDance (流光 · 记)** 是一个把真实空间保存为可浏览、可检索、可回访数字资产的项目。
 
-它的出发点很简单：照片和视频能留下画面，但很难保住空间感。一个房间怎么摆、一个街角从哪看过去、某件东西当时放在什么位置，这些信息在 2D 媒介里通常会被压缩掉。
+它的出发点很简单：照片和视频能留下画面，但很难保留空间感。一个房间怎么摆、一个街角从哪看过去、某件东西当时放在什么位置，这些信息在 2D 媒介里通常会被压缩掉。
 
 BrainDance 用 **3D Gaussian Splatting (高斯泼溅)** 等技术把真实场景重建成三维资产，再接入 **Multimodal AI (多模态大模型)** 与 **RAG (检索增强生成)**，让这些场景不只是“能看”，还可以被搜索、定位和回溯。可以把它理解成一个面向现实空间的记忆索引系统。
 
@@ -32,7 +32,7 @@ BrainDance 用 **3D Gaussian Splatting (高斯泼溅)** 等技术把真实场景
 - **📷 低门槛采集**：用手机视频或图片就能发起空间采集，重建计算放在云端完成。
 - **🔍 空间语义检索**：结合多模态理解、向量检索和空间锚点，在三维场景里查找物体、位置和相关视角。
 - **⏳ 时间维度回看**：围绕同一空间的多次扫描结果，比较不同时间下的变化。
-- **📱 Marker AR 叠加**：基于打印纸板图像识别（MindAR），将 3DGS 重建的三维模型锚定到真实环境中，支持缩放、旋转和高度调节，在移动端 WebView 内完成完整 AR 交互。
+- **🥽 AR/VR 沉浸式查看**：移动端支持基于 MindAR 图像识别的 Marker AR 模式，将 3DGS 模型通过打印纸板锚定到真实环境，支持缩放、旋转和高度调节；桌面端提供独立 VR 渲染器（`vr-3dgs-viewer`），基于 WebXR 标准支持 SteamVR 头显中的抓取缩放、导航跳转与空间测量。
 - **☁️ 端云协同链路**：移动端负责采集与查看，Supabase 和 AI Worker 负责存储、调度与重建处理。
 
 ### 技术栈速览
@@ -97,37 +97,17 @@ BrainDance 不只想记录一个静态场景，也想记录同一空间在不同
 
 ### Agent Recall：把检索升级成可解释的多轮空间助理
 
-当前仓库已经在 `supabase/functions/agent-recall` 上落地统一 Agent 入口，并把核心编排能力收敛到共享
-Core `supabase/functions/_shared/agent-core/spatialAgent.ts`。这条链路不再只返回“搜到了什么”，而是会根据查询在多种模式之间路由，并把结构化结果直接交给 Flutter Recall 页消费。
-
-- **统一入口与共享 Core**：`agent-recall`、`spatial-search-agent` 共享同一套 Agent Core，避免协议和能力散落在多个函数里。
-- **多模式能力**：当前已覆盖 `spatial_search`、`asset_metadata`、`time_compare`、`creative`、`memory_graph` 五类模式。
-- **稳定动作协议**：正式前端动作已经统一为 `open_scene`、`fly_to_pose`，降低 Flutter / Viewer 接口漂移。
-- **多轮续聊与预览确认**：返回 `session_state`、`conversation_summary`、`follow_up`，支持“先预览，再确认执行”的资产写操作闭环。
-- **流式过程可视化**：`agent-recall` 已支持 `text/event-stream` 与 `application/x-ndjson`，Recall 页会展示状态、工具调用和最终结果时间线。
-
-### 技术亮点
-
-- **移动端轻采集，云端重计算**：用户在手机端完成视频或图片采集，计算密集型重建任务放在 GPU Worker 执行，更符合移动应用的性能边界。
-- **从 3D 重建走向 3D 检索**：项目不只生成三维模型，还把场景理解、对象标注和向量检索整合进链路，形成可查询的空间记忆系统。
-- **从检索接口走向 Agent 编排**：在 `search-models` 之上新增 LangChain / Agent 统一入口，把空间检索、资产整理、时间对比、创作准备与弱图谱摘要纳入同一协议。
-- **从桌面 3D 走向 AR/VR 沉浸式查看**：新增独立 VR 渲染端 `vr-3dgs-viewer`，基于 WebXR 标准，支持 Desktop / Stereo / WebXR 三种预览模式，可在 SteamVR 头显（PICO Neo 2 等）中完成手柄抓取缩放、HUD 操作、导航点跳转、标记查看与空间测量等全链路 VR 交互；新增 Marker AR 模式（`spark-3dgs-viewer`），基于 MindAR 图像识别与 Spark 3DGS 渲染，通过打印纸板将重建模型锚定到真实环境，支持智能主后置摄像头选择、实时 AR 变换控制（缩放 / 旋转 / 偏移）和 Flutter WebView 摄像头权限桥接。
-- **端云协同的完整闭环**：从素材上传、任务调度、状态回传，到模型浏览和语义搜索，当前仓库已经覆盖完整的软件链路，而不是单点算法演示。
-- **支持多种重建流水线**：除了常规 `video_3dgs`，还接入了 `single_image_sam3d`、`single_image_sharp`、`da3_sugar`、`da3_2dgs`、`sparse2dgs` 等任务类型，便于根据不同输入场景切换方案。
+当前仓库已在 `supabase/functions/agent-recall` 落地统一 Agent 入口，支持空间检索、资产整理、时间对比、记忆图谱等多模式路由，并通过流式协议输出结构化结果（答案、证据、动作、候选），由 Flutter Recall 页直接消费。详细编排能力与协议说明见 [语义搜索与 Agent 编排](#语义搜索与-agent-编排) 和 [docs/09-LangChain专题/](docs/09-LangChain专题/README.md)。
 
 ## 技术架构与实现 (Technical Architecture)
 
 本项目采用 **Supabase BaaS 架构**，实现了从移动端采集到云端重建，再到多端检索与浏览的端云协同流程。
 
-### 🧪 基于知识蒸馏的端侧“近极低幻觉”大模型引擎
+### 🧪 端侧本地大模型引擎
 
-为了在移动端极为有限的算力下实现完全断网、隐私安全的空间检索，项目放弃了传统的云端黑盒大模型 API 路径，自主完成了端侧小模型（Qwen3-1.7B）的全链路针对性微调与量化落地：
+为了在移动端实现断网环境下的空间检索，项目基于 Qwen3-1.7B 完成了从知识蒸馏、LoRA 微调到 GGUF 量化（3.3GB → 1.2GB）的全链路端侧部署，使主流手机能够在本地运行可靠的语义理解与拒答控制。
 
-- **Teacher-Student 知识蒸馏**：利用超大模型（GPT-5.4 级）强大的逻辑能力，离线生成涵盖困难样本（如局部命中、完全无关语境）的合成数据集。通过 LoRA 流水线有监督微调（SFT）将强对齐规则注入小模型，让其在极受限算力下实现**极高可靠性**的指令遵循与“极低幻觉”控制拒答。
-- **低比特量化与重要性矩阵 (imatrix) 保真**：在 GGUF 跨平台格式之上，创造性引入 `imatrix` 激活分布校准，将 3.3GB 模型极限压缩至 1.2GB（Q5_K_M，适配 OPPO 等主流设备常驻内存），同时在严格多源回归评测中，使实体召回等关键指标对比全量基线仅衰退不到 1%，达到了“体积与智商”的平衡。
-- **端侧多重约束路由机制**：融合大模型能力与确定性工程，构筑了意图格式化（Formatters）与字面量兜底（Lexical Fallback）等双保险模块。
-
-> 完整的模型探索、蒸馏微调流程、严格无泄露 OOD 基准测试，以及由于量化评估诞生的 Part 1 到 Part 30 全面技术演进记录，请参阅 [`docs/04-本地问答与微调/`](docs/04-本地问答与微调/) 记录架构文档与其对应的 `ai_engine/finetune_qwen3/` 工程模块。
+> 完整的模型探索、蒸馏微调流程、量化评估与技术演进记录，请参阅 [`docs/04-本地问答与微调/`](docs/04-本地问答与微调/) 及其对应的 `ai_engine/finetune_qwen3/` 工程模块。
 
 系统当前由四个核心部分组成，并通过 **Supabase** 做任务、数据和状态解耦：
 
@@ -151,17 +131,6 @@ Core `supabase/functions/_shared/agent-core/spatialAgent.ts`。这条链路不�
 
 4. **AI Worker (Python)**  
    部署在 Linux / WSL GPU 节点，监听 `processing_tasks`，根据 `task_type` 执行不同流水线，上传结果并回写日志、评分、标签和资产信息，承担项目主要的 AI 和 3D 重建计算。
-
-### 当前已接入的主要任务类型
-
-- `video_3dgs`
-- `multi_image`
-- `single_image_sam3d`
-- `single_image_sharp`
-- `da3_feed_forward_3dgs`
-- `da3_sugar` / `da3+sugar`
-- `da3_2dgs` / `da3+2dgs`
-- `sparse2dgs`
 
 ## 系统组成 (Project Structure)
 
@@ -384,52 +353,9 @@ supabase functions serve agent-recall --no-verify-jwt
 
 ## 数据流与存储约定
 
-Storage 目前分成两个主要 bucket：
+Storage 分为两个主要 bucket：`braindance-assets`（原始素材与重建输出）和 `braindance-models`（端侧模型发布）。数据库核心表包括 `processing_tasks`、`model_assets`、`memory_poses`、`community_posts`、`worker_nodes` 等。
 
-- `braindance-assets`：3D 生成任务的原始素材、中间结果和输出模型
-- `braindance-models`：Flutter Recall 本地 AI 下载用的端侧模型发布仓
-
-`braindance-assets` 常见路径约定如下：
-
-```text
-{user_id}/{scene_id}/raw/video.mp4
-{user_id}/{scene_id}/raw/image.png
-{user_id}/{scene_id}/raw/images.zip
-{user_id}/{scene_id}/raw/thumbnail.jpg
-
-{user_id}/{scene_id}/output/point_cloud.ply
-{user_id}/{scene_id}/output/point_cloud.splat
-{user_id}/{scene_id}/output/point_cloud.ksplat
-{user_id}/{scene_id}/output/transforms.json
-```
-
-`braindance-models` 当前约定如下：
-
-```text
-catalog/model_catalog.json
-
-releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
-releases/qwen3-1.7b-braindance-q5-k-m.gguf
-releases/qwen3-1.7b-braindance-q4-k-m.gguf
-releases/qwen3-1.7b-braindance-merged/*
-releases/qwen3-0.6b-braindance-round1/*
-```
-
-其中 Flutter Recall 本地 AI 默认下载地址当前指向：
-
-```text
-{Supabase_URL}/storage/v1/object/public/braindance-models/releases/qwen3-1.7b-braindance-q5-k-m-imatrix.gguf
-```
-
-数据库中的关键表包括：
-
-- `processing_tasks`：任务状态、日志、质量分数、任务类型、参数与 `display_name`
-- `model_assets`：模型路径、描述、标签、对象、Embedding，以及 `place_id`、`memory_thread_id`、`summary_title`、`agent_meta` 等 Agent 辅助字段
-- `memory_poses`：帧级空间锚点与向量
-- `related_model_links`：模型间弱关系，如同地点、同事件、前后变化
-- `memory_collections` / `memory_collection_items`：记忆专题、时间线与集合成员
-- `community_posts`：社区贴文与地理位置索引
-- `worker_nodes`：Worker 注册、心跳与控制状态
+> 详细的路径约定、表结构与字段说明见 [supabase/README.md](supabase/README.md)。
 
 ## 语义搜索与 Agent 编排
 
