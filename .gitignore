@@ -198,9 +198,8 @@ app/assets/webgl_spark/models/
 # 忽略 app/assets/webgl_spark/favicon.ico
 app/assets/webgl_spark/favicon.ico
 
-# 忽略 app/assets/webgl_spark/assets/ 下的构建产物
-app/assets/webgl_spark/assets/index-*.js
-app/assets/webgl_spark/assets/index-*.css
+# 忽略 app/assets/webgl_spark/assets/ 下的构建产物（Vite 构建产物，通过 build_to_flutter.ps1 生成）
+app/assets/webgl_spark/assets/
 # 忽略 WebGL Demo 的 HTML 文件
 app/assets/webgl_spark/index.html
 
@@ -353,6 +352,11 @@ ai_engine/demo/webgl/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
 # =========================
 # 11. Local Tooling / Build Artifacts (本地工具与构建产物)
 # =========================
+
+# 根目录意外产生的 node 依赖（仅含 gsap，属于本地临时产物）
+/node_modules/
+/package.json
+/package-lock.json
 
 # Frontend local dependencies and builds
 dashboard/.env
