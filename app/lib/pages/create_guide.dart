@@ -39,68 +39,67 @@ class CreateGuidePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: BDPageBackdrop(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 96.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                BDPageHeader(
-                  title: textLocalize('create'),
-                  subtitle: textLocalize('create_guide_subtitle'),
+      extendBody: true,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 96.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              BDPageHeader(
+                title: textLocalize('create'),
+                subtitle: textLocalize('create_guide_subtitle'),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    _buildEntryCard(
+                      context,
+                      icon: Icons.camera_rounded,
+                      title: textLocalize('record'),
+                      subtitle: textLocalize('create_record_desc'),
+                      onTap: () => Navigator.push(
+                        context,
+                        _verticalSlideRoute(
+                          builder: (_) => const RecordPage(),
+                          fromTop: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildEntryCard(
+                      context,
+                      icon: Icons.auto_awesome_rounded,
+                      title: textLocalize('generate'),
+                      subtitle: textLocalize('create_generate_desc'),
+                      onTap: () => Navigator.push(
+                        context,
+                        _verticalSlideRoute(
+                          builder: (_) => const GeneratePage(),
+                          fromTop: false,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildEntryCard(
+                      context,
+                      icon: Icons.groups_rounded,
+                      title: textLocalize('community'),
+                      subtitle: textLocalize('create_community_desc'),
+                      onTap: () => Navigator.push(
+                        context,
+                        _verticalSlideRoute(
+                          builder: (_) => const CommunityPage(),
+                          fromTop: false,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    children: [
-                      _buildEntryCard(
-                        context,
-                        icon: Icons.camera_rounded,
-                        title: textLocalize('record'),
-                        subtitle: textLocalize('create_record_desc'),
-                        onTap: () => Navigator.push(
-                          context,
-                          _verticalSlideRoute(
-                            builder: (_) => const RecordPage(),
-                            fromTop: true,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildEntryCard(
-                        context,
-                        icon: Icons.auto_awesome_rounded,
-                        title: textLocalize('generate'),
-                        subtitle: textLocalize('create_generate_desc'),
-                        onTap: () => Navigator.push(
-                          context,
-                          _verticalSlideRoute(
-                            builder: (_) => const GeneratePage(),
-                            fromTop: false,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildEntryCard(
-                        context,
-                        icon: Icons.groups_rounded,
-                        title: textLocalize('community'),
-                        subtitle: textLocalize('create_community_desc'),
-                        onTap: () => Navigator.push(
-                          context,
-                          _verticalSlideRoute(
-                            builder: (_) => const CommunityPage(),
-                            fromTop: false,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
