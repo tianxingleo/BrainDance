@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
 import BottomSelector from './BottomSelector.vue';
+import { AirGestureController } from '../lib/gesture/AirGestureController';
 import {
   buildCenterModeBounds,
   clampCenterModePitch,
@@ -12,10 +13,15 @@ import {
 } from '../lib/interaction/centerModeBounds';
 
 const containerRef = ref(null);
+const gestureVideoRef = ref(null);
 const isVRMode = ref(false);
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
+const gestureEnabled = ref(false);
+const gestureStatus = ref('未开启');
+const gestureStatusLevel = ref('idle');
+const gestureLastAction = ref('');
 const VIEW_MODE = {
   FREE: 'free',
   ORBIT: 'orbit'
@@ -173,6 +179,7 @@ let xrSessionEndHandler = null;
 let vrHud = null;
 let vrLastFrameTime = 0;
 let vrLastHudUpdateMs = 0;
+let airGestureController = null;
 
 const cinematicState = {
   trajectory: null,
@@ -2424,6 +2431,150 @@ const flyToImage = (poseData, options = {}) => {
   });
 };
 
+const getCurrentPoseIndex = (list) => {
+  if (!Array.isArray(list) || list.length === 0) return -1;
+  return list.findIndex((pose) => getPosePresentationId(pose) === activePoseId.value);
+};
+
+const flyToRelativePose = (step) => {
+  const list = filteredPoses.value.length > 0 ? filteredPoses.value : cameraPoses.value;
+  if (!Array.isArray(list) || list.length === 0) return;
+
+  const currentIndex = getCurrentPoseIndex(list);
+  const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (baseIndex + step + list.length) % list.length;
+  if (nextIndex === currentIndex) return;
+
+  flyToImage(list[nextIndex]);
+};
+
+const applyAirGestureInOrbitMode = (action) => {
+  if (!viewer || !viewer.camera || isOrbitRecenterFlightActive) return;
+  interruptCinematicPlayback();
+  interruptCameraFlightFromUserInput();
+
+  if (action.type === 'swipe_left' || action.type === 'swipe_right') {
+    const direction = action.type === 'swipe_left' ? -1 : 1;
+    const strength = THREE.MathUtils.clamp(action.strength || 1, 0.7, 2.2);
+    orbitState.targetYaw = clampOrbitYaw(orbitState.targetYaw + direction * 0.22 * strength);
+    interactionState.orbitInertiaActive = false;
+    scheduleInteractionFrame();
+    gestureLastAction.value = action.type === 'swipe_left' ? '左挥：旋转视角' : '右挥：旋转视角';
+    return;
+  }
+
+  if (action.type === 'open' || action.type === 'close') {
+    const amount = THREE.MathUtils.clamp(action.amount || 1, 0.7, 1.8);
+    const scale = action.type === 'open'
+      ? Math.pow(0.94, amount)
+      : Math.pow(1.06, amount);
+    orbitState.targetRadius = clampOrbitRadius(orbitState.targetRadius * scale);
+    interactionState.zoomInertiaActive = false;
+    scheduleInteractionFrame();
+    gestureLastAction.value = action.type === 'open' ? '张开：拉近' : '闭合：拉远';
+  }
+};
+
+const applyAirGestureInFreeMode = (action) => {
+  if (!viewer || !viewer.camera) return;
+
+  if (action.type === 'swipe_left') {
+    gestureLastAction.value = '左挥：上一个位姿';
+    flyToRelativePose(-1);
+    return;
+  }
+
+  if (action.type === 'swipe_right') {
+    gestureLastAction.value = '右挥：下一个位姿';
+    flyToRelativePose(1);
+    return;
+  }
+
+  if (action.type === 'open' || action.type === 'close') {
+    interruptCinematicPlayback();
+    interruptCameraFlightFromUserInput();
+    const amount = THREE.MathUtils.clamp(action.amount || 1, 0.7, 1.8);
+    const scale = action.type === 'open'
+      ? Math.pow(1.06, amount)
+      : Math.pow(0.94, amount);
+    zoomByFocalScale(scale);
+    gestureLastAction.value = action.type === 'open' ? '张开：拉近焦距' : '闭合：拉广焦距';
+  }
+};
+
+const applyAirGestureAction = (action) => {
+  if (!action || action.type === 'ready' || action.type === 'hand_present') return;
+  if (action.type === 'lost_hand') {
+    gestureLastAction.value = '等待手掌进入画面';
+    return;
+  }
+  if (action.type === 'error') {
+    gestureLastAction.value = action.message || '手势识别异常';
+    return;
+  }
+
+  if (isOrbitMode.value) {
+    applyAirGestureInOrbitMode(action);
+  } else {
+    applyAirGestureInFreeMode(action);
+  }
+};
+
+const updateGestureStatus = (status, message = '') => {
+  gestureStatusLevel.value = status;
+  gestureStatus.value = message || {
+    idle: '未开启',
+    requesting_camera: '请求摄像头权限中',
+    loading_model: '加载识别模型中',
+    running: '识别中',
+    hand_present: '已识别手掌',
+    lost_hand: '未检测到手',
+    error: '手势识别异常',
+  }[status] || '识别中';
+};
+
+const startAirGesture = async () => {
+  if (gestureEnabled.value || !gestureVideoRef.value) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    updateGestureStatus('error', '当前环境不支持摄像头');
+    return;
+  }
+
+  gestureEnabled.value = true;
+  gestureLastAction.value = '';
+  airGestureController = new AirGestureController({
+    video: gestureVideoRef.value,
+    onStatus: updateGestureStatus,
+    onAction: applyAirGestureAction,
+  });
+
+  try {
+    await airGestureController.start();
+  } catch (_) {
+    gestureEnabled.value = false;
+    airGestureController = null;
+  }
+};
+
+const stopAirGesture = () => {
+  if (airGestureController) {
+    airGestureController.stop();
+    airGestureController = null;
+  } else {
+    updateGestureStatus('idle', '未开启');
+  }
+  gestureEnabled.value = false;
+  gestureLastAction.value = '';
+};
+
+const toggleAirGesture = async () => {
+  if (gestureEnabled.value) {
+    stopAirGesture();
+  } else {
+    await startAirGesture();
+  }
+};
+
 const getViewerConfig = () => {
   const isMobile = isMobileDevice();
   const canUseSharedMemory = window.crossOriginIsolated === true;
@@ -3548,6 +3699,7 @@ onBeforeUnmount(async () => {
   window.removeEventListener('touchstart', onCapturedUserCameraInput, true);
   window.removeEventListener('touchmove', onCapturedUserCameraInput, true);
   window.removeEventListener('wheel', onCapturedUserCameraInput, true);
+  stopAirGesture();
   stopInteractionInertia();
   stopCinematicPlayback();
 
@@ -3607,6 +3759,12 @@ onBeforeUnmount(async () => {
             中心模式
           </button>
         </div>
+        <button class="archive-btn archive-btn--ghost gesture-toggle"
+          :class="{ active: gestureEnabled, warn: gestureStatusLevel === 'lost_hand', error: gestureStatusLevel === 'error' }"
+          @click="toggleAirGesture"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          {{ gestureEnabled ? '关闭手势' : '手势' }}
+        </button>
         <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
           @mousedown.stop @touchstart.stop @touchend.stop>
           {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
@@ -3673,6 +3831,21 @@ onBeforeUnmount(async () => {
           </label>
         </div>
         <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
+      </div>
+    </div>
+
+    <div class="gesture-panel" v-show="gestureEnabled || gestureStatusLevel === 'error'"
+      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+      <video
+        ref="gestureVideoRef"
+        class="gesture-video"
+        muted
+        autoplay
+        playsinline
+      ></video>
+      <div class="gesture-meta">
+        <div class="gesture-state" :class="gestureStatusLevel">{{ gestureStatus }}</div>
+        <div class="gesture-action">{{ gestureLastAction || '中心模式旋转/缩放，自由模式切位姿/焦距' }}</div>
       </div>
     </div>
 
@@ -3943,6 +4116,80 @@ onBeforeUnmount(async () => {
   align-self: flex-start;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.gesture-toggle {
+  min-width: 72px;
+}
+
+.gesture-toggle.active {
+  background: rgba(47, 184, 122, 0.2);
+  border-color: rgba(47, 184, 122, 0.55);
+}
+
+.gesture-toggle.warn {
+  background: rgba(224, 168, 54, 0.18);
+  border-color: rgba(224, 168, 54, 0.55);
+}
+
+.gesture-toggle.error {
+  background: rgba(232, 86, 86, 0.18);
+  border-color: rgba(232, 86, 86, 0.55);
+}
+
+.gesture-panel {
+  position: absolute;
+  top: calc(var(--flutter-safe-top) + 56px);
+  right: calc(var(--flutter-safe-right) + 16px);
+  width: 172px;
+  z-index: 130;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 16px 36px var(--card-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.gesture-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.42);
+  transform: scaleX(-1);
+}
+
+.gesture-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 2px 1px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.gesture-state {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.gesture-state.hand_present,
+.gesture-state.running {
+  color: #2fb87a;
+}
+
+.gesture-state.lost_hand {
+  color: #e0a836;
+}
+
+.gesture-state.error {
+  color: #e85656;
+}
+
+.gesture-action {
+  color: var(--text-secondary);
 }
 
 .view-mode-switch {
@@ -4551,6 +4798,18 @@ input[type='range'] {
 
   .focal-settings-panel {
     top: calc(var(--flutter-safe-top) + 122px);
+  }
+
+  .gesture-panel {
+    top: calc(var(--flutter-safe-top) + 46px);
+    right: 12px;
+    width: 116px;
+    padding: 6px;
+    border-radius: 14px;
+  }
+
+  .gesture-meta {
+    font-size: 10px;
   }
 }
 
