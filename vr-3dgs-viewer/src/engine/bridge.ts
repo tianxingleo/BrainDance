@@ -131,8 +131,6 @@ export function normalizeAuthSession(value: unknown): BrainDanceAuthSession | nu
     userId: entry.userId ? String(entry.userId) : undefined,
     email: entry.email ? String(entry.email) : undefined,
     displayName: entry.displayName ? String(entry.displayName) : undefined,
-    accessToken: entry.accessToken ? String(entry.accessToken) : undefined,
-    refreshToken: entry.refreshToken ? String(entry.refreshToken) : undefined,
     expiresAt: entry.expiresAt ? String(entry.expiresAt) : undefined,
     code: entry.code ? String(entry.code) : undefined,
     status: entry.status ? String(entry.status) : undefined,

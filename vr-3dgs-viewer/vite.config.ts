@@ -3,7 +3,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 
-const supabaseProxyTarget = process.env.VITE_BD_SUPABASE_PROXY_TARGET?.trim() || ''
+const supabaseUrl = (process.env.VITE_BD_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim()
+const configuredProxyTarget = process.env.VITE_BD_SUPABASE_PROXY_TARGET?.trim() || ''
+const supabaseProxyTarget = configuredProxyTarget || (supabaseUrl.startsWith('http://') ? supabaseUrl : '')
 
 export default defineConfig({
   plugins: [vue(), basicSsl()],

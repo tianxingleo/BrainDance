@@ -289,6 +289,10 @@ button.active {
   line-height: 1.45;
 }
 
+.hint.error {
+  color: #ff9c88;
+}
+
 .search-panel {
   display: grid;
   gap: 8px;

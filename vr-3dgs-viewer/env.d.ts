@@ -7,8 +7,13 @@ interface ImportMetaEnv {
   readonly VITE_BD_DEFAULT_PREVIEW_MODE?: 'desktop' | 'stereo' | 'webxr'
   readonly VITE_BD_MODEL_CATALOG_URL?: string
   readonly VITE_BD_SUPABASE_URL?: string
+  readonly VITE_BD_SUPABASE_URL_FALLBACKS?: string
   readonly VITE_BD_SUPABASE_PROXY_TARGET?: string
   readonly VITE_BD_SUPABASE_ANON_KEY?: string
+  readonly VITE_BD_SUPABASE_STORAGE_BUCKET?: string
+  readonly VITE_SUPABASE_URL?: string
+  readonly VITE_SUPABASE_URL_FALLBACKS?: string
+  readonly VITE_SUPABASE_ANON_KEY?: string
 }
 
 interface ImportMeta {
