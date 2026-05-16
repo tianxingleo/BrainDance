@@ -525,9 +525,6 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
     final inputBg = isDark ? const Color(0xFF23232A) : const Color(0xFFF6F8FC);
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final submitBottomPadding = keyboardInset > 0 ? keyboardInset + 8.0 : 32.0;
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -793,7 +790,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                             : textLocalize('video_submit_btn'),
                   ),
                 ),
-                SizedBox(height: submitBottomPadding),
+                const SizedBox(height: 32.0),
               ],
             ),
           ),
