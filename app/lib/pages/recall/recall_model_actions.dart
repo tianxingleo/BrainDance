@@ -1,6 +1,40 @@
 part of '../recall.dart';
 
 extension _RecallPageModelActions on _RecallPageState {
+  /// Compute the local cache path for a model URL (same logic used by WebGL viewer).
+  Future<File> _localCacheFileForUrl(String url) async {
+    final encodedUrl = Uri.encodeFull(Uri.decodeFull(url));
+    final uri = Uri.parse(encodedUrl);
+    final sanitized = uri.path.replaceAll('/', '_').replaceAll('\\', '_');
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/$sanitized');
+  }
+
+  /// Save a .meta.json sidecar so the offline scanner can reconstruct model info.
+  Future<void> _saveModelMetaSidecar({
+    required String modelUrl,
+    String? previewUrl,
+    String? displayName,
+    bool isLocalOnly = false,
+    File? localFile,
+  }) async {
+    try {
+      final targetFile = localFile ?? await _localCacheFileForUrl(modelUrl);
+      final metaFile = File('${targetFile.path}.meta.json');
+      // Don't overwrite existing metadata for local-only models
+      if (isLocalOnly && await metaFile.exists()) return;
+      final meta = {
+        if (previewUrl != null && previewUrl.isNotEmpty)
+          'preview_img_path': previewUrl,
+        if (displayName != null && displayName.isNotEmpty)
+          'display_name': displayName,
+      };
+      if (meta.isNotEmpty) {
+        await metaFile.writeAsString(JsonEncoder.withIndent(null).convert(meta));
+      }
+    } catch (_) {}
+  }
+
   String _modelKey(Map<String, dynamic> model) {
     return model['id']?.toString() ??
         model['scene_id']?.toString() ??
@@ -21,10 +55,12 @@ extension _RecallPageModelActions on _RecallPageState {
 
   void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
     final plyPath = model['ply_path'] as String? ?? '';
+    final isLocalOnly = model['_is_local_only'] == true;
+    // For local-only models, pass the file path directly instead of converting to a Supabase URL
     final modelUrl = plyPath.isNotEmpty
-        ? toPublicUrl(plyPath)
+        ? (isLocalOnly ? plyPath : _toPublicUrl(plyPath))
         : '';
-    final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
+    final posesUrl = (plyPath.isNotEmpty && !isLocalOnly) ? _toPosesUrl(plyPath) : null;
     final sceneId = _modelDisplayName(model);
     String? initialPoseId;
 
@@ -45,6 +81,17 @@ extension _RecallPageModelActions on _RecallPageState {
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
       initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
+    }
+
+    // Save metadata sidecar so offline scanner can find preview thumbnail
+    if (!isLocalOnly && modelUrl.isNotEmpty) {
+      unawaited(
+        _saveModelMetaSidecar(
+          modelUrl: modelUrl,
+          previewUrl: model['preview_img_path']?.toString(),
+          displayName: sceneId,
+        ),
+      );
     }
 
     unawaited(
@@ -84,18 +131,22 @@ extension _RecallPageModelActions on _RecallPageState {
     }
 
     try {
+      // For local-only models, check the file path directly
+      if (model['_is_local_only'] == true) {
+        final localFile = File(plyPath);
+        if (!await localFile.exists()) return '';
+        final sizeBytes = await localFile.length();
+        if (sizeBytes <= 0) return '';
+        final sizeMb = sizeBytes / 1024 / 1024;
+        return '${sizeMb.toStringAsFixed(sizeMb >= 100 ? 0 : 1)}MB';
+      }
+
       final modelUrl = _toPublicUrl(plyPath);
       if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
         return '';
       }
 
-      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
-      final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName = uri.path
-          .replaceAll('/', '_')
-          .replaceAll('\\', '_');
-      final dir = await getApplicationDocumentsDirectory();
-      final localFile = File('${dir.path}/$sanitizedFileName');
+      final localFile = await _localCacheFileForUrl(modelUrl);
       if (!await localFile.exists()) {
         return '';
       }
@@ -144,10 +195,11 @@ extension _RecallPageModelActions on _RecallPageState {
   Future<void> _showModelDetails(Map<String, dynamic> model) async {
     final sceneId = model['scene_id']?.toString();
     final sizeLabel = await _getLocalModelSizeLabel(model);
+    final isLocalOnly = model['_is_local_only'] == true;
 
-    // 从 processing_tasks 表获取详细信息
+    // 从 processing_tasks 表获取详细信息 (skip for local-only models)
     Map<String, dynamic>? taskInfo;
-    if (sceneId != null) {
+    if (sceneId != null && !isLocalOnly) {
       try {
         final resp = await Supabase.instance.client
             .from('processing_tasks')
@@ -300,17 +352,45 @@ extension _RecallPageModelActions on _RecallPageState {
     if (plyPath.isEmpty) return;
 
     try {
+      if (model['_is_local_only'] == true) {
+        final localFile = File(plyPath);
+        if (await localFile.exists()) {
+          await localFile.delete();
+          // Also clean up the .meta.json sidecar
+          final metaFile = File('${localFile.path}.meta.json');
+          if (await metaFile.exists()) {
+            await metaFile.delete();
+          }
+        }
+        if (mounted) {
+          final targetKey = _modelKey(model);
+          setState(() {
+            _allModels.removeWhere((item) => _modelKey(item) == targetKey);
+            _models.removeWhere((item) => _modelKey(item) == targetKey);
+            if (_activeModelAction != null &&
+                _modelKey(_activeModelAction!) == targetKey) {
+              _activeModelAction = null;
+              _activeModelActionRect = null;
+            }
+            if (_allModels.isEmpty) {
+              final demo = _buildDemoModel();
+              _allModels = [demo];
+              _models = [demo];
+            } else if (_models.isEmpty) {
+              _models = List<Map<String, dynamic>>.from(_allModels);
+            }
+          });
+          _updateOverviewProvider();
+          showAppToast(context, textLocalize('recall_delete_local_success'));
+        }
+        return;
+      }
+
       final modelUrl = _toPublicUrl(plyPath);
       if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
         return;
       }
-      final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
-      final uri = Uri.parse(encodedUrl);
-      final sanitizedFileName = uri.path
-          .replaceAll('/', '_')
-          .replaceAll('\\', '_');
-      final dir = await getApplicationDocumentsDirectory();
-      final localFile = File('${dir.path}/$sanitizedFileName');
+      final localFile = await _localCacheFileForUrl(modelUrl);
       if (await localFile.exists()) {
         await localFile.delete();
         if (mounted) {
@@ -369,6 +449,16 @@ extension _RecallPageModelActions on _RecallPageState {
       if (mounted) {
         showAppToast(context, '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}');
       }
+
+      // Save metadata sidecar next to the downloaded file
+      unawaited(
+        _saveModelMetaSidecar(
+          modelUrl: modelUrl,
+          previewUrl: model['preview_img_path']?.toString(),
+          displayName: _modelDisplayName(model, fallback: ''),
+          localFile: File(targetPath),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         debugPrint('[RecallModelActions] download error: $e');
@@ -513,18 +603,6 @@ extension _RecallPageModelActions on _RecallPageState {
     final plyPath = model['ply_path']?.toString().trim() ?? '';
 
     try {
-      if (targetSceneFolder != null && targetSceneFolder.isNotEmpty) {
-        final storageFiles = await _listStorageFilesRecursively(
-          'braindance-assets',
-          targetSceneFolder,
-        );
-        if (storageFiles.isNotEmpty) {
-          await Supabase.instance.client.storage
-              .from('braindance-assets')
-              .remove(storageFiles);
-        }
-      }
-
       final deleteResult = await Supabase.instance.client
           .from('model_assets')
           .delete()
@@ -537,6 +615,22 @@ extension _RecallPageModelActions on _RecallPageState {
           showAppToast(context, textLocalize('cloud_model_delete_fail'));
         }
         return;
+      }
+
+      if (targetSceneFolder != null && targetSceneFolder.isNotEmpty) {
+        try {
+          final storageFiles = await _listStorageFilesRecursively(
+            'braindance-assets',
+            targetSceneFolder,
+          );
+          if (storageFiles.isNotEmpty) {
+            await Supabase.instance.client.storage
+                .from('braindance-assets')
+                .remove(storageFiles);
+          }
+        } catch (_) {
+          debugPrint('[RecallModelActions] storage cleanup failed for: $targetSceneFolder');
+        }
       }
 
       await _localRagIndex.deleteByModelId(modelId);

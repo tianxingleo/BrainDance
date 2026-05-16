@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
+import '../../services/thumbnail_cache.dart';
 import 'model_card.dart';
 
 String _modelDisplayName(
@@ -539,7 +541,6 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                     borderRadius: BorderRadius.circular(18),
                     onTap: () async {
                       widget.onDismiss();
-                      await widget.onShareModelToCommunity(widget.model);
                     },
                     child: Ink(
                       width: actionWidth,
@@ -757,7 +758,23 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
       return;
     }
 
-    final provider = NetworkImage(imageUrl);
+    if (imageUrl.startsWith('http')) {
+      // Check disk cache first, fall back to network
+      ThumbnailCache().getCachedPath(imageUrl).then((cachedPath) {
+        if (cachedPath != null && mounted && imageUrl == this.imageUrl) {
+          _resolveFromProvider(FileImage(File(cachedPath)));
+          return;
+        }
+        _resolveFromProvider(NetworkImage(imageUrl));
+        // Also cache to disk for offline use
+        ThumbnailCache().getPath(imageUrl);
+      });
+    } else {
+      _resolveFromProvider(FileImage(File(imageUrl)));
+    }
+  }
+
+  void _resolveFromProvider(ImageProvider provider) {
     final stream = provider.resolve(const ImageConfiguration());
     _imageStream = stream;
     _imageStreamListener = ImageStreamListener(
@@ -964,8 +981,11 @@ class RecallModelTile extends StatelessWidget {
     final desc = model['description'] ?? textLocalize("recall_no_desc");
     final similarity = model['similarity'] as double?;
     final plyPath = model['ply_path'] as String? ?? '';
-    final modelUrl = plyPath.isNotEmpty && toPublicUrl != null
-        ? toPublicUrl!(plyPath)
+    final isLocalOnly = model['_is_local_only'] == true;
+    final modelUrl = plyPath.isNotEmpty
+        ? (isLocalOnly
+              ? plyPath
+              : (toPublicUrl != null ? toPublicUrl!(plyPath) : ''))
         : '';
     final radius = BorderRadius.circular(28.0);
 
@@ -1076,7 +1096,7 @@ class RecallModelTile extends StatelessWidget {
                     textColor: hintTextColor,
                     maxLines: 2,
                   ),
-                  if (toPublicUrl != null) ...[
+                  if (toPublicUrl != null || isLocalOnly) ...[
                     const SizedBox(height: 6),
                     ModelDownloadBadge(
                       modelUrl: modelUrl,

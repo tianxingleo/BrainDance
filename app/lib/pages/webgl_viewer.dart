@@ -70,8 +70,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel =>
-      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
@@ -267,8 +266,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -371,6 +369,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           _launchViewer();
         }
       }
+    } else if (originalUrl.isNotEmpty) {
+      // Local file path — serve directly without downloading
+      _localModelPath = originalUrl;
+      if (mounted) _launchViewer();
     } else {
       if (mounted) _launchViewer();
     }
@@ -552,7 +554,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
       _controller?.runJavaScript(
-          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
+      );
       return;
     }
 
@@ -605,7 +608,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName = model['display_name']?.toString() ??
+      final displayName =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
@@ -624,7 +628,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
     _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '$currentModelId')");
+      "window.setModelListForTimePeeling($json, '$currentModelId')",
+    );
   }
 
   String _findCurrentModelId() {
@@ -918,8 +923,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
-                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text(
+                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
+                      ),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),
