@@ -70,7 +70,7 @@
 | `da3_2dgs` / `da3+2dgs` | Nerfstudio 3DGS 的替代路线（输出 2DGS） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
-| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `images.zip` / `video.mp4` |
+| `sparse2dgs` | 少量图片生成 2DGS（Sparse2DGS） | `picture_*.jpg` 帧序列 / `video.mp4` |
 
 **task_params 字段说明 (sparse2dgs):**
 
@@ -155,12 +155,12 @@
 |---|---|---|---|
 | `da3_sugar` / `da3+sugar` | 质量优先且可接受更慢速度（mesh/SDF 约束 3DGS） | `raw/video.mp4` | `regularization=dn_consistency`, `refinement_time=short`, `fast_mode=true` |
 | `da3_2dgs` / `da3+2dgs` | 希望替代 Nerfstudio 3DGS 并输出 2DGS | `raw/video.mp4`（建议连续走拍视频） | `iterations=30000`, `extract_fps=2.0`, `min_images=24` |
-| `sparse2dgs` | 少量图片直接生成 2DGS | `raw/images.zip`（至少 3 张） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
+| `sparse2dgs` | 少量图片直接生成 2DGS | `raw/picture_XXXXX.jpg` 帧序列（至少 3 帧） | `iterations=7000`, `resolution=2`, `depth_ratio=1.0` |
 
 **上传约定（非常关键）:**
 
 1. `da3_2dgs` / `da3+2dgs` 必须上传视频到 `{user_id}/{scene_id}/raw/video.mp4`。
-2. `sparse2dgs` 使用 `images.zip` 到 `{user_id}/{scene_id}/raw/images.zip`。
+2. `sparse2dgs` 使用 `picture_XXXXX.jpg` 帧序列（流式拍摄），存放于 `{user_id}/{scene_id}/raw/`。
 3. `da3_2dgs` 不支持单图或少量图片回退。
 
 **创建视频任务示例 (Dart):**
@@ -412,9 +412,10 @@ braindance-assets/ (Bucket)
 └── {user_id}/                   <-- 第一级：用户隔离
     └── {scene_id}/              <-- 第二级：项目/场景隔离
         ├── raw/                 <-- 原始素材
-        │   ├── video.mp4        # 视频任务 (task_type: video_3dgs / da3_2dgs / da3+2dgs)
-        │   ├── images.zip       # 多图任务 (task_type: sparse2dgs)
-        │   └── image.png        # 单图任务 (task_type: single_image_sam3d)
+        │   ├── video.mp4           # 视频任务 (video_3dgs / da3_2dgs / da3+2dgs 等)
+        │   ├── picture_00001.jpg   # 流式帧序列 (sparse2dgs，每秒一帧)
+        │   ├── picture_00002.jpg   #   5 位零填充序号，从 00001 开始
+        │   └── image.png           # 单图任务 (single_image_sam3d / single_image_sharp)
         ├── processed/           <-- 抽帧图片
         │   ├── frame_001.jpg
         │   └── frame_002.jpg
@@ -665,3 +666,138 @@ class SearchResult {
 3.  Dashboard 读取 `worker_nodes` 渲染实例列表。
 4.  Dashboard 需要暂停实例时，更新 `desired_state='pause'`。
 5.  Worker 观察到状态变更后停止接新任务，并优雅退出。
+
+### 流程七：流式拍摄 (Streaming Capture)
+
+流式拍摄是一种"边拍边传"的实时帧上传方案。用户拍摄期间每秒自动拍照并即时上传 JPEG 帧至 Storage，停止瞬间所有帧已就绪，Worker 直接拉取帧序列进入管线。**全链路无 zip 打包/解压环节。**
+
+#### 7.1 拍摄流程
+
+```
+用户开启流式模式 → 对准目标场景 → 点击录制按钮
+  │
+  ├─ 第 0 秒: 立即拍摄第一帧 → 即时上传 → 帧计数 +1
+  ├─ 第 1 秒: 拍摄 → 上传 → 帧计数 +1
+  ├─ 第 2 秒: 拍摄 → 上传 → 帧计数 +1
+  │   ...
+  ├─ 第 N 秒: 用户点击停止
+  │
+  ├─ await Future.wait(所有 pending uploads)
+  ├─ INSERT processing_tasks (task_type: sparse2dgs)
+  └─ Toast "流式拍摄完成，任务已创建" → Navigator.pop()
+```
+
+#### 7.2 帧文件规范
+
+| 项目 | 规范 |
+| :--- | :--- |
+| **拍摄频率** | 1 帧/秒 |
+| **最大时长** | 600 秒 (10 分钟)，超时自动停止 |
+| **文件格式** | JPEG (.jpg)，相机原生输出 |
+| **帧命名规则** | `picture_XXXXX.jpg`，5 位零填充序号（从 00001 开始） |
+| **存储路径** | `{user_id}/{scene_id}/raw/picture_XXXXX.jpg` |
+
+#### 7.3 Scene ID 生成
+
+拍摄开始时前端立即生成，与标准流程格式一致：
+
+```
+格式: scene_YYYYMMDD_NNNNNN
+示例: scene_20260517_004217
+```
+
+#### 7.4 上传时序
+
+```
+拍摄阶段 (每帧独立):
+  takePicture() → .jpg 文件 → Supabase Storage SDK upload()
+  → 帧与帧之间互不阻塞，各自独立成功/失败计数
+
+停止阶段:
+  ┌──────────────────────────────────────────────────┐
+  │ 1. 取消 1s 定时器                                 │
+  │ 2. Future.wait(_pendingUploads)   ← 等待末帧完成  │
+  │ 3. INSERT processing_tasks        ← 创建任务      │
+  │    { scene_id, user_id,                           │
+  │      task_type: 'sparse2dgs',                     │
+  │      task_params: { image_count: N },             │
+  │      status: 'pending' }                          │
+  │ 4. Navigator.pop()               ← 返回上一页     │
+  └──────────────────────────────────────────────────┘
+```
+
+#### 7.5 任务创建时机
+
+| 场景 | 行为 |
+| :--- | :--- |
+| 用户手动停止 | ✅ 创建任务 |
+| 达到最大时长 (10 分钟) | ✅ 自动停止并创建任务 |
+| App 切到后台 | ❌ 等待上传完成，清理状态，**不创建任务** |
+
+#### 7.6 后端处理时序
+
+Worker 轮询到 `sparse2dgs` 任务后，直接从 Storage list/downlad `raw/` 目录下的帧文件，送入 Sparse2DGS 管线。全程不涉及 zip。
+
+```
+Worker 侧 (单次任务):
+  1. SELECT * FROM processing_tasks WHERE status='pending' LIMIT 1
+  2. UPDATE status='processing'
+  3. 列出并下载帧: storage.from('braindance-assets').list('{user_id}/{scene_id}/raw')
+     → 筛选 *.jpg → 逐一下载到本地临时目录
+  4. 帧序列 → Sparse2DGSPipeline
+     → COLMAP 稀疏重建 → Sparse2DGS 训练
+  5. 上传结果: {user_id}/{scene_id}/output/point_cloud.ply
+  6. UPSERT model_assets (on_conflict: scene_id)
+  7. UPDATE status='completed' → Realtime 推送前端
+```
+
+> 帧下载步骤复用 Worker 已有的 `list_image_keys()` 目录探测逻辑，以 `{user_id}/{scene_id}/raw` 为前缀枚举所有 `*.jpg` 文件。
+
+#### 7.7 存储目录 (流式帧)
+
+```text
+braindance-assets/
+└── {user_id}/
+    └── {scene_id}/
+        └── raw/
+            ├── picture_00001.jpg   # 第 1 帧 (0 秒时拍摄)
+            ├── picture_00002.jpg   # 第 2 帧 (1 秒时拍摄)
+            ├── picture_00003.jpg   # 第 3 帧 (2 秒时拍摄)
+            └── ...
+```
+
+#### 7.8 Dart 代码示例
+
+```dart
+// 流式拍摄核心：每秒拍照 + 即时上传
+Future<void> _captureAndUploadFrame(
+  CameraController controller,
+  String userId,
+) async {
+  final frameIndex = ++_streamingFrameIndex;
+  final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
+
+  final photo = await controller.takePicture();
+  final file = File(photo.path);
+
+  await supabase.storage
+      .from('braindance-assets')
+      .upload('$userId/$sceneId/raw/$frameLabel.jpg', file);
+
+  file.deleteSync();
+}
+
+// 停止拍摄 → 等待上传 → 创建任务
+Future<void> _stopStreaming() async {
+  _streamingTimer?.cancel();
+  await Future.wait(_pendingUploads);
+
+  await supabase.from('processing_tasks').insert({
+    'scene_id': sceneId,
+    'user_id': user.id,
+    'task_type': 'sparse2dgs',
+    'task_params': { 'image_count': successCount },
+    'status': 'pending',
+  });
+}
+```
