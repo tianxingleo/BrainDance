@@ -542,13 +542,13 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final llama = LlamaEngine(LlamaBackend());
       var backendSummary = 'CPU';
-      // Android Vulkan / Adreno 对较大的 n_ubatch 计算图非常敏感；
-      // 继续使用 GPU，但将物理 micro-batch 收敛到 1，避免驱动层崩溃。
+      // 一加 15 / Adreno 当前系统上的 Vulkan 后端会在 llama_decode 阶段
+      // 触发驱动级 SIGSEGV。Android 端改走 OpenCL GPU，绕开 Vulkan pipeline。
       final mobileProfile = Platform.isAndroid
           ? const ModelParams(
               contextSize: 1024,
               gpuLayers: 8,
-              preferredBackend: GpuBackend.vulkan,
+              preferredBackend: GpuBackend.opencl,
               numberOfThreads: 2,
               numberOfThreadsBatch: 2,
               batchSize: 32,
@@ -567,7 +567,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         await llama.loadModel(modelPath, modelParams: mobileProfile);
         final backendName = await llama.getBackendName();
         backendSummary = Platform.isAndroid
-            ? '$backendName (Android Vulkan 安全批处理)'
+            ? '$backendName (Android OpenCL GPU)'
             : '$backendName (GPU 优先)';
       } catch (_) {
         await llama.dispose();
