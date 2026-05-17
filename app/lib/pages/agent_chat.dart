@@ -55,8 +55,12 @@ class _AgentChatPageState extends ConsumerState<AgentChatPage> {
   DateTime? _runFinishedAt;
   DateTime? _firstRemoteEventAt;
   AgentStep? _bootstrapStep;
+  final Set<String> _consumedEventKeys = {};
 
   bool _isLoadingHistory = true;
+
+  // Cache for restored ChatMessage instances (preserves expand/collapse state)
+  final Map<int, ChatMessage> _restoredChatMessages = {};
 
   @override
   void initState() {
@@ -108,6 +112,7 @@ class _AgentChatPageState extends ConsumerState<AgentChatPage> {
       _activeChatMessage = null;
       _activeResult = null;
       _isSearching = false;
+      _restoredChatMessages.clear();
       _isLoadingHistory = false;
     });
     _scrollToBottom();
@@ -128,6 +133,7 @@ class _AgentChatPageState extends ConsumerState<AgentChatPage> {
       _activeChatMessage = null;
       _activeResult = null;
       _isSearching = false;
+      _restoredChatMessages.clear();
       _conversationList.insert(0, conv);
     });
   }

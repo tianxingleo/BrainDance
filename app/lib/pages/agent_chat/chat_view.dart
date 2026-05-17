@@ -167,12 +167,33 @@ extension _AgentChatView on _AgentChatPageState {
   ) {
     final answer = msg.finalAnswer ?? msg.content;
     AgentRecallResponse? result;
+    Map<String, dynamic>? resultJson;
     if (msg.agentResultJson != null && msg.agentResultJson!.isNotEmpty) {
       try {
-        result = AgentRecallResponse.fromJson(
-          jsonDecode(msg.agentResultJson!) as Map<String, dynamic>,
-        );
+        resultJson = jsonDecode(msg.agentResultJson!) as Map<String, dynamic>;
+        result = AgentRecallResponse.fromJson(resultJson);
       } catch (_) {}
+    }
+
+    ChatMessage? restoredChatMessage;
+    final stepsJson = resultJson?['steps'];
+    if (stepsJson is List && stepsJson.isNotEmpty && msg.id != null) {
+      restoredChatMessage = _restoredChatMessages.putIfAbsent(msg.id!, () {
+        return ChatMessage(
+          isUser: false,
+          finalAnswer: answer,
+          isProcessCollapsed: true,
+          steps: stepsJson
+              .whereType<Map<String, dynamic>>()
+              .map((s) => AgentStep(
+                    type: s['type'] as String? ?? 'status',
+                    content: s['content'] as String? ?? '',
+                    toolName: s['tool_name'] as String?,
+                    isCompleted: s['is_completed'] as bool? ?? true,
+                  ))
+              .toList(),
+        );
+      });
     }
 
     return Padding(
@@ -196,14 +217,30 @@ extension _AgentChatView on _AgentChatPageState {
                   : BDDesign.colorMutedBlue.withValues(alpha: 0.1),
             ),
           ),
-          child: _buildAgentContent(
-            answer: answer,
-            result: result,
-            isDark: isDark,
-            textColor: textColor,
-            hintColor: hintColor,
-            elapsedMs: msg.elapsedMs,
-            isActive: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (restoredChatMessage != null) ...[
+                AgentProcessPanel(
+                  chatMessage: restoredChatMessage,
+                  isDark: isDark,
+                  textColor: textColor,
+                  hintColor: hintColor,
+                  isSearching: false,
+                  onRetry: () {},
+                ),
+                const SizedBox(height: 10),
+              ],
+              _buildAgentContent(
+                answer: answer,
+                result: result,
+                isDark: isDark,
+                textColor: textColor,
+                hintColor: hintColor,
+                elapsedMs: msg.elapsedMs,
+                isActive: false,
+              ),
+            ],
           ),
         ),
       ),

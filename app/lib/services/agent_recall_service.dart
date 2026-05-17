@@ -686,10 +686,9 @@ class AgentRecallService {
         eventBuffer.write(chunk);
         final rawBuffer = eventBuffer.toString();
         final parsed = drainStreamingEvents(rawBuffer);
-        if (parsed.remaining != rawBuffer.length) {
-          eventBuffer
-            ..clear()
-            ..write(rawBuffer.substring(parsed.remaining));
+        eventBuffer.clear();
+        if (parsed.remaining < rawBuffer.length) {
+          eventBuffer.write(rawBuffer.substring(parsed.remaining));
         }
         for (final event in parsed.events) {
           yield event;

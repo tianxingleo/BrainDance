@@ -4026,10 +4026,11 @@ export async function runSpatialSearchAgent(
   }
 
   if (mode === "asset_metadata") {
+    const agentAnswer = extractLastAgentTextFromMessages(finalMessages);
     const reason = assetState.lastToolName
       ? `资产模式最后一次有效工具为 ${assetState.lastToolName}`
       : null;
-    const answer = reason || "当前没有生成有效的模型资产结果。";
+    const answer = agentAnswer || reason || "当前没有生成有效的模型资产结果。";
 
     return finalizeResponseWithLongTermMemory(supabase, {
       success: true,

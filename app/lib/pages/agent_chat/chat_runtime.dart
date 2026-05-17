@@ -18,6 +18,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
   Future<void> _askAgent(String query) async {
     _ensureSessionId();
     final executionMode = _resolveExecutionMode(query);
+    _consumedEventKeys.clear();
 
     setState(() {
       _isSearching = true;
@@ -33,8 +34,10 @@ extension _AgentChatRuntime on _AgentChatPageState {
 
     _streamSubscription?.cancel();
 
+    var hasPersisted = false;
+
     void fallback() async {
-      if (!mounted) return;
+      if (!mounted || hasPersisted) return;
       _bootstrapTimer?.cancel();
       _bootstrapTimer = null;
       setState(() => _isSearching = true);
@@ -47,7 +50,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
         );
-        if (!mounted) return;
+        if (!mounted || hasPersisted) return;
         setState(() {
           _activeResult = result;
           _activeChatMessage!.finalAnswer = result.answer;
@@ -56,6 +59,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
         _finishRunTracking();
         _rememberResponse(query, result);
         _completeRun();
+        hasPersisted = true;
         await _persistAgentResponse(query);
       } catch (ex) {
         if (!mounted) return;
@@ -82,7 +86,8 @@ extension _AgentChatRuntime on _AgentChatPageState {
             if (data is Map) {
               _consumeEvent(Map<String, dynamic>.from(data));
               setState(() {});
-              if (data['event']?.toString() == 'done') {
+              if (data['event']?.toString() == 'done' && !hasPersisted) {
+                hasPersisted = true;
                 setState(() => _isSearching = false);
                 _finishRunTracking();
                 unawaited(_persistAgentResponse(query));
@@ -97,16 +102,20 @@ extension _AgentChatRuntime on _AgentChatPageState {
           setState(() => _isSearching = false);
           _bootstrapTimer?.cancel();
           debugPrint('[AgentChat] stream error: $e');
-          showAppToast(context, textLocalize('agent_search_failed'));
-          fallback();
+          if (!hasPersisted) {
+            fallback();
+          }
         },
         onDone: () {
           if (!mounted) return;
           setState(() => _isSearching = false);
           _finishRunTracking();
           _bootstrapTimer?.cancel();
-          if (_activeChatMessage?.finalAnswer.isNotEmpty == true) {
+          if (!hasPersisted &&
+              _activeChatMessage?.finalAnswer.isNotEmpty == true) {
+            hasPersisted = true;
             _completeRun();
+            unawaited(_persistAgentResponse(query));
           }
         },
       );
@@ -115,8 +124,9 @@ extension _AgentChatRuntime on _AgentChatPageState {
       setState(() => _isSearching = false);
       _bootstrapTimer?.cancel();
       debugPrint('[AgentChat] stream start error: $e');
-      showAppToast(context, textLocalize('agent_search_failed'));
-      fallback();
+      if (!hasPersisted) {
+        fallback();
+      }
     }
   }
 
@@ -169,6 +179,17 @@ extension _AgentChatRuntime on _AgentChatPageState {
         'message': r.followUp!.message,
         'suggested_replies': r.followUp!.suggestedReplies,
       },
+      if (r.assetContext != null) 'asset_context': r.assetContext,
+      if (_activeChatMessage != null && _activeChatMessage!.steps.isNotEmpty)
+        'steps': _activeChatMessage!.steps
+            .where((s) => s.type == 'tool_call' || s.type == 'status')
+            .map((s) => {
+              'type': s.type,
+              'content': s.content,
+              if (s.toolName != null) 'tool_name': s.toolName,
+              'is_completed': s.isCompleted,
+            })
+            .toList(),
     };
   }
 
@@ -326,6 +347,9 @@ extension _AgentChatRuntime on _AgentChatPageState {
 
     if (event == 'status' && payload is Map) {
       final summary = payload['summary']?.toString() ?? '';
+      final key = 'status:$summary';
+      if (_consumedEventKeys.contains(key)) return;
+      _consumedEventKeys.add(key);
       _activeChatMessage!.liveStatus = summary;
       _activeChatMessage!.addStep(
         AgentStep(type: 'status', content: summary, isCompleted: true),
@@ -352,9 +376,13 @@ extension _AgentChatRuntime on _AgentChatPageState {
 
     if (event == 'tool_call' && payload is Map) {
       final toolName = payload['name']?.toString() ?? '';
+      final round = payload['round']?.toString() ?? '';
       final args = payload['args'] is Map
           ? Map<String, dynamic>.from(payload['args'] as Map)
           : const <String, dynamic>{};
+      final key = 'tool_call:$toolName:$round:${args.keys.join(",")}';
+      if (_consumedEventKeys.contains(key)) return;
+      _consumedEventKeys.add(key);
       _activeChatMessage!.liveStatus = '调用工具: $toolName';
       _activeChatMessage!.addStep(AgentStep(
         type: 'tool_call',
@@ -425,6 +453,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
     if (normalized.startsWith(current)) return normalized;
     if (current.endsWith(normalized)) return current;
     if (normalized.contains(current)) return normalized;
+    if (current.contains(normalized)) return current;
     return '$current$normalized';
   }
 

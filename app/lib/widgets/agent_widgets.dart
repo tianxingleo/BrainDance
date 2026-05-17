@@ -63,6 +63,7 @@ class _AgentProcessPanelState extends State<AgentProcessPanel> {
 
   void _handleMessageChanged() {
     if (!mounted) return;
+    setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
