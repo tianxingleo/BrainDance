@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import 'package:ffmpeg_kit_extended_flutter/ffmpeg_kit_extended_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -62,10 +64,20 @@ class VideoPreprocessResult {
   }
 }
 
+class VideoPreprocessCancelledException implements Exception {
+  final String? message;
+  const VideoPreprocessCancelledException([this.message]);
+  @override
+  String toString() => message ?? 'Preprocessing cancelled';
+}
+
 class VideoPreprocessor {
   static bool _initialized = false;
-  static final _durationRe = RegExp(r'Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})');
+  static final _durationRe = RegExp(
+    r'Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})',
+  );
   static final _timeRe = RegExp(r'time=(\d{2}):(\d{2}):(\d{2}\.\d{2})');
+  static final _outTimeMsRe = RegExp(r'out_time_ms=(\d+)');
 
   static Future<void> ensureInitialized() async {
     if (_initialized) return;
@@ -73,10 +85,17 @@ class VideoPreprocessor {
     await FFmpegKitExtended.initialize();
   }
 
-  static String _hevcEncoder() {
-    if (Platform.isIOS) return 'hevc_videotoolbox';
-    if (Platform.isAndroid) return 'hevc_mediacodec';
-    return 'libx265';
+  /// Returns encoders in priority order. First success wins.
+  static List<String> _videoEncoders() {
+    if (Platform.isIOS)
+      return ['hevc_videotoolbox', 'h264_videotoolbox', 'libx265'];
+    if (Platform.isAndroid)
+      return ['hevc_mediacodec', 'h264_mediacodec', 'libx264'];
+    return ['libx265'];
+  }
+
+  static bool _isSoftwareEncoder(String encoder) {
+    return encoder == 'libx265' || encoder == 'libx264';
   }
 
   static String _audioEncoder() {
@@ -93,6 +112,7 @@ class VideoPreprocessor {
     VideoPreprocessConfig config = const VideoPreprocessConfig(),
     void Function(double progress)? onProgress,
     File? outputFile,
+    Completer<void>? cancelSignal,
   }) async {
     await ensureInitialized();
 
@@ -112,96 +132,185 @@ class VideoPreprocessor {
       resolvedOutput = File('${tempDir.path}/$outputName');
     }
 
-    final videoEncoder = _hevcEncoder();
+    final encoders = _videoEncoders();
+    String? lastError;
+
+    for (final videoEncoder in encoders) {
+      if (cancelSignal?.isCompleted == true) {
+        throw const VideoPreprocessCancelledException();
+      }
+      try {
+        return await _tryEncode(
+          inputFile: inputFile,
+          outputFile: resolvedOutput,
+          encoder: videoEncoder,
+          config: config,
+          onProgress: onProgress,
+          inputSize: inputSize,
+          cancelSignal: cancelSignal,
+        );
+      } on VideoPreprocessCancelledException {
+        rethrow;
+      } catch (e) {
+        lastError = e.toString();
+        debugPrint(
+          '[VideoPreprocessor] encoder $videoEncoder failed: $lastError',
+        );
+        if (await resolvedOutput.exists()) {
+          try {
+            await resolvedOutput.delete();
+          } catch (_) {}
+        }
+      }
+    }
+
+    throw Exception(
+      'FFmpeg preprocessing failed with all encoders:\n${lastError ?? 'unknown error'}',
+    );
+  }
+
+  static Future<VideoPreprocessResult> _tryEncode({
+    required File inputFile,
+    required File outputFile,
+    required String encoder,
+    required VideoPreprocessConfig config,
+    required void Function(double)? onProgress,
+    required int inputSize,
+    Completer<void>? cancelSignal,
+  }) async {
+    final isSoftware = _isSoftwareEncoder(encoder);
 
     final extraArgs = <String>[];
-    if (videoEncoder == 'hevc_videotoolbox') {
+    if (encoder == 'hevc_videotoolbox') {
       extraArgs.addAll(['-allow_sw', '1', '-realtime', '1']);
     }
 
-    final movflags =
-        config.enableFastStart ? '-movflags +faststart' : '';
-
-    final command = [
+    final commandParts = <String>[
       '-y',
-      '-i', inputFile.path,
-      '-vf', _buildFilterChain(config),
-      '-c:v', videoEncoder,
-      '-b:v', config.videoBitrate,
-      '-preset', 'fast',
+      '-i',
+      '"${inputFile.path}"',
+      '-vf',
+      _buildFilterChain(config),
+      '-c:v',
+      encoder,
+      '-b:v',
+      config.videoBitrate,
+      if (isSoftware) ...['-preset', 'fast'],
       ...extraArgs,
-      '-c:a', _audioEncoder(),
-      '-b:a', config.audioBitrate,
-      movflags,
-      resolvedOutput.path,
-    ].where((s) => s.isNotEmpty).join(' ');
+      '-c:a',
+      _audioEncoder(),
+      '-b:a',
+      config.audioBitrate,
+      if (config.enableFastStart) ...['-movflags', '+faststart'],
+      '"${outputFile.path}"',
+    ];
 
-    final startMs = DateTime.now().millisecondsSinceEpoch;
-    String? failOutput;
+    final completer = Completer<Session>();
+    final logBuf = StringBuffer();
+    const maxLogLen = 8192;
     double? totalDurationSec;
 
-    final session = await FFmpegKit.executeAsync(
-      command,
-      onComplete: (s) async {
-        // completion handled below via session
+    final startMs = DateTime.now().millisecondsSinceEpoch;
+
+    FFmpegKit.executeAsync(
+      commandParts.join(' '),
+      onComplete: (s) {
+        if (!completer.isCompleted) completer.complete(s);
       },
       onLog: (log) {
         final msg = log.message;
-        if (failOutput == null) {
-          failOutput = msg;
-        } else {
-          failOutput = '${failOutput!}\n$msg';
+        if (logBuf.length < maxLogLen) {
+          logBuf.writeln(msg);
         }
 
         if (onProgress == null) return;
 
-        // Parse total duration from early log lines: Duration: 00:01:23.45
         if (totalDurationSec == null) {
           final durMatch = _durationRe.firstMatch(msg);
           if (durMatch != null) {
-            totalDurationSec = int.parse(durMatch.group(1)!) * 3600.0 +
+            totalDurationSec =
+                int.parse(durMatch.group(1)!) * 3600.0 +
                 int.parse(durMatch.group(2)!) * 60.0 +
                 double.parse(durMatch.group(3)!);
           }
         }
 
-        // Parse current encoding time: time=00:00:12.34
-        final timeMatch = _timeRe.firstMatch(msg);
-        if (timeMatch != null) {
-          final currentSec = int.parse(timeMatch.group(1)!) * 3600.0 +
-              int.parse(timeMatch.group(2)!) * 60.0 +
-              double.parse(timeMatch.group(3)!);
-          if (totalDurationSec != null && totalDurationSec! > 0) {
+        if (totalDurationSec != null && totalDurationSec! > 0) {
+          double? currentSec;
+          final timeMatch = _timeRe.firstMatch(msg);
+          if (timeMatch != null) {
+            currentSec =
+                int.parse(timeMatch.group(1)!) * 3600.0 +
+                int.parse(timeMatch.group(2)!) * 60.0 +
+                double.parse(timeMatch.group(3)!);
+          } else {
+            final outMatch = _outTimeMsRe.firstMatch(msg);
+            if (outMatch != null) {
+              currentSec = int.parse(outMatch.group(1)!) / 1000000.0;
+            }
+          }
+          if (currentSec != null) {
             onProgress((currentSec / totalDurationSec!).clamp(0.0, 1.0));
           }
         }
       },
     );
 
+    Future<Session> waitSession() async {
+      if (cancelSignal != null) {
+        await Future.any([completer.future, cancelSignal.future]);
+        if (cancelSignal.isCompleted) {
+          FFmpegKitExtended.cancelAllSessions();
+          try {
+            await completer.future.timeout(const Duration(seconds: 3));
+          } catch (_) {}
+          throw const VideoPreprocessCancelledException();
+        }
+      }
+      return completer.future.timeout(
+        const Duration(minutes: 20),
+        onTimeout: () {
+          FFmpegKitExtended.cancelAllSessions();
+          throw TimeoutException('FFmpeg encoding timed out after 20 minutes');
+        },
+      );
+    }
+
+    final session = await waitSession();
     final returnCode = session.getReturnCode();
     final elapsed = DateTime.now().millisecondsSinceEpoch - startMs;
 
     if (ReturnCode.isSuccess(returnCode)) {
-      final outputSize =
-          await resolvedOutput.exists() ? await resolvedOutput.length() : 0;
+      final outputSize = await outputFile.exists()
+          ? await outputFile.length()
+          : 0;
       return VideoPreprocessResult(
-        outputFile: resolvedOutput,
+        outputFile: outputFile,
         durationMs: elapsed,
         inputSizeBytes: inputSize,
         outputSizeBytes: outputSize,
       );
     }
 
-    throw Exception(
-      'FFmpeg preprocessing failed:\n${failOutput ?? session.getFailStackTrace() ?? "unknown error"}',
-    );
+    try {
+      session.cancel();
+    } catch (_) {}
+
+    if (cancelSignal?.isCompleted == true) {
+      throw const VideoPreprocessCancelledException();
+    }
+
+    throw Exception(logBuf.toString());
   }
 
   static String _buildFilterChain(VideoPreprocessConfig config) {
     final parts = <String>['fps=${config.targetFps}'];
     if (config.maxHeight > 0) {
-      parts.add('scale=-2:${config.maxHeight}');
+      parts.add(
+        'scale=w=-2:h=${config.maxHeight}:force_original_aspect_ratio=decrease',
+      );
     }
+    parts.add('format=yuv420p');
     return parts.join(',');
   }
 
@@ -223,13 +332,15 @@ class VideoPreprocessor {
       'format': info.format,
       'bitrate': info.bitrate,
       'streams': info.streams
-          ?.map((s) => {
-                'type': s.type,
-                'codec': s.codec,
-                'width': s.width,
-                'height': s.height,
-                'bitrate': s.bitrate,
-              })
+          ?.map(
+            (s) => {
+              'type': s.type,
+              'codec': s.codec,
+              'width': s.width,
+              'height': s.height,
+              'bitrate': s.bitrate,
+            },
+          )
           .toList(),
     };
   }

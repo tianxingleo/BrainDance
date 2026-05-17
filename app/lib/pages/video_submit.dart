@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:async';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -50,6 +51,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   bool _shouldClosePage = false;
   bool _deleteVideo = true;
   bool _preprocessCancelled = false;
+  Completer<void>? _cancelPreprocessSignal;
   VideoPreprocessResult? _preprocessResult;
   String? _uploadedStoragePath;
 
@@ -97,9 +99,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           ),
           content: Text(
             textLocalize('video_upload_cancel_message'),
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
           actions: [
             TextButton(
@@ -108,9 +108,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             ),
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.redAccent,
-              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               child: Text(textLocalize('video_upload_cancel_confirm')),
             ),
           ],
@@ -252,7 +250,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                 ),
                 TextButton(
                   onPressed: () {
-                    debugPrint('[VideoSubmit] exit confirmed, deleteVideo=$_deleteVideo');
+                    debugPrint(
+                      '[VideoSubmit] exit confirmed, deleteVideo=$_deleteVideo',
+                    );
                     Navigator.of(ctx).pop(true);
                   },
                   style: TextButton.styleFrom(
@@ -311,10 +311,12 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
     if (_uploadedStoragePath == null) return;
     try {
       final client = Supabase.instance.client;
-      await client.storage
-          .from('braindance-assets')
-          .remove([_uploadedStoragePath!]);
-      debugPrint('[VideoSubmit] deleted uploaded content: $_uploadedStoragePath');
+      await client.storage.from('braindance-assets').remove([
+        _uploadedStoragePath!,
+      ]);
+      debugPrint(
+        '[VideoSubmit] deleted uploaded content: $_uploadedStoragePath',
+      );
     } catch (e) {
       debugPrint('[VideoSubmit] error deleting uploaded content: $e');
     }
@@ -349,6 +351,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
     _cancelToken = CancelToken();
     _preprocessCancelled = false;
+    _cancelPreprocessSignal = Completer<void>();
 
     setState(() {
       _isUploading = true;
@@ -369,7 +372,11 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             });
           }
         },
+        cancelSignal: _cancelPreprocessSignal,
       );
+    } on VideoPreprocessCancelledException {
+      debugPrint('[VideoSubmit] preprocessing cancelled by user');
+      return;
     } catch (e) {
       if (_preprocessCancelled) {
         debugPrint('[VideoSubmit] preprocessing cancelled by user');
@@ -480,6 +487,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       _cleanupPreprocess();
     } finally {
       _cancelToken = null;
+      _cancelPreprocessSignal = null;
       _uploadedStoragePath = null;
       if (mounted) {
         setState(() {
@@ -520,7 +528,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
@@ -531,14 +541,19 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         if (didPop) return;
         final navigator = Navigator.of(context);
         if (_isPreprocessing) {
-          debugPrint('[VideoSubmit] back intercepted while preprocessing, showing cancel dialog');
+          debugPrint(
+            '[VideoSubmit] back intercepted while preprocessing, showing cancel dialog',
+          );
           _dialogShowing = true;
           final shouldCancel = await _showCancelPreprocessDialog();
           if (!mounted) return;
           _dialogShowing = false;
           if (shouldCancel) {
-            debugPrint('[VideoSubmit] preprocessing cancelled by user via back button');
+            debugPrint(
+              '[VideoSubmit] preprocessing cancelled by user via back button',
+            );
             _preprocessCancelled = true;
+            _cancelPreprocessSignal?.complete();
             FFmpegKitExtended.cancelAllSessions();
             setState(() {
               _isUploading = false;
@@ -551,7 +566,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             navigator.pop();
           }
         } else if (_isUploading) {
-          debugPrint('[VideoSubmit] back intercepted while uploading, showing upload cancel dialog');
+          debugPrint(
+            '[VideoSubmit] back intercepted while uploading, showing upload cancel dialog',
+          );
           _dialogShowing = true;
           final shouldCancel = await _showCancelUploadDialog();
           if (!mounted) return;
@@ -570,7 +587,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             navigator.pop();
           }
         } else {
-          debugPrint('[VideoSubmit] back intercepted before upload, showing exit confirm dialog');
+          debugPrint(
+            '[VideoSubmit] back intercepted before upload, showing exit confirm dialog',
+          );
           final shouldExit = await _showExitConfirmDialog();
           if (!mounted) return;
           if (shouldExit) {
@@ -638,14 +657,20 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                                     _isPreprocessing
                                         ? '${(_preprocessProgress * 100).toStringAsFixed(0)}%'
                                         : '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                                    style: TextStyle(fontSize: 12, color: hintColor),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: hintColor,
+                                    ),
                                   ),
                                   const Spacer(),
                                   Text(
                                     _isPreprocessing
                                         ? _progressHint()
                                         : '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
-                                    style: TextStyle(fontSize: 11, color: hintColor),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: hintColor,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -698,7 +723,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                           onTap: () {
                             if (_isPreprocessing) {
                               _dialogShowing = true;
-                              _showCancelPreprocessDialog().then((shouldCancel) {
+                              _showCancelPreprocessDialog().then((
+                                shouldCancel,
+                              ) {
                                 if (!mounted) return;
                                 _dialogShowing = false;
                                 if (shouldCancel) {
@@ -771,10 +798,16 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                     onTap: _isUploading ? () {} : _submit,
                     style: TDButtonStyle(
                       backgroundColor: _isUploading
-                          ? (isDark ? const Color(0xFF1A1A1E) : const Color(0xFFD8D8DF))
-                          : (isDark ? const Color(0xFF2A2A2E) : BDDesign.colorMutedBlue),
+                          ? (isDark
+                                ? const Color(0xFF1A1A1E)
+                                : const Color(0xFFD8D8DF))
+                          : (isDark
+                                ? const Color(0xFF2A2A2E)
+                                : BDDesign.colorMutedBlue),
                       textColor: _isUploading
-                          ? (isDark ? Colors.white.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.45))
+                          ? (isDark
+                                ? Colors.white.withValues(alpha: 0.28)
+                                : Colors.white.withValues(alpha: 0.45))
                           : Colors.white,
                       radius: BorderRadius.circular(18),
                     ),
@@ -786,8 +819,8 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                     text: _isPreprocessing
                         ? '${textLocalize('video_preprocess_cancel_title')}...'
                         : _isUploading
-                            ? '${textLocalize('gen_uploading')}...'
-                            : textLocalize('video_submit_btn'),
+                        ? '${textLocalize('gen_uploading')}...'
+                        : textLocalize('video_submit_btn'),
                   ),
                 ),
                 const SizedBox(height: 32.0),
@@ -830,8 +863,8 @@ class _NameTextField extends StatelessWidget {
           color: focused
               ? BDDesign.colorMutedBlue
               : (isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
           width: focused ? 1.5 : 1,
         ),
       ),
