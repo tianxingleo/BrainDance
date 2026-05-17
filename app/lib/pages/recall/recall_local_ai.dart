@@ -638,9 +638,11 @@ extension _RecallPageLocalAi on _RecallPageState {
       '1. hit_count > 0 时，必须回答具体内容，不能只说有记录。'
       '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
       '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
-      '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
-      '5. 不复述问题，不解释规则，不说‘根据给定证据’。'
-      '6. 如需说明过程，只能用极短的摘要，不要输出完整推理链。';
+      '4. 用户询问最近模型、有哪些模型、模型列表或盘点时，按证据列出 2 到 5 条模型摘要，并给出简短结论。'
+      '5. 其他单点问题可以简短回答，但不要只输出一个模型名。'
+      '6. 输出必须是自然语言或简短列表，不要输出 JSON、代码块或键值对。'
+      '7. 不复述问题，不解释规则，不说‘根据给定证据’。'
+      '8. 如需说明过程，只能用极短的摘要，不要输出完整推理链。';
 
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
@@ -665,7 +667,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
         '<|im_start|>user\n$userPayload<|im_end|>\n'
         '<|im_start|>assistant\n'
-        '请直接给出最终回答，且只输出一句到两句。';
+        '请直接给出最终回答；如果问题在问模型列表或最近模型，请列出多条证据。';
 
     setState(() {
       _localAnswer = '';
@@ -678,14 +680,13 @@ extension _RecallPageLocalAi on _RecallPageState {
 
     try {
       var streamedAnswer = '';
-      var lockedAnswer = false;
       _localQnaModel!.cancelGeneration();
       await _llamaStreamSubscription?.cancel();
       _llamaStreamSubscription = _localQnaModel!
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 96,
+              maxTokens: 220,
               temp: 0.0,
               topK: 1,
               topP: 1.0,
@@ -705,23 +706,11 @@ extension _RecallPageLocalAi on _RecallPageState {
               final parsedOutput = _parseLocalModelOutput(nextRaw);
               final nextReasoning = parsedOutput.reasoning;
               final nextAnswer = _truncateLocalAnswer(parsedOutput.answer);
-              if (lockedAnswer) {
-                if (nextAnswer != _localAnswer ||
-                    nextReasoning != _localReasoning) {
-                  _localQnaModel!.cancelGeneration();
-                }
-                return;
-              }
               streamedAnswer = nextRaw;
-              lockedAnswer =
-                  nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
               setState(() {
                 _localReasoning = nextReasoning;
                 _localAnswer = nextAnswer;
               });
-              if (lockedAnswer) {
-                _localQnaModel!.cancelGeneration();
-              }
             },
             onError: (Object error) {
               if (!mounted) {
@@ -763,7 +752,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       final expandedQuery = _expandQuery(question);
       matches = await _localRagIndex.search(
         expandedQuery,
-        limit: 3,
+        limit: 5,
         minScore: 0.08,
       );
     } catch (_) {
@@ -795,7 +784,7 @@ extension _RecallPageLocalAi on _RecallPageState {
             'scene_id': item['scene_id']?.toString() ?? '',
           };
         })
-        .take(3)
+        .take(5)
         .toList();
 
     return {
@@ -927,42 +916,11 @@ extension _RecallPageLocalAi on _RecallPageState {
     return cleaned.replaceAll('</think>', '');
   }
 
-  bool _shouldLockAnswer(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return false;
-    }
-    if (trimmed.length >= 8 &&
-        (trimmed.endsWith('。') ||
-            trimmed.endsWith('！') ||
-            trimmed.endsWith('？') ||
-            trimmed.endsWith('.') ||
-            trimmed.endsWith('!') ||
-            trimmed.endsWith('?'))) {
-      return true;
-    }
-    return false;
-  }
-
   String _truncateLocalAnswer(String value) {
     var cleaned = _sanitizeLocalAnswer(_stripDanglingThinkTag(value));
-    final newlineIndex = cleaned.indexOf('\n');
-    if (newlineIndex >= 0) {
-      cleaned = cleaned.substring(0, newlineIndex);
-    }
-    final sentenceParts = cleaned.split(RegExp(r'[。！？!?]'));
-    if (sentenceParts.isEmpty) {
-      return cleaned.trim();
-    }
-    final first = sentenceParts.first.trim();
-    if (first.isNotEmpty) {
-      return first.endsWith('。') ||
-              first.endsWith('！') ||
-              first.endsWith('？') ||
-              first.endsWith('!') ||
-              first.endsWith('?')
-          ? first
-          : '$first。';
+    const maxLength = 420;
+    if (cleaned.length > maxLength) {
+      cleaned = cleaned.substring(0, maxLength).trimRight();
     }
     return cleaned.trim();
   }
