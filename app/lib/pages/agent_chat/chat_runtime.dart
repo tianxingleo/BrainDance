@@ -46,7 +46,6 @@ extension _AgentChatRuntime on _AgentChatPageState {
           sessionId: _agentSessionId,
           conversationSummary: _agentConversationSummary,
           sessionState: _agentSessionState,
-          shortTermMemory: _agentShortTermMemory,
         );
         if (!mounted) return;
         setState(() {
@@ -74,7 +73,6 @@ extension _AgentChatRuntime on _AgentChatPageState {
         sessionId: _agentSessionId,
         conversationSummary: _agentConversationSummary,
         sessionState: _agentSessionState,
-        shortTermMemory: _agentShortTermMemory,
       );
       _streamSubscription = stream.listen(
         (chunk) {

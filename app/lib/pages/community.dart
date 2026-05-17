@@ -5,6 +5,7 @@ import 'package:braindance/pages/community/detail.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
+import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
