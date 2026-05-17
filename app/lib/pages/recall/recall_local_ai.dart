@@ -542,20 +542,33 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final llama = LlamaEngine(LlamaBackend());
       var backendSummary = 'CPU';
-      late final ModelParams mobileProfile;
-      mobileProfile = const ModelParams(
-        contextSize: 1024,
-        gpuLayers: 12,
-        preferredBackend: GpuBackend.vulkan,
-        numberOfThreads: 4,
-        numberOfThreadsBatch: 4,
-        batchSize: 64,
-        microBatchSize: 32,
-      );
+      // Android Vulkan / Adreno 对较大的 n_ubatch 计算图非常敏感；
+      // 继续使用 GPU，但将物理 micro-batch 收敛到 1，避免驱动层崩溃。
+      final mobileProfile = Platform.isAndroid
+          ? const ModelParams(
+              contextSize: 1024,
+              gpuLayers: 8,
+              preferredBackend: GpuBackend.vulkan,
+              numberOfThreads: 2,
+              numberOfThreadsBatch: 2,
+              batchSize: 32,
+              microBatchSize: 1,
+            )
+          : const ModelParams(
+              contextSize: 1024,
+              gpuLayers: 12,
+              preferredBackend: GpuBackend.vulkan,
+              numberOfThreads: 4,
+              numberOfThreadsBatch: 4,
+              batchSize: 64,
+              microBatchSize: 32,
+            );
       try {
         await llama.loadModel(modelPath, modelParams: mobileProfile);
         final backendName = await llama.getBackendName();
-        backendSummary = '$backendName (GPU 优先)';
+        backendSummary = Platform.isAndroid
+            ? '$backendName (Android Vulkan 安全批处理)'
+            : '$backendName (GPU 优先)';
       } catch (_) {
         await llama.dispose();
         final fallbackLlama = LlamaEngine(LlamaBackend());
@@ -627,7 +640,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
       '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
       '5. 不复述问题，不解释规则，不说‘根据给定证据’。'
-      '6. 不要输出<think>或任何思考链。';
+      '6. 如需说明过程，只能用极短的摘要，不要输出完整推理链。';
 
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
