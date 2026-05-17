@@ -70,40 +70,39 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                   title: textLocalize('manage'),
                   trailing: GestureDetector(
                     onTap: () async {
-                      if (ref.read(themeAnimationProvider).isAnimating) return;
+                      final currentState = ref.read(themeAnimationProvider);
 
-                      // 1. Capture the UI before changing theme
+                      if (currentState.isAnimating) {
+                        ref.read(themeAnimationProvider.notifier).toggleDirection(
+                          themeAnimationFraction.value,
+                        );
+                        return;
+                      }
+
+                      final screenSize = MediaQuery.of(context).size;
+                      final isDarkNow = AppConfig.isNightMode;
+                      final mode = isDarkNow
+                          ? ThemeTransitionMode.expandHole
+                          : ThemeTransitionMode.shrinkClip;
+                      final center = Offset(screenSize.width, 0);
+
                       final boundary =
                           themeAnimationKey.currentContext?.findRenderObject()
                               as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final image = await boundary.toImage(pixelRatio: 1.0);
-
-                          final RenderBox? buttonBox =
-                              _themeSwitchKey.currentContext?.findRenderObject()
-                                  as RenderBox?;
-
-                          if (buttonBox != null) {
-                            final offset = buttonBox.localToGlobal(Offset.zero);
-                            final center =
-                                offset +
-                                Offset(
-                                  buttonBox.size.width / 2,
-                                  buttonBox.size.height / 2,
-                                );
-
-                            ref
-                                .read(themeAnimationProvider.notifier)
-                                .startBase(image, center);
-                          }
+                          final dpr = MediaQuery.of(context).devicePixelRatio;
+                          final image = await boundary.toImage(pixelRatio: dpr);
+                          ref
+                              .read(themeAnimationProvider.notifier)
+                              .start(image, center, mode);
                         } catch (e) {
                           debugPrint('Theme transition error: $e');
                         }
                       }
 
-                      SetConfig.setNightMode(!AppConfig.isNightMode, ref);
                       WidgetsBinding.instance.addPostFrameCallback((_) {
+                        SetConfig.setNightMode(!AppConfig.isNightMode, ref);
                         SetConfig.saveMsgToFile();
                       });
                     },

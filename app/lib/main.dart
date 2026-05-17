@@ -176,6 +176,7 @@ class Home extends ConsumerWidget {
         ),
       ),
       themeMode: themeModeAsync,
+      themeAnimationDuration: Duration.zero,
       initialRoute: canEnterApp
           ? '/'
           : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
