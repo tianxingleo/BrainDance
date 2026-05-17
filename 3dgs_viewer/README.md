@@ -35,6 +35,8 @@ npm install
 npm run dev
 ```
 
+VR 预览端已移至仓库根目录 `vr-3dgs-viewer/`，启动说明请参考 [vr-3dgs-viewer/README.md](../vr-3dgs-viewer/README.md)。
+
 ### 2. 同步图片
 
 ```bash

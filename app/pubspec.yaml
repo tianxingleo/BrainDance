@@ -37,9 +37,10 @@ dependencies:
   video_thumbnail_pro: ^0.7.3
   image_picker: ^1.1.2
   camera: ^0.12.0
-  photo_manager: ^3.8.3
+  photo_manager: ^3.9.0
   supabase_flutter: ^2.12.0
   webview_flutter: ^4.13.1
+  webview_flutter_android: ^4.12.0
   flutter_riverpod: ^3.2.0
   flutter_dotenv: ^5.1.0
   sensors_plus: ^6.1.1
@@ -142,11 +143,11 @@ flutter:
     - assets/fonts/
     - assets/sprites/
     - assets/webgl/
-    - assets/webgl/models/
     - assets/webgl/assets/
     - assets/webgl_spark/
-    - assets/webgl_spark/models/
     - assets/webgl_spark/assets/
+    - assets/webgl_spark/models/
+    - assets/webgl_spark/targets/
   fonts:
     - family: HarmonyOS_Sans
       fonts:

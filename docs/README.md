@@ -24,8 +24,6 @@
 - `07-技术报告/`：专项技术报告
 - `08-待办事项/`：整理后的待办与改进建议
 - `09-LangChain专题/`：LangChain / Agent 编排相关的实现现状、阶段总结和联调记录
-- `开发文档/`：核心开发纪要、比赛材料、微调实践全纪录
-- `.archive/`：历史归档
 
 ## 常用入口
 
@@ -34,6 +32,7 @@
 - Supabase 层：[supabase/README.md](/ltx-data/BrainDance/supabase/README.md)
 - Dashboard：[dashboard/README.md](/ltx-data/BrainDance/dashboard/README.md)
 - App：[app/README.md](/ltx-data/BrainDance/app/README.md)
+- VR 查看器：[vr-3dgs-viewer/README.md](/ltx-data/BrainDance/vr-3dgs-viewer/README.md)
 
 ## 说明
 
@@ -117,11 +116,10 @@
 | [认证迁移待办](08-待办事项/认证迁移待办.md) | 认证迁移任务 |
 | [更多待办...](08-待办事项/) | Pipeline 统一、Edge Function、消息队列优化 |
 
-### 9️⃣ 历史归档
+### 9️⃣ 补充说明
 
 | 文档名称 | 说明 |
 |----------|------|
-| [归档说明](.archive/README.md) | 历史文档归档说明 |
 | [本地问答微调文档补充说明](04-本地问答与微调/本地问答微调文档补充说明.md) | 微调阶段结论、脚本入口、统一口径说明 |
 
 ---
@@ -142,7 +140,7 @@
 cd supabase && supabase start
 
 # 启动 AI Worker
-conda activate gs_linux_backup
+conda activate braindance
 cd ai_engine/3dgs && python main.py
 
 # 启动 Edge Function
@@ -154,9 +152,9 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 
 ## 🔄 文档版本与更新
 
-- **文档版本**: v1.0
-- **最后更新**: 2026-03-22
-- **主要更新**: 补充 Qwen3 Part 27-30、部署候选结论与仓库入口文档同步
+- **文档版本**: v1.2
+- **最后更新**: 2026-05-13
+- **主要更新**: 补充 VR 查看器常用入口、同步架构文档
 
 ---
 
@@ -169,4 +167,4 @@ supabase functions serve search-models --no-verify-jwt --env-file .env.local
 </div>
 
 - `docs/` 里同时包含开发文档和比赛材料，口径不完全一致是正常的
-- 旧稿和废弃方案尽量放在 `.archive/`，但仍建议以根 README 和各模块 README 为准
+- 历史归档、比赛材料和过程纪要建议保留在本地，不再作为仓库表层导航的一部分

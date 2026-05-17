@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -36,9 +38,7 @@ String? toPosesUrl(String? plyPath) {
 // ── Sibling query ────────────────────────────────────────────
 
 /// 根据 sceneId（display_name）自动查询兄弟模型（同名场景的不同时间版本）。
-Future<List<Map<String, dynamic>>> _querySiblingModels(
-  String sceneId,
-) async {
+Future<List<Map<String, dynamic>>> _querySiblingModels(String sceneId) async {
   try {
     // 1. 查 processing_tasks 获取当前 sceneId 对应的 display_name
     //    sceneId 参数可能是 display_name，也可能是 scene_id
@@ -108,6 +108,8 @@ Future<List<Map<String, dynamic>>> _querySiblingModels(
 // ── Unified navigation ──────────────────────────────────────
 
 /// 统一的 3DGS Viewer 入口。自动查询兄弟模型并传入 timePeelingModels。
+Completer<void>? _viewerLaunchInFlight;
+
 Future<void> openViewer(
   BuildContext context, {
   required String initialModelUrl,
@@ -115,37 +117,56 @@ Future<void> openViewer(
   required String sceneId,
   List<double>? initialPose,
   String? initialPoseId,
+  bool initialMarkerArMode = false,
 }) async {
-  final siblings = await _querySiblingModels(sceneId);
+  final inFlight = _viewerLaunchInFlight;
+  if (inFlight != null) {
+    return inFlight.future;
+  }
 
-  if (!context.mounted) return;
+  final guard = Completer<void>();
+  _viewerLaunchInFlight = guard;
 
-  Navigator.of(context).push(
-    PageRouteBuilder(
-      transitionDuration: const Duration(milliseconds: 320),
-      reverseTransitionDuration: const Duration(milliseconds: 320),
-      opaque: true,
-      pageBuilder: (_, __, ___) => WebGLViewerPage(
-        initialModelUrl: initialModelUrl,
-        posesUrl: posesUrl,
-        sceneId: sceneId,
-        initialPose: initialPose,
-        initialPoseId: initialPoseId,
-        timePeelingModels: siblings,
+  try {
+    final siblings = await _querySiblingModels(sceneId);
+    if (!context.mounted) return;
+
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 320),
+        opaque: true,
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            WebGLViewerPage(
+              initialModelUrl: initialModelUrl,
+              posesUrl: posesUrl,
+              sceneId: sceneId,
+              initialPose: initialPose,
+              initialPoseId: initialPoseId,
+              initialMarkerArMode: initialMarkerArMode,
+              timePeelingModels: siblings,
+            ),
+        transitionsBuilder: (_, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeInOutCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -1),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
       ),
-      transitionsBuilder: (_, animation, __, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeInOutCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, -1),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    ),
-  );
+    );
+  } finally {
+    if (!guard.isCompleted) {
+      guard.complete();
+    }
+    if (identical(_viewerLaunchInFlight, guard)) {
+      _viewerLaunchInFlight = null;
+    }
+  }
 }

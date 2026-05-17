@@ -1,9 +1,15 @@
+// agent_recall_models 导出，保持旧调用方 import 路径不变
+export 'agent_recall_models.dart';
+
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
+import 'agent_recall_error.dart';
+import 'agent_recall_models.dart';
+import 'agent_recall_streaming.dart';
 
 // ── Data models ──────────────────────────────────────────────
 
@@ -614,7 +620,6 @@ class AgentRecallService {
     String? sessionId,
     String? conversationSummary,
     AgentSessionState? sessionState,
-    Map<String, dynamic>? shortTermMemory,
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -662,7 +667,6 @@ class AgentRecallService {
             'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
-          if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
@@ -681,12 +685,11 @@ class AgentRecallService {
         }
         eventBuffer.write(chunk);
         final rawBuffer = eventBuffer.toString();
-        final parsed = _drainStreamingEvents(rawBuffer);
-        if (parsed.remaining > 0) {
-          eventBuffer.clear();
-          if (parsed.remaining < rawBuffer.length) {
-            eventBuffer.write(rawBuffer.substring(parsed.remaining));
-          }
+        final parsed = drainStreamingEvents(rawBuffer);
+        if (parsed.remaining != rawBuffer.length) {
+          eventBuffer
+            ..clear()
+            ..write(rawBuffer.substring(parsed.remaining));
         }
         for (final event in parsed.events) {
           yield event;
@@ -695,7 +698,7 @@ class AgentRecallService {
 
       final tail = eventBuffer.toString().trim();
       if (tail.isNotEmpty) {
-        for (final event in _parseEventChunk(tail)) {
+        for (final event in parseEventChunk(tail)) {
           yield event;
         }
       }
@@ -716,13 +719,12 @@ class AgentRecallService {
           sessionId: sessionId,
           conversationSummary: conversationSummary,
           sessionState: sessionState,
-          shortTermMemory: shortTermMemory,
         );
         yield jsonEncode({'event': 'done', 'data': _encodeResponse(result)});
       } catch (fallbackError) {
         yield jsonEncode({
           'event': 'error',
-          'data': _normalizeInvokeError(fallbackError),
+          'data': normalizeInvokeError(fallbackError),
         });
       }
     } finally {
@@ -741,7 +743,6 @@ class AgentRecallService {
     String? sessionId,
     String? conversationSummary,
     AgentSessionState? sessionState,
-    Map<String, dynamic>? shortTermMemory,
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
@@ -764,12 +765,11 @@ class AgentRecallService {
             'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
-          if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
-      final data = _decodeInvokeData(response.data);
+      final data = decodeInvokeData(response.data);
       if (data is! Map) {
         throw Exception(textLocalize('agent_error_bad_response'));
       }
@@ -780,7 +780,7 @@ class AgentRecallService {
 
       return AgentRecallResponse.fromJson(Map<String, dynamic>.from(data));
     } catch (e) {
-      throw Exception(_normalizeInvokeError(e));
+      throw Exception(normalizeInvokeError(e));
     }
   }
 
@@ -858,195 +858,4 @@ class AgentRecallService {
             },
     };
   }
-
-  Object? _decodeInvokeData(Object? data) {
-    if (data is String) {
-      final trimmed = data.trim();
-      if (trimmed.isEmpty) {
-        return null;
-      }
-
-      try {
-        return jsonDecode(trimmed);
-      } catch (_) {
-        return trimmed;
-      }
-    }
-
-    return data;
-  }
-
-  String _normalizeDioError(DioException error) {
-    if (error.type == DioExceptionType.connectionTimeout ||
-        error.type == DioExceptionType.connectionError ||
-        error.type == DioExceptionType.sendTimeout) {
-      return SupabaseConfig.buildConnectionHelp(
-        'agent-recall',
-        endpoint: SupabaseConfig.edgeFunctionUrl('agent-recall'),
-      );
-    }
-
-    final status = error.response?.statusCode;
-    final data = _decodeInvokeData(error.response?.data);
-    if (data is Map && data['error'] != null) {
-      return _normalizeRawErrorText(data['error'].toString());
-    }
-    if (data is Map && data['message'] != null) {
-      return _normalizeRawErrorText(data['message'].toString());
-    }
-    if (data is String && data.trim().isNotEmpty) {
-      return _normalizeRawErrorText(data.trim());
-    }
-    if (status == 503) {
-      return textLocalize('agent_error_unavailable');
-    }
-    if (status == 502 || status == 504) {
-      return textLocalize('agent_error_upstream');
-    }
-    if (status != null) {
-      return textLocalize(
-        'agent_error_http',
-      ).replaceAll('{status}', status.toString());
-    }
-    return error.message ?? error.toString();
-  }
-
-  String _normalizeInvokeError(Object error) {
-    if (error is DioException) {
-      return _normalizeDioError(error);
-    }
-
-    if (error is FunctionException) {
-      final detail = _decodeInvokeData(error.details);
-      if (detail is Map && detail['error'] != null) {
-        return _normalizeRawErrorText(detail['error'].toString());
-      }
-      if (detail is Map && detail['message'] != null) {
-        return _normalizeRawErrorText(detail['message'].toString());
-      }
-      if (detail is String && detail.isNotEmpty) {
-        return _normalizeRawErrorText(detail);
-      }
-      if (error.reasonPhrase != null && error.reasonPhrase!.isNotEmpty) {
-        return _normalizeRawErrorText(error.reasonPhrase!);
-      }
-      if (error.status == 503) {
-        return textLocalize('agent_error_unavailable');
-      }
-      if (error.status == 502 || error.status == 504) {
-        return textLocalize('agent_error_upstream');
-      }
-      return textLocalize(
-        'agent_error_http',
-      ).replaceAll('{status}', error.status.toString());
-    }
-
-    return _normalizeRawErrorText(error.toString());
-  }
-
-  String _normalizeRawErrorText(String message) {
-    final trimmed = message.trim();
-    if (trimmed.isEmpty) {
-      return trimmed;
-    }
-
-    final normalized = trimmed.toLowerCase();
-    if (normalized.contains('an invalid response was received from the upstream server')) {
-      return textLocalize('agent_error_upstream');
-    }
-    if (normalized.contains('upstream connect error')) {
-      return textLocalize('agent_error_upstream');
-    }
-
-    return trimmed;
-  }
-
-  _ParsedStreamEvents _drainStreamingEvents(String raw) {
-    final events = <String>[];
-    var cursor = 0;
-
-    while (cursor < raw.length) {
-      final sseBoundary = raw.indexOf('\n\n', cursor);
-      final lineBoundary = raw.indexOf('\n', cursor);
-      final looksLikeSse =
-          raw.startsWith('event:', cursor) || raw.startsWith('data:', cursor);
-
-      if (looksLikeSse) {
-        if (sseBoundary == -1) {
-          break;
-        }
-        final chunk = raw.substring(cursor, sseBoundary).trim();
-        cursor = sseBoundary + 2;
-        events.addAll(_parseEventChunk(chunk));
-        continue;
-      }
-
-      if (lineBoundary == -1) {
-        break;
-      }
-
-      final chunk = raw.substring(cursor, lineBoundary).trim();
-      cursor = lineBoundary + 1;
-      if (chunk.isEmpty) {
-        continue;
-      }
-      events.addAll(_parseEventChunk(chunk));
-    }
-
-    return _ParsedStreamEvents(events: events, remaining: cursor);
-  }
-
-  List<String> _parseEventChunk(String chunk) {
-    final trimmed = chunk.trim();
-    if (trimmed.isEmpty) {
-      return const [];
-    }
-
-    if (trimmed.startsWith('{')) {
-      return [trimmed];
-    }
-
-    String eventName = 'message';
-    final dataLines = <String>[];
-    for (final line in const LineSplitter().convert(trimmed)) {
-      final normalized = line.trimRight();
-      if (normalized.isEmpty || normalized.startsWith(':')) {
-        continue;
-      }
-      if (normalized.startsWith('event:')) {
-        eventName = normalized.substring(6).trim();
-        continue;
-      }
-      if (normalized.startsWith('data:')) {
-        dataLines.add(normalized.substring(5).trimLeft());
-      }
-    }
-
-    if (dataLines.isEmpty) {
-      return const [];
-    }
-
-    final dataText = dataLines.join('\n').trim();
-    if (dataText.isEmpty) {
-      return const [];
-    }
-
-    try {
-      final decoded = jsonDecode(dataText);
-      return [
-        jsonEncode({'event': eventName, 'data': decoded}),
-      ];
-    } catch (_) {
-      return [
-        jsonEncode({'event': eventName, 'data': dataText}),
-      ];
-    }
-  }
-}
-
-class _ParsedStreamEvents {
-  final List<String> events;
-  final int remaining;
-
-  const _ParsedStreamEvents({required this.events, required this.remaining});
 }

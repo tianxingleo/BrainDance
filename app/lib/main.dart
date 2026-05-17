@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/configs/reco_config.dart';
@@ -54,7 +55,8 @@ final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   TDTheme.needMultiTheme(true);
 
   /// 开启多套主题功能
@@ -146,6 +148,7 @@ class Home extends ConsumerWidget {
       SetConfig.loadSettingsFromMsg(ref);
     }
     ref.read(loadingProvider.notifier).state = false;
+    FlutterNativeSplash.remove();
   }
 
   @override
@@ -220,10 +223,7 @@ class Home extends ConsumerWidget {
             },
           );
         }
-        return MaterialPageRoute(
-          settings: settings,
-          builder: builder,
-        );
+        return MaterialPageRoute(settings: settings, builder: builder);
       },
       // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
       builder: (context, child) {
@@ -493,20 +493,18 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void initState() {
     super.initState();
     _animController =
-        AnimationController(
-          duration: BDMotion.durationNormal,
-          vsync: this,
-        )..addStatusListener((status) {
-          if (status == AnimationStatus.completed) {
-            ref.read(pageAnimatingProvider.notifier).state = false;
-            if (mounted) {
-              setState(() {
-                _isAnimating = false;
-                _previousIndex = ref.read(pageIndexProvider);
-              });
+        AnimationController(duration: BDMotion.durationNormal, vsync: this)
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) {
+              ref.read(pageAnimatingProvider.notifier).state = false;
+              if (mounted) {
+                setState(() {
+                  _isAnimating = false;
+                  _previousIndex = ref.read(pageIndexProvider);
+                });
+              }
             }
-          }
-        });
+          });
     _curvedAnimation = _animController.drive(
       CurveTween(curve: Curves.easeInOutCubic),
     );
@@ -593,7 +591,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
       extendBody: true,
       body: BDPageBackdrop(
         child: isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const SizedBox.shrink()
             : Stack(
                 children: [
                   // ── 页面槽位：保证每个页面的 State 不被销毁 ──
@@ -606,14 +604,33 @@ class _MainScreenState extends ConsumerState<MainScreen>
                       animation: _curvedAnimation,
                       builder: (context, child) {
                         final bool isActive = i == pageIndex;
-                        final bool isLeaving = _isAnimating && i == _previousIndex && i != pageIndex;
-                        final double t = _curvedAnimation.value;
+                        // 外部直接修改 pageIndexProvider 时，_isAnimating 在当前帧还未置 true，
+                        // 需要按 t=0 的状态渲染，避免新页面在最终位置闪现一帧。
+                        final bool pendingAnim =
+                            !_isAnimating && pageIndex != _previousIndex;
+                        final bool effectiveAnim = _isAnimating || pendingAnim;
+                        final int effectiveDir = pendingAnim
+                            ? (pageIndex > _previousIndex ? 1 : -1)
+                            : _slideDirection;
+                        final bool isLeaving =
+                            effectiveAnim &&
+                            i == _previousIndex &&
+                            i != pageIndex;
+                        final double t = pendingAnim
+                            ? 0.0
+                            : _curvedAnimation.value;
                         double dx = 0;
 
-                        if (_isAnimating && isActive) {
-                          dx = _slideDirection * (1.0 - t) * MediaQuery.of(context).size.width;
+                        if (effectiveAnim && isActive) {
+                          dx =
+                              effectiveDir *
+                              (1.0 - t) *
+                              MediaQuery.of(context).size.width;
                         } else if (isLeaving) {
-                          dx = -_slideDirection * t * MediaQuery.of(context).size.width;
+                          dx =
+                              -effectiveDir *
+                              t *
+                              MediaQuery.of(context).size.width;
                         }
 
                         final bool isVisible = isActive || isLeaving;
@@ -633,7 +650,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   }),
                   if (!isRecording)
                     FloatingNavBar(
-                      skipBlur: _isAnimating,
+                      skipBlur: _isAnimating || (pageIndex != _previousIndex),
                       currentIndex: pageIndex,
                       onTap: _switchToPage,
                       items: [

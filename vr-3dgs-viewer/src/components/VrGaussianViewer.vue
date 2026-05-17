@@ -1,0 +1,3454 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import * as THREE from 'three'
+import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory.js'
+import { deriveVrConfigUrl, getInitialPayload, normalizePayload, resolveRelativeAssetUrl } from '../engine/payload'
+import { getPreviewMode, switchPreviewMode, type PreviewMode } from '../engine/previewMode'
+import { loadVrConfig } from '../engine/vrConfig'
+import { getVrModelCandidates } from '../engine/modelUrl'
+import { mergeStandaloneCatalog } from '../engine/catalog'
+import { loadViewerClientState, saveViewerClientState } from '../engine/clientState'
+import { viewerSupabaseClient, viewerSupabaseEnabled } from '../engine/supabaseClient'
+import {
+  decomposeMatrix,
+  normalizeMatrixForViewer,
+} from '../engine/bridge'
+import type {
+  BrainDanceAuthSession,
+  BrainDanceNavigationPoint,
+  BrainDanceRecallMarker,
+  BrainDanceRecallModel,
+  BrainDanceRecallSearchResult,
+  BrainDanceViewerPayload,
+  BrainDanceVrConfig,
+  RuntimeGaussianViewer,
+} from '../types/viewer'
+
+type ControllerHand = 'left' | 'right'
+type InteractionMode = 'explore' | 'inspect'
+type SceneScaleMode = 'room' | 'diorama'
+type TurnMode = 'snap' | 'smooth'
+type QualityPreset = 'ultra' | 'high' | 'balanced' | 'performance' | 'potato'
+type HudView = 'controls' | 'auth' | 'models' | 'search' | 'markers' | 'nav'
+type LoadPhase =
+  | 'idle'
+  | 'config'
+  | 'model'
+  | 'ready'
+  | 'error'
+
+type GrabState =
+  | {
+    mode: 'one-hand'
+    hand: ControllerHand
+    startControllerPosition: THREE.Vector3
+    startControllerQuaternion: THREE.Quaternion
+    startObjectPosition: THREE.Vector3
+    startObjectQuaternion: THREE.Quaternion
+  }
+  | {
+    mode: 'two-hand'
+    startDistance: number
+    startMidpoint: THREE.Vector3
+    startObjectPosition: THREE.Vector3
+    startObjectScale: THREE.Vector3
+  }
+
+type HudAction = {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  kind: 'tab' | 'button' | 'item'
+  accent?: string
+  disabled?: boolean
+  onActivate: () => void
+}
+
+type ControllerHudState = {
+  triggerActive?: boolean
+  gripActive?: boolean
+  stickActive?: boolean
+  menuActive?: boolean
+}
+
+type ControllerRigItem = {
+  hand: ControllerHand
+  controller: THREE.Group
+  grip: THREE.Group
+  hud: THREE.Mesh
+  fallback: THREE.Group
+  officialModel: THREE.Object3D
+  state: ControllerHudState
+  modelCheckTimer?: number
+}
+
+const containerRef = ref<HTMLDivElement | null>(null)
+const spectatorCanvasRef = ref<HTMLCanvasElement | null>(null)
+const status = ref('等待初始化')
+const errorMessage = ref('')
+const fps = ref(0)
+const isVrPresenting = ref(false)
+const persistedClientState = loadViewerClientState()
+const previewMode = ref<PreviewMode>(persistedClientState.previewMode || getPreviewMode())
+const activePayload = ref<BrainDanceViewerPayload | null>(null)
+const activeModelUrl = ref('')
+const activeConfig = ref<BrainDanceVrConfig | null>(null)
+const cameraPosition = ref('0, 0, 0')
+const sceneRotation = ref('0.00')
+const userScale = ref(1)
+const loadPhase = ref<LoadPhase>('idle')
+const loadProgress = ref(0)
+const loadText = ref('等待加载')
+const authSession = ref<BrainDanceAuthSession | null>(persistedClientState.authSession || null)
+const modelList = ref<BrainDanceRecallModel[]>([])
+const markers = ref<BrainDanceRecallMarker[]>([])
+const searchResults = ref<BrainDanceRecallSearchResult[]>([])
+const localModelName = ref('')
+const localPosesName = ref('')
+const activeModelId = ref(persistedClientState.activeModelId || '')
+const activeSearchQuery = ref(persistedClientState.activeSearchQuery || '')
+const selectedMarkerId = ref('')
+const selectedSearchResultId = ref('')
+const isMenuOpen = ref(persistedClientState.isMenuOpen ?? true)
+const isDesktopPanelOpen = ref(true)
+const interactionMode = ref<InteractionMode>(persistedClientState.interactionMode || 'explore')
+const sceneScaleMode = ref<SceneScaleMode>(persistedClientState.sceneScaleMode || 'room')
+const turnMode = ref<TurnMode>(persistedClientState.turnMode || 'smooth')
+const hudView = ref<HudView>(persistedClientState.hudView || 'controls')
+const moveSpeed = ref(1.15)
+const snapTurnAngle = ref(30)
+const vignetteEnabled = ref(true)
+const floorLockEnabled = ref(true)
+const qualityPreset = ref<QualityPreset>(persistedClientState.qualityPreset || 'balanced')
+const clippingEnabled = ref(persistedClientState.clippingEnabled ?? false)
+const clippingDistance = ref(persistedClientState.clippingDistance ?? 3.2)
+const measurementEnabled = ref(persistedClientState.measurementEnabled ?? false)
+const measurementPoints = ref<[number, number, number][]>([])
+const selectedNavPointId = ref('')
+const navPointIndex = ref(0)
+const controllerDebug = ref('等待 SteamVR 手柄输入')
+const lastDirectionHint = ref('暂无导航目标')
+const modelSummaryText = ref('等待场景摘要')
+const authEmail = ref(persistedClientState.authSession?.email || '')
+const authPassword = ref('')
+const authMessage = ref('')
+const authBusy = ref(false)
+let viewer: GaussianSplats3D.Viewer | null = null
+let frameCount = 0
+let lastFpsTime = performance.now()
+let statsRafId = 0
+let stereoRafId = 0
+let controllerRafId = 0
+let activeModelIndex = -1
+let scaleOverride: number | null = null
+let rotationOverride: number | null = null
+let currentControllerFrame = 0
+let xrSession: XRSession | null = null
+let leftController: THREE.Group | null = null
+let rightController: THREE.Group | null = null
+let leftControllerGrip: THREE.Group | null = null
+let rightControllerGrip: THREE.Group | null = null
+let controllerModelFactory: XRControllerModelFactory | null = null
+const controllerRigItems = new Map<ControllerHand, ControllerRigItem>()
+let controllerRay: THREE.Group | null = null
+let controllerTip: THREE.Mesh | null = null
+let hudActions: HudAction[] = []
+let hudHoveredActionId: string | null = null
+let hudPointerHit = false
+let hudPointerDistance = 1.5
+let hudPointerWorldPoint = new THREE.Vector3()
+let hudRaycaster = new THREE.Raycaster()
+let hudCanvas: HTMLCanvasElement | null = null
+let hudTexture: THREE.CanvasTexture | null = null
+let hudMesh: THREE.Mesh | null = null
+let hudContext: CanvasRenderingContext2D | null = null
+let lastHudDrawTime = 0
+let hudPlane = new THREE.Plane()
+let hudPlaneNormal = new THREE.Vector3(0, 0, 1)
+let hudPlaneAnchor = new THREE.Vector3()
+let hudPlaneRight = new THREE.Vector3(1, 0, 0)
+let hudPlaneUp = new THREE.Vector3(0, 1, 0)
+let sceneRoot: THREE.Group | null = null
+let xrRig: THREE.Group | null = null
+let worldRoot: THREE.Group | null = null
+let xrSessionListenersInstalled = false
+let overlayScene: THREE.Scene | null = null
+let originalViewerRender: (() => void) | null = null
+let vrEnvironmentMap: THREE.Texture | null = null
+let spectatorRenderer: THREE.WebGLRenderer | null = null
+let spectatorCamera: THREE.PerspectiveCamera | null = null
+let lastSpectatorRenderTime = 0
+let introGlint: THREE.Points | null = null
+let grabState: GrabState | null = null
+let markerGroup: THREE.Group | null = null
+let navGroup: THREE.Group | null = null
+let clippingPlaneHelper: THREE.Mesh | null = null
+let measurementLine: THREE.Line | null = null
+let measurementLabelMesh: THREE.Sprite | null = null
+let vignetteMesh: THREE.Mesh | null = null
+let localModelObjectUrl: string | null = null
+let localPosesObjectUrl: string | null = null
+const localModelFormatByUrl = new Map<string, number>()
+let lastSnapTurnTime = 0
+let stateSaveTimer = 0
+const buttonLatch = new Map<string, boolean>()
+const qualityPresets: QualityPreset[] = ['ultra', 'high', 'balanced', 'performance', 'potato']
+const spectatorRenderWidth = 960
+const spectatorRenderHeight = 540
+const spectatorRenderIntervalMs = 1000 / 30
+const hudPlaneWidth = 1.6
+const hudPlaneHeight = 1.0
+const hudRenderOrder = 1000
+const hudPointerRenderOrder = 1002
+const preferStylizedControllerModel = false
+const enableControllerFallbackModel = false
+const splatSceneFormats = {
+  splat: 0,
+  ksplat: 1,
+  ply: 2,
+  spz: 3,
+} as const
+
+const sceneLabel = computed(() => activePayload.value?.sceneId || activePayload.value?.imageId || 'BrainDance VR Viewer')
+const modelLabel = computed(() => {
+  const selected = modelList.value.find((item) => item.id === activeModelId.value) || modelList.value[activeModelIndex]
+  if (selected) {
+    return selected.name || selected.displayName || selected.id
+  }
+  return activePayload.value?.sceneId || activePayload.value?.imageId || '当前场景'
+})
+const scaleLabel = computed(() => activeConfig.value?.worldScale.toFixed(2) ?? '1.00')
+const positionLabel = computed(() => activeConfig.value?.worldPosition.map((item) => item.toFixed(2)).join(', ') ?? '0, 0, 0')
+const rotationLabel = computed(() => activeConfig.value?.worldRotationY.toFixed(2) ?? '0.00')
+const measurementDistanceLabel = computed(() => {
+  if (measurementPoints.value.length < 2) return '未完成'
+  const a = measurementPoints.value[0]
+  const b = measurementPoints.value[1]
+  if (!a || !b) return '未完成'
+  const distance = new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b))
+  return `${distance.toFixed(2)} m`
+})
+const activeSearchResult = computed(() => searchResults.value.find((item) => item.id === selectedSearchResultId.value) || null)
+const activeMarker = computed(() => markers.value.find((item) => item.id === selectedMarkerId.value) || null)
+const activeEvidence = computed(() => {
+  const result = activeSearchResult.value
+  if (result) return {
+    label: result.label,
+    description: result.description,
+    imageId: result.imageId,
+    score: result.score,
+    tags: result.tags,
+    createdAt: result.createdAt,
+  }
+  const marker = activeMarker.value
+  if (marker) return {
+    label: marker.label,
+    description: marker.description,
+    imageId: marker.imageId,
+    score: marker.score,
+    tags: marker.tags,
+    createdAt: marker.createdAt,
+  }
+  return null
+})
+const navigationPoints = computed(() => activeConfig.value?.navigationPoints || [])
+const qualityLabel = computed(() => qualityPreset.value)
+const authLabel = computed(() => authSession.value?.displayName || authSession.value?.email || '未登录')
+const modelCountLabel = computed(() => {
+  if (modelList.value.length === 0) return '0/0'
+  const currentIndex = Math.max(0, modelList.value.findIndex((item) => item.id === activeModelId.value))
+  return `${currentIndex + 1}/${modelList.value.length}`
+})
+const filteredModels = computed(() => {
+  const query = activeSearchQuery.value.trim().toLowerCase()
+  if (!query) return modelList.value
+  return modelList.value.filter((item) => {
+    const haystack = [
+      item.id,
+      item.name,
+      item.displayName,
+      item.description,
+      ...(item.tags || []),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+function revokeObjectUrl(url: string | null) {
+  if (!url) return
+  localModelFormatByUrl.delete(url)
+  try {
+    URL.revokeObjectURL(url)
+  } catch {}
+}
+
+function getSceneFormatFromFileName(fileName: string): number | null {
+  const normalized = fileName.toLowerCase()
+  if (normalized.endsWith('.ply')) return splatSceneFormats.ply
+  if (normalized.endsWith('.splat')) return splatSceneFormats.splat
+  if (normalized.endsWith('.ksplat')) return splatSceneFormats.ksplat
+  if (normalized.endsWith('.spz')) return splatSceneFormats.spz
+  return null
+}
+
+function getSceneFormatForUrl(url: string): number | null {
+  const localFormat = localModelFormatByUrl.get(url)
+  if (localFormat != null) return localFormat
+  try {
+    const parsed = new URL(url, window.location.href)
+    const format = getSceneFormatFromFileName(parsed.pathname)
+    return format
+  } catch {
+    return getSceneFormatFromFileName(url)
+  }
+}
+
+function clearLocalModelState() {
+  revokeObjectUrl(localModelObjectUrl)
+  revokeObjectUrl(localPosesObjectUrl)
+  localModelObjectUrl = null
+  localPosesObjectUrl = null
+  localModelName.value = ''
+  localPosesName.value = ''
+}
+
+function resetLocalLabelsIfRemoteModel(model: BrainDanceRecallModel) {
+  const modelUrl = model.modelUrl || model.ply || ''
+  const posesUrl = model.poses || model.posesUrl || ''
+  if (!String(modelUrl).startsWith('blob:')) localModelName.value = ''
+  if (!String(posesUrl).startsWith('blob:')) localPosesName.value = ''
+}
+
+function triggerLocalModelPicker() {
+  document.getElementById('vr-local-model-input')?.click()
+}
+
+function triggerLocalPosesPicker() {
+  document.getElementById('vr-local-poses-input')?.click()
+}
+
+function clearLocalPoses() {
+  revokeObjectUrl(localPosesObjectUrl)
+  localPosesObjectUrl = null
+  localPosesName.value = ''
+}
+
+async function onLocalModelSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  revokeObjectUrl(localModelObjectUrl)
+  const localFormat = getSceneFormatFromFileName(file.name)
+  if (localFormat == null) {
+    errorMessage.value = `不支持的本地模型格式：${file.name}`
+    if (input) input.value = ''
+    return
+  }
+  localModelObjectUrl = URL.createObjectURL(file)
+  localModelFormatByUrl.set(localModelObjectUrl, localFormat)
+  localModelName.value = file.name || '本地模型'
+
+  const localModel: BrainDanceRecallModel = {
+    id: `local-model-${Date.now()}`,
+    name: file.name || '本地模型',
+    displayName: file.name || '本地模型',
+    ply: localModelObjectUrl,
+    modelUrl: localModelObjectUrl,
+    poses: localPosesObjectUrl || undefined,
+    posesUrl: localPosesObjectUrl || undefined,
+    description: '来自本地文件选择',
+  }
+
+  activeModelId.value = localModel.id
+  modelList.value = [localModel, ...modelList.value.filter((item) => !String(item.modelUrl || item.ply).startsWith('blob:'))]
+  try {
+    await loadModel(localModel)
+  } catch (error) {
+    console.error('[BrainDance VR] 本地模型加载失败:', error)
+    errorMessage.value = error instanceof Error ? error.message : '本地模型加载失败'
+    setLoadState('error', '本地模型加载失败', loadProgress.value)
+  } finally {
+    if (input) input.value = ''
+  }
+}
+
+async function onLocalPosesSelected(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) return
+
+  revokeObjectUrl(localPosesObjectUrl)
+  localPosesObjectUrl = URL.createObjectURL(file)
+  localPosesName.value = file.name || '本地位姿'
+
+  const current = modelList.value.find((item) => item.id === activeModelId.value) || modelList.value[activeModelIndex] || modelList.value[0]
+  if (current) {
+    const localModel: BrainDanceRecallModel = {
+      ...current,
+      poses: localPosesObjectUrl,
+      posesUrl: localPosesObjectUrl,
+    }
+    modelList.value = modelList.value.map((item) => item.id === current.id ? localModel : item)
+    try {
+      await loadModel(localModel)
+    } catch (error) {
+      console.error('[BrainDance VR] 本地位姿加载失败:', error)
+      errorMessage.value = error instanceof Error ? error.message : '本地位姿加载失败'
+      setLoadState('error', '本地位姿加载失败', loadProgress.value)
+    }
+  }
+  if (input) input.value = ''
+}
+
+function makeSceneRotationY(rotationY: number): [number, number, number, number] {
+  const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotationY)
+  // 3DGS 资源在 VR 端需要先绕 X 轴旋转 180 度，纠正“前后反了且上下倒了”的整体朝向。
+  const x180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI)
+  const quaternion = yaw.premultiply(x180)
+  return [quaternion.x, quaternion.y, quaternion.z, quaternion.w]
+}
+
+function setLoadState(phase: LoadPhase, text: string, progress = loadProgress.value) {
+  loadPhase.value = phase
+  loadText.value = text
+  loadProgress.value = THREE.MathUtils.clamp(progress, 0, 1)
+  scheduleClientStateSave()
+}
+
+function getSceneActionTargets() {
+  const runtime = getRuntimeViewer()
+  const targets: THREE.Object3D[] = []
+  if (runtime?.splatMesh) targets.push(runtime.splatMesh)
+  if (worldRoot && !targets.includes(worldRoot)) targets.push(worldRoot)
+  return targets
+}
+
+function applySceneDelta(delta: THREE.Vector3) {
+  for (const target of getSceneActionTargets()) {
+    target.position.add(delta)
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  scheduleClientStateSave()
+}
+
+function applySceneRotationY(angle: number) {
+  for (const target of getSceneActionTargets()) {
+    target.rotateY(angle)
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  scheduleClientStateSave()
+}
+
+function rotateSceneAroundUser(angle: number) {
+  const runtime = getRuntimeViewer()
+  const camera = getRenderCamera()
+  if (!camera) {
+    applySceneRotationY(angle)
+    return
+  }
+
+  const pivot = camera.getWorldPosition(new THREE.Vector3())
+  for (const target of getSceneActionTargets()) {
+    target.position.sub(pivot).applyAxisAngle(new THREE.Vector3(0, 0, 1), angle).add(pivot)
+    target.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), angle)
+  }
+  runtime?.forceRenderNextFrame?.()
+}
+
+function rotateSceneAroundView(axis: THREE.Vector3, angle: number) {
+  const runtime = getRuntimeViewer()
+  const camera = getRenderCamera()
+  if (!camera || axis.lengthSq() < 1e-8) return false
+  const pivot = camera.getWorldPosition(new THREE.Vector3())
+  const normalizedAxis = axis.clone().normalize()
+  for (const target of getSceneActionTargets()) {
+    target.position.sub(pivot).applyAxisAngle(normalizedAxis, angle).add(pivot)
+    target.rotateOnWorldAxis(normalizedAxis, angle)
+  }
+  runtime?.forceRenderNextFrame?.()
+  return true
+}
+
+function focusSceneOnPoint(point: THREE.Vector3, offset = 1.45) {
+  const runtime = getRuntimeViewer()
+  const camera = runtime?.renderer?.xr?.isPresenting
+    ? runtime.renderer.xr.getCamera()
+    : runtime?.camera
+  if (!camera) return
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  const desired = camera.position.clone().addScaledVector(forward, offset)
+  const delta = desired.sub(point)
+  applySceneDelta(delta)
+}
+
+function resolveInitialModel(payload: BrainDanceViewerPayload, models: BrainDanceRecallModel[]) {
+  if (models.length === 0) return null
+  const candidates = [payload.activeModelId, payload.sceneId, payload.imageId].filter(
+    (item): item is string => Boolean(item && item.trim()),
+  )
+  for (const candidate of candidates) {
+    const match = models.find((item) => item.id === candidate || item.sceneId === candidate)
+    if (match) return match
+  }
+
+  const payloadUrl = payload.modelUrl || payload.ply
+  if (payloadUrl) {
+    const match = models.find((item) => item.modelUrl === payloadUrl || item.ply === payloadUrl)
+    if (match) return match
+  }
+
+  return models[0] || null
+}
+
+function disposeViewer() {
+  if (!viewer) return
+  try {
+    viewer.stop()
+    viewer.dispose()
+  } catch (error) {
+    console.warn('[BrainDance VR] viewer 释放时出现非致命错误:', error)
+  }
+  viewer = null
+  sceneRoot = null
+  xrRig = null
+  worldRoot = null
+  leftController = null
+  rightController = null
+  leftControllerGrip = null
+  rightControllerGrip = null
+  controllerModelFactory = null
+  for (const item of controllerRigItems.values()) {
+    if (item.modelCheckTimer) window.clearInterval(item.modelCheckTimer)
+  }
+  controllerRigItems.clear()
+  controllerRay = null
+  controllerTip = null
+  xrSessionListenersInstalled = false
+  overlayScene = null
+  originalViewerRender = null
+  vrEnvironmentMap?.dispose()
+  vrEnvironmentMap = null
+  disposeSpectatorRenderer()
+  hudActions = []
+  hudHoveredActionId = null
+  hudPointerHit = false
+  hudPointerWorldPoint = new THREE.Vector3()
+  markerGroup = null
+  navGroup = null
+  clippingPlaneHelper = null
+  measurementLine = null
+  measurementLabelMesh = null
+  vignetteMesh = null
+  grabState = null
+  buttonLatch.clear()
+}
+
+function resetRuntimeState() {
+  activeModelIndex = -1
+  activeModelUrl.value = ''
+  errorMessage.value = ''
+  loadProgress.value = 0
+  loadText.value = '等待加载'
+  loadPhase.value = 'idle'
+  selectedMarkerId.value = ''
+  selectedSearchResultId.value = ''
+  selectedNavPointId.value = ''
+  hudHoveredActionId = null
+  measurementPoints.value = []
+  lastDirectionHint.value = '暂无导航目标'
+}
+
+function scheduleClientStateSave() {
+  if (stateSaveTimer) return
+  stateSaveTimer = window.setTimeout(() => {
+    stateSaveTimer = 0
+    saveViewerClientState({
+      authSession: authSession.value,
+      activeModelId: activeModelId.value,
+      activeSearchQuery: activeSearchQuery.value,
+      previewMode: previewMode.value,
+      hudView: hudView.value,
+      interactionMode: interactionMode.value,
+      sceneScaleMode: sceneScaleMode.value,
+      turnMode: turnMode.value,
+      qualityPreset: qualityPreset.value,
+      clippingEnabled: clippingEnabled.value,
+      clippingDistance: clippingDistance.value,
+      measurementEnabled: measurementEnabled.value,
+      isMenuOpen: isMenuOpen.value,
+    })
+  }, 120)
+}
+
+function syncClientStateNow() {
+  if (stateSaveTimer) {
+    window.clearTimeout(stateSaveTimer)
+    stateSaveTimer = 0
+  }
+  saveViewerClientState({
+    authSession: authSession.value,
+    activeModelId: activeModelId.value,
+    activeSearchQuery: activeSearchQuery.value,
+    previewMode: previewMode.value,
+    hudView: hudView.value,
+    interactionMode: interactionMode.value,
+    sceneScaleMode: sceneScaleMode.value,
+    turnMode: turnMode.value,
+    qualityPreset: qualityPreset.value,
+    clippingEnabled: clippingEnabled.value,
+    clippingDistance: clippingDistance.value,
+    measurementEnabled: measurementEnabled.value,
+    isMenuOpen: isMenuOpen.value,
+  })
+}
+
+function setAuthSession(session: BrainDanceAuthSession | null, message = '') {
+  authSession.value = session
+  authEmail.value = session?.email || authEmail.value
+  authMessage.value = message
+  scheduleClientStateSave()
+  drawHud()
+}
+
+async function refreshSupabaseSession() {
+  if (!viewerSupabaseClient) return
+  const { data, error } = await viewerSupabaseClient.auth.getSession()
+  if (error) {
+    authMessage.value = `会话同步失败：${error.message}`
+    return
+  }
+  const session = data.session
+  if (!session?.user) return
+  setAuthSession({
+    userId: session.user.id,
+    email: session.user.email || undefined,
+    displayName: session.user.user_metadata?.display_name || session.user.email || session.user.id,
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresAt: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
+    status: 'signed-in',
+  }, '已同步当前登录态')
+}
+
+async function signInToViewer() {
+  if (!viewerSupabaseClient) {
+    setAuthSession({
+      email: authEmail.value.trim() || 'local@viewer',
+      displayName: authEmail.value.trim() || 'Local VR User',
+      status: 'local-only',
+    }, '未配置 Supabase，已切换到本地会话模式')
+    return
+  }
+  if (!authEmail.value.trim() || !authPassword.value.trim()) {
+    authMessage.value = '请输入邮箱和密码'
+    return
+  }
+  authBusy.value = true
+  authMessage.value = '正在登录...'
+  try {
+    const { data, error } = await viewerSupabaseClient.auth.signInWithPassword({
+      email: authEmail.value.trim(),
+      password: authPassword.value,
+    })
+    if (error) throw error
+    const user = data.user
+    const session = data.session
+    if (user) {
+      setAuthSession({
+        userId: user.id,
+        email: user.email || undefined,
+        displayName: user.user_metadata?.display_name || user.email || user.id,
+        accessToken: session?.access_token,
+        refreshToken: session?.refresh_token,
+        expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
+        status: 'signed-in',
+      }, '登录成功')
+    }
+  } catch (error) {
+    authMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+    authPassword.value = ''
+  }
+}
+
+async function signOutOfViewer() {
+  if (!viewerSupabaseClient) {
+    setAuthSession({
+      status: 'local-only',
+      displayName: 'VR Local User',
+    }, '本地会话已清除')
+    return
+  }
+  authBusy.value = true
+  try {
+    const { error } = await viewerSupabaseClient.auth.signOut()
+    if (error) throw error
+    setAuthSession(null, '已退出登录')
+  } catch (error) {
+    authMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    authBusy.value = false
+  }
+}
+
+function updateFps() {
+  frameCount += 1
+  const now = performance.now()
+  if (now - lastFpsTime < 1000) return
+  fps.value = frameCount
+  frameCount = 0
+  lastFpsTime = now
+}
+
+function updateCameraDebug() {
+  const camera = getRuntimeViewer()?.camera
+  if (!camera) return
+  cameraPosition.value = [camera.position.x, camera.position.y, camera.position.z]
+    .map((item) => item.toFixed(2))
+    .join(', ')
+  const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ')
+  sceneRotation.value = THREE.MathUtils.radToDeg(euler.y).toFixed(2)
+}
+
+function startStatsLoop() {
+  const tick = () => {
+    updateFps()
+    updateCameraDebug()
+    statsRafId = window.requestAnimationFrame(tick)
+  }
+  tick()
+}
+
+function stopStereoLoop() {
+  if (!stereoRafId) return
+  window.cancelAnimationFrame(stereoRafId)
+  stereoRafId = 0
+}
+
+function stopControllerLoop() {
+  if (!controllerRafId) return
+  window.cancelAnimationFrame(controllerRafId)
+  controllerRafId = 0
+}
+
+function disposeSpectatorRenderer() {
+  spectatorRenderer?.dispose()
+  spectatorRenderer = null
+  spectatorCamera = null
+}
+
+function ensureSpectatorRenderer() {
+  if (!spectatorCanvasRef.value) return null
+  if (!spectatorRenderer) {
+    spectatorRenderer = new THREE.WebGLRenderer({
+      canvas: spectatorCanvasRef.value,
+      antialias: true,
+      alpha: false,
+    })
+    spectatorRenderer.outputColorSpace = THREE.SRGBColorSpace
+    spectatorRenderer.setClearColor(0x050505, 1)
+  }
+
+  if (!spectatorCamera) {
+    spectatorCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.01, 1000)
+  }
+
+  return {
+    renderer: spectatorRenderer,
+    camera: spectatorCamera,
+  }
+}
+
+function resizeSpectatorRenderer() {
+  const canvas = spectatorCanvasRef.value
+  const setup = ensureSpectatorRenderer()
+  if (!canvas || !setup) return
+
+  setup.renderer.setPixelRatio(1)
+  setup.renderer.setSize(spectatorRenderWidth, spectatorRenderHeight, false)
+  setup.camera.aspect = spectatorRenderWidth / spectatorRenderHeight
+  setup.camera.updateProjectionMatrix()
+}
+
+function getVerticalFovFromProjection(camera: THREE.Camera) {
+  const projection = camera.projectionMatrix.elements
+  const yScale = projection[5]
+  if (!Number.isFinite(yScale) || yScale <= 0) return null
+  return THREE.MathUtils.radToDeg(2 * Math.atan(1 / yScale))
+}
+
+function updateSpectatorHeadsetCamera() {
+  const runtime = getRuntimeViewer()
+  const setup = ensureSpectatorRenderer()
+  if (!runtime?.renderer?.xr?.isPresenting || !runtime.camera || !setup) return false
+
+  const xrCamera = runtime.renderer.xr.getCamera()
+  xrCamera.updateMatrixWorld(true)
+  const eyeCamera = xrCamera.cameras?.[0] || xrCamera
+  setup.camera.position.copy(xrCamera.position)
+  setup.camera.quaternion.copy(xrCamera.quaternion)
+  // WebXR 的实际视场来自单眼投影矩阵；直接沿用桌面相机 fov 会让旁观画面偏广角。
+  setup.camera.fov = getVerticalFovFromProjection(eyeCamera) || runtime.camera.fov
+  setup.camera.near = eyeCamera.near || runtime.camera.near
+  setup.camera.far = eyeCamera.far || runtime.camera.far
+  setup.camera.updateProjectionMatrix()
+  setup.camera.updateMatrixWorld(true)
+  return true
+}
+
+function getRuntimeViewer(): RuntimeGaussianViewer | null {
+  return viewer as (GaussianSplats3D.Viewer & RuntimeGaussianViewer) | null
+}
+
+function ensureOverlayScene() {
+  if (!overlayScene) {
+    overlayScene = new THREE.Scene()
+    overlayScene.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.25))
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.7)
+    keyLight.position.set(2, 4, 3)
+    overlayScene.add(keyLight)
+    const fillLight = new THREE.DirectionalLight(0x88bbff, 0.85)
+    fillLight.position.set(-3, 2, -2)
+    overlayScene.add(fillLight)
+    if (vrEnvironmentMap) overlayScene.environment = vrEnvironmentMap
+  }
+  return overlayScene
+}
+
+function setupVrLighting() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer) return vrEnvironmentMap
+  if (!vrEnvironmentMap) {
+    const pmrem = new THREE.PMREMGenerator(runtime.renderer)
+    vrEnvironmentMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    pmrem.dispose()
+  }
+
+  if (runtime.threeScene) {
+    runtime.threeScene.environment = vrEnvironmentMap
+    if (!runtime.threeScene.getObjectByName('braindance-vr-hemi-light')) {
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1.1)
+      hemi.name = 'braindance-vr-hemi-light'
+      runtime.threeScene.add(hemi)
+    }
+    if (!runtime.threeScene.getObjectByName('braindance-vr-key-light')) {
+      const key = new THREE.DirectionalLight(0xffffff, 1.45)
+      key.name = 'braindance-vr-key-light'
+      key.position.set(2, 4, 3)
+      runtime.threeScene.add(key)
+    }
+  }
+
+  const overlay = ensureOverlayScene()
+  overlay.environment = vrEnvironmentMap
+  return vrEnvironmentMap
+}
+
+function getRenderCamera() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return null
+  if (runtime.renderer?.xr?.isPresenting) {
+    return runtime.renderer.xr.getCamera()
+  }
+  return runtime.camera
+}
+
+function renderOverlayScene() {
+  const runtime = getRuntimeViewer()
+  const camera = getRenderCamera()
+  if (!runtime?.renderer || !overlayScene || !camera) return
+  if (!overlayScene.children.some((child) => child.visible)) return
+
+  const savedAutoClear = runtime.renderer.autoClear
+  runtime.renderer.autoClear = false
+  runtime.renderer.render(overlayScene, camera)
+  runtime.renderer.autoClear = savedAutoClear
+  runtime.forceRenderNextFrame?.()
+}
+
+function renderOverlaySceneWithRenderer(renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
+  if (!overlayScene) return
+  if (!overlayScene.children.some((child) => child.visible)) return
+
+  const savedAutoClear = renderer.autoClear
+  renderer.autoClear = false
+  renderer.render(overlayScene, camera)
+  renderer.autoClear = savedAutoClear
+}
+
+function installOverlayRenderHook() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.render || originalViewerRender) return
+  originalViewerRender = runtime.render.bind(runtime)
+  runtime.render = () => {
+    originalViewerRender?.()
+    renderOverlayScene()
+    renderSpectatorFrameThrottled()
+  }
+}
+
+function ensureSceneRoots() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.threeScene) return
+  if (sceneRoot) return
+
+  sceneRoot = new THREE.Group()
+  xrRig = new THREE.Group()
+  worldRoot = new THREE.Group()
+  xrRig.add(worldRoot)
+  sceneRoot.add(xrRig)
+  runtime.threeScene.add(sceneRoot)
+}
+
+function disposeHud() {
+  if (hudMesh) hudMesh.parent?.remove(hudMesh)
+  hudMesh?.geometry?.dispose?.()
+  ;(hudMesh?.material as THREE.Material | undefined)?.dispose?.()
+  hudTexture?.dispose()
+  hudCanvas = null
+  hudTexture = null
+  hudMesh = null
+  hudContext = null
+}
+
+function createHud() {
+  if (hudMesh) return
+
+  hudCanvas = document.createElement('canvas')
+  hudCanvas.width = 1024
+  hudCanvas.height = 640
+  hudContext = hudCanvas.getContext('2d')
+  if (!hudContext) return
+
+  hudTexture = new THREE.CanvasTexture(hudCanvas)
+  hudTexture.colorSpace = THREE.SRGBColorSpace
+  const material = new THREE.MeshBasicMaterial({
+    map: hudTexture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  })
+  hudMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.6, 1.0),
+    material,
+  )
+  hudMesh.renderOrder = hudRenderOrder
+  hudMesh.visible = false
+  ensureOverlayScene().add(hudMesh)
+  updateHudPlaneBasis()
+}
+
+function updateHudPlaneBasis() {
+  if (!hudMesh) return
+  hudMesh.updateMatrixWorld(true)
+  const worldPosition = hudMesh.getWorldPosition(new THREE.Vector3())
+  const worldQuaternion = hudMesh.getWorldQuaternion(new THREE.Quaternion())
+  hudPlaneAnchor = worldPosition
+  hudPlaneNormal = new THREE.Vector3(0, 0, 1).applyQuaternion(worldQuaternion).normalize()
+  hudPlaneRight = new THREE.Vector3(1, 0, 0).applyQuaternion(worldQuaternion).normalize()
+  hudPlaneUp = new THREE.Vector3(0, 1, 0).applyQuaternion(worldQuaternion).normalize()
+  hudPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(hudPlaneNormal, hudPlaneAnchor)
+}
+
+function intersectHudPlane(origin: THREE.Vector3, direction: THREE.Vector3) {
+  if (!hudMesh) return null
+  updateHudPlaneBasis()
+  const hitPoint = new THREE.Vector3()
+  const hit = hudRaycaster.ray.intersectPlane(hudPlane, hitPoint)
+  if (!hit) return null
+  const localPoint = hitPoint.clone().sub(hudPlaneAnchor)
+  const u = localPoint.dot(hudPlaneRight)
+  const v = localPoint.dot(hudPlaneUp)
+  const halfWidth = hudPlaneWidth / 2
+  const halfHeight = hudPlaneHeight / 2
+  if (Math.abs(u) > halfWidth || Math.abs(v) > halfHeight) return null
+  return {
+    distance: origin.distanceTo(hitPoint),
+    point: hitPoint,
+    uv: new THREE.Vector2((u / hudPlaneWidth) + 0.5, (v / hudPlaneHeight) + 0.5),
+  }
+}
+
+function createIntroGlint() {
+  if (!worldRoot || introGlint) return
+  const geometry = new THREE.BufferGeometry()
+  const points = new Float32Array(600 * 3)
+  for (let index = 0; index < 600; index += 1) {
+    const i3 = index * 3
+    const theta = (index / 600) * Math.PI * 2
+    const radius = 0.7 + (index % 17) * 0.02
+    points[i3] = Math.cos(theta) * radius
+    points[i3 + 1] = Math.sin(theta * 2) * 0.15
+    points[i3 + 2] = Math.sin(theta) * radius
+  }
+  geometry.setAttribute('position', new THREE.BufferAttribute(points, 3))
+  const material = new THREE.PointsMaterial({
+    color: 0x9ed0c6,
+    size: 0.018,
+    transparent: true,
+    opacity: 0.72,
+  })
+  introGlint = new THREE.Points(geometry, material)
+  worldRoot.add(introGlint)
+}
+
+function disposeIntroGlint() {
+  if (worldRoot && introGlint) worldRoot.remove(introGlint)
+  introGlint?.geometry?.dispose?.()
+  ;(introGlint?.material as THREE.Material | undefined)?.dispose?.()
+  introGlint = null
+}
+
+function disposeObject3D(object: THREE.Object3D | null) {
+  if (!object) return
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh
+    mesh.geometry?.dispose?.()
+    const material = mesh.material as THREE.Material | THREE.Material[] | undefined
+    if (Array.isArray(material)) material.forEach((item) => item.dispose())
+    else material?.dispose?.()
+  })
+  object.parent?.remove(object)
+}
+
+function rebuildSpatialHelpers() {
+  ensureSceneRoots()
+  if (!worldRoot) return
+  disposeObject3D(markerGroup)
+  disposeObject3D(navGroup)
+  markerGroup = new THREE.Group()
+  navGroup = new THREE.Group()
+  worldRoot.add(markerGroup)
+  worldRoot.add(navGroup)
+  buildMarkerMeshes()
+  buildNavigationMeshes()
+  updateClippingPlaneHelper()
+  updateMeasurementVisual()
+  updateSceneSummary()
+}
+
+function createTextSprite(text: string, color = '#f7f8fb') {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = 'rgba(8, 10, 12, 0.78)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.strokeStyle = 'rgba(247, 248, 251, 0.22)'
+  ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4)
+  ctx.fillStyle = color
+  ctx.font = '700 34px Inter, sans-serif'
+  ctx.fillText(text.slice(0, 24), 24, 58)
+  ctx.font = '22px Inter, sans-serif'
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.72)'
+  ctx.fillText('Trigger 选择 / 导航', 24, 96)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })
+  const sprite = new THREE.Sprite(material)
+  sprite.scale.set(0.72, 0.18, 1)
+  return sprite
+}
+
+function markerPositionFromInput(input: BrainDanceRecallMarker | BrainDanceRecallSearchResult) {
+  if (input.position) return new THREE.Vector3(...input.position)
+  if (input.matrix) {
+    const resolved = resolveMatrixPayload(input.matrix)
+    if (resolved) return resolved.position
+  }
+  return null
+}
+
+function buildMarkerMeshes() {
+  if (!markerGroup) return
+  const resultMarkers = searchResults.value
+    .map((result) => ({
+      id: `result:${result.id}`,
+      label: result.label,
+      color: '#f2c38f',
+      source: result,
+    }))
+  const manualMarkers = markers.value.map((marker) => ({
+    id: `marker:${marker.id}`,
+    label: marker.label,
+    color: marker.color || '#9ed0c6',
+    source: marker,
+  }))
+
+  for (const item of [...manualMarkers, ...resultMarkers]) {
+    const position = markerPositionFromInput(item.source)
+    if (!position) continue
+    const group = new THREE.Group()
+    group.name = item.id
+    group.position.copy(position)
+    const color = new THREE.Color(item.color)
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 24, 16),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92 }),
+    )
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.12, 0.15, 32),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.66, side: THREE.DoubleSide }),
+    )
+    ring.rotation.x = -Math.PI / 2
+    const sprite = createTextSprite(item.label, item.color)
+    sprite.position.set(0, 0.22, 0)
+    group.add(sphere, ring, sprite)
+    markerGroup.add(group)
+  }
+}
+
+function buildNavigationMeshes() {
+  if (!navGroup) return
+  const groupRoot = navGroup
+  navigationPoints.value.forEach((point) => {
+    const group = new THREE.Group()
+    group.name = `nav:${point.id}`
+    group.position.set(...point.position)
+    const material = new THREE.MeshBasicMaterial({ color: 0x87a5ff, transparent: true, opacity: 0.72 })
+    const disk = new THREE.Mesh(new THREE.CircleGeometry(0.16, 32), material)
+    disk.rotation.x = -Math.PI / 2
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, 0.35, 12),
+      new THREE.MeshBasicMaterial({ color: 0x87a5ff, transparent: true, opacity: 0.6 }),
+    )
+    stem.position.y = 0.17
+    const sprite = createTextSprite(point.label, '#d8e0ff')
+    sprite.position.y = 0.5
+    group.add(disk, stem, sprite)
+    groupRoot.add(group)
+  })
+}
+
+function updateSceneSummary() {
+  const summary = activeConfig.value?.summary
+  const model = modelList.value[activeModelIndex] || modelList.value[0]
+  const objects = summary?.objects?.length ? summary.objects : model?.tags
+  const searchable = summary?.searchableObjects?.length ? summary.searchableObjects : objects
+  modelSummaryText.value = [
+    summary?.sceneType ? `场景：${summary.sceneType}` : model?.description || '场景摘要：可从 model_assets / vr_config 注入',
+    objects?.length ? `主要对象：${objects.slice(0, 6).join('、')}` : '',
+    searchable?.length ? `可检索：${searchable.slice(0, 6).join('、')}` : '',
+  ].filter(Boolean).join('；')
+}
+
+function setHudView(view: HudView) {
+  hudView.value = view
+  scheduleClientStateSave()
+  drawHud()
+}
+
+function nextQualityPreset(offset: number) {
+  const index = qualityPresets.indexOf(qualityPreset.value)
+  const next = qualityPresets[(index + offset + qualityPresets.length) % qualityPresets.length]
+  if (next) setQualityPreset(next)
+}
+
+function addHudAction(action: HudAction) {
+  hudActions.push(action)
+}
+
+function drawHudButton(
+  ctx: CanvasRenderingContext2D,
+  action: HudAction,
+  active = false,
+) {
+  addHudAction(action)
+  const hovered = hudHoveredActionId === action.id
+  const accent = action.accent || '#9ed0c6'
+  ctx.save()
+  ctx.globalAlpha = action.disabled ? 0.38 : 1
+  ctx.fillStyle = active
+    ? `${accent}66`
+    : hovered
+      ? 'rgba(247, 248, 251, 0.20)'
+      : 'rgba(247, 248, 251, 0.08)'
+  ctx.strokeStyle = hovered ? accent : active ? `${accent}cc` : 'rgba(247, 248, 251, 0.20)'
+  ctx.lineWidth = hovered ? 3 : 2
+  ctx.beginPath()
+  ctx.roundRect(action.x, action.y, action.width, action.height, 10)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = action.disabled ? 'rgba(247, 248, 251, 0.48)' : '#f7f8fb'
+  ctx.font = '700 20px Inter, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(action.label.slice(0, 18), action.x + action.width / 2, action.y + action.height / 2)
+  ctx.restore()
+}
+
+function drawHudListItem(
+  ctx: CanvasRenderingContext2D,
+  action: HudAction,
+  meta: string,
+  active = false,
+) {
+  addHudAction(action)
+  const hovered = hudHoveredActionId === action.id
+  const accent = action.accent || '#9ed0c6'
+  ctx.save()
+  ctx.globalAlpha = action.disabled ? 0.38 : 1
+  ctx.fillStyle = active
+    ? `${accent}44`
+    : hovered
+      ? 'rgba(247, 248, 251, 0.16)'
+      : 'rgba(247, 248, 251, 0.06)'
+  ctx.strokeStyle = hovered ? accent : 'rgba(247, 248, 251, 0.16)'
+  ctx.lineWidth = hovered ? 3 : 1.5
+  ctx.beginPath()
+  ctx.roundRect(action.x, action.y, action.width, action.height, 8)
+  ctx.fill()
+  ctx.stroke()
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+  ctx.fillStyle = '#f7f8fb'
+  ctx.font = '700 22px Inter, sans-serif'
+  ctx.fillText(action.label.slice(0, 32), action.x + 18, action.y + 28)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
+  ctx.font = '18px Inter, sans-serif'
+  ctx.fillText(meta.slice(0, 64), action.x + 18, action.y + 54)
+  ctx.restore()
+}
+
+function drawHudTabs(ctx: CanvasRenderingContext2D) {
+  const tabs: Array<{ view: HudView; label: string }> = [
+    { view: 'controls', label: '控制' },
+    { view: 'auth', label: '账户' },
+    { view: 'models', label: `模型 ${modelCountLabel.value}` },
+    { view: 'search', label: `结果 ${searchResults.value.length}` },
+    { view: 'markers', label: `标记 ${markers.value.length}` },
+    { view: 'nav', label: `视角 ${navigationPoints.value.length}` },
+  ]
+  tabs.forEach((tab, index) => {
+    drawHudButton(ctx, {
+      id: `tab:${tab.view}`,
+      label: tab.label,
+      x: 44 + index * 148,
+      y: 206,
+      width: 132,
+      height: 42,
+      kind: 'tab',
+      onActivate: () => setHudView(tab.view),
+    }, hudView.value === tab.view)
+  })
+}
+
+function drawHudControls(ctx: CanvasRenderingContext2D) {
+  const buttons: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'preview:desktop', label: 'Desktop', active: previewMode.value === 'desktop', onActivate: () => selectMode('desktop') },
+    { id: 'preview:stereo', label: 'Stereo', active: previewMode.value === 'stereo', onActivate: () => selectMode('stereo') },
+    { id: 'preview:webxr', label: 'WebXR', active: previewMode.value === 'webxr', onActivate: () => selectMode('webxr') },
+    { id: 'interaction:explore', label: 'Explore', active: interactionMode.value === 'explore', onActivate: () => setInteractionMode('explore') },
+    { id: 'interaction:inspect', label: 'Inspect', active: interactionMode.value === 'inspect', onActivate: () => setInteractionMode('inspect') },
+    { id: 'scale:room', label: '1:1', active: sceneScaleMode.value === 'room', onActivate: () => setSceneScaleMode('room') },
+    { id: 'scale:diorama', label: '沙盘', active: sceneScaleMode.value === 'diorama', onActivate: () => setSceneScaleMode('diorama') },
+  ]
+  buttons.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 134,
+      y: 282,
+      width: 120,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  const rowTwo: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'model:prev', label: '上一模型', onActivate: () => selectModelByOffset(-1) },
+    { id: 'model:next', label: '下一模型', onActivate: () => selectModelByOffset(1) },
+    { id: 'view:reset', label: '重置', onActivate: resetView },
+    { id: 'vr:enter', label: '进入VR', accent: '#87a5ff', onActivate: () => { void enterVrSession() } },
+    { id: 'vr:exit', label: '退出VR', accent: '#f2c38f', onActivate: () => { void exitVrSession() } },
+    { id: 'menu:close', label: '收起HUD', onActivate: () => { isMenuOpen.value = false } },
+  ]
+  rowTwo.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 154,
+      y: 338,
+      width: 140,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  const rowThree: Array<{ id: string; label: string; active?: boolean; accent?: string; onActivate: () => void }> = [
+    { id: 'quality:prev', label: `质量 -`, onActivate: () => nextQualityPreset(-1) },
+    { id: 'quality:next', label: `质量 +`, onActivate: () => nextQualityPreset(1) },
+    { id: 'turn:toggle', label: turnMode.value === 'snap' ? 'Snap' : 'Smooth', active: turnMode.value === 'snap', onActivate: () => { turnMode.value = turnMode.value === 'snap' ? 'smooth' : 'snap' } },
+    { id: 'floor:toggle', label: '锁地面', active: floorLockEnabled.value, onActivate: () => { floorLockEnabled.value = !floorLockEnabled.value } },
+    { id: 'vignette:toggle', label: '黑边', active: vignetteEnabled.value, onActivate: () => { vignetteEnabled.value = !vignetteEnabled.value } },
+    { id: 'clip:toggle', label: '剖切', active: clippingEnabled.value, onActivate: () => { clippingEnabled.value = !clippingEnabled.value; updateClippingPlaneHelper() } },
+    { id: 'measure:toggle', label: '测量', active: measurementEnabled.value, onActivate: () => { measurementEnabled.value = !measurementEnabled.value } },
+    { id: 'measure:clear', label: '清除', onActivate: clearMeasurement },
+  ]
+  rowThree.forEach((button, index) => {
+    drawHudButton(ctx, {
+      id: button.id,
+      label: button.label,
+      x: 44 + index * 116,
+      y: 394,
+      width: 102,
+      height: 42,
+      kind: 'button',
+      accent: button.accent,
+      onActivate: button.onActivate,
+    }, button.active)
+  })
+
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.70)'
+  ctx.font = '22px Inter, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.fillText(`当前：${modelLabel.value} / ${qualityLabel.value} / ${measurementDistanceLabel.value}`, 44, 492)
+  ctx.fillText(`提示：用控制器光标指向按钮，扣 Trigger 执行；Grip 抓取模型，双手 Grip 缩放。`, 44, 532)
+}
+
+function drawHudAuth(ctx: CanvasRenderingContext2D) {
+  ctx.save()
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.94)'
+  ctx.font = '700 28px Inter, sans-serif'
+  ctx.fillText('账户', 44, 286)
+  ctx.font = '22px Inter, sans-serif'
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.76)'
+  ctx.fillText(`当前：${authLabel.value}`, 44, 322)
+  ctx.fillText(`状态：${authMessage.value || '未操作'}`, 44, 356)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
+  ctx.font = '20px Inter, sans-serif'
+  ctx.fillText(viewerSupabaseEnabled ? 'Supabase 登录已启用' : '未配置 Supabase，使用本地会话', 44, 388)
+  ctx.restore()
+
+  drawHudButton(ctx, {
+    id: 'auth:signin',
+    label: authBusy.value ? '登录中' : '登录',
+    x: 44,
+    y: 424,
+    width: 124,
+    height: 42,
+    kind: 'button',
+    accent: '#87a5ff',
+    disabled: authBusy.value || !authEmail.value.trim(),
+    onActivate: () => { void signInToViewer() },
+  })
+  drawHudButton(ctx, {
+    id: 'auth:signout',
+    label: '退出',
+    x: 180,
+    y: 424,
+    width: 124,
+    height: 42,
+    kind: 'button',
+    accent: '#f2c38f',
+    disabled: authBusy.value,
+    onActivate: () => { void signOutOfViewer() },
+  })
+  drawHudListItem(ctx, {
+    id: 'auth:email',
+    label: authEmail.value.trim() || '邮箱',
+    x: 44,
+    y: 484,
+    width: 260,
+    height: 58,
+    kind: 'item',
+    accent: '#9ed0c6',
+    onActivate: () => {},
+  }, authPassword.value ? '已输入密码' : '点击后在页面输入邮箱/密码')
+}
+
+function drawHudCollection(ctx: CanvasRenderingContext2D) {
+  const yStart = 278
+  const rowHeight = 68
+  const maxRows = 5
+  if (hudView.value === 'models') {
+    modelList.value.slice(0, maxRows).forEach((model, index) => {
+      drawHudListItem(ctx, {
+        id: `model:${model.id}`,
+        label: model.name || model.displayName || model.id,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        onActivate: () => selectModel(model),
+      }, model.description || model.ply || '-', activeModelId.value === model.id)
+    })
+    return
+  }
+
+  if (hudView.value === 'search') {
+    searchResults.value.slice(0, maxRows).forEach((item, index) => {
+      drawHudListItem(ctx, {
+        id: `search:${item.id}`,
+        label: item.label,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        accent: '#f2c38f',
+        onActivate: () => selectSearchResult(item),
+      }, `${item.score != null ? `${Math.round(item.score * 100)}% · ` : ''}${item.description || item.markerId || '-'}`, selectedSearchResultId.value === item.id)
+    })
+    return
+  }
+
+  if (hudView.value === 'markers') {
+    markers.value.slice(0, maxRows).forEach((item, index) => {
+      drawHudListItem(ctx, {
+        id: `marker:${item.id}`,
+        label: item.label,
+        x: 44,
+        y: yStart + index * rowHeight,
+        width: 936,
+        height: 58,
+        kind: 'item',
+        accent: item.color || '#9ed0c6',
+        onActivate: () => selectMarker(item),
+      }, item.description || item.imageId || '-', selectedMarkerId.value === item.id)
+    })
+    return
+  }
+
+  navigationPoints.value.slice(0, maxRows).forEach((item, index) => {
+    drawHudListItem(ctx, {
+      id: `nav:${item.id}`,
+      label: item.label,
+      x: 44,
+      y: yStart + index * rowHeight,
+      width: 936,
+      height: 58,
+      kind: 'item',
+      accent: '#87a5ff',
+      onActivate: () => selectNavigationPoint(item.id),
+    }, item.description || item.kind || item.position.map((value) => value.toFixed(1)).join(', '), selectedNavPointId.value === item.id)
+  })
+}
+
+function drawHud() {
+  if (!hudContext || !hudCanvas) return
+  hudActions = []
+  const ctx = hudContext
+  const { width, height } = hudCanvas
+  ctx.clearRect(0, 0, width, height)
+  ctx.fillStyle = 'rgba(10, 12, 16, 0.82)'
+  ctx.fillRect(0, 0, width, height)
+  ctx.strokeStyle = 'rgba(230, 235, 240, 0.24)'
+  ctx.lineWidth = 3
+  ctx.strokeRect(2, 2, width - 4, height - 4)
+
+  ctx.fillStyle = '#f7f8fb'
+  ctx.font = '700 48px Inter, sans-serif'
+  ctx.fillText('BrainDance VR', 44, 72)
+  ctx.font = '28px Inter, sans-serif'
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.82)'
+  ctx.fillText(`${loadPhase.value.toUpperCase()} · ${loadText.value}`, 44, 118)
+
+  const barWidth = 520
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.14)'
+  ctx.fillRect(44, 148, barWidth, 18)
+  ctx.fillStyle = '#9ed0c6'
+  ctx.fillRect(44, 148, barWidth * loadProgress.value, 18)
+
+  ctx.font = '24px Inter, sans-serif'
+  ctx.fillStyle = '#f7f8fb'
+  ctx.fillText(`FPS ${fps.value || '--'}   |   模型 ${modelLabel.value}`, 44, 224)
+  ctx.fillText(`用户 ${authLabel.value}   |   状态 ${status.value}`, 44, 184)
+
+  drawHudTabs(ctx)
+  if (hudView.value === 'controls') {
+    drawHudControls(ctx)
+  } else if (hudView.value === 'auth') {
+    drawHudAuth(ctx)
+  } else {
+    drawHudCollection(ctx)
+  }
+
+  const hover = hudActions.find((action) => action.id === hudHoveredActionId)
+  ctx.fillStyle = hover ? '#f2c38f' : 'rgba(247, 248, 251, 0.58)'
+  ctx.font = '20px Inter, sans-serif'
+  ctx.textAlign = 'left'
+  ctx.fillText(hover ? `Trigger：${hover.label}` : '光标指向按钮后扣 Trigger 选择；B/Y 收起或展开 HUD。', 44, 614)
+
+  if (hudPointerHit && hudPointerDistance > 0) {
+    ctx.fillStyle = '#f2c38f'
+    ctx.beginPath()
+    ctx.arc(1000, 614, 7, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  hudTexture!.needsUpdate = true
+  updateHudPlaneBasis()
+}
+
+function placeHudInFrontOfUser() {
+  const camera = getRenderCamera()
+  if (!hudMesh || !camera) return
+  camera.updateMatrixWorld?.()
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  hudMesh.position.copy(camera.position).addScaledVector(forward, 1.35).add(new THREE.Vector3(0, -0.18, 0))
+  hudMesh.quaternion.copy(camera.quaternion)
+  hudMesh.visible = isMenuOpen.value || !isVrPresenting.value
+  updateHudPlaneBasis()
+}
+
+function refreshHudDisplay() {
+  if (!hudMesh) createHud()
+  placeHudInFrontOfUser()
+  drawHud()
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function ensureVignette() {
+  if (vignetteMesh) return
+  vignetteMesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.36, 0.82, 64),
+    new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.34,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  )
+  vignetteMesh.renderOrder = 1000
+  vignetteMesh.visible = false
+  ensureOverlayScene().add(vignetteMesh)
+}
+
+function updateVignette(visible: boolean) {
+  if (!vignetteEnabled.value) visible = false
+  ensureVignette()
+  const camera = getRenderCamera()
+  if (!vignetteMesh || !camera) return
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  vignetteMesh.position.copy(camera.position).addScaledVector(forward, 0.32)
+  vignetteMesh.quaternion.copy(camera.quaternion)
+  vignetteMesh.visible = visible && isVrPresenting.value
+}
+
+function drawRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + width, y, x + width, y + height, radius)
+  ctx.arcTo(x + width, y + height, x, y + height, radius)
+  ctx.arcTo(x, y + height, x, y, radius)
+  ctx.arcTo(x, y, x + width, y, radius)
+  ctx.closePath()
+}
+
+function drawControllerHudLabel(
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  hint: string,
+  x: number,
+  y: number,
+  anchorX: number,
+  anchorY: number,
+  active = false,
+) {
+  ctx.strokeStyle = active ? 'rgba(242, 195, 143, 0.9)' : 'rgba(158, 208, 198, 0.62)'
+  ctx.lineWidth = active ? 4 : 3
+  ctx.beginPath()
+  ctx.moveTo(anchorX, anchorY)
+  ctx.lineTo(x + 16, y + 24)
+  ctx.stroke()
+
+  ctx.fillStyle = active ? 'rgba(42, 34, 24, 0.92)' : 'rgba(7, 10, 18, 0.82)'
+  drawRoundRect(ctx, x, y, 180, 58, 16)
+  ctx.fill()
+  ctx.strokeStyle = active ? 'rgba(242, 195, 143, 0.95)' : 'rgba(135, 165, 255, 0.75)'
+  ctx.lineWidth = 3
+  drawRoundRect(ctx, x, y, 180, 58, 16)
+  ctx.stroke()
+
+  ctx.fillStyle = active ? '#f2c38f' : '#9ed0c6'
+  ctx.font = '700 20px sans-serif'
+  ctx.fillText(label, x + 16, y + 23)
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.94)'
+  ctx.font = '18px sans-serif'
+  ctx.fillText(hint, x + 16, y + 47)
+}
+
+function updateControllerHud(item: ControllerRigItem) {
+  const canvas = item.hud.userData.canvas as HTMLCanvasElement | undefined
+  const ctx = item.hud.userData.ctx as CanvasRenderingContext2D | undefined
+  const texture = item.hud.userData.texture as THREE.CanvasTexture | undefined
+  if (!canvas || !ctx || !texture) return
+  const isLeft = item.hand === 'left'
+  const state = item.state
+  const mirror = isLeft ? -1 : 1
+  const mapX = (value: number) => isLeft ? canvas.width - value : value
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#f7f8fb'
+  ctx.font = '700 26px sans-serif'
+  ctx.fillText(isLeft ? '左手柄' : '右手柄', mapX(isLeft ? 392 : 40), 42)
+
+  ctx.strokeStyle = isLeft ? 'rgba(158, 208, 198, 0.8)' : 'rgba(135, 165, 255, 0.8)'
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.ellipse(256, 214, 52, 108, 0.08 * mirror, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.12)'
+  ctx.beginPath()
+  ctx.arc(mapX(304), 128, 18, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(mapX(286), 176, 18, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(mapX(308), 224, 15, 0, Math.PI * 2)
+  ctx.fill()
+
+  drawControllerHudLabel(ctx, 'B键', '呼出 / 返回', mapX(58) - (isLeft ? 180 : 0), 62, mapX(304), 128, state.menuActive)
+  drawControllerHudLabel(ctx, 'A键', isLeft ? '重置视图' : '切换面板', mapX(52) - (isLeft ? 180 : 0), 144, mapX(286), 176, state.menuActive)
+  drawControllerHudLabel(ctx, '摇杆', isLeft ? '水平移动' : '平滑转头', mapX(324) - (isLeft ? 180 : 0), 80, mapX(308), 224, state.stickActive)
+  drawControllerHudLabel(ctx, '侧握', isLeft ? '拖拽物体' : '旋转物体', mapX(314) - (isLeft ? 180 : 0), 240, mapX(210), 248, state.gripActive)
+  drawControllerHudLabel(ctx, '扳机', isLeft ? '沿视线后退' : '沿视线前进', mapX(58) - (isLeft ? 180 : 0), 286, mapX(246), 320, state.triggerActive)
+
+  texture.needsUpdate = true
+}
+
+function createControllerHud(hand: ControllerHand) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 384
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建手柄 HUD Canvas')
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.05), material)
+  panel.name = 'braindance-controller-hud'
+  panel.renderOrder = hudRenderOrder + 3
+  panel.position.set(hand === 'left' ? -0.1 : 0.1, 0.13, -0.12)
+  panel.rotation.set(-0.18, hand === 'left' ? 0.12 : -0.12, 0)
+  panel.scale.setScalar(0.18)
+  panel.userData.canvas = canvas
+  panel.userData.ctx = ctx
+  panel.userData.texture = texture
+  return panel
+}
+
+function createFallbackControllerModel(hand: ControllerHand) {
+  const group = new THREE.Group()
+  group.name = 'braindance-fallback-controller'
+  const shellMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2b3445,
+    roughness: 0.42,
+    metalness: 0.18,
+    emissive: 0x07121a,
+    emissiveIntensity: 0.25,
+    envMapIntensity: 1.5,
+  })
+  const accentMaterial = new THREE.MeshStandardMaterial({
+    color: 0x46d9ff,
+    emissive: 0x159ac2,
+    emissiveIntensity: 0.9,
+    roughness: 0.2,
+    metalness: 0.1,
+    envMapIntensity: 1.6,
+  })
+  const darkMaterial = new THREE.MeshStandardMaterial({
+    color: 0x111827,
+    roughness: 0.55,
+    metalness: 0.05,
+    envMapIntensity: 1,
+  })
+  const buttonMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe8f4ff,
+    roughness: 0.25,
+    metalness: 0.05,
+    envMapIntensity: 1.8,
+  })
+
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.035, 0.11, 8, 20),
+    shellMaterial,
+  )
+  body.rotation.x = Math.PI / 2
+  body.position.set(0, 0, 0)
+
+  const handle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.032, 0.026, 0.13, 24),
+    shellMaterial,
+  )
+  handle.rotation.x = 0.22
+  handle.position.set(0, -0.055, 0.035)
+
+  const topPanel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.07, 0.022, 0.09),
+    darkMaterial,
+  )
+  topPanel.position.set(0, 0.025, -0.025)
+  topPanel.rotation.x = -0.22
+
+  const trigger = new THREE.Mesh(
+    new THREE.BoxGeometry(0.032, 0.018, 0.04),
+    accentMaterial,
+  )
+  trigger.name = 'trigger'
+  trigger.position.set(0, -0.025, -0.055)
+  trigger.rotation.x = 0.35
+
+  const stickBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.018, 0.018, 0.008, 32),
+    darkMaterial,
+  )
+  stickBase.rotation.x = Math.PI / 2
+  stickBase.position.set(0, 0.043, -0.045)
+
+  const stick = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.011, 0.014, 0.018, 32),
+    buttonMaterial,
+  )
+  stick.name = 'stick'
+  stick.rotation.x = Math.PI / 2
+  stick.position.set(0, 0.052, -0.045)
+
+  const buttonA = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.01, 0.01, 0.006, 24),
+    buttonMaterial,
+  )
+  buttonA.name = 'button-a'
+  buttonA.rotation.x = Math.PI / 2
+  buttonA.position.set(hand === 'right' ? 0.018 : -0.018, 0.048, -0.005)
+
+  const buttonB = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.01, 0.01, 0.006, 24),
+    buttonMaterial,
+  )
+  buttonB.name = 'button-b'
+  buttonB.rotation.x = Math.PI / 2
+  buttonB.position.set(hand === 'right' ? -0.018 : 0.018, 0.048, 0.015)
+
+  const sideButton = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.01, 20),
+    accentMaterial,
+  )
+  sideButton.name = 'grip-button'
+  sideButton.rotation.z = Math.PI / 2
+  sideButton.position.set(hand === 'left' ? -0.037 : 0.037, -0.018, 0.018)
+
+  const lightStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.008, 0.006, 0.12),
+    accentMaterial,
+  )
+  lightStrip.name = 'light-strip'
+  lightStrip.position.set(hand === 'right' ? 0.035 : -0.035, 0.004, 0)
+
+  const tip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 24, 16),
+    accentMaterial,
+  )
+  tip.name = 'pointer-tip'
+  tip.position.set(0, 0.005, -0.09)
+
+  group.add(body, handle, topPanel, trigger, stickBase, stick, buttonA, buttonB, sideButton, lightStrip, tip)
+  group.scale.setScalar(1.15)
+  return group
+}
+
+function setFallbackButtonState(fallback: THREE.Group, state: ControllerHudState) {
+  const trigger = fallback.getObjectByName('trigger') as THREE.Mesh | undefined
+  if (trigger?.material && !Array.isArray(trigger.material)) {
+    const material = trigger.material as THREE.MeshStandardMaterial
+    material.emissiveIntensity = state.triggerActive ? 2.4 : 0.9
+    trigger.scale.set(1, state.triggerActive ? 0.82 : 1, state.triggerActive ? 0.92 : 1)
+  }
+
+  const grip = fallback.getObjectByName('grip-button') as THREE.Mesh | undefined
+  if (grip?.material && !Array.isArray(grip.material)) {
+    ;(grip.material as THREE.MeshStandardMaterial).emissiveIntensity = state.gripActive ? 1.8 : 0.9
+  }
+
+  const stick = fallback.getObjectByName('stick') as THREE.Mesh | undefined
+  if (stick?.material && !Array.isArray(stick.material)) {
+    ;(stick.material as THREE.MeshStandardMaterial).emissiveIntensity = state.stickActive ? 0.45 : 0
+  }
+}
+
+function updateControllerHudFacing() {
+  // 手柄 HUD 固定在 controllerGrip 的局部空间里，避免随头显转动导致空间关系混乱。
+}
+
+function applyEnvironmentMapToModel(model: THREE.Object3D, envMap: THREE.Texture | null) {
+  const controllerModel = model as THREE.Object3D & { setEnvironmentMap?: (texture: THREE.Texture) => void }
+  if (envMap && controllerModel.setEnvironmentMap) controllerModel.setEnvironmentMap(envMap)
+  model.traverse((child) => {
+    const mesh = child as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      const standardMaterial = material as THREE.MeshStandardMaterial
+      if ('envMap' in standardMaterial && envMap) {
+        standardMaterial.envMap = envMap
+        standardMaterial.envMapIntensity = Math.max(standardMaterial.envMapIntensity || 0, 1.25)
+        standardMaterial.needsUpdate = true
+      }
+    }
+  })
+}
+
+function removeControllerVisuals(grip: THREE.Group) {
+  const removableNames = new Set([
+    'braindance-fallback-controller',
+    'official-controller-model',
+    'braindance-controller-hud',
+  ])
+  const removable = grip.children.filter((child) => removableNames.has(child.name))
+  for (const child of removable) {
+    grip.remove(child)
+    disposeObject3D(child)
+  }
+}
+
+function watchOfficialControllerModel(item: ControllerRigItem) {
+  if (preferStylizedControllerModel) {
+    item.fallback.visible = true
+    item.officialModel.visible = false
+    return
+  }
+  item.fallback.visible = false
+  if (!enableControllerFallbackModel) return
+  let checks = 0
+  item.modelCheckTimer = window.setInterval(() => {
+    checks += 1
+    applyEnvironmentMapToModel(item.officialModel, vrEnvironmentMap)
+    let hasOfficialMesh = false
+    item.officialModel.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) hasOfficialMesh = true
+    })
+    if (hasOfficialMesh) {
+      item.fallback.visible = false
+      window.clearInterval(item.modelCheckTimer)
+      item.modelCheckTimer = undefined
+    } else if (checks > 180) {
+      item.fallback.visible = enableControllerFallbackModel
+      window.clearInterval(item.modelCheckTimer)
+      item.modelCheckTimer = undefined
+    }
+  }, 16)
+}
+
+function createNicePointerRay() {
+  const group = new THREE.Group()
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x55ddff,
+    transparent: true,
+    opacity: 0.45,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const ray = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.002, 0.006, 1.5, 16, 1, true),
+    material,
+  )
+  ray.name = 'pointer-ray-beam'
+  ray.rotation.x = Math.PI / 2
+  ray.position.z = -0.75
+  group.add(ray)
+  group.userData.ray = ray
+  group.visible = false
+  group.renderOrder = hudPointerRenderOrder
+  return group
+}
+
+function getPointerRayMaterial() {
+  const ray = controllerRay?.userData.ray as THREE.Mesh | undefined
+  if (!ray?.material || Array.isArray(ray.material)) return null
+  return ray.material as THREE.MeshBasicMaterial
+}
+
+function updateHud(nowMs: number) {
+  if (!hudMesh) return
+  placeHudInFrontOfUser()
+  updateControllerHudFacing()
+  if (nowMs - lastHudDrawTime > 180) {
+    lastHudDrawTime = nowMs
+    drawHud()
+  }
+}
+
+function getControllerByHandedness(handedness: XRHandedness) {
+  if (handedness === 'left') return leftController
+  if (handedness === 'right') return rightController
+  return null
+}
+
+function ensureControllerRig() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer) return
+  if (leftController && rightController) return
+
+  const envMap = setupVrLighting()
+  controllerModelFactory = controllerModelFactory || new XRControllerModelFactory()
+  leftController = runtime.renderer.xr.getController(0)
+  rightController = runtime.renderer.xr.getController(1)
+  leftControllerGrip = runtime.renderer.xr.getControllerGrip(0)
+  rightControllerGrip = runtime.renderer.xr.getControllerGrip(1)
+  const overlay = ensureOverlayScene()
+  overlay.add(leftController)
+  overlay.add(rightController)
+  overlay.add(leftControllerGrip)
+  overlay.add(rightControllerGrip)
+
+  const grips: Array<{ hand: ControllerHand; grip: THREE.Group; controller: THREE.Group }> = [
+    { hand: 'left', grip: leftControllerGrip, controller: leftController },
+    { hand: 'right', grip: rightControllerGrip, controller: rightController },
+  ]
+  for (const item of grips) {
+    removeControllerVisuals(item.grip)
+    const fallback = createFallbackControllerModel(item.hand)
+    fallback.visible = preferStylizedControllerModel && enableControllerFallbackModel
+    item.grip.add(fallback)
+    const model = controllerModelFactory.createControllerModel(item.grip)
+    model.name = 'official-controller-model'
+    model.visible = !preferStylizedControllerModel
+    applyEnvironmentMapToModel(model, envMap)
+    item.grip.add(model)
+    const hud = createControllerHud(item.hand)
+    item.grip.add(hud)
+    const rigItem: ControllerRigItem = {
+      hand: item.hand,
+      controller: item.controller,
+      grip: item.grip,
+      hud,
+      fallback,
+      officialModel: model,
+      state: {},
+    }
+    controllerRigItems.set(item.hand, rigItem)
+    updateControllerHud(rigItem)
+    watchOfficialControllerModel(rigItem)
+  }
+
+  controllerRay = createNicePointerRay()
+  rightController.add(controllerRay)
+
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: 0x88f4ff,
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.9,
+  })
+  controllerTip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 24, 12),
+    tipMaterial,
+  )
+  controllerTip.renderOrder = hudPointerRenderOrder + 1
+  controllerTip.position.set(0, 0, -1.5)
+  rightController.add(controllerTip)
+}
+
+function getWorldRootScale() {
+  return getSceneManipulationTarget()?.scale.x || worldRoot?.scale.x || 1
+}
+
+function getSceneManipulationTarget() {
+  return getRuntimeViewer()?.splatMesh || worldRoot
+}
+
+function isButtonPressed(gamepad: Gamepad, indexes: number[]) {
+  return indexes.some((index) => Boolean(gamepad.buttons[index]?.pressed))
+}
+
+function applyInputDeadzone(value: number, deadzone = 0.18) {
+  if (!Number.isFinite(value) || Math.abs(value) <= deadzone) return 0
+  return value
+}
+
+function getThumbstickAxes(gamepad: Gamepad) {
+  const axes = gamepad.axes || []
+  const hasSecondaryStick = axes.length >= 4 && (Math.abs(axes[2] || 0) > 0.01 || Math.abs(axes[3] || 0) > 0.01)
+  const rawX = hasSecondaryStick ? axes[2] : axes[0]
+  const rawY = hasSecondaryStick ? axes[3] : axes[1]
+  return {
+    x: applyInputDeadzone(rawX || 0),
+    y: applyInputDeadzone(rawY || 0),
+  }
+}
+
+function wasPressedNow(hand: ControllerHand, action: string, pressed: boolean) {
+  const key = `${hand}:${action}`
+  const previous = buttonLatch.get(key) || false
+  buttonLatch.set(key, pressed)
+  return pressed && !previous
+}
+
+function wasAxisCrossed(hand: ControllerHand, action: string, value: number, threshold = 0.7) {
+  return wasPressedNow(hand, action, Math.abs(value) >= threshold)
+}
+
+function getControllerWorldPose(controller: THREE.Object3D) {
+  return {
+    position: controller.getWorldPosition(new THREE.Vector3()),
+    quaternion: controller.getWorldQuaternion(new THREE.Quaternion()),
+  }
+}
+
+function getControllerPointerDirection(controller: THREE.Object3D) {
+  // WebXR 控制器的指向线沿本地 -Z，不能直接用 Object3D.getWorldDirection 的 +Z 结果。
+  return new THREE.Vector3(0, 0, -1)
+    .applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()))
+    .normalize()
+}
+
+function getActiveControllerPoses() {
+  if (!leftController || !rightController) return null
+  return {
+    left: getControllerWorldPose(leftController),
+    right: getControllerWorldPose(rightController),
+  }
+}
+
+function getHudPointerController() {
+  const session = xrSession || getRuntimeViewer()?.renderer?.xr.getSession() || null
+  if (!session) return rightController || leftController
+  const sources = Array.from(session.inputSources || [])
+  const preferred = sources.find((source: XRInputSource) => source.handedness === 'right')
+    || sources.find((source: XRInputSource) => source.handedness === 'left')
+  if (preferred) {
+    return getControllerByHandedness(preferred.handedness) || rightController || leftController
+  }
+  return rightController || leftController
+}
+
+function getHudActionAtUv(uv: THREE.Vector2) {
+  if (!hudCanvas) return null
+  const x = uv.x * hudCanvas.width
+  const y = (1 - uv.y) * hudCanvas.height
+  return hudActions.find(
+    (action) =>
+      x >= action.x &&
+      x <= action.x + action.width &&
+      y >= action.y &&
+      y <= action.y + action.height,
+  ) || null
+}
+
+function activateHudAction(action: HudAction | null) {
+  if (!action || action.disabled) return false
+  try {
+    action.onActivate()
+    drawHud()
+    return true
+  } catch (error) {
+    console.warn('[BrainDance VR] HUD action failed:', action.id, error)
+    return false
+  }
+}
+
+function updateHudPointer(triggerPressed: boolean) {
+  if (!hudMesh) {
+    hudHoveredActionId = null
+    hudPointerHit = false
+    return
+  }
+  const controller = getHudPointerController()
+  if (!controller) {
+    hudHoveredActionId = null
+    hudPointerHit = false
+    return
+  }
+
+  const origin = controller.getWorldPosition(new THREE.Vector3())
+  const direction = getControllerPointerDirection(controller)
+  hudRaycaster.set(origin, direction)
+  hudRaycaster.far = Math.max(6, hudPointerDistance + 2)
+  const hit = intersectHudPlane(origin, direction) || null
+  const previousHoverId = hudHoveredActionId
+  hudPointerHit = Boolean(hit)
+
+  if (!hit) {
+    hudHoveredActionId = null
+    if (controllerRay) {
+      controllerRay.visible = isMenuOpen.value
+      controllerRay.scale.z = Math.max(1, hudPointerDistance / 1.5)
+    }
+    if (controllerTip) {
+      controllerTip.visible = isMenuOpen.value
+      controllerTip.position.z = -Math.max(0.05, hudPointerDistance)
+    }
+    if (previousHoverId !== hudHoveredActionId) drawHud()
+    if (triggerPressed && !isMenuOpen.value) {
+      handlePrimarySelect()
+    }
+    return
+  }
+
+  hudHoveredActionId = getHudActionAtUv(hit.uv)?.id || null
+  hudPointerDistance = origin.distanceTo(hit.point)
+  hudPointerWorldPoint = hit.point.clone()
+
+  if (controllerRay) {
+    controllerRay.visible = true
+    controllerRay.scale.z = Math.max(0.01, hit.distance / 1.5)
+  }
+  if (controllerTip) {
+    controllerTip.visible = true
+    controllerTip.position.z = -Math.max(0.05, hit.distance)
+  }
+
+  if (triggerPressed && hudHoveredActionId) {
+    const action = hudActions.find((item) => item.id === hudHoveredActionId) || null
+    activateHudAction(action)
+  }
+
+  if (hudHoveredActionId && controllerTip && controllerRay) {
+    const action = hudActions.find((item) => item.id === hudHoveredActionId)
+    if (action) {
+      const color = action.kind === 'tab' ? 0x87a5ff : action.kind === 'item' ? 0xf2c38f : 0x9ed0c6
+      ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(color)
+      getPointerRayMaterial()?.color.setHex(color)
+    }
+  } else if (controllerTip && controllerRay) {
+    ;(controllerTip.material as THREE.MeshBasicMaterial).color.setHex(0xffffff)
+    getPointerRayMaterial()?.color.setHex(0x55ddff)
+  }
+
+  if (previousHoverId !== hudHoveredActionId) {
+    drawHud()
+  }
+
+  if (triggerPressed && !hudHoveredActionId && !isMenuOpen.value) {
+    handlePrimarySelect()
+  }
+}
+
+function beginOneHandGrab(hand: ControllerHand, controller: THREE.Object3D) {
+  const target = getSceneManipulationTarget()
+  if (!target) return
+  const pose = getControllerWorldPose(controller)
+  grabState = {
+    mode: 'one-hand',
+    hand,
+    startControllerPosition: pose.position,
+    startControllerQuaternion: pose.quaternion,
+    startObjectPosition: target.position.clone(),
+    startObjectQuaternion: target.quaternion.clone(),
+  }
+}
+
+function beginTwoHandGrab() {
+  const target = getSceneManipulationTarget()
+  if (!target) return
+  const poses = getActiveControllerPoses()
+  if (!poses) return
+  const midpoint = poses.left.position.clone().add(poses.right.position).multiplyScalar(0.5)
+  grabState = {
+    mode: 'two-hand',
+    startDistance: Math.max(0.001, poses.left.position.distanceTo(poses.right.position)),
+    startMidpoint: midpoint,
+    startObjectPosition: target.position.clone(),
+    startObjectScale: target.scale.clone(),
+  }
+}
+
+function updateGrabState(leftGrip: boolean, rightGrip: boolean) {
+  const target = getSceneManipulationTarget()
+  if (!target) return
+  if (!leftGrip && !rightGrip) {
+    grabState = null
+    return
+  }
+
+  if (leftGrip && rightGrip) {
+    if (grabState?.mode !== 'two-hand') beginTwoHandGrab()
+    const poses = getActiveControllerPoses()
+    if (!poses || grabState?.mode !== 'two-hand') return
+    const currentDistance = Math.max(0.001, poses.left.position.distanceTo(poses.right.position))
+    const currentMidpoint = poses.left.position.clone().add(poses.right.position).multiplyScalar(0.5)
+    const scaleFactor = THREE.MathUtils.clamp(currentDistance / grabState.startDistance, 0.25, 4)
+    target.scale.copy(grabState.startObjectScale).multiplyScalar(scaleFactor)
+    target.position.copy(grabState.startObjectPosition).add(currentMidpoint.sub(grabState.startMidpoint))
+    userScale.value = getWorldRootScale()
+    getRuntimeViewer()?.forceRenderNextFrame?.()
+    return
+  }
+
+  const activeHand: ControllerHand = leftGrip ? 'left' : 'right'
+  const controller = activeHand === 'left' ? leftController : rightController
+  if (!controller) return
+  if (grabState?.mode !== 'one-hand' || grabState.hand !== activeHand) beginOneHandGrab(activeHand, controller)
+  if (grabState?.mode !== 'one-hand') return
+
+  const pose = getControllerWorldPose(controller)
+  const rotationDelta = pose.quaternion.clone().multiply(grabState.startControllerQuaternion.clone().invert())
+  const translationDelta = pose.position.clone().sub(grabState.startControllerPosition)
+  // 单手抓取沿用移动端 viewer 的“操作模型而不是改相机”思路，避免破坏 WebXR 头部追踪。
+  target.position.copy(grabState.startObjectPosition).add(translationDelta)
+  target.quaternion.copy(rotationDelta.multiply(grabState.startObjectQuaternion))
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function updateControllerState(nowMs: number) {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer || !xrSession) return
+  ensureControllerRig()
+  if (!hudMesh) createHud()
+
+  const session = runtime.renderer.xr.getSession() || xrSession
+  if (!session) return
+  const dt = currentControllerFrame > 0 ? THREE.MathUtils.clamp((nowMs - currentControllerFrame) / 1000, 1 / 120, 0.06) : 1 / 90
+  currentControllerFrame = nowMs
+
+  let leftGrip = false
+  let rightGrip = false
+  let moving = false
+  let hudTriggerPressed = false
+  const debugLines: string[] = []
+  for (const source of session.inputSources || []) {
+    const gamepad = source.gamepad
+    if (!gamepad) continue
+    const axes = gamepad.axes || []
+    const { x, y } = getThumbstickAxes(gamepad)
+    debugLines.push(`${source.handedness || 'unknown'} profiles=${source.profiles?.join(',') || '-'} axes=[${axes.map((axis) => axis.toFixed(2)).join(', ')}] buttons=${gamepad.buttons.map((button, index) => `${index}:${button.pressed ? 'P' : '-'}:${button.value.toFixed(2)}`).join(' ')}`)
+    const controller = getControllerByHandedness(source.handedness)
+    if (!controller) continue
+    const hand = source.handedness === 'left' ? 'left' : source.handedness === 'right' ? 'right' : null
+    if (!hand) continue
+    const triggerPressed = isButtonPressed(gamepad, [0])
+    const gripPressed = isButtonPressed(gamepad, [1])
+    const menuPressed = isButtonPressed(gamepad, [4, 5, 6, 7])
+    if (hand === 'left') leftGrip = gripPressed
+    if (hand === 'right') rightGrip = gripPressed
+    const rigItem = controllerRigItems.get(hand)
+    if (rigItem) {
+      rigItem.state = {
+        triggerActive: triggerPressed,
+        gripActive: gripPressed,
+        stickActive: Math.abs(x) > 0 || Math.abs(y) > 0,
+        menuActive: menuPressed,
+      }
+      updateControllerHud(rigItem)
+      setFallbackButtonState(rigItem.fallback, rigItem.state)
+    }
+
+    if (triggerPressed) {
+      moving = moveRigAlongView(dt, hand === 'left' ? -1 : 1) || moving
+    }
+
+    if (hand === 'left') {
+      moving = moveRig(x, -y, dt) || moving
+      if (wasPressedNow(hand, 'reset', menuPressed)) {
+        resetView()
+      }
+    } else if (hand === 'right') {
+      moving = turnViewRig(x, y, dt) || moving
+      if (wasPressedNow(hand, 'menu', menuPressed)) {
+        isMenuOpen.value = !isMenuOpen.value
+      }
+      if (wasPressedNow(hand, 'trigger', triggerPressed)) {
+        hudTriggerPressed = true
+      }
+    }
+  }
+
+  if (debugLines.length > 0) {
+    controllerDebug.value = debugLines.join('\n')
+  }
+  updateGrabState(leftGrip, rightGrip)
+  updateDirectionHint()
+  updateVignette(moving)
+  updateHudPointer(hudTriggerPressed)
+  updateHud(nowMs)
+}
+
+function startControllerLoop() {
+  stopControllerLoop()
+  const tick = (nowMs: number) => {
+    updateControllerState(nowMs)
+    controllerRafId = window.requestAnimationFrame(tick)
+  }
+  controllerRafId = window.requestAnimationFrame(tick)
+}
+
+function renderSceneWithCamera(
+  runtime: RuntimeGaussianViewer,
+  camera: THREE.PerspectiveCamera,
+  targetRenderer: THREE.WebGLRenderer = runtime.renderer as THREE.WebGLRenderer,
+) {
+  if (!targetRenderer || !runtime.splatMesh) return
+
+  const savedAutoClear = targetRenderer.autoClear
+  if (runtime.threeScene?.children.some((child) => child.visible)) {
+    targetRenderer.render(runtime.threeScene, camera)
+    targetRenderer.autoClear = false
+  }
+
+  targetRenderer.render(runtime.splatMesh, camera)
+  targetRenderer.autoClear = false
+
+  const focusOpacity = runtime.sceneHelper?.getFocusMarkerOpacity?.() ?? 0
+  if (focusOpacity > 0 && runtime.sceneHelper?.focusMarker) {
+    targetRenderer.render(runtime.sceneHelper.focusMarker, camera)
+  }
+  if (runtime.showControlPlane && runtime.sceneHelper?.controlPlane) {
+    targetRenderer.render(runtime.sceneHelper.controlPlane, camera)
+  }
+
+  renderOverlaySceneWithRenderer(targetRenderer, camera)
+  targetRenderer.autoClear = savedAutoClear
+}
+
+function renderSpectatorFrame() {
+  const runtime = getRuntimeViewer()
+  const setup = ensureSpectatorRenderer()
+  if (!runtime?.splatMesh || !setup) return
+
+  resizeSpectatorRenderer()
+  if (!updateSpectatorHeadsetCamera()) {
+    setup.renderer.clear()
+    return
+  }
+  renderSceneWithCamera(runtime, setup.camera, setup.renderer)
+}
+
+function renderSpectatorFrameThrottled(nowMs = performance.now()) {
+  if (nowMs - lastSpectatorRenderTime < spectatorRenderIntervalMs) return
+  lastSpectatorRenderTime = nowMs
+  renderSpectatorFrame()
+}
+
+function startStereoPreviewLoop() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer || !runtime.camera) return
+
+  const baseCamera = runtime.camera
+  const leftCamera = baseCamera.clone()
+  const rightCamera = baseCamera.clone()
+
+  const renderStereoFrame = () => {
+    const currentRuntime = getRuntimeViewer()
+    if (!currentRuntime?.renderer || !currentRuntime.camera) return
+
+    currentRuntime.controls?.update()
+    currentRuntime.update?.()
+
+    const renderer = currentRuntime.renderer
+    const camera = currentRuntime.camera
+    const canvas = renderer.domElement
+    const width = canvas.width
+    const height = canvas.height
+    const halfWidth = Math.floor(width / 2)
+
+    camera.updateMatrixWorld()
+    leftCamera.copy(camera)
+    rightCamera.copy(camera)
+
+    const eyeOffset = new THREE.Vector3(0.032, 0, 0)
+    const leftOffset = eyeOffset.clone().multiplyScalar(-1).applyQuaternion(camera.quaternion)
+    const rightOffset = eyeOffset.clone().applyQuaternion(camera.quaternion)
+
+    leftCamera.position.add(leftOffset)
+    rightCamera.position.add(rightOffset)
+    leftCamera.aspect = Math.max(0.1, halfWidth / height)
+    rightCamera.aspect = Math.max(0.1, halfWidth / height)
+    leftCamera.updateProjectionMatrix()
+    rightCamera.updateProjectionMatrix()
+    leftCamera.updateMatrixWorld()
+    rightCamera.updateMatrixWorld()
+
+    renderer.setScissorTest(true)
+    renderer.setViewport(0, 0, halfWidth, height)
+    renderer.setScissor(0, 0, halfWidth, height)
+    renderSceneWithCamera(currentRuntime, leftCamera)
+
+    renderer.setViewport(halfWidth, 0, width - halfWidth, height)
+    renderer.setScissor(halfWidth, 0, width - halfWidth, height)
+    renderSceneWithCamera(currentRuntime, rightCamera)
+    renderer.setScissorTest(false)
+
+    stereoRafId = window.requestAnimationFrame(renderStereoFrame)
+  }
+
+  stopStereoLoop()
+  renderStereoFrame()
+}
+
+function resolveMatrixPayload(matrix: unknown) {
+  const normalized = normalizeMatrixForViewer(matrix)
+  if (!normalized || normalized.length !== 16) return null
+  const runtime = getRuntimeViewer()
+  const rawMatrix = new THREE.Matrix4().fromArray(normalized)
+  const finalMatrix = new THREE.Matrix4()
+  const splatMesh = runtime?.splatMesh
+  if (splatMesh) {
+    splatMesh.updateMatrixWorld()
+    finalMatrix.copy(splatMesh.matrixWorld).multiply(rawMatrix)
+  } else {
+    finalMatrix.copy(rawMatrix)
+  }
+  return decomposeMatrix(finalMatrix.toArray())
+}
+
+function selectModel(model: BrainDanceRecallModel) {
+  const index = modelList.value.findIndex((item) => item.id === model.id)
+  if (index < 0) return
+  activeModelIndex = index
+  activeModelUrl.value = model.modelUrl || model.ply
+  activeModelId.value = model.id
+  scheduleClientStateSave()
+  loadModel(model, { preserveState: true })
+}
+
+function selectMarker(marker: BrainDanceRecallMarker) {
+  selectedMarkerId.value = marker.id
+  selectedSearchResultId.value = ''
+  selectedNavPointId.value = ''
+  scheduleClientStateSave()
+  if (marker.matrix) {
+    flyToMatrix(marker.matrix)
+  } else if (marker.position) {
+    flyToPosition(marker.position)
+  }
+}
+
+function selectSearchResult(result: BrainDanceRecallSearchResult) {
+  selectedSearchResultId.value = result.id
+  selectedMarkerId.value = ''
+  selectedNavPointId.value = ''
+  scheduleClientStateSave()
+  if (result.matrix) {
+    flyToMatrix(result.matrix)
+  } else if (result.position) {
+    flyToPosition(result.position)
+  } else if (result.markerId) {
+    const marker = markers.value.find((item) => item.id === result.markerId)
+    if (marker) selectMarker(marker)
+  }
+}
+
+function selectNavigationPoint(pointId: string) {
+  const point = navigationPoints.value.find((item) => item.id === pointId)
+  if (!point) return
+  selectedNavPointId.value = point.id
+  selectedMarkerId.value = ''
+  selectedSearchResultId.value = ''
+  scheduleClientStateSave()
+  if (point.matrix) flyToMatrix(point.matrix)
+  else flyToPosition(point.position)
+}
+
+function nextNavigationPoint() {
+  if (navigationPoints.value.length === 0) return
+  navPointIndex.value = (navPointIndex.value + 1) % navigationPoints.value.length
+  const point = navigationPoints.value[navPointIndex.value]
+  if (point) selectNavigationPoint(point.id)
+}
+
+function handlePrimarySelect() {
+  if (measurementEnabled.value) {
+    addMeasurementPointFromCamera()
+    return
+  }
+  if (searchResults.value.length > 0) {
+    const currentIndex = Math.max(0, searchResults.value.findIndex((item) => item.id === selectedSearchResultId.value))
+    const next = searchResults.value[currentIndex] || searchResults.value[0]
+    if (next) selectSearchResult(next)
+    return
+  }
+  if (navigationPoints.value.length > 0) nextNavigationPoint()
+}
+
+function selectModelByOffset(offset: number) {
+  if (isVrPresenting.value) {
+    status.value = 'VR 会话中已禁用摇杆切换模型，请先退出 VR 或使用网页列表切换'
+    return
+  }
+  if (modelList.value.length === 0) return
+  const currentIndex = Math.max(0, modelList.value.findIndex((item) => item.id === activeModelId.value))
+  const nextIndex = (currentIndex + offset + modelList.value.length) % modelList.value.length
+  const nextModel = modelList.value[nextIndex]
+  if (nextModel) selectModel(nextModel)
+}
+
+function flyToMatrix(matrix: unknown) {
+  const runtime = getRuntimeViewer()
+  const resolved = resolveMatrixPayload(matrix)
+  if (!resolved) return
+  if (isVrPresenting.value && runtime?.renderer?.xr?.isPresenting) {
+    focusSceneOnPoint(resolved.position)
+  } else if (runtime?.camera) {
+    runtime.camera.position.copy(resolved.position)
+    runtime.camera.quaternion.copy(resolved.quaternion)
+  }
+  runtime?.forceRenderNextFrame?.()
+}
+
+function flyToPosition(position: [number, number, number]) {
+  const runtime = getRuntimeViewer()
+  if (isVrPresenting.value && runtime?.renderer?.xr?.isPresenting) {
+    focusSceneOnPoint(new THREE.Vector3(position[0], position[1], position[2]))
+  } else if (runtime?.camera) {
+    runtime.camera.position.set(position[0], position[1], position[2])
+  }
+  runtime?.forceRenderNextFrame?.()
+}
+
+function addMeasurementPointFromCamera() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return
+  const forward = new THREE.Vector3()
+  runtime.camera.getWorldDirection(forward)
+  const point = runtime.camera.position.clone().addScaledVector(forward, 1.25)
+  const next: [number, number, number] = [point.x, point.y, point.z]
+  measurementPoints.value = measurementPoints.value.length >= 2 ? [next] : [...measurementPoints.value, next]
+  updateMeasurementVisual()
+}
+
+function clearMeasurement() {
+  measurementPoints.value = []
+  updateMeasurementVisual()
+}
+
+function updateMeasurementVisual() {
+  disposeObject3D(measurementLine)
+  disposeObject3D(measurementLabelMesh)
+  measurementLine = null
+  measurementLabelMesh = null
+  if (!worldRoot || measurementPoints.value.length < 2) return
+  const points = measurementPoints.value.map((point) => new THREE.Vector3(...point))
+  const firstPoint = points[0]
+  const secondPoint = points[1]
+  if (!firstPoint || !secondPoint) return
+  measurementLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color: 0xf2c38f }),
+  )
+  const mid = firstPoint.clone().add(secondPoint).multiplyScalar(0.5)
+  const sprite = createTextSprite(measurementDistanceLabel.value, '#f2c38f')
+  sprite.position.copy(mid).add(new THREE.Vector3(0, 0.12, 0))
+  measurementLabelMesh = sprite
+  worldRoot.add(measurementLine, measurementLabelMesh)
+}
+
+function updateClippingPlaneHelper() {
+  disposeObject3D(clippingPlaneHelper)
+  clippingPlaneHelper = null
+  if (!worldRoot || !clippingEnabled.value) return
+  clippingPlaneHelper = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 2.2),
+    new THREE.MeshBasicMaterial({
+      color: 0x87a5ff,
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+    }),
+  )
+  clippingPlaneHelper.position.set(0, activeConfig.value?.userHeight || 1.4, -clippingDistance.value)
+  worldRoot.add(clippingPlaneHelper)
+}
+
+function updateDirectionHint() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera) return
+  const target = getActiveTargetPosition()
+  if (!target) {
+    lastDirectionHint.value = '暂无导航目标'
+    return
+  }
+  const cameraPos = runtime.camera.getWorldPosition(new THREE.Vector3())
+  const cameraForward = new THREE.Vector3()
+  runtime.camera.getWorldDirection(cameraForward)
+  cameraForward.y = 0
+  cameraForward.normalize()
+  const toTarget = target.clone().sub(cameraPos)
+  const distance = toTarget.length()
+  toTarget.y = 0
+  toTarget.normalize()
+  const cross = new THREE.Vector3().crossVectors(cameraForward, toTarget).y
+  const dot = cameraForward.dot(toTarget)
+  const direction = dot > 0.85 ? '前方' : cross > 0 ? '左前方' : '右前方'
+  lastDirectionHint.value = `${direction} ${distance.toFixed(1)}m`
+}
+
+function resolveAssetUrl(assetUrl: string | undefined) {
+  return resolveRelativeAssetUrl(assetUrl, window.location.href)
+}
+
+function getActiveTargetPosition() {
+  const result = activeSearchResult.value
+  if (result) return markerPositionFromInput(result)
+  const marker = activeMarker.value
+  if (marker) return markerPositionFromInput(marker)
+  const nav = navigationPoints.value.find((point) => point.id === selectedNavPointId.value)
+  if (nav) return new THREE.Vector3(...nav.position)
+  return null
+}
+
+async function addSplatSceneWithFallback(payload: BrainDanceViewerPayload, config: BrainDanceVrConfig): Promise<string> {
+  const sourceUrl = resolveAssetUrl(payload.modelUrl || payload.ply)
+  const candidates = config.preferCompressedModel ? getVrModelCandidates(sourceUrl) : [sourceUrl]
+  let lastError: unknown = null
+
+  for (const candidate of candidates) {
+    const format = getSceneFormatForUrl(candidate)
+    try {
+      setLoadState('model', `加载 3DGS 模型：${candidate}`, 0.2)
+      await viewer?.addSplatScene(candidate, {
+        ...(format != null ? { format } : {}),
+        showLoadingUI: false,
+        progressiveLoad: false,
+        optimizeSplatData: true,
+        freeIntermediateSplatData: true,
+        splatAlphaRemovalThreshold: 5,
+        onProgress: (percentComplete: number, percentCompleteLabel?: string, loaderStatus?: number) => {
+          const percent = Number(percentComplete)
+          if (Number.isFinite(percent)) {
+            const normalized = THREE.MathUtils.clamp(percent / 100, 0, 1)
+            const progress = loaderStatus === 1
+              ? THREE.MathUtils.clamp(0.96 + normalized * 0.04, loadProgress.value, 1)
+              : THREE.MathUtils.clamp(0.2 + normalized * 0.76, loadProgress.value, 0.96)
+            setLoadState('model', loaderStatus === 1 ? '解析并构建高斯数据' : `下载模型数据 ${percentCompleteLabel || ''}`.trim(), progress)
+            drawHud()
+            renderSpectatorFrameThrottled()
+          }
+        },
+        position: config.worldPosition,
+        rotation: makeSceneRotationY(config.worldRotationY),
+        // 缩放保持正值，真正的朝向修正在 rotation 里统一做 X180，避免 .splat/.ksplat 路径下负缩放失效。
+        scale: [config.worldScale, config.worldScale, config.worldScale],
+      })
+      return candidate
+    } catch (error) {
+      lastError = error
+      console.warn('[BrainDance VR] 模型加载失败，尝试下一个候选:', candidate, error)
+    }
+  }
+
+  throw lastError || new Error('没有可用的 3DGS 模型候选')
+}
+
+function extractPoseMatrices(input: unknown): number[][] {
+  if (!input || typeof input !== 'object') return []
+  const root = input as Record<string, unknown>
+  const candidates = Array.isArray(root.frames)
+    ? root.frames
+    : Array.isArray(root.poses)
+      ? root.poses
+      : Array.isArray(root.cameras)
+        ? root.cameras
+        : []
+
+  return candidates
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const entry = item as Record<string, unknown>
+      const matrix = entry.transform_matrix || entry.matrix || entry.transform || entry.camera_to_world
+      if (Array.isArray(matrix) && matrix.length === 16) return matrix.map(Number).filter(Number.isFinite)
+      if (Array.isArray(matrix) && matrix.length >= 3 && Array.isArray(matrix[0])) {
+        return (matrix as unknown[][]).flat().map(Number).filter(Number.isFinite)
+      }
+      return null
+    })
+    .filter((matrix): matrix is number[] => Boolean(matrix && matrix.length === 16))
+}
+
+async function inferNavigationPoints(payload: BrainDanceViewerPayload, config: BrainDanceVrConfig): Promise<BrainDanceNavigationPoint[] | undefined> {
+  if (config.navigationPoints?.length || !payload.poses) return config.navigationPoints
+  try {
+    const resolvedPosesUrl = resolveAssetUrl(payload.poses)
+    const response = await fetch(resolvedPosesUrl, { cache: 'no-cache' })
+    if (!response.ok) return undefined
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('json')) return undefined
+    const matrices = extractPoseMatrices(await response.json())
+    if (matrices.length === 0) return undefined
+    const sampleIndexes = Array.from(new Set([
+      0,
+      Math.floor(matrices.length * 0.25),
+      Math.floor(matrices.length * 0.5),
+      Math.floor(matrices.length * 0.75),
+      matrices.length - 1,
+    ])).filter((index) => index >= 0 && index < matrices.length)
+    const points = sampleIndexes
+      .map((matrixIndex, outputIndex) => {
+        const matrix = normalizeMatrixForViewer(matrices[matrixIndex])
+        if (!matrix) return null
+        const pose = decomposeMatrix(matrix)
+        const label = outputIndex === 0 ? '入口点' : outputIndex === 2 ? '中心观察点' : `导览点 ${outputIndex + 1}`
+        return {
+          id: `pose-${matrixIndex}`,
+          label,
+          position: [pose.position.x, pose.position.y, pose.position.z] as [number, number, number],
+          matrix,
+          kind: outputIndex === 0 ? 'entry' : outputIndex === 2 ? 'center' : 'tour',
+          description: `来自 webgl_poses 第 ${matrixIndex + 1} 帧`,
+        } satisfies BrainDanceNavigationPoint
+      })
+      .filter(Boolean) as BrainDanceNavigationPoint[]
+    return points.length > 0 ? points : undefined
+  } catch (error) {
+    console.warn('[BrainDance VR] 自动导航点生成失败:', error)
+    return undefined
+  }
+}
+
+function normalizeModelPayloadList(payload: BrainDanceViewerPayload) {
+  const list = payload.modelList || []
+  if (list.length > 0) return list
+  const fallbackModel: BrainDanceRecallModel = {
+    id: payload.sceneId || payload.imageId || 'current',
+    name: payload.sceneId || payload.imageId || '当前模型',
+    displayName: payload.sceneId || payload.imageId || '当前模型',
+    ply: payload.modelUrl || payload.ply,
+    modelUrl: payload.modelUrl || payload.ply,
+    poses: payload.posesUrl || payload.poses,
+    posesUrl: payload.posesUrl || payload.poses,
+  }
+  return [fallbackModel]
+}
+
+async function loadModel(model: BrainDanceRecallModel, options: { preserveState?: boolean } = {}) {
+  if (!containerRef.value) return
+  resetLocalLabelsIfRemoteModel(model)
+  const payload = activePayload.value || getInitialPayload()
+  const config = activeConfig.value || (await loadVrConfig(deriveVrConfigUrl(payload)))
+  const nextPayload = {
+    ...payload,
+    ply: model.ply || model.modelUrl || payload.ply,
+    modelUrl: model.modelUrl || model.ply || payload.modelUrl,
+    poses: model.poses || model.posesUrl || payload.poses,
+    posesUrl: model.posesUrl || model.poses || payload.posesUrl,
+  }
+
+  if (!options.preserveState) {
+    resetRuntimeState()
+  }
+
+  activePayload.value = nextPayload
+  activeModelUrl.value = nextPayload.modelUrl || nextPayload.ply
+  setLoadState('config', '读取 VR 配置', 0.06)
+  const resolvedConfig = await loadVrConfig(deriveVrConfigUrl(nextPayload))
+  const inferredNavigationPoints = await inferNavigationPoints(nextPayload, resolvedConfig)
+  if (inferredNavigationPoints?.length) resolvedConfig.navigationPoints = inferredNavigationPoints
+  if (scaleOverride != null) resolvedConfig.worldScale = scaleOverride
+  if (rotationOverride != null) resolvedConfig.worldRotationY = rotationOverride
+  activeConfig.value = resolvedConfig
+  userScale.value = resolvedConfig.worldScale
+
+  setLoadState('model', '初始化 WebXR Viewer', 0.15)
+  disposeHud()
+  disposeIntroGlint()
+  disposeObject3D(markerGroup)
+  disposeObject3D(navGroup)
+  disposeObject3D(clippingPlaneHelper)
+  disposeObject3D(measurementLine)
+  disposeObject3D(measurementLabelMesh)
+  disposeObject3D(vignetteMesh)
+  disposeViewer()
+  viewer = new GaussianSplats3D.Viewer({
+    rootElement: containerRef.value,
+    cameraUp: [0, 1, 0],
+    initialCameraPosition: [0, resolvedConfig.userHeight, resolvedConfig.startDistance],
+    initialCameraLookAt: [0, resolvedConfig.userHeight, 0],
+    sharedMemoryForWorkers: typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : false,
+    gpuAcceleratedSort: false,
+    integerBasedSort: false,
+    halfPrecisionCovariancesOnGPU: true,
+    antialiased: false,
+    ignoreDevicePixelRatio: true,
+    dynamicScene: true,
+    webXRMode: previewMode.value === 'webxr' ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
+    sphericalHarmonicsDegree: 0,
+    selfDrivenMode: previewMode.value !== 'stereo',
+    useBuiltInControls: previewMode.value !== 'webxr',
+  })
+  installOverlayRenderHook()
+
+  if (previewMode.value === 'webxr') {
+    installXrSessionListeners()
+  }
+
+  activeModelIndex = modelList.value.findIndex((item) => item.id === model.id)
+  if (activeModelIndex < 0) activeModelIndex = 0
+  ensureSceneRoots()
+  createHud()
+  createIntroGlint()
+  rebuildSpatialHelpers()
+  applySceneScaleMode()
+  applyQualityPreset()
+
+  const candidate = await addSplatSceneWithFallback(nextPayload, resolvedConfig)
+  activeModelUrl.value = candidate
+  disposeIntroGlint()
+  rebuildSpatialHelpers()
+  applySceneScaleMode()
+  setLoadState('ready', '模型已加载，准备进入 VR', 1)
+  status.value = '模型已加载，网页端 Recall/VR 壳已就绪'
+
+  if (previewMode.value !== 'stereo') {
+    viewer?.start()
+  }
+  if (previewMode.value === 'stereo') {
+    startStereoPreviewLoop()
+  }
+  if (xrSession) startControllerLoop()
+  refreshHudDisplay()
+}
+
+async function bootstrap(input?: unknown) {
+  try {
+    const seedPayload = normalizePayload(input ?? getInitialPayload())
+    const payload = await mergeStandaloneCatalog(seedPayload)
+    activePayload.value = payload
+    if (payload.previewMode) previewMode.value = payload.previewMode
+    else if (previewMode.value === 'desktop' && (payload.ply || payload.modelUrl || (payload.modelList?.length ?? 0) <= 1)) {
+      previewMode.value = 'webxr'
+    }
+    authMessage.value = viewerSupabaseEnabled ? 'Supabase 已启用，等待登录' : '未配置 Supabase，使用本地会话'
+    if (payload.authSession) {
+      setAuthSession(payload.authSession, '已加载 payload 会话')
+    } else if (!authSession.value && !viewerSupabaseEnabled) {
+      setAuthSession({
+        status: 'local-preview',
+        displayName: 'VR Local User',
+      }, '本地预览会话已启用')
+    }
+    modelList.value = normalizeModelPayloadList(payload)
+    markers.value = payload.markers || []
+    searchResults.value = payload.searchResults || []
+    selectedSearchResultId.value = searchResults.value[0]?.id || ''
+    selectedMarkerId.value = !selectedSearchResultId.value ? markers.value[0]?.id || '' : ''
+    activeModelId.value = payload.activeModelId || modelList.value[0]?.id || ''
+    activeSearchQuery.value = ''
+    setLoadState('config', '准备读取模型配置', 0.04)
+    const initialModel = resolveInitialModel(payload, modelList.value)
+    if (initialModel) {
+      activeModelId.value = initialModel.id
+      await loadModel(initialModel)
+    }
+    void refreshSupabaseSession()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    errorMessage.value = message
+    status.value = 'VR Viewer 初始化失败'
+    loadPhase.value = 'error'
+    loadText.value = '初始化失败'
+    console.error('[BrainDance VR] 初始化失败:', error)
+  }
+}
+
+function resetView() {
+  scaleOverride = null
+  rotationOverride = null
+  const current = modelList.value[activeModelIndex] || modelList.value[0]
+  if (!current) return
+  void loadModel(current)
+}
+
+function adjustScale(delta: number) {
+  if (!activeConfig.value) return
+  const nextScale = Math.max(0.05, activeConfig.value.worldScale + delta)
+  scaleOverride = nextScale
+  activeConfig.value = {
+    ...activeConfig.value,
+    worldScale: nextScale,
+  }
+  userScale.value = nextScale
+  const target = getSceneManipulationTarget()
+  if (target) {
+    const signZ = target.scale.z < 0 ? -1 : 1
+    target.scale.set(nextScale, nextScale, signZ * nextScale)
+    getRuntimeViewer()?.forceRenderNextFrame?.()
+  }
+  scheduleClientStateSave()
+}
+
+function adjustRotation(delta: number) {
+  if (!activeConfig.value) return
+  rotationOverride = activeConfig.value.worldRotationY + delta
+  activeConfig.value = {
+    ...activeConfig.value,
+    worldRotationY: rotationOverride,
+  }
+  const target = getSceneManipulationTarget()
+  if (target) {
+    target.quaternion.set(...makeSceneRotationY(rotationOverride))
+    getRuntimeViewer()?.forceRenderNextFrame?.()
+  }
+  scheduleClientStateSave()
+}
+
+function applySceneScaleMode() {
+  const target = getSceneManipulationTarget()
+  if (!target) return
+  const baseScale = activeConfig.value?.worldScale ?? 1
+  const modeScale = sceneScaleMode.value === 'diorama' ? baseScale * 0.22 : baseScale
+  const signZ = target.scale.z < 0 ? -1 : 1
+  target.scale.set(modeScale, modeScale, signZ * modeScale)
+  if (sceneScaleMode.value === 'diorama') {
+    target.position.y += 0.8
+  }
+  userScale.value = getWorldRootScale()
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+}
+
+function setSceneScaleMode(mode: SceneScaleMode) {
+  if (sceneScaleMode.value === mode) return
+  sceneScaleMode.value = mode
+  applySceneScaleMode()
+  scheduleClientStateSave()
+}
+
+function setInteractionMode(mode: InteractionMode) {
+  interactionMode.value = mode
+  if (mode === 'inspect') {
+    setSceneScaleMode('diorama')
+  }
+  scheduleClientStateSave()
+}
+
+function applyQualityPreset() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer) return
+  const ratioMap: Record<QualityPreset, number> = {
+    ultra: 1,
+    high: 0.88,
+    balanced: 0.72,
+    performance: 0.58,
+    potato: 0.44,
+  }
+  runtime.renderer.setPixelRatio(ratioMap[qualityPreset.value])
+  runtime.forceRenderNextFrame?.()
+}
+
+function setQualityPreset(preset: QualityPreset) {
+  qualityPreset.value = preset
+  applyQualityPreset()
+  scheduleClientStateSave()
+}
+
+function moveRig(strafe: number, forward: number, dt = 1 / 90, vertical = 0) {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.camera || !xrRig) return false
+  if (interactionMode.value === 'inspect') return false
+  if (Math.abs(strafe) <= 0.01 && Math.abs(forward) <= 0.01 && Math.abs(vertical) <= 0.01) return false
+  const direction = new THREE.Vector3()
+  runtime.camera.getWorldDirection(direction)
+  direction.y = 0
+  direction.normalize()
+  const right = new THREE.Vector3().crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize()
+  const delta = new THREE.Vector3()
+  delta.addScaledVector(direction, forward * moveSpeed.value * dt)
+  delta.addScaledVector(right, strafe * moveSpeed.value * dt)
+  if (!floorLockEnabled.value) delta.y += vertical * 0.85 * dt
+  if (isVrPresenting.value) {
+    applySceneDelta(delta.clone().multiplyScalar(-1))
+  } else {
+    xrRig.position.add(delta)
+  }
+  runtime.forceRenderNextFrame?.()
+  return true
+}
+
+function moveRigAlongView(dt = 1 / 90, directionSign = 1) {
+  const camera = getRenderCamera()
+  if (!camera || interactionMode.value === 'inspect') return false
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+  if (direction.lengthSq() < 1e-8) return false
+  const delta = direction.multiplyScalar(moveSpeed.value * directionSign * dt)
+  if (isVrPresenting.value) {
+    applySceneDelta(delta.clone().multiplyScalar(-1))
+  } else if (xrRig) {
+    xrRig.position.add(delta)
+  } else {
+    return false
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  return true
+}
+
+function turnViewRig(yawInput: number, pitchInput: number, dt = 1 / 90) {
+  if (Math.abs(yawInput) <= 0.01 && Math.abs(pitchInput) <= 0.01) return false
+  const camera = getRenderCamera()
+  if (!camera) return false
+  const yawAngle = -yawInput * 1.65 * dt
+  const pitchAngle = -pitchInput * 1.15 * dt
+  let moved = false
+
+  if (Math.abs(yawAngle) > 0.00001) {
+    if (isVrPresenting.value) {
+      moved = rotateSceneAroundView(new THREE.Vector3(0, 0, 1), yawAngle) || moved
+    } else if (xrRig) {
+      xrRig.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), -yawAngle)
+      moved = true
+    }
+  }
+
+  if (Math.abs(pitchAngle) > 0.00001) {
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 0, 1)).normalize()
+    if (right.lengthSq() > 1e-8) {
+      if (isVrPresenting.value) {
+        moved = rotateSceneAroundView(right, pitchAngle) || moved
+      } else if (xrRig) {
+        xrRig.rotateOnWorldAxis(right, -pitchAngle)
+        moved = true
+      }
+    }
+  }
+
+  if (moved) getRuntimeViewer()?.forceRenderNextFrame?.()
+  return moved
+}
+
+function turnRig(turn: number, dt = 1 / 90, nowMs = performance.now(), mode: TurnMode = turnMode.value) {
+  if (!xrRig || Math.abs(turn) <= 0.18) return false
+  let angle = -turn * 1.65 * dt
+  if (mode === 'snap') {
+    if (nowMs - lastSnapTurnTime < 360) return false
+    angle = -Math.sign(turn) * THREE.MathUtils.degToRad(snapTurnAngle.value)
+    lastSnapTurnTime = nowMs
+  }
+  if (isVrPresenting.value) {
+    rotateSceneAroundUser(angle)
+  } else {
+    xrRig.rotateY(angle)
+  }
+  getRuntimeViewer()?.forceRenderNextFrame?.()
+  return true
+}
+
+function selectMode(mode: PreviewMode) {
+  if (mode === previewMode.value) return
+  switchPreviewMode(mode)
+  previewMode.value = mode
+  scheduleClientStateSave()
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'r' || event.key === 'R') resetView()
+  if (event.key === '[') adjustScale(-0.1)
+  if (event.key === ']') adjustScale(0.1)
+  if (event.key === 'q' || event.key === 'Q') adjustRotation(-0.1)
+  if (event.key === 'e' || event.key === 'E') adjustRotation(0.1)
+  if (event.key === 'w' || event.key === 'W') moveRig(0, 1, 1 / 60)
+  if (event.key === 's' || event.key === 'S') moveRig(0, -1, 1 / 60)
+  if (event.key === 'a' || event.key === 'A') moveRig(-1, 0, 1 / 60)
+  if (event.key === 'd' || event.key === 'D') moveRig(1, 0, 1 / 60)
+  if (event.key === '1') selectMode('desktop')
+  if (event.key === '2') selectMode('stereo')
+  if (event.key === '3') selectMode('webxr')
+  if (event.key === 'm' || event.key === 'M') isDesktopPanelOpen.value = !isDesktopPanelOpen.value
+  if (event.key === 'x' || event.key === 'X') setInteractionMode(interactionMode.value === 'explore' ? 'inspect' : 'explore')
+  if (event.key === 'z' || event.key === 'Z') setSceneScaleMode(sceneScaleMode.value === 'room' ? 'diorama' : 'room')
+  if (event.key === 'n' || event.key === 'N') nextNavigationPoint()
+  if (event.key === 'c' || event.key === 'C') {
+    clippingEnabled.value = !clippingEnabled.value
+    updateClippingPlaneHelper()
+  }
+  if (event.key === 'v' || event.key === 'V') measurementEnabled.value = !measurementEnabled.value
+  if (event.key === 'Enter') handlePrimarySelect()
+}
+
+function installXrSessionListeners() {
+  if (xrSessionListenersInstalled) return
+  const xr = viewer?.renderer?.xr
+  if (!xr?.addEventListener) return
+  xrSessionListenersInstalled = true
+  xr.addEventListener('sessionstart', () => {
+    isVrPresenting.value = true
+    xrSession = xr.getSession() || xrSession
+    ensureSceneRoots()
+    ensureSpectatorRenderer()
+    resizeSpectatorRenderer()
+    refreshHudDisplay()
+    startControllerLoop()
+    status.value = 'WebXR 会话已启动'
+  })
+  xr.addEventListener('sessionend', () => {
+    isVrPresenting.value = false
+    xrSession = null
+    stopControllerLoop()
+    if (hudMesh) hudMesh.visible = false
+    renderSpectatorFrame()
+    status.value = 'WebXR 会话已结束'
+  })
+}
+
+async function enterVrSession() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer?.xr || !navigator.xr) return
+  runtime.renderer.xr.enabled = true
+  runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
+  installXrSessionListeners()
+  const session = await navigator.xr.requestSession('immersive-vr', {
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+  })
+  await runtime.renderer.xr.setSession(session)
+  xrSession = session
+  isVrPresenting.value = true
+  ensureSceneRoots()
+  ensureSpectatorRenderer()
+  resizeSpectatorRenderer()
+  ensureControllerRig()
+  refreshHudDisplay()
+  startControllerLoop()
+}
+
+async function exitVrSession() {
+  const runtime = getRuntimeViewer()
+  const session = runtime?.renderer?.xr.getSession() || xrSession
+  if (session) await session.end()
+}
+
+function normalizeWindowHooks() {
+  window.loadViewerPayload = (input: unknown) => {
+    clearLocalModelState()
+    void bootstrap(input)
+  }
+  window.setViewerTheme = () => {
+    drawHud()
+  }
+  window.setViewerModelList = (list: unknown, currentId?: unknown) => {
+    const nextList = normalizePayload({
+      ...activePayload.value,
+      modelList: list,
+    }).modelList || []
+    modelList.value = nextList
+    if (currentId) {
+      const activeId = String(currentId)
+      const index = nextList.findIndex((item) => item.id === activeId)
+      if (index >= 0) {
+        activeModelIndex = index
+        activeModelId.value = activeId
+      }
+    }
+    drawHud()
+  }
+  window.setViewerSession = (session: unknown) => {
+    authSession.value = session && typeof session === 'object' ? normalizePayload({
+      ...activePayload.value,
+      authSession: session,
+    }).authSession || null : null
+    drawHud()
+  }
+  window.setViewerSearchResults = (results: unknown) => {
+    searchResults.value = normalizePayload({
+      ...activePayload.value,
+      searchResults: results,
+    }).searchResults || []
+    selectedSearchResultId.value = searchResults.value[0]?.id || ''
+    rebuildSpatialHelpers()
+    drawHud()
+  }
+  window.setViewerMarkers = (nextMarkers: unknown) => {
+    markers.value = normalizePayload({
+      ...activePayload.value,
+      markers: nextMarkers,
+    }).markers || []
+    rebuildSpatialHelpers()
+    drawHud()
+  }
+  window.setViewerQuery = (query: string) => {
+    activeSearchQuery.value = query || ''
+  }
+}
+
+onMounted(() => {
+  normalizeWindowHooks()
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', resizeSpectatorRenderer)
+  startStatsLoop()
+  void bootstrap()
+})
+
+onBeforeUnmount(() => {
+  window.cancelAnimationFrame(statsRafId)
+  stopStereoLoop()
+  stopControllerLoop()
+  syncClientStateNow()
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', resizeSpectatorRenderer)
+  clearLocalModelState()
+  disposeHud()
+  disposeIntroGlint()
+  disposeSpectatorRenderer()
+  disposeViewer()
+})
+</script>
+
+<template>
+  <main class="vr-page">
+    <input id="vr-local-model-input" class="sr-only-input" type="file" accept=".ply,.splat,.ksplat,.spz" @change="onLocalModelSelected" />
+    <input id="vr-local-poses-input" class="sr-only-input" type="file" accept=".json" @change="onLocalPosesSelected" />
+    <div ref="containerRef" class="vr-canvas" />
+    <section v-show="previewMode === 'webxr'" class="browser-mirror" :class="{ presenting: isVrPresenting }" aria-label="头显视角旁观窗口">
+      <div class="mirror-header">
+        <span>头显视角</span>
+        <span>{{ isVrPresenting ? 'Live' : '等待 WebXR' }}</span>
+      </div>
+      <canvas ref="spectatorCanvasRef" class="browser-mirror-canvas" />
+    </section>
+    <section class="desktop-panel" :class="{ collapsed: !isDesktopPanelOpen }" aria-label="BrainDance VR 状态">
+      <header class="panel-header">
+        <p class="eyebrow">BrainDance</p>
+        <h1>{{ sceneLabel }}</h1>
+      </header>
+
+      <div class="status-block">
+        <p>{{ status }}</p>
+        <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+      </div>
+
+      <dl class="metrics">
+        <div>
+          <dt>Mode</dt>
+          <dd>{{ interactionMode }}</dd>
+        </div>
+        <div>
+          <dt>FPS</dt>
+          <dd>{{ fps }}</dd>
+        </div>
+        <div>
+          <dt>Scale</dt>
+          <dd>{{ sceneScaleMode }}</dd>
+        </div>
+        <div>
+          <dt>Quality</dt>
+          <dd>{{ qualityLabel }}</dd>
+        </div>
+      </dl>
+
+      <dl class="debug-list">
+        <div>
+          <dt>Model</dt>
+          <dd>{{ modelCountLabel }} · {{ activeModelUrl || '-' }}</dd>
+        </div>
+        <div>
+          <dt>Position</dt>
+          <dd>{{ positionLabel }}</dd>
+        </div>
+        <div>
+          <dt>RotationY</dt>
+          <dd>{{ rotationLabel }}</dd>
+        </div>
+        <div>
+          <dt>User</dt>
+          <dd>{{ authLabel }}</dd>
+        </div>
+      </dl>
+
+      <div class="auth-panel">
+        <div class="auth-header">
+          <p class="panel-label">登录</p>
+          <button type="button" class="ghost-button" @click="void refreshSupabaseSession()">同步会话</button>
+        </div>
+        <label>
+          <span>邮箱</span>
+          <input v-model="authEmail" type="email" placeholder="name@example.com" @input="scheduleClientStateSave()" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input v-model="authPassword" type="password" placeholder="Password" @keydown.enter="void signInToViewer()" />
+        </label>
+        <div class="button-row">
+          <button type="button" :disabled="authBusy || !authEmail.trim()" @click="void signInToViewer()">登录</button>
+          <button type="button" :disabled="authBusy" @click="void signOutOfViewer()">退出</button>
+        </div>
+        <p class="hint">{{ authMessage || (viewerSupabaseEnabled ? 'VR 独立客户端已连接 Supabase' : '未配置 Supabase，当前为本地会话模式') }}</p>
+      </div>
+
+      <div class="mode-row">
+        <button type="button" :class="{ active: previewMode === 'desktop' }" @click="selectMode('desktop')">Desktop</button>
+        <button type="button" :class="{ active: previewMode === 'stereo' }" @click="selectMode('stereo')">Stereo</button>
+        <button type="button" :class="{ active: previewMode === 'webxr' }" @click="selectMode('webxr')">WebXR</button>
+      </div>
+
+      <div class="mode-row">
+        <button type="button" :class="{ active: interactionMode === 'explore' }" @click="setInteractionMode('explore')">Explore</button>
+        <button type="button" :class="{ active: interactionMode === 'inspect' }" @click="setInteractionMode('inspect')">Inspect</button>
+        <button type="button" :class="{ active: sceneScaleMode === 'diorama' }" @click="setSceneScaleMode(sceneScaleMode === 'room' ? 'diorama' : 'room')">沙盘</button>
+      </div>
+
+      <div class="button-row">
+        <button type="button" @click="adjustScale(-0.1)">缩小</button>
+        <button type="button" @click="resetView">重置</button>
+        <button type="button" @click="adjustScale(0.1)">放大</button>
+      </div>
+
+      <div class="button-row">
+        <button type="button" :class="{ active: turnMode === 'snap' }" @click="turnMode = turnMode === 'snap' ? 'smooth' : 'snap'">Snap</button>
+        <button type="button" :class="{ active: floorLockEnabled }" @click="floorLockEnabled = !floorLockEnabled">锁地面</button>
+        <button type="button" :class="{ active: vignetteEnabled }" @click="vignetteEnabled = !vignetteEnabled">黑边</button>
+      </div>
+
+      <div class="control-grid">
+        <label>
+          <span>移动速度 {{ moveSpeed.toFixed(2) }}</span>
+          <input v-model.number="moveSpeed" type="range" min="0.35" max="2.2" step="0.05" />
+        </label>
+        <label>
+          <span>转向角度 {{ snapTurnAngle }}°</span>
+          <input v-model.number="snapTurnAngle" type="range" min="15" max="45" step="15" />
+        </label>
+      </div>
+
+      <div class="quality-row">
+        <button v-for="preset in qualityPresets" :key="preset" type="button" :class="{ active: qualityPreset === preset }" @click="setQualityPreset(preset)">
+          {{ preset }}
+        </button>
+      </div>
+
+      <div class="button-row xr-row">
+        <button type="button" @click="enterVrSession">进入 VR</button>
+        <button type="button" @click="exitVrSession">退出 VR</button>
+        <button type="button" @click="isDesktopPanelOpen = !isDesktopPanelOpen">面板</button>
+      </div>
+
+      <div class="button-row xr-row">
+        <button type="button" @click="triggerLocalModelPicker">本地模型</button>
+        <button type="button" @click="triggerLocalPosesPicker">本地位姿</button>
+        <button type="button" :disabled="!localPosesName" @click="clearLocalPoses">清位姿</button>
+      </div>
+
+      <p v-if="localModelName || localPosesName" class="hint">
+        {{ localModelName ? `模型：${localModelName}` : '' }}
+        {{ localModelName && localPosesName ? '；' : '' }}
+        {{ localPosesName ? `位姿：${localPosesName}` : '' }}
+      </p>
+
+      <div class="tool-panel">
+        <div class="button-row">
+          <button type="button" :class="{ active: clippingEnabled }" @click="clippingEnabled = !clippingEnabled; updateClippingPlaneHelper()">剖切</button>
+          <button type="button" :class="{ active: measurementEnabled }" @click="measurementEnabled = !measurementEnabled">测量</button>
+          <button type="button" @click="clearMeasurement">清除</button>
+        </div>
+        <label>
+          <span>剖切距离 {{ clippingDistance.toFixed(1) }}m</span>
+          <input v-model.number="clippingDistance" type="range" min="0.8" max="8" step="0.1" @input="updateClippingPlaneHelper" />
+        </label>
+        <p class="hint">测量距离：{{ measurementDistanceLabel }}；Enter / VR Trigger 记录测量点。</p>
+      </div>
+
+      <div class="search-panel">
+        <input v-model="activeSearchQuery" type="text" placeholder="搜索模型、标签、描述" @input="scheduleClientStateSave()" />
+        <div class="search-results">
+          <button
+            v-for="item in filteredModels"
+            :key="item.id"
+            type="button"
+            :class="{ active: activeModelId === item.id }"
+            @click="selectModel(item)"
+          >
+            <strong>{{ item.name || item.displayName || item.id }}</strong>
+            <span>{{ item.description || item.ply }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="search-panel">
+        <p class="panel-label">Search Results</p>
+        <div class="search-results">
+          <button
+            v-for="item in searchResults"
+            :key="item.id"
+            type="button"
+            :class="{ active: selectedSearchResultId === item.id }"
+            @click="selectSearchResult(item)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.score != null ? `${Math.round(item.score * 100)}% · ` : '' }}{{ item.description || item.markerId || '-' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div v-if="activeEvidence" class="evidence-card">
+        <p class="panel-label">Evidence</p>
+        <h2>{{ activeEvidence.label }}</h2>
+        <p>{{ activeEvidence.description || '暂无证据描述' }}</p>
+        <dl>
+          <div>
+            <dt>Score</dt>
+            <dd>{{ activeEvidence.score != null ? `${Math.round(activeEvidence.score * 100)}%` : '-' }}</dd>
+          </div>
+          <div>
+            <dt>Frame</dt>
+            <dd>{{ activeEvidence.imageId || '-' }}</dd>
+          </div>
+          <div>
+            <dt>Time</dt>
+            <dd>{{ activeEvidence.createdAt || '-' }}</dd>
+          </div>
+        </dl>
+        <p v-if="activeEvidence.tags?.length" class="tag-line">{{ activeEvidence.tags.join('、') }}</p>
+        <p class="hint">{{ lastDirectionHint }}</p>
+      </div>
+
+      <div class="search-panel">
+        <p class="panel-label">Markers</p>
+        <div class="search-results">
+          <button
+            v-for="item in markers"
+            :key="item.id"
+            type="button"
+            :class="{ active: selectedMarkerId === item.id }"
+            @click="selectMarker(item)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.color || 'marker' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="search-panel">
+        <p class="panel-label">Time / Navigation</p>
+        <div class="search-results">
+          <button
+            v-for="item in navigationPoints"
+            :key="item.id"
+            type="button"
+            :class="{ active: selectedNavPointId === item.id }"
+            @click="selectNavigationPoint(item.id)"
+          >
+            <strong>{{ item.label }}</strong>
+            <span>{{ item.kind || 'navigation' }} · {{ item.description || item.position.join(', ') }}</span>
+          </button>
+        </div>
+        <button type="button" @click="nextNavigationPoint">下一个导航点</button>
+      </div>
+
+      <div class="summary-panel">
+        <p class="panel-label">Scene Summary</p>
+        <p>{{ modelSummaryText }}</p>
+      </div>
+
+      <details class="debug-panel">
+        <summary>SteamVR Input Debug</summary>
+        <pre>{{ controllerDebug }}</pre>
+      </details>
+
+      <p class="hint">1/2/3 切换 Desktop/Stereo/WebXR，WASD 漫游，M 面板，X Explore/Inspect，Z 沙盘/1:1，N 导航点，C 剖切，V 测量，Enter 选择/测量。</p>
+    </section>
+  </main>
+</template>

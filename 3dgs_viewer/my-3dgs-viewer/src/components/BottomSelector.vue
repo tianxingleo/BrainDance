@@ -1,5 +1,7 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount, shallowRef } from 'vue';
+
+import TimelineElastic from './TimelineElastic.vue';
 
 const props = defineProps({
   models: { type: Array, default: () => [] },
@@ -16,6 +18,7 @@ const emit = defineEmits(['selectModel', 'selectPose']);
 
 const mode = ref('pose'); // 'pose' | 'model'
 const scrollRef = ref(null);
+const loadedThumbs = ref({});
 
 // 拖拽滚动状态
 let isDragging = false;
@@ -23,20 +26,20 @@ let dragStartX = 0;
 let scrollStartLeft = 0;
 let dragMoved = false;
 
-const sortedModels = computed(() => {
-  return [...props.models].sort((a, b) => {
-    const ta = new Date(a.createdAt || 0).getTime();
-    const tb = new Date(b.createdAt || 0).getTime();
-    return tb - ta;
-  });
-});
+const modelItems = shallowRef([]);
 
-const showTabs = computed(() => props.hasModels);
+// 只要有时间维度数据，就保留切换入口；单个模型也要能进入时间视图。
+const showTabs = computed(() => props.models.length > 0);
 
 // 自动切换到可用 tab（仅当模型 tab 不可用时切换，视角为空时保留空状态）
 watch([() => props.hasModels, () => props.hasPoses], () => {
   if (mode.value === 'model' && !props.hasModels) mode.value = 'pose';
 }, { immediate: true });
+
+watch(mode, () => {
+  // 切换 tab 时重置拖拽态，避免把时间轴的选择误判为滚动。
+  dragMoved = false;
+});
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -48,10 +51,31 @@ function formatTime(dateStr) {
   return `${mm}/${dd} ${hh}:${min}`;
 }
 
+watch(
+  () => props.models,
+  (models) => {
+    modelItems.value = [...models]
+      .sort((a, b) => {
+        const ta = new Date(a.createdAt || 0).getTime();
+        const tb = new Date(b.createdAt || 0).getTime();
+        return tb - ta;
+      })
+      .map((model) => ({
+        ...model,
+        formattedTime: formatTime(model.createdAt),
+      }));
+  },
+  { immediate: true },
+);
+
 function onClickModel(model) {
-  if (dragMoved) return;
   if (model.id === props.activeModelId) return;
   emit('selectModel', model);
+}
+
+function onSelectTimelineModel(model) {
+  dragMoved = false;
+  onClickModel(model);
 }
 
 function onClickPose(pose) {
@@ -73,6 +97,7 @@ watch([() => props.activePoseId, () => props.activeModelId, mode], () => {
 
 // 拖拽滚动
 function onPointerDown(e) {
+  if (mode.value !== 'pose') return;
   isDragging = true;
   dragMoved = false;
   dragStartX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
@@ -80,6 +105,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  if (mode.value !== 'pose') return;
   if (!isDragging || !scrollRef.value) return;
   const x = e.clientX || (e.touches && e.touches[0].clientX) || 0;
   const dx = x - dragStartX;
@@ -89,6 +115,7 @@ function onPointerMove(e) {
 
 function onPointerUp() {
   isDragging = false;
+  dragMoved = false;
 }
 
 onMounted(() => {
@@ -119,6 +146,7 @@ onBeforeUnmount(() => {
     <!-- 缩略图滚动区 -->
     <div class="bs-track-wrap">
       <div class="bs-track"
+        :class="{ 'bs-track--timeline': mode === 'model' }"
         ref="scrollRef"
         @mousedown="onPointerDown"
         @mousemove="onPointerMove"
@@ -134,36 +162,34 @@ onBeforeUnmount(() => {
             :class="{ 'bs-item--active': activePoseId === getPosePresentationId(pose) }"
             @click="onClickPose(pose)"
           >
-            <img v-if="pose.image_url" :src="pose.image_url" class="bs-thumb" draggable="false" />
+            <img
+              v-if="pose.image_url"
+              :src="pose.image_url"
+              class="bs-thumb"
+              :class="{ 'bs-thumb--loaded': loadedThumbs[pose.image_url] }"
+              @load="loadedThumbs[pose.image_url] = true"
+              draggable="false"
+              loading="eager"
+              decoding="async"
+              fetchpriority="low"
+            />
             <div v-else class="bs-thumb bs-thumb--empty">
               <span>未命名</span>
             </div>
-            <div v-if="pose.tag" class="bs-tag">{{ pose.tag }}</div>
+            <!-- 文字标签已隐藏，只显示图片 -->
+            <!-- <div v-if="pose.tag" class="bs-tag">{{ pose.tag }}</div> -->
           </div>
         </template>
 
-        <!-- 模型模式 -->
+        <!-- 模型模式 (Timeline) -->
         <template v-if="mode === 'model'">
-          <div
-            v-for="model in sortedModels"
-            :key="model.id"
-            class="bs-item"
-            :class="{ 'bs-item--active': model.id === activeModelId }"
-            @click="onClickModel(model)"
-          >
-            <img v-if="model.previewImg" :src="model.previewImg" class="bs-thumb" draggable="false" />
-            <div v-else class="bs-thumb bs-thumb--empty">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-              </svg>
-            </div>
-            <div class="bs-time">{{ formatTime(model.createdAt) }}</div>
-          </div>
+          <TimelineElastic
+            :items="modelItems"
+            :active-id="activeModelId"
+            @select="onSelectTimelineModel"
+          />
         </template>
       </div>
-      <!-- 左右渐隐 -->
-      <div class="bs-fade bs-fade--left"></div>
-      <div class="bs-fade bs-fade--right"></div>
     </div>
   </div>
 </template>
@@ -176,7 +202,7 @@ onBeforeUnmount(() => {
   right: 16px;
   z-index: 100;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0;
   pointer-events: auto;
   background: var(--card-bg, rgba(249, 249, 248, 0.88));
@@ -185,7 +211,7 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   box-shadow: 0 8px 24px var(--card-shadow, rgba(0, 0, 0, 0.1));
-  padding: 10px 0 10px 12px;
+  padding: 10px 0 14px 12px;
 }
 
 /* 切换按钮 */
@@ -227,20 +253,29 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .bs-track {
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: flex-end;
   overflow-x: auto;
-  overflow-y: hidden;
-  padding: 6px 36px;
+  overflow-y: visible;
+  padding: 16px 36px 28px;
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: grab;
   user-select: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+}
+.bs-track--timeline {
+  gap: 0;
+  padding-top: 52px;
+  padding-bottom: 14px;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .bs-track::-webkit-scrollbar {
   display: none;
@@ -252,23 +287,29 @@ onBeforeUnmount(() => {
 /* 缩略图项 */
 .bs-item {
   position: relative;
-  width: 80px;
-  height: 56px;
+  width: 96px;
+  height: 68px;
   flex-shrink: 0;
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
   border: 2px solid var(--card-border, rgba(107, 122, 143, 0.12));
   opacity: 0.7;
   box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
+  transform: scale(0.84);
+  transform-origin: center;
+  will-change: transform, opacity;
 }
 .bs-item--active {
-  width: 96px;
-  height: 68px;
   border-color: #CC9A5C;
   opacity: 1;
   box-shadow: 0 4px 16px rgba(204, 154, 92, 0.3);
+  transform: scale(1);
 }
 .bs-item:hover:not(.bs-item--active) {
   opacity: 0.88;
@@ -285,8 +326,19 @@ onBeforeUnmount(() => {
   background: rgba(30, 30, 32, 0.5);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: scale(0.95);
+  filter: blur(4px);
+}
+.bs-thumb.bs-thumb--loaded {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0px);
 }
 .bs-thumb--empty {
+  opacity: 1;
+  transform: scale(1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -325,25 +377,4 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
-/* 左右渐隐 */
-.bs-fade {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 40px;
-  pointer-events: none;
-  z-index: 2;
-}
-.bs-fade--left {
-  left: 0;
-  background: linear-gradient(to right,
-    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
-    transparent 100%);
-}
-.bs-fade--right {
-  right: 0;
-  background: linear-gradient(to left,
-    var(--card-bg, rgba(249, 249, 248, 0.95)) 0%,
-    transparent 100%);
-}
 </style>

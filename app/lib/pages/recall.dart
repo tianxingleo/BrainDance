@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'dart:convert';
 import 'dart:io';
 
@@ -39,8 +40,10 @@ import 'community/composer_sheet.dart';
 import 'community/models.dart';
 import 'community/repository.dart';
 import 'recall/empty_states.dart';
+import 'recall/model_action_overlay.dart';
 import 'recall/model_grid.dart';
 import 'recall/model_detail_sheet.dart';
+import 'recall/time_peeling.dart';
 import 'recall/processing_section.dart';
 import 'recall/rename_model_dialog.dart';
 import 'recall/search_header_section.dart';
@@ -63,7 +66,8 @@ class RecallPage extends ConsumerStatefulWidget {
 }
 
 class _RecallPageState extends ConsumerState<RecallPage> {
-  static const String _defaultModelFileName = 'qwen3-1.7b.gguf';
+  static const String _defaultModelFileName =
+      'qwen3-1.7b-braindance-q5-k-m-imatrix.gguf';
   static const String _localModelPathPrefKey = 'recall.local_llm_model_path';
   static const String _localModelUrlPrefKey = 'recall.local_llm_model_url';
 
@@ -102,7 +106,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   RealtimeChannel? _realtimeChannel;
   String _localAnswer = '';
   String _localReasoning = '';
-  String _localAnswerStatus = 'Qwen3-1.7B 端侧模型未加载';
+  String _localAnswerStatus = '端侧模型未加载';
   String _localContextPreview = '';
   String _lastOwnModelSignature = '';
   String? _lastSearchKey;
@@ -113,26 +117,27 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _agentShortTermMemory;
   final List<AgentConversationEntry> _agentConversationHistory = [];
 
-  ChatMessage? get _agentChatMessage =>
-      _agentConversationHistory.isNotEmpty
-          ? _agentConversationHistory.first.agentMessage
-          : null;
+  ChatMessage? get _agentChatMessage => _agentConversationHistory.isNotEmpty
+      ? _agentConversationHistory.first.agentMessage
+      : null;
 
-  AgentRecallResponse? get _agentResult =>
-      _agentConversationHistory.isNotEmpty
-          ? _agentConversationHistory.first.agentResult
-          : null;
+  AgentRecallResponse? get _agentResult => _agentConversationHistory.isNotEmpty
+      ? _agentConversationHistory.first.agentResult
+      : null;
 
   set _agentResult(AgentRecallResponse? value) {
     if (_agentConversationHistory.isNotEmpty) {
       _agentConversationHistory.first.agentResult = value;
     }
   }
+
   AgentStep? _agentBootstrapStep;
   DateTime? _agentRunStartedAt;
   DateTime? _agentRunFinishedAt;
   DateTime? _agentFirstRemoteEventAt;
   bool _isLoading = true;
+  bool _isOpeningViewer = false;
+  String? _openingViewerLabel;
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = false;
   bool _isLocalModelLoading = false;
@@ -153,6 +158,13 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   final darkCard = const Color(0xFF18181C);
   final darkInput = const Color(0xFF23232A);
   final darkBorder = const Color(0xFF23232A);
+
+  void _refreshState([VoidCallback? fn]) {
+    if (!mounted) {
+      return;
+    }
+    setState(fn ?? () {});
+  }
 
   @override
   void initState() {

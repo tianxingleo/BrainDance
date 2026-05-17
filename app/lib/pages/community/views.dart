@@ -4,6 +4,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/animated_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
@@ -916,20 +917,24 @@ class _CommunityThumbnail extends StatelessWidget {
     return SizedBox(
       height: height,
       width: width,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: url == null || url.isEmpty
-            ? fallback
-            : Image.network(
-                url,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => fallback,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return fallback;
-                },
+      child: url == null || url.isEmpty
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: fallback,
+            )
+          : BDFadeInNetworkImage(
+              imageUrl: url,
+              placeholder: fallback,
+              errorWidget: ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: fallback,
               ),
-      ),
+              fit: BoxFit.cover,
+              borderRadius: BorderRadius.circular(22),
+              backgroundColor: Colors.transparent,
+              duration: BDMotion.durationSlow,
+              curve: BDMotion.curveEnter,
+            ),
     );
   }
 }

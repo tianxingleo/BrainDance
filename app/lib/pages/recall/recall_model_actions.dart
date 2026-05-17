@@ -1,6 +1,14 @@
+// ignore_for_file: invalid_use_of_protected_member
 part of '../recall.dart';
 
 extension _RecallPageModelActions on _RecallPageState {
+  void _setViewerOpeningState(bool isOpening, {String? label}) {
+    _refreshState(() {
+      _isOpeningViewer = isOpening;
+      _openingViewerLabel = isOpening ? label : null;
+    });
+  }
+
   String _modelKey(Map<String, dynamic> model) {
     return model['id']?.toString() ??
         model['scene_id']?.toString() ??
@@ -20,10 +28,12 @@ extension _RecallPageModelActions on _RecallPageState {
   }
 
   void _navigateToViewer(Map<String, dynamic> model, dynamic transformMatrix) {
+    if (_isOpeningViewer) {
+      return;
+    }
+
     final plyPath = model['ply_path'] as String? ?? '';
-    final modelUrl = plyPath.isNotEmpty
-        ? toPublicUrl(plyPath)
-        : '';
+    final modelUrl = plyPath.isNotEmpty ? toPublicUrl(plyPath) : '';
     final posesUrl = plyPath.isNotEmpty ? _toPosesUrl(plyPath) : null;
     final sceneId = _modelDisplayName(model);
     String? initialPoseId;
@@ -44,19 +54,35 @@ extension _RecallPageModelActions on _RecallPageState {
     // Convert transformMatrix if not null to List<double>
     List<double>? initialPose;
     if (transformMatrix != null && transformMatrix is List) {
-      initialPose = transformMatrix.map((e) => (e as num).toDouble()).toList();
+      initialPose = transformMatrix
+          .map((e) => (e is num) ? e.toDouble() : 0.0)
+          .toList();
     }
 
-    unawaited(
-      openViewer(
-        context,
-        initialModelUrl: modelUrl,
-        posesUrl: posesUrl,
-        sceneId: sceneId,
-        initialPose: initialPose,
-        initialPoseId: initialPoseId,
-      ),
-    );
+    _setViewerOpeningState(true, label: sceneId);
+
+    unawaited(() async {
+      try {
+        await openViewer(
+          context,
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+          initialPose: initialPose,
+          initialPoseId: initialPoseId,
+        );
+      } catch (e) {
+        debugPrint('[RecallModelActions] open viewer error: $e');
+        if (mounted) {
+          showAppToast(context, '打开模型失败，请稍后重试');
+        }
+      } finally {
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        if (mounted) {
+          _setViewerOpeningState(false);
+        }
+      }
+    }());
   }
 
   Future<void> _shareModelToCommunity(Map<String, dynamic> model) async {
@@ -130,7 +156,7 @@ extension _RecallPageModelActions on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _activeModelAction = {
         ...model,
         if (sizeLabel.isNotEmpty) '_local_size_label': sizeLabel,
@@ -260,7 +286,7 @@ extension _RecallPageModelActions on _RecallPageState {
       if (mounted) {
         showAppToast(context, textLocalize('recall_rename_success'));
         final targetKey = _modelKey(model);
-        setState(() {
+        _refreshState(() {
           for (final m in _allModels) {
             if (_modelKey(m) == targetKey) {
               m['display_name'] = newName;
@@ -328,7 +354,10 @@ extension _RecallPageModelActions on _RecallPageState {
     final plyPath = model['ply_path']?.toString() ?? '';
     if (plyPath.isEmpty) {
       if (mounted) {
-        showAppToast(context, textLocalize('recall_download_model_unavailable'));
+        showAppToast(
+          context,
+          textLocalize('recall_download_model_unavailable'),
+        );
       }
       return;
     }
@@ -336,7 +365,10 @@ extension _RecallPageModelActions on _RecallPageState {
     final modelUrl = _toPublicUrl(plyPath);
     if (!modelUrl.startsWith('http://') && !modelUrl.startsWith('https://')) {
       if (mounted) {
-        showAppToast(context, textLocalize('recall_download_model_unavailable'));
+        showAppToast(
+          context,
+          textLocalize('recall_download_model_unavailable'),
+        );
       }
       return;
     }
@@ -367,7 +399,10 @@ extension _RecallPageModelActions on _RecallPageState {
       );
 
       if (mounted) {
-        showAppToast(context, '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}');
+        showAppToast(
+          context,
+          '${textLocalize('recall_download_model_success')}: ${path.basename(targetPath)}',
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -532,7 +567,8 @@ extension _RecallPageModelActions on _RecallPageState {
           .eq('user_id', currentUserId)
           .select('id');
 
-      if (deleteResult == null || (deleteResult is List && deleteResult.isEmpty)) {
+      if (deleteResult == null ||
+          (deleteResult is List && deleteResult.isEmpty)) {
         if (mounted) {
           showAppToast(context, textLocalize('cloud_model_delete_fail'));
         }
@@ -552,7 +588,7 @@ extension _RecallPageModelActions on _RecallPageState {
         return;
       }
 
-      setState(() {
+      _refreshState(() {
         _allModels.removeWhere((item) => _modelKey(item) == targetKey);
         _models.removeWhere((item) => _modelKey(item) == targetKey);
         if (_activeModelAction != null &&
@@ -593,7 +629,7 @@ extension _RecallPageModelActions on _RecallPageState {
     }
 
     if (mounted) {
-      setState(() {
+      _refreshState(() {
         _activeModelAction = null;
         _activeModelActionRect = null;
       });
@@ -610,9 +646,7 @@ extension _RecallPageModelActions on _RecallPageState {
         fallback: textLocalize('recall_unnamed_model'),
       ),
       description: model['description']?.toString() ?? '',
-      modelUrl: plyPath.isEmpty
-          ? ''
-          : _toPublicUrl(plyPath),
+      modelUrl: plyPath.isEmpty ? '' : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
       coverUrl: preview,
     );

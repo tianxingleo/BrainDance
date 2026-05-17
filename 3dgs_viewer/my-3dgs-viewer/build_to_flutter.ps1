@@ -6,9 +6,6 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Building Vite project..." -ForegroundColor Cyan
 Write-Host "====================================="
 
-$scriptDir = $PSScriptRoot
-Push-Location $scriptDir
-
 npm run build-only
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
@@ -17,27 +14,32 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "====================================" -ForegroundColor Cyan
-Write-Host "  Syncing to Flutter assets..." -ForegroundColor Cyan
+Write-Host "  Syncing to Flutter assets (webgl)..." -ForegroundColor Cyan
 Write-Host "====================================="
 
-$targets = @(
-    (Join-Path $scriptDir "..\..\app\assets\webgl")
-)
+$scriptDir = $PSScriptRoot
+$target = Join-Path $scriptDir "..\..\app\assets\webgl"
 
-foreach ($target in $targets) {
-    Remove-Item -Recurse -Force "$target\assets" -ErrorAction SilentlyContinue
-    Remove-Item -Force "$target\index.html" -ErrorAction SilentlyContinue
-    Remove-Item -Force "$target\favicon.ico" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$target\assets" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$target\models" -ErrorAction SilentlyContinue
+Remove-Item -Force "$target\index.html" -ErrorAction SilentlyContinue
+Remove-Item -Force "$target\favicon.ico" -ErrorAction SilentlyContinue
 
-    Copy-Item -Recurse "$scriptDir\dist\assets" "$target\assets"
-    Copy-Item "$scriptDir\dist\index.html" "$target\index.html"
+Copy-Item -Recurse "$scriptDir\dist\assets" "$target\assets"
+Copy-Item "$scriptDir\dist\index.html" "$target\index.html"
+if (Test-Path "$scriptDir\dist\models") {
+    Copy-Item -Recurse "$scriptDir\dist\models" "$target\models"
+}
+if (Test-Path "$scriptDir\dist\favicon.ico") {
     Copy-Item "$scriptDir\dist\favicon.ico" "$target\favicon.ico"
-
-    Write-Host "   Synced: $target" -ForegroundColor Gray
 }
 
+if (-not (Test-Path "$target\models")) {
+    New-Item -ItemType Directory -Path "$target\models" | Out-Null
+}
+New-Item -ItemType File -Path "$target\models\.gitkeep" -Force | Out-Null
+
+Write-Host "   Synced: $target" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Done! Flutter app will use the new production build." -ForegroundColor Green
 Write-Host "Run 'flutter run' in the app/ directory." -ForegroundColor Green
-
-Pop-Location

@@ -126,7 +126,99 @@ class _CommunityPageState extends State<CommunityPage>
       ),
     );
   }
+  
+  void _openViewer(CommunityPost post) {
+    openViewer(
+      context,
+      initialModelUrl: post.modelUrl,
+      posesUrl: post.posesUrl,
+      sceneId: post.modelName,
+      initialMarkerArMode: true,
+    );
+  }
 
+  void _openLocationHub(CommunityPost seedPost) {
+    final peers = _posts
+        .where((post) => post.placeName == seedPost.placeName)
+        .toList();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final isDark = ctx.isDarkMode;
+        final textColor =
+            isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+        final hintColor = isDark
+            ? Colors.white.withValues(alpha: 0.62)
+            : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+          child: BDPanelCard(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(seedPost.placeName,
+                                style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 6),
+                            Text(
+                                '这里收集了 ${peers.length} 个来自不同用户的空间记忆。',
+                                style: TextStyle(
+                                    color: hintColor, height: 1.4)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: Icon(Icons.close_rounded,
+                            color: textColor),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: peers.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final post = peers[index];
+                        return InkWell(
+                          borderRadius: BDDesign.radiusLarge,
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openViewer(post);
+                          },
+                          child:
+                              CommunityLocationHubRow(post: post),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
   void _toggleSubmitModel(CommunityModelOption model) {
     setState(() {
       if (_selectedSubmitModels.any((m) => m.id == model.id)) {

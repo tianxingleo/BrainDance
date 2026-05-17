@@ -77,6 +77,9 @@ service_account.json
 # Dart doc 生成的 API 文档
 doc/api/
 
+# Flutter lock file
+/app/pubspec.lock
+
 # Flutter web 构建产物
 /app/web/build/
 
@@ -195,9 +198,8 @@ app/assets/webgl_spark/models/
 # 忽略 app/assets/webgl_spark/favicon.ico
 app/assets/webgl_spark/favicon.ico
 
-# 忽略 app/assets/webgl_spark/assets/ 下的构建产物
-app/assets/webgl_spark/assets/index-*.js
-app/assets/webgl_spark/assets/index-*.css
+# 忽略 app/assets/webgl_spark/assets/ 下的构建产物（Vite 构建产物，通过 build_to_flutter.ps1 生成）
+app/assets/webgl_spark/assets/
 # 忽略 WebGL Demo 的 HTML 文件
 app/assets/webgl_spark/index.html
 
@@ -225,6 +227,18 @@ app/assets/webgl/.vite/
 3dgs_viewer/spark-3dgs-viewer/dist/
 3dgs_viewer/spark-3dgs-viewer/.vite/
 3dgs_viewer/spark-3dgs-viewer/.tmp/
+# tsc / vue-tsc 编译产物（源码为 .ts / .vue）
+3dgs_viewer/spark-3dgs-viewer/src/**/*.js
+3dgs_viewer/spark-3dgs-viewer/src/**/*.d.ts
+
+# VR 查看器本地开发产物（已移至根目录）
+vr-3dgs-viewer/node_modules/
+vr-3dgs-viewer/dist/
+vr-3dgs-viewer/.vite/
+vr-3dgs-viewer/**/*.mp4
+vr-3dgs-viewer/**/*.ply
+vr-3dgs-viewer/**/*.splat
+vr-3dgs-viewer/**/*.ksplat
 
 # 忽略 Nerfstudio/COLMAP 的输出目录
 ai_engine/outputs/
@@ -308,6 +322,37 @@ tmp/docs/
 # pandoc 提取的文档媒体目录
 docs/**/*-media/
 
+# 草稿文档
+docs/3dgs-mobile-rendering.md
+docs/cinematic-mode-algorithm.md
+
+# Local-only doc archives and duplicate doc surfaces.
+# Keep the canonical 01-09 docs tree in Git, keep legacy/duplicate docs only locally.
+/docs/.archive/
+/docs/1.总览/
+/docs/2.架构说明/
+/docs/3.API文档/
+/docs/4.测试（待审阅）/
+/docs/5.贡献/
+/docs/old/
+/docs/代办/
+/docs/协同规范/
+/docs/技术报告/
+/docs/开发文档/
+/docs/过时的项目设计/
+/docs/API_DOC.md
+/docs/API_TEST_REPORT.md
+/docs/BrainDance 项目协作规范与开发协议 (v1.0).md
+/docs/BrainDance_Design_Rules.md
+/docs/EDGE_FUNCTIONS_DEPLOYMENT.md
+/docs/INDEX.md
+/docs/LOCAL_DEPLOYMENT.md
+/docs/SAM3D_MODEL_SETUP.md
+/docs/开发环境配置.md
+/docs/快速开始指南.md
+/docs/第十九届全国大学生软件创新大赛-项目计划书.md
+/docs/第十九届全国大学生软件创新大赛-项目计划书.md.backup
+
 # 备份文件超过100MB不应提交
 *.ply.bak
 *.mp4.bak
@@ -319,6 +364,11 @@ ai_engine/demo/webgl/my-3dgs-viewer/public/models/scene_auto_sync.ply.bak
 # =========================
 # 11. Local Tooling / Build Artifacts (本地工具与构建产物)
 # =========================
+
+# 根目录意外产生的 node 依赖（仅含 gsap，属于本地临时产物）
+/node_modules/
+/package.json
+/package-lock.json
 
 # Frontend local dependencies and builds
 dashboard/.env

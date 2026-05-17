@@ -34,6 +34,7 @@ Widget setTab4(BuildContext context, ScrollController scrollController) {
         SizedBox(
           height: 420,
           child: BDPanelCard(
+            glass: true,
             child: ClipRRect(
               borderRadius: BDDesign.radiusLarge,
               child: Scrollbar(

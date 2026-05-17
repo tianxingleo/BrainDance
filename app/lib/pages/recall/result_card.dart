@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/widgets/animated_network_image.dart';
 import '../../services/viewer_navigation.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
@@ -150,24 +152,29 @@ class SearchResultCard extends StatelessWidget {
                               color: isDark ? darkInput : theme.grayColor3,
                               child: Padding(
                                 padding: const EdgeInsets.all(6.0),
-                                child: Image.network(
-                                  imageUrl,
+                                child: BDFadeInNetworkImage(
+                                  imageUrl: imageUrl,
+                                  placeholder: const Center(
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  errorWidget: const Center(
+                                    child: Icon(
+                                      Icons.broken_image,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                                   fit: BoxFit.contain,
                                   alignment: Alignment.center,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    developer.log(
-                                      '[RecallPreview] FAILED url=$imageUrl error=$error',
-                                      name: 'ResultCard',
-                                      error: error,
-                                      stackTrace: stackTrace,
-                                    );
-                                    return const Center(
-                                      child: Icon(
-                                        Icons.broken_image,
-                                        color: Colors.grey,
-                                      ),
-                                    );
-                                  },
+                                  backgroundColor:
+                                      isDark ? darkInput : theme.grayColor3,
+                                  duration: BDMotion.durationSlow,
+                                  curve: BDMotion.curveEnter,
                                 ),
                               ),
                             ),

@@ -177,10 +177,12 @@ extension _RecallPageLocalAi on _RecallPageState {
 
   Future<void> _restoreLocalModelPath() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedPath =
-        prefs.getString(_RecallPageState._localModelPathPrefKey)?.trim();
-    final savedUrl =
-        prefs.getString(_RecallPageState._localModelUrlPrefKey)?.trim();
+    final savedPath = prefs
+        .getString(_RecallPageState._localModelPathPrefKey)
+        ?.trim();
+    final savedUrl = prefs
+        .getString(_RecallPageState._localModelUrlPrefKey)
+        ?.trim();
     final effectiveUrl = (savedUrl == null || savedUrl.isEmpty)
         ? _defaultModelDownloadUrl
         : savedUrl;
@@ -410,7 +412,9 @@ extension _RecallPageLocalAi on _RecallPageState {
     final modelLabel =
         selectedCatalogItem?.name ??
         path.basename(
-          modelPath.isEmpty ? _RecallPageState._defaultModelFileName : modelPath,
+          modelPath.isEmpty
+              ? _RecallPageState._defaultModelFileName
+              : modelPath,
         );
     if (modelPath.isEmpty) {
       showAppToast(context, textLocalize('local_model_fill_path'));
@@ -443,19 +447,18 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final llama = LlamaEngine(LlamaBackend());
       var backendSummary = 'CPU';
+      late final ModelParams mobileProfile;
+      mobileProfile = const ModelParams(
+        contextSize: 1024,
+        gpuLayers: 12,
+        preferredBackend: GpuBackend.vulkan,
+        numberOfThreads: 4,
+        numberOfThreadsBatch: 4,
+        batchSize: 64,
+        microBatchSize: 32,
+      );
       try {
-        await llama.loadModel(
-          modelPath,
-          modelParams: const ModelParams(
-            contextSize: 2048,
-            gpuLayers: 24,
-            preferredBackend: GpuBackend.vulkan,
-            numberOfThreads: 4,
-            numberOfThreadsBatch: 4,
-            batchSize: 256,
-            microBatchSize: 256,
-          ),
-        );
+        await llama.loadModel(modelPath, modelParams: mobileProfile);
         final backendName = await llama.getBackendName();
         backendSummary = '$backendName (GPU 优先)';
       } catch (_) {
@@ -464,13 +467,13 @@ extension _RecallPageLocalAi on _RecallPageState {
         await fallbackLlama.loadModel(
           modelPath,
           modelParams: const ModelParams(
-            contextSize: 2048,
+            contextSize: 768,
             gpuLayers: 0,
             preferredBackend: GpuBackend.cpu,
-            numberOfThreads: 4,
-            numberOfThreadsBatch: 4,
-            batchSize: 256,
-            microBatchSize: 256,
+            numberOfThreads: 3,
+            numberOfThreadsBatch: 3,
+            batchSize: 64,
+            microBatchSize: 32,
           ),
         );
         final backendName = await fallbackLlama.getBackendName();
@@ -528,7 +531,8 @@ extension _RecallPageLocalAi on _RecallPageState {
       '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
       '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
       '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
-      '5. 不复述问题，不解释规则，不说‘根据给定证据’。';
+      '5. 不复述问题，不解释规则，不说‘根据给定证据’。'
+      '6. 不要输出<think>或任何思考链。';
 
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
@@ -541,7 +545,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
 
-    // 1. 构建符合 Qwen3-1.7B-Instruct 格式的 retrieval payload
+    // 1. 构建紧凑的 retrieval payload，尽量减少端侧上下文占用
     final retrieval = await _buildRetrievalPayload(userQuestion);
     final userPayload = jsonEncode({
       'question': userQuestion,
@@ -549,12 +553,11 @@ extension _RecallPageLocalAi on _RecallPageState {
     });
 
     // 2. 构建 ChatML 格式 Prompt
-    // 注意：微调后的模型对 System Prompt 和 JSON Payload 格式非常敏感
     final prompt =
         '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
         '<|im_start|>user\n$userPayload<|im_end|>\n'
         '<|im_start|>assistant\n'
-        '请直接给出最终回答；如果你仍然生成 <think> 思考链，系统会将其与正式回答分离，仅正式回答会作为最终结果展示。\n';
+        '请直接给出最终回答，且只输出一句到两句。';
 
     setState(() {
       _localAnswer = '';
@@ -574,11 +577,11 @@ extension _RecallPageLocalAi on _RecallPageState {
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 384, // 给 <think> + 正式回答留出更充足的联合预算，降低被截断概率
-              temp: 0.1, // 接近 Greedy Search，减少幻觉
-              topK: 20,
-              topP: 0.1, // 进一步限制采样范围
-              penalty: 1.05, // 对齐 Python 脚本的 repetition_penalty=1.05
+              maxTokens: 96,
+              temp: 0.0,
+              topK: 1,
+              topP: 1.0,
+              penalty: 1.02,
               stopSequences: ['<|im_end|>', '<|endoftext|>'], // Qwen3 停止符
             ),
           )
@@ -593,7 +596,7 @@ extension _RecallPageLocalAi on _RecallPageState {
               final nextRaw = streamedAnswer + token;
               final parsedOutput = _parseLocalModelOutput(nextRaw);
               final nextReasoning = parsedOutput.reasoning;
-              final nextAnswer = parsedOutput.answer;
+              final nextAnswer = _truncateLocalAnswer(parsedOutput.answer);
               if (lockedAnswer) {
                 if (nextAnswer != _localAnswer ||
                     nextReasoning != _localReasoning) {
@@ -660,38 +663,39 @@ extension _RecallPageLocalAi on _RecallPageState {
     }
 
     if (matches.isEmpty) {
-      final fallbackModels = (_models.isNotEmpty ? _models : _allModels)
-          .take(3)
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-      matches = fallbackModels;
+      return {
+        'evidence': const [],
+        'hit_count': 0,
+        'intent': 'unknown',
+        'answerability_hint': 'no_hit',
+      };
     }
 
-    // 转换为微调模型预期的 evidence 格式
-    final evidence = matches.map((item) {
-      final metaInfo = _toMap(item['meta_info']);
-      final tags = _joinList(item['tags']);
-      final objects = _joinList(item['objects']);
-      final summary = _collectStrings(
-        metaInfo,
-      ).take(6).map((t) => t.trim()).where((t) => t.isNotEmpty).join('；');
+    final evidence = matches
+        .map((item) {
+          final metaInfo = _toMap(item['meta_info']);
+          final tags = _joinList(item['tags']);
+          final objects = _joinList(item['objects']);
+          final summary = _summarizeEvidence(metaInfo);
 
-      return {
-        'id': item['id']?.toString() ?? '',
-        'created_at': item['created_at']?.toString() ?? '',
-        'description': item['description']?.toString() ?? '',
-        'tags': tags,
-        'objects': objects,
-        'summary': summary,
-        'scene_id': item['scene_id']?.toString() ?? '',
-      };
-    }).toList();
+          return {
+            'id': item['id']?.toString() ?? '',
+            'score': (item['similarity'] as num?)?.toDouble() ?? 0.0,
+            'object': objects,
+            'tags': tags,
+            'summary': summary,
+            'scene_id': item['scene_id']?.toString() ?? '',
+          };
+        })
+        .take(3)
+        .toList();
 
     return {
       'evidence': evidence,
       'hit_count': evidence.length,
       // 本地暂无 Intent 识别模型，先默认为 unknown 或根据是否有结果判断
       'intent': evidence.isEmpty ? 'unknown' : 'object_lookup',
+      'answerability_hint': evidence.isEmpty ? 'no_hit' : 'hit',
     };
   }
 
@@ -830,6 +834,42 @@ extension _RecallPageLocalAi on _RecallPageState {
       return true;
     }
     return false;
+  }
+
+  String _truncateLocalAnswer(String value) {
+    var cleaned = _sanitizeLocalAnswer(_stripDanglingThinkTag(value));
+    final newlineIndex = cleaned.indexOf('\n');
+    if (newlineIndex >= 0) {
+      cleaned = cleaned.substring(0, newlineIndex);
+    }
+    final sentenceParts = cleaned.split(RegExp(r'[。！？!?]'));
+    if (sentenceParts.isEmpty) {
+      return cleaned.trim();
+    }
+    final first = sentenceParts.first.trim();
+    if (first.isNotEmpty) {
+      return first.endsWith('。') ||
+              first.endsWith('！') ||
+              first.endsWith('？') ||
+              first.endsWith('!') ||
+              first.endsWith('?')
+          ? first
+          : '$first。';
+    }
+    return cleaned.trim();
+  }
+
+  String _summarizeEvidence(Map<String, dynamic> metaInfo) {
+    final parts = _collectStrings(metaInfo)
+        .take(4)
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) {
+      return '';
+    }
+    final summary = parts.join('；');
+    return summary.length > 120 ? summary.substring(0, 120) : summary;
   }
 
   String _joinList(dynamic rawList) {

@@ -76,18 +76,22 @@ class SupabaseConfig {
   static List<String> buildUrlCandidates() {
     final configured = configuredUrl;
     final candidates = <String>[
-      if (configured.isNotEmpty) configured,
+      // Try fallbacks (local/LAN IPs) first — they respond instantly on LAN
+      // and bypass Cloudflare's 100-second timeout for large uploads.
       ...urlFallbacks,
+      if (configured.isNotEmpty) configured,
     ];
 
     final lowerConfigured = configured.toLowerCase();
     if (lowerConfigured.startsWith('http://127.0.0.1') ||
         lowerConfigured.startsWith('http://localhost')) {
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        candidates.add(configured.replaceFirst(
-          RegExp(r'://(127\.0\.0\.1|localhost)'),
-          '://10.0.2.2',
-        ));
+        candidates.add(
+          configured.replaceFirst(
+            RegExp(r'://(127\.0\.0\.1|localhost)'),
+            '://10.0.2.2',
+          ),
+        );
       }
     }
 
@@ -110,7 +114,7 @@ class SupabaseConfig {
   }
 
   static Future<SupabaseEndpointResolution> resolveEndpoint({
-    Duration timeout = const Duration(seconds: 2),
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     final candidates = buildUrlCandidates();
     if (candidates.isEmpty) {
@@ -166,19 +170,12 @@ class SupabaseConfig {
   }
 
   static Future<bool> _isEndpointReachable(Dio dio, String baseUrl) async {
-    final probes = <String>[
-      '$baseUrl/rest/v1/',
-      '$baseUrl/auth/v1/health',
-    ];
+    final probes = <String>['$baseUrl/rest/v1/', '$baseUrl/auth/v1/health'];
     for (final probe in probes) {
       try {
         final response = await dio.get<Object?>(
           probe,
-          options: Options(
-            headers: {
-              if (apiKey.isNotEmpty) 'apikey': apiKey,
-            },
-          ),
+          options: Options(headers: {if (apiKey.isNotEmpty) 'apikey': apiKey}),
         );
         if ((response.statusCode ?? 0) > 0) {
           return true;

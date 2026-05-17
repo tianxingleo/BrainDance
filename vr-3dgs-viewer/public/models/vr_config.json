@@ -1,0 +1,10 @@
+{
+  "worldScale": 1.0,
+  "worldPosition": [0, 0, -2.2],
+  "worldRotationY": 0,
+  "userHeight": 1.6,
+  "startDistance": 2.2,
+  "near": 0.01,
+  "far": 2000,
+  "preferCompressedModel": true
+}

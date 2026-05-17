@@ -97,6 +97,14 @@ const errorMessage = ref('')
 const storageError = ref('')
 const lastUpdated = ref<string | null>(null)
 
+// 认证状态
+const isAuthenticated = ref(false)
+const authLoading = ref(true)
+const loginEmail = ref('')
+const loginPassword = ref('')
+const loginError = ref('')
+const loginSubmitting = ref(false)
+
 const taskRows = ref<ProcessingTask[]>([])
 const workerRows = ref<WorkerNode[]>([])
 const modelAssetCount = ref(0)
@@ -624,6 +632,27 @@ const applyTheme = () => {
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
+const handleLogin = async () => {
+  loginError.value = ''
+  if (!loginEmail.value || !loginPassword.value) {
+    loginError.value = '请输入邮箱和密码'
+    return
+  }
+  loginSubmitting.value = true
+  const { error } = await supabase.auth.signInWithPassword({
+    email: loginEmail.value,
+    password: loginPassword.value,
+  })
+  loginSubmitting.value = false
+  if (error) {
+    loginError.value = error.message
+  }
+}
+
+const handleLogout = async () => {
+  await supabase.auth.signOut()
+}
+
 const updateWorkerDesiredState = async (
   worker: WorkerNode,
   desiredState: 'run' | 'pause' | 'interrupt',
@@ -1140,9 +1169,7 @@ const refreshDashboard = async () => {
     taskTableCountRes,
     task24hRes,
     asset7dRes,
-    processingTaskUsers,
-    assetUsers,
-    legacyTaskUsers,
+    userActivityRes,
   ] = await Promise.all([
     supabase
       .from('processing_tasks')
@@ -1165,9 +1192,8 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
-    fetchAllRows<{ user_id: string; created_at: string }>('processing_tasks', 'user_id, created_at'),
-    fetchAllRows<{ user_id: string | null; created_at: string }>('model_assets', 'user_id, created_at'),
-    fetchAllRows<{ user_id: string; created_at: string }>('tasks', 'user_id, created_at'),
+    // 使用 RPC 替代 3 次 fetchAllRows 全表扫描
+    supabase.rpc('get_user_activity_summary', {}),
   ])
 
   if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
@@ -1181,10 +1207,28 @@ const refreshDashboard = async () => {
   } else {
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
     const workers = (workerRes.data ?? []) as WorkerNode[]
-    const summaries = buildUserSummaries(processingTaskUsers, assetUsers, legacyTaskUsers)
+    // RPC 返回的是聚合后的用户活跃数据
+    const rpcSummaries = (userActivityRes.data ?? []) as Array<{
+      user_id: string
+      total_tasks: number
+      tasks_24h: number
+      tasks_7d: number
+      total_assets: number
+      assets_7d: number
+      last_active: string | null
+    }>
     taskRows.value = tasks
     workerRows.value = workers
-    userSummaries.value = summaries
+    userSummaries.value = rpcSummaries.map((s) => ({
+      userId: s.user_id,
+      displayName: s.user_id.slice(0, 8) + '...',
+      taskCount: s.total_tasks,
+      assetCount: s.total_assets,
+      task24h: s.tasks_24h,
+      task7d: s.tasks_7d,
+      asset7d: s.assets_7d,
+      lastActive: s.last_active,
+    }))
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
 
@@ -1268,6 +1312,17 @@ onMounted(async () => {
   }
   applyTheme()
 
+  // 认证检查：监听 Supabase Auth 状态
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    isAuthenticated.value = !!session
+    authLoading.value = false
+  })
+  supabase.auth.onAuthStateChange((_event, session) => {
+    isAuthenticated.value = !!session
+    authLoading.value = false
+  })
+
+  if (!isAuthenticated.value) return
   await refreshDashboard()
 
   bindChannel('processing_tasks', 'dashboard-processing-tasks')
@@ -1294,7 +1349,47 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <!-- 认证加载中 -->
+  <div v-if="authLoading" class="auth-loading">
+    <p>正在验证登录状态...</p>
+  </div>
+
+  <!-- 登录表单 -->
+  <div v-else-if="!isAuthenticated" class="login-page">
+    <div class="login-card glass-card">
+      <h2>BrainDance Dashboard</h2>
+      <p class="login-subtitle">请登录以访问管理面板</p>
+      <form @submit.prevent="handleLogin">
+        <el-input
+          v-model="loginEmail"
+          type="email"
+          placeholder="邮箱"
+          :disabled="loginSubmitting"
+          style="margin-bottom: 12px;"
+        />
+        <el-input
+          v-model="loginPassword"
+          type="password"
+          placeholder="密码"
+          show-password
+          :disabled="loginSubmitting"
+          style="margin-bottom: 12px;"
+        />
+        <p v-if="loginError" class="login-error">{{ loginError }}</p>
+        <el-button
+          type="primary"
+          native-type="submit"
+          :loading="loginSubmitting"
+          style="width: 100%;"
+        >
+          登录
+        </el-button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 已认证：主 Dashboard -->
+  <div v-else class="dashboard-page">
     <section class="shell-grid">
       <aside class="phone-shell">
         <div class="phone-shell__glow"></div>
@@ -1418,6 +1513,11 @@ onUnmounted(() => {
                   :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
                 />
               </div>
+
+              <el-button size="small" @click="handleLogout">
+                <Icon icon="lucide:log-out" />
+                <span>登出</span>
+              </el-button>
             </div>
           </div>
 

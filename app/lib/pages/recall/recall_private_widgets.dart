@@ -20,6 +20,111 @@ class _ParsedLocalModelOutput {
   final String answer;
 }
 
+class _RecallViewerOpeningOverlay extends StatelessWidget {
+  const _RecallViewerOpeningOverlay({
+    required this.isDark,
+    required this.label,
+  });
+
+  final bool isDark;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final panelColor = isDark
+        ? const Color(0xCC10161F)
+        : const Color(0xEAF7FAFD);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.14);
+    final textColor = isDark ? const Color(0xFFFFFFFF) : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.72)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
+
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: AnimatedOpacity(
+          opacity: 1,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+            child: ColoredBox(
+              color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.08),
+              child: Center(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0.96, end: 1),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, child) {
+                    return Transform.scale(scale: value, child: child);
+                  },
+                  child: Container(
+                    width: 220,
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                    decoration: BoxDecoration(
+                      color: panelColor,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.14),
+                          blurRadius: 28,
+                          offset: const Offset(0, 14),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.6,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              isDark
+                                  ? const Color(0xFF7CE4EF)
+                                  : const Color(0xFF59B0B6),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          '正在打开模型',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _AgentProcessPanel extends StatefulWidget {
   const _AgentProcessPanel({
     required this.chatMessage,
@@ -248,55 +353,65 @@ class _AgentStepTimeline extends StatelessWidget {
     final fadeBase = isDark ? const Color(0xFF10161F) : const Color(0xFFF6F9FC);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 220),
-      child: ShaderMask(
-        shaderCallback: (bounds) {
-          return LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [fadeBase.withValues(alpha: 0), fadeBase, fadeBase],
-            stops: const [0, 0.18, 1],
-          ).createShader(bounds);
-        },
-        blendMode: BlendMode.dstIn,
-        child: ListView.separated(
-          controller: scrollController,
-          padding: EdgeInsets.zero,
-          itemCount: steps.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final step = steps[index];
-            return ListenableBuilder(
-              listenable: step,
-              builder: (context, _) {
-                switch (step.type) {
-                  case 'status':
-                    return _AgentStatusStepTile(
-                      step: step,
-                      isDark: isDark,
-                      textColor: textColor,
-                      hintColor: hintColor,
-                    );
-                  case 'tool_call':
-                    return _AgentStepTile(
-                      step: step,
-                      isDark: isDark,
-                      textColor: textColor,
-                    );
-                  case 'thought':
-                    return _AgentThoughtStepTile(
-                      step: step,
-                      isDark: isDark,
-                      hintColor: hintColor,
-                    );
-                  case 'error':
-                    return _AgentErrorStepTile(step: step, onRetry: onRetry);
-                  default:
-                    return const SizedBox.shrink();
-                }
-              },
-            );
-          },
-        ),
+      child: Stack(
+        children: [
+          ListView.separated(
+            controller: scrollController,
+            padding: EdgeInsets.zero,
+            itemCount: steps.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final step = steps[index];
+              return ListenableBuilder(
+                listenable: step,
+                builder: (context, _) {
+                  switch (step.type) {
+                    case 'status':
+                      return _AgentStatusStepTile(
+                        step: step,
+                        isDark: isDark,
+                        textColor: textColor,
+                        hintColor: hintColor,
+                      );
+                    case 'tool_call':
+                      return _AgentStepTile(
+                        step: step,
+                        isDark: isDark,
+                        textColor: textColor,
+                      );
+                    case 'thought':
+                      return _AgentThoughtStepTile(
+                        step: step,
+                        isDark: isDark,
+                        hintColor: hintColor,
+                      );
+                    case 'error':
+                      return _AgentErrorStepTile(step: step, onRetry: onRetry);
+                    default:
+                      return const SizedBox.shrink();
+                  }
+                },
+              );
+            },
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 36,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [fadeBase, fadeBase.withValues(alpha: 0.0)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -702,7 +817,7 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
         color: isDark ? const Color(0xFF13181E) : const Color(0xFFF1F4EA),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
         ),
       ),
       child: Column(
@@ -712,8 +827,8 @@ class _CodeElementBuilder extends MarkdownElementBuilder {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: isDark
-                  ? Colors.white.withOpacity(0.05)
-                  : Colors.black.withOpacity(0.03),
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.03),
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(8),
               ),
@@ -799,6 +914,15 @@ class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
   int _visibleLength = 0;
   String _animatedText = '';
 
+  String _prepareStreamingMarkdown(String text) {
+    if (text.isEmpty) return text;
+    final parts = text.split('```');
+    if (parts.length % 2 == 0) {
+      return '$text\n```';
+    }
+    return text;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -844,10 +968,13 @@ class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
 
   @override
   Widget build(BuildContext context) {
-    final visibleText = _animatedText.substring(0, _visibleLength);
+    final visibleText = _prepareStreamingMarkdown(
+      _animatedText.substring(0, _visibleLength),
+    );
     return MarkdownBody(
       data: visibleText,
       builders: {'code': _CodeElementBuilder(widget.isDark, context)},
+      extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(color: widget.textColor, fontSize: 14, height: 1.6),
         h1: TextStyle(

@@ -373,25 +373,53 @@ sequenceDiagram
 
 This project is an exploration standing on the shoulders of giants. Core algorithms and rendering capabilities heavily draw from and integrate the following excellent open-source projects, to whom we express our gratitude:
 
-#### Core Algorithms
+#### Core Algorithms & 3D Reconstruction
 
 - **[nerfstudio](https://github.com/nerfstudio-project/nerfstudio)**: Provides the most modular NeRF/3DGS training framework. Our training pipeline is modified based on the `splatfacto` model.
 - **[gsplat](https://github.com/nerfstudio-project/gsplat)**: Ultra-fast CUDA rasterization backend, providing performance assurance for cloud training.
-- **[gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria's original paper implementation, laying the theoretical foundation.
-- **[SAM3D](https://github.com/ ScreenVerse/sam-3d-objects)**: Single-image 3DGS generation framework, supporting high-quality 3D model reconstruction from a single photo.
+- **[3D Gaussian Splatting (Inria)](https://github.com/graphdeco-inria/gaussian-splatting)**: Inria's original paper implementation, laying the theoretical foundation.
+- **[2D Gaussian Splatting](https://github.com/hbb1/2d-gaussian-splatting)**: 2D Gaussian representation and geometrically accurate reconstruction.
+- **[Sparse2DGS](https://github.com/Wuuu3511/Sparse2DGS)**: Geometry-prioritized 2DGS reconstruction from sparse views.
+- **[SuGaR](https://github.com/Anttwo/SuGaR)**: Surface-aligned Gaussian splatting for efficient 3D mesh reconstruction.
+- **[Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3)**: Depth estimation and visual space recovery from any views.
+- **[SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects)**: Single-image/few-image 3D object generation framework.
 - **[SHARP](https://github.com/apple/ml-sharp)**: Apple's high-quality single-image 3DGS generation model, directly predicting Gaussian splatting parameters through neural networks.
+- **[MoGe (Microsoft)](https://github.com/microsoft/MoGe)**: Monocular geometry estimation, serving as the depth backend for SAM 3D Objects.
+- **[COLMAP](https://colmap.github.io/)**: Structure-from-Motion (SfM), prerequisite for Nerfstudio training pipeline.
+- **[GLOMAP](https://github.com/colmap/glomap)**: Global SfM reconstruction.
+- **[PyTorch](https://github.com/pytorch/pytorch)**: Deep learning framework, the foundation of our AI engine.
+- **[Ultralytics YOLO](https://github.com/ultralytics/ultralytics)**: Object detection and image segmentation.
 
-#### Infrastructure & AI
-
-- **[Supabase](https://github.com/supabase/supabase)**: The soul of this project. Provides out-of-the-box Auth, Storage, and Realtime capabilities, allowing us to focus on 3D business logic.
-- **[pgvector](https://github.com/pgvector/pgvector)**: PostgreSQL vector extension, replacing ChromaDB and providing high-performance RAG retrieval capabilities for this project.
-- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: Powerful multimodal large model that gives 3D scenes the ability to "be understood" (auto-tagging and description).
-
-#### Rendering & Viewer
+#### Web Rendering & Viewer
 
 - **Special Thanks**: Special thanks to **[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)** for its continued contribution to the web 3DGS ecosystem.
 - **[GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)**: Three.js-based web viewer, inspiration for our mobile WebView rendering.
+- **[Three.js](https://github.com/mrdoob/three.js)**: WebGL 3D rendering engine, the foundation of all web viewers.
+- **[Spark (@sparkjsdev)](https://github.com/sparkjsdev/spark)**: 3DGS web rendering engine.
 - **[antimatter15/splat](https://github.com/antimatter15/splat)**: Another excellent WebGL implementation, providing early conceptual references.
+- **[MindAR.js](https://github.com/hiukim/mind-ar-js)**: Web AR image recognition and tracking.
+- **[GSAP](https://gsap.com/)**: Professional-grade web animation library.
+- **[MediaPipe (Google)](https://github.com/google-ai-edge/mediapipe)**: Vision task processing (hand gesture recognition, etc.).
+
+#### Infrastructure & AI Services
+
+- **[Supabase](https://github.com/supabase/supabase)**: The soul of this project. Provides out-of-the-box Auth, Storage, and Realtime capabilities, allowing us to focus on 3D business logic.
+- **[pgvector](https://github.com/pgvector/pgvector)**: PostgreSQL vector extension, providing high-performance RAG retrieval capabilities.
+- **[LangChain](https://github.com/langchain-ai/langchain)**: Agent orchestration framework, powering intelligent routing and tool invocation in the backend.
+- **[OpenAI API](https://github.com/openai/openai-python)**: LLM API service.
+- **[Qwen-VL](https://github.com/QwenLM/Qwen-VL)**: Powerful multimodal large model that gives 3D scenes the ability to "be understood" (auto-tagging and description).
+- **[DashScope (Alibaba Cloud)](https://help.aliyun.com/dashscope)**: Tongyi Qianwen model service.
+- **[Deno](https://github.com/denoland/deno)**: Runtime for Supabase Edge Functions.
+
+#### Mobile & Frontend
+
+- **[Flutter](https://github.com/flutter/flutter)**: Cross-platform mobile framework.
+- **[Vue.js](https://github.com/vuejs/core)**: Frontend framework — web viewers and dashboard are built on Vue 3.
+- **[TDesign Flutter (Tencent)](https://github.com/Tencent/tdesign-flutter)**: Flutter UI component library.
+- **[Riverpod](https://github.com/riverpod/riverpod)**: Flutter state management.
+- **[Element Plus](https://github.com/element-plus/element-plus)**: Vue 3 UI component library.
+- **[ECharts](https://github.com/apache/echarts)**: Data visualization charting library.
+- **[llama.cpp](https://github.com/ggerganov/llama.cpp)**: On-device LLM inference (via llamadart Dart bindings).
 
 
 

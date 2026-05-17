@@ -926,3 +926,48 @@ textarea {
     max-width: none;
   }
 }
+
+/* 登录页面 */
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-secondary, #999);
+  font-size: 14px;
+}
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-canvas, #0a0a0f);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 40px 32px;
+  text-align: center;
+}
+
+.login-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary, #e5e5ea);
+}
+
+.login-subtitle {
+  margin: 0 0 24px;
+  color: var(--text-secondary, #999);
+  font-size: 14px;
+}
+
+.login-error {
+  color: #f56c6c;
+  font-size: 12px;
+  margin: 0 0 12px;
+  text-align: left;
+}

@@ -10,9 +10,19 @@ export default defineConfig({
   ],
   base: './', 
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      { find: /^three$/, replacement: fileURLToPath(new URL('./src/vendor/three-compat.ts', import.meta.url)) },
+    ],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name]-rollfix-[hash].js',
+        chunkFileNames: 'assets/[name]-rollfix-[hash].js',
+        assetFileNames: 'assets/[name]-rollfix-[hash][extname]',
+      },
+    },
   },
   server: {
     host: '0.0.0.0',

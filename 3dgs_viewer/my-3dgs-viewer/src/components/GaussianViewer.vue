@@ -4,6 +4,12 @@ import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
 import BottomSelector from './BottomSelector.vue';
+import {
+  buildCenterModeBounds,
+  clampCenterModePitch,
+  clampCenterModeRadius,
+  clampCenterModeYaw,
+} from '../lib/interaction/centerModeBounds';
 
 const containerRef = ref(null);
 const isVRMode = ref(false);
@@ -18,12 +24,15 @@ const currentViewMode = ref(VIEW_MODE.FREE);
 const cameraPoses = ref([]);
 const searchQuery = ref(''); // 绑定搜索框的数据
 const activeImage = ref(''); // 当前激活的参考图
+const loadedRefImages = ref({}); // 记录已加载的参考图
 const activeTag = ref(''); // 当前激活的标签
 const activePoseId = ref(''); // 当前高亮的镜头项，不一定同步刷新右侧参考图
 const sceneMetadata = ref({}); // 存储 FOV 等元数据
 const debugInfo = ref({ x: 0, y: 0, z: 0 }); // 调试用的旋转信息
 const arrivalEuler = ref({ x: 0, y: 0, z: 0 }); // 刚飞到时的欧拉角
 const loadError = ref(''); // 添加错误状态
+const loadingProgress = ref(0);
+const loadingStatusText = ref('准备加载模型');
 const currentFps = ref(0); // 实时帧数
 const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
@@ -37,23 +46,21 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
-const showTopMenu = ref(false);
-const topMenuRef = ref(null);
-const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
 const hasModelTab = computed(() => modelList.value.length > 1);
 const hasPoseTab = computed(() => !isOrbitMode.value && filteredPoses.value.length > 0);
 const DEFAULT_FOCAL_PX = 380; // 无位姿元数据时使用更广一点的默认焦距
-const DRAG_ROTATE_SENSITIVITY = 0.065;
-const DRAG_PAN_SENSITIVITY = 0.0022;
+const FREE_LOOK_SENSITIVITY = 0.0048;
 const WHEEL_ZOOM_STEP = 0.08;
-const PINCH_ZOOM_STEP = 1.0;
-const ORBIT_YAW_SENSITIVITY = 0.0055;
-const ORBIT_PITCH_SENSITIVITY = 0.0042;
+const PINCH_ZOOM_STEP = 1.8;
+const ORBIT_YAW_SENSITIVITY = 0.0048;
+const ORBIT_PITCH_SENSITIVITY = 0.0048;
 const ORBIT_ROLL_SENSITIVITY = 1.0;
-const ORBIT_DOLLY_FACTOR = 0.35;
+// 双指缩放时允许少量抖动，但不能把它误判成旋转，否则中心模式会出现镜头抽动。
+const ORBIT_TOUCH_PINCH_DISTANCE_EPS = 2.5;
+const ORBIT_TOUCH_ROTATE_ANGLE_EPS = THREE.MathUtils.degToRad(2.0);
 const CINEMATIC_MIN_LOOK_AHEAD = 1.2;
 const CINEMATIC_MAX_LOOK_AHEAD = 8.0;
 const CINEMATIC_PATH_BLEND = 0.72;
@@ -62,8 +69,65 @@ const CINEMATIC_CAMERA_DAMPING_SLOW = 0.1;
 const CINEMATIC_MAX_KEYFRAMES = 18;
 const CINEMATIC_MIN_KEYFRAMES = 6;
 const CINEMATIC_UP_ALIGNMENT_MIN = 0.45;
+const ORBIT_RECENTER_DURATION = 1.5;
+const ORBIT_RADIUS_SMOOTHING = 0.22;
+const ORBIT_RADIUS_MIN_STEP = 0.02;
+const INTRO_PARTICLE_FADE_IN_START = 0.04;
+const INTRO_SPLAT_REVEAL_START = 0.24;
+const INTRO_SPLAT_REVEAL_END = 0.9;
+const INTRO_PARTICLE_FADE_OUT_START = 0.22;
+const INTRO_PARTICLE_FADE_OUT_END = 0.88;
+const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
+const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.14;
+const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
+const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 1.08;
+const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
+const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
+const DESKTOP_INTRO_PARTICLE_BUDGET = 42000;
+const MOBILE_INTRO_PARTICLE_BUDGET = 18000;
+const INTRO_DURATION_MS = 6500;
+const INTRO_ORBIT_AXIS = new THREE.Vector3(0, 0, 1);
+const VR_MOVE_SPEED = 1.35;
+const VR_TURN_SPEED = 1.65;
+const VR_VERTICAL_SPEED = 0.85;
+const VR_DEADZONE = 0.18;
+const VR_HUD_REFRESH_MS = 180;
+const VR_HUD_CANVAS_SIZE = { width: 1024, height: 512 };
+const VR_HUD_WORLD_SIZE = { width: 1.35, height: 0.675 };
+const SCENE_AXIS_FIX = {
+  position: [0, 0, 0],
+  // 桌面查看器保持原始朝向，不额外做镜像，避免把正常模型翻到头朝地。
+  scale: [1, 1, 1],
+  rotation: [0, 0, 0, 1],
+};
 
 const isOrbitMode = computed(() => currentViewMode.value === VIEW_MODE.ORBIT);
+
+const isMobileDevice = () => (
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+);
+
+const getFileExtension = (url) => {
+  const path = String(url || '').split('?')[0].split('#')[0];
+  const match = path.match(/\.[^./\\]+$/);
+  return match ? match[0].toLowerCase() : '';
+};
+
+const replaceModelExtension = (url, extension) => {
+  const value = String(url || '');
+  const queryIndex = value.search(/[?#]/);
+  const base = queryIndex === -1 ? value : value.slice(0, queryIndex);
+  const suffix = queryIndex === -1 ? '' : value.slice(queryIndex);
+  return `${base.replace(/\.(ply|splat|ksplat)$/i, extension)}${suffix}`;
+};
+
+const isSameOriginUrl = (url) => {
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch (_) {
+    return false;
+  }
+};
 
 const filteredPoses = computed(() => {
   if (!searchQuery.value.trim()) {
@@ -91,12 +155,24 @@ const searchAndFly = () => {
 
 let viewer;
 let particleSystem;
+let particleSystemRevealDone = false;
 const worldUp = new THREE.Vector3(0, 1, 0);
+const centerModeUp = new THREE.Vector3(0, 0, 1);
+let activeCameraTween = null;
+let activeCameraFlightId = 0;
+let isOrbitRecenterFlightActive = false;
 let pendingInitialTarget = null;
 let didApplyInitialTarget = false;
 let didApplyDefaultPose = false;
 let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
+let interactionFrameHandle = 0;
+let renderRequested = false;
+let xrSession = null;
+let xrSessionEndHandler = null;
+let vrHud = null;
+let vrLastFrameTime = 0;
+let vrLastHudUpdateMs = 0;
 
 const cinematicState = {
   trajectory: null,
@@ -106,6 +182,37 @@ const cinematicState = {
   lastNearestPoseIndex: -1,
   filteredSample: null,
 };
+
+const interactionState = {
+  freeVelocityYaw: 0,
+  freeVelocityPitch: 0,
+  orbitVelocityYaw: 0,
+  orbitVelocityPitch: 0,
+  orbitZoomVelocity: 0,
+  freeInertiaActive: false,
+  orbitInertiaActive: false,
+  zoomInertiaActive: false,
+  lastFrameTime: 0,
+};
+
+const orbitState = {
+  center: new THREE.Vector3(0, 0, 0),
+  up: new THREE.Vector3(0, 1, 0),
+  basisX: new THREE.Vector3(1, 0, 0),
+  basisY: new THREE.Vector3(0, 0, -1),
+  yaw: 0,
+  pitch: 0,
+  radius: 3,
+  targetYaw: 0,
+  targetPitch: 0,
+  targetRadius: 3,
+};
+
+let centerModeBounds = null;
+let orbitNeedsRecenterAfterPoseFlight = false;
+
+const reusableYawQuat = new THREE.Quaternion();
+const reusablePitchQuat = new THREE.Quaternion();
 
 const rotationDelta = ref({ x: 0, y: 0 }); // 记录用户微调了多少度
 const canPlayCinematic = computed(() => cameraPoses.value.length >= 2);
@@ -137,6 +244,139 @@ const refreshCurrentFocalInfo = () => {
   }
 };
 
+const requestRender = () => {
+  if (renderRequested) return;
+  renderRequested = true;
+
+  requestAnimationFrame(() => {
+    renderRequested = false;
+    if (!viewer) return;
+    try {
+      viewer.update();
+      viewer.render();
+    } catch (_) {}
+  });
+};
+
+const normalizeMatrixArray = (input) => {
+  if (!Array.isArray(input) || input.length !== 16) return null;
+  const matrix = input.map(value => Number(value));
+  return matrix.every(Number.isFinite) ? matrix : null;
+};
+
+const normalizePoseList = (input) => {
+  const source = Array.isArray(input)
+    ? input
+    : Array.isArray(input?.frames)
+      ? input.frames
+      : Array.isArray(input?.poses)
+        ? input.poses
+        : Array.isArray(input?.cameras)
+          ? input.cameras
+          : [];
+
+  if (!Array.isArray(source) || source.length === 0) return [];
+
+  return source.map((pose) => {
+    if (!pose || typeof pose !== 'object') return null;
+    const normalizedMatrix = normalizeMatrixArray(pose.matrix || pose.transform_matrix || pose.transform || pose.camera_to_world);
+    if (!normalizedMatrix) return null;
+
+    return {
+      ...pose,
+      matrix: normalizedMatrix,
+    };
+  }).filter(Boolean);
+};
+
+const hasModelResource = async (url) => {
+  if (!isSameOriginUrl(url)) return false;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
+const resolvePreferredModelUrl = async (modelUrl) => {
+  const sourceUrl = modelUrl || currentPlyUrl;
+  const ext = getFileExtension(sourceUrl);
+  if (!sourceUrl || ext !== '.ply') return sourceUrl;
+
+  for (const candidateExt of OPTIMIZED_MODEL_EXTENSIONS) {
+    const candidate = replaceModelExtension(sourceUrl, candidateExt);
+    if (candidate === sourceUrl) continue;
+    if (await hasModelResource(candidate)) {
+      console.info(`[Viewer] 检测到优化模型格式，优先加载: ${candidate}`);
+      return candidate;
+    }
+  }
+
+  return sourceUrl;
+};
+
+const addSplatSceneWithFormatFallback = async (sourceUrl) => {
+  const preferredUrl = await resolvePreferredModelUrl(sourceUrl);
+  const candidates = [preferredUrl];
+  if (preferredUrl !== sourceUrl) candidates.push(sourceUrl);
+
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      console.log(`[Viewer] 加载模型: ${candidate}`);
+      loadingStatusText.value = '下载模型数据';
+      await viewer.addSplatScene(candidate, {
+        'showLoadingUI': false,
+        'progressiveLoad': false,
+        'optimizeSplatData': true,
+        'freeIntermediateSplatData': true,
+        'onProgress': (percentComplete, percentCompleteLabel, loaderStatus) => {
+          const percent = Number(percentComplete);
+          if (Number.isFinite(percent)) {
+            const normalized = THREE.MathUtils.clamp(percent / 100, 0, 1);
+            loadingProgress.value = loaderStatus === 1
+              ? THREE.MathUtils.clamp(0.96 + normalized * 0.04, loadingProgress.value, 1)
+              : THREE.MathUtils.clamp(normalized * 0.96, loadingProgress.value, 0.96);
+          }
+          if (loaderStatus === 1) {
+            loadingStatusText.value = '解析并构建高斯数据';
+          } else {
+            loadingStatusText.value = percentCompleteLabel
+              ? `下载模型数据 ${percentCompleteLabel}`
+            : '下载模型数据';
+          }
+        },
+        'position': SCENE_AXIS_FIX.position,
+        'rotation': SCENE_AXIS_FIX.rotation,
+        'scale': SCENE_AXIS_FIX.scale,
+      });
+      currentPlyUrl = candidate;
+      loadingProgress.value = 1;
+      loadingStatusText.value = '模型加载完成，准备入场动画';
+      return candidate;
+    } catch (error) {
+      lastError = error;
+      if (candidate !== sourceUrl) {
+        console.warn(`[Viewer] 优化格式加载失败，回退原始模型: ${sourceUrl}`, error);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || new Error('模型加载失败');
+};
+
 const applyFocalLengthPx = (focalPx, options = {}) => {
   if (!viewer || !viewer.camera) return;
   // 优先使用位姿 JSON 中记录的真实图像高度，否则回退到视口高度
@@ -155,17 +395,18 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
       ease: options.ease || 'power2.out',
       onUpdate: () => {
         cam.updateProjectionMatrix();
-        // 更新 splat shader uniforms 并立即重绘
-        try { viewer.update(); viewer.render(); } catch (_) {}
+        // 将投影更新合并到下一帧，避免与 viewer 自身循环重复渲染。
+        requestRender();
         refreshCurrentFocalInfo();
+        updateIntroParticleCameraScale();
       }
     });
   } else {
     cam.fov = targetFov;
     cam.updateProjectionMatrix();
-    // 更新 splat shader uniforms 并立即重绘，无需等到下一帧
-    try { viewer.update(); viewer.render(); } catch (_) {}
+    requestRender();
     refreshCurrentFocalInfo();
+    updateIntroParticleCameraScale();
   }
 };
 
@@ -207,13 +448,10 @@ const focalMax = computed(() => {
 
 const toggleFocalSettings = () => {
   showFocalSettings.value = !showFocalSettings.value;
-  if (showFocalSettings.value) {
-    showCinematicPanel.value = false;
-    if (!manualFocalPx.value) {
-      manualFocalPx.value = Number(
-        (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
-      );
-    }
+  if (showFocalSettings.value && !manualFocalPx.value) {
+    manualFocalPx.value = Number(
+      (currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX).toFixed(1)
+    );
   }
 };
 
@@ -262,7 +500,366 @@ const getSceneRadius = () => {
   return radius > 0 ? radius : 1;
 };
 
-const syncOrbitTarget = () => {};
+const getIntroParticleCameraScale = () => {
+  if (!viewer?.camera) return 1;
+
+  // 用包围球的屏幕投影占比统一粒子观感：物体越铺满屏幕，单点越要收敛。
+  // 这样广角近景不会因为相机离模型近而出现粗颗粒，大场景的默认密度也能保持。
+  const viewportHeight = containerRef.value?.clientHeight || sceneMetadata.value.h || window.innerHeight;
+  const viewportWidth = containerRef.value?.clientWidth || sceneMetadata.value.w || window.innerWidth;
+  const viewportReference = Math.max(Math.min(viewportWidth || 0, viewportHeight || 0), 1);
+  const focalPx = calcFocalFromFov(viewer.camera.fov, viewportHeight)
+    || sceneMetadata.value.fl_y
+    || DEFAULT_FOCAL_PX;
+
+  const radius = getSceneRadius();
+  const distance = Math.max(
+    viewer.camera.position.distanceTo(globalUniforms.uCenter.value),
+    radius * 0.08,
+    0.001
+  );
+  const projectedRadiusPx = Number.isFinite(focalPx) && focalPx > 0
+    ? (focalPx * radius) / distance
+    : viewportReference * INTRO_PARTICLE_SCREEN_COVERAGE_TARGET * 0.5;
+  const screenCoverage = THREE.MathUtils.clamp(
+    projectedRadiusPx / (viewportReference * 0.5),
+    0.04,
+    3.0
+  );
+  const screenScale = Math.pow(
+    INTRO_PARTICLE_SCREEN_COVERAGE_TARGET / screenCoverage,
+    INTRO_PARTICLE_SCREEN_SCALE_EXPONENT
+  );
+
+  return THREE.MathUtils.clamp(
+    screenScale,
+    INTRO_PARTICLE_SCREEN_SCALE_MIN,
+    INTRO_PARTICLE_SCREEN_SCALE_MAX
+  );
+};
+
+const updateIntroParticleCameraScale = () => {
+  if (!particleSystem?.material?.uniforms?.uCameraScale) return;
+  particleSystem.material.uniforms.uCameraScale.value = getIntroParticleCameraScale();
+};
+
+const getCurrentXrSession = () => viewer?.renderer?.xr?.getSession?.() || xrSession;
+
+const getXrCamera = () => {
+  if (!viewer?.renderer?.xr || !viewer?.camera) return viewer?.camera || null;
+  try {
+    return viewer.renderer.xr.getCamera(viewer.camera);
+  } catch (_) {
+    return viewer.camera;
+  }
+};
+
+const applyVrDeadzone = (value, threshold = VR_DEADZONE) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || Math.abs(numeric) < threshold) return 0;
+  return numeric;
+};
+
+const readThumbstick = (gamepad) => {
+  if (!gamepad) return { x: 0, y: 0 };
+  const axes = gamepad.axes || [];
+  const x = applyVrDeadzone(axes[2] ?? axes[0] ?? 0);
+  const y = applyVrDeadzone(axes[3] ?? axes[1] ?? 0);
+  return { x, y };
+};
+
+const moveVrCameraRig = (strafe, forward, vertical, dt) => {
+  if (!viewer?.camera) return;
+  const xrCamera = getXrCamera();
+  const direction = new THREE.Vector3();
+  (xrCamera || viewer.camera).getWorldDirection(direction);
+  direction.y = 0;
+  if (direction.lengthSq() < 1e-8) direction.set(0, 0, -1);
+  direction.normalize();
+
+  const right = new THREE.Vector3().crossVectors(direction, worldUp).normalize();
+  const delta = new THREE.Vector3()
+    .addScaledVector(direction, -forward * VR_MOVE_SPEED * dt)
+    .addScaledVector(right, strafe * VR_MOVE_SPEED * dt)
+    .addScaledVector(worldUp, vertical * VR_VERTICAL_SPEED * dt);
+
+  viewer.camera.position.add(delta);
+};
+
+const rotateVrCameraRig = (turn, dt) => {
+  if (!viewer?.camera || !turn) return;
+  const angle = -turn * VR_TURN_SPEED * dt;
+  const pivot = getXrCamera()?.position || viewer.camera.position;
+  const offset = viewer.camera.position.clone().sub(pivot);
+  const quat = new THREE.Quaternion().setFromAxisAngle(worldUp, angle);
+  offset.applyQuaternion(quat);
+  viewer.camera.position.copy(pivot).add(offset);
+  viewer.camera.quaternion.premultiply(quat).normalize();
+};
+
+const resetVrView = () => {
+  if (!viewer?.camera) return;
+  const center = globalUniforms.uCenter.value || new THREE.Vector3(0, 0, 0);
+  const radius = Math.max(getSceneRadius(), 0.8);
+  viewer.camera.position.set(center.x, center.y + Math.min(radius * 0.2, 1.0), center.z + radius * 2.2);
+  viewer.camera.up.copy(worldUp);
+  viewer.camera.lookAt(center);
+};
+
+const createVrHud = () => {
+  if (!viewer?.threeScene || vrHud) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = VR_HUD_CANVAS_SIZE.width;
+  canvas.height = VR_HUD_CANVAS_SIZE.height;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(VR_HUD_WORLD_SIZE.width, VR_HUD_WORLD_SIZE.height),
+    material,
+  );
+  mesh.renderOrder = 999;
+  mesh.visible = false;
+  viewer.threeScene.add(mesh);
+  vrHud = { canvas, context: canvas.getContext('2d'), texture, mesh };
+};
+
+const drawVrHud = () => {
+  if (!vrHud?.context) return;
+  const ctx = vrHud.context;
+  const { width, height } = vrHud.canvas;
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = 'rgba(12, 14, 18, 0.76)';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(210, 220, 235, 0.26)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(2, 2, width - 4, height - 4);
+
+  ctx.fillStyle = '#f7f8fb';
+  ctx.font = '700 48px Microsoft YaHei, sans-serif';
+  ctx.fillText('BrainDance VR', 48, 76);
+  ctx.font = '28px Microsoft YaHei, sans-serif';
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.78)';
+  ctx.fillText(`FPS ${currentFps.value || '--'}  |  ${isLoading.value ? loadingStatusText.value : '模型已就绪'}`, 48, 122);
+
+  const progressWidth = 520;
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.12)';
+  ctx.fillRect(48, 152, progressWidth, 18);
+  ctx.fillStyle = '#8fae7f';
+  ctx.fillRect(48, 152, progressWidth * THREE.MathUtils.clamp(loadingProgress.value, 0, 1), 18);
+
+  ctx.font = '26px Microsoft YaHei, sans-serif';
+  ctx.fillStyle = '#f7f8fb';
+  ctx.fillText('左摇杆：前后 / 平移', 48, 230);
+  ctx.fillText('右摇杆：转向 / 升降', 48, 274);
+  ctx.fillText('A/X：重置视角    B/Y：退出 VR', 48, 318);
+  ctx.fillText(`模式：${currentViewMode.value === VIEW_MODE.ORBIT ? '中心观察' : '自由漫游'}`, 48, 382);
+  ctx.fillStyle = 'rgba(247, 248, 251, 0.58)';
+  ctx.fillText(`模型：${activeModelId.value || currentPlyUrl.split('/').pop() || '当前场景'}`, 48, 428);
+
+  vrHud.texture.needsUpdate = true;
+};
+
+const updateVrHud = (nowMs) => {
+  if (!vrHud?.mesh || !viewer?.camera) return;
+  const camera = getXrCamera() || viewer.camera;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+
+  vrHud.mesh.position
+    .copy(camera.position)
+    .addScaledVector(forward, 1.55)
+    .addScaledVector(right, 0)
+    .addScaledVector(up, -0.22);
+  vrHud.mesh.quaternion.copy(camera.quaternion);
+  vrHud.mesh.visible = true;
+
+  if (nowMs - vrLastHudUpdateMs > VR_HUD_REFRESH_MS) {
+    vrLastHudUpdateMs = nowMs;
+    drawVrHud();
+  }
+};
+
+const destroyVrHud = () => {
+  if (!vrHud) return;
+  if (viewer?.threeScene && vrHud.mesh) viewer.threeScene.remove(vrHud.mesh);
+  vrHud.mesh?.geometry?.dispose?.();
+  vrHud.mesh?.material?.dispose?.();
+  vrHud.texture?.dispose?.();
+  vrHud = null;
+};
+
+const handleVrButtons = (gamepad) => {
+  if (!gamepad?.buttons) return;
+  const pressed = (index) => gamepad.buttons[index]?.pressed === true;
+  if (pressed(4) || pressed(5)) resetVrView();
+  if (pressed(3) || pressed(6)) exitVRSession();
+};
+
+const updateVrInteraction = (nowMs) => {
+  if (!isVRMode.value || !viewer?.renderer) return;
+  const session = getCurrentXrSession();
+  if (!session) return;
+
+  const dt = vrLastFrameTime > 0
+    ? THREE.MathUtils.clamp((nowMs - vrLastFrameTime) / 1000, 1 / 120, 0.06)
+    : 1 / 90;
+  vrLastFrameTime = nowMs;
+
+  for (const source of session.inputSources || []) {
+    const gamepad = source.gamepad;
+    if (!gamepad) continue;
+    const stick = readThumbstick(gamepad);
+    if (source.handedness === 'left') {
+      moveVrCameraRig(stick.x, stick.y, 0, dt);
+    } else if (source.handedness === 'right') {
+      rotateVrCameraRig(stick.x, dt);
+      moveVrCameraRig(0, 0, -stick.y, dt);
+      handleVrButtons(gamepad);
+    }
+  }
+
+  updateVrHud(nowMs);
+};
+
+const getOrbitMinRadius = () => centerModeBounds
+  ? centerModeBounds.radiusMin
+  : Math.max(getSceneRadius() * 0.05, 0.04);
+
+const getOrbitMaxRadius = () => centerModeBounds
+  ? centerModeBounds.radiusMax
+  : Math.max(getSceneRadius() * 12, getOrbitMinRadius() * 6);
+
+const getOrbitFrame = () => {
+  const up = centerModeBounds?.up?.clone?.() || orbitState.up.clone();
+  const basisX = centerModeBounds?.basisX?.clone?.() || orbitState.basisX.clone();
+  const basisY = centerModeBounds?.basisY?.clone?.() || orbitState.basisY.clone();
+  return { up, basisX, basisY };
+};
+
+const updateOrbitFrame = (fallbackCenter = getModelWorldCenter()) => {
+  const frame = getOrbitFrame();
+  orbitState.up.copy(frame.up).normalize();
+  orbitState.basisX.copy(frame.basisX).normalize();
+  orbitState.basisY.copy(frame.basisY).normalize();
+  orbitState.center.copy(centerModeBounds?.center || fallbackCenter);
+};
+
+const getOrbitOffsetFromSpherical = (yaw, pitch, radius) => {
+  const frame = getOrbitFrame();
+  const cosPitch = Math.cos(pitch);
+  return new THREE.Vector3()
+    .addScaledVector(frame.basisX, Math.cos(yaw) * cosPitch * radius)
+    .addScaledVector(frame.basisY, Math.sin(yaw) * cosPitch * radius)
+    .addScaledVector(frame.up, Math.sin(pitch) * radius);
+};
+
+const getOrbitAnglesFromOffset = (offset) => {
+  if (!offset || offset.lengthSq() < 1e-8) {
+    return { yaw: 0, pitch: 0 };
+  }
+  const frame = getOrbitFrame();
+  const x = offset.dot(frame.basisX);
+  const y = offset.dot(frame.basisY);
+  const z = offset.dot(frame.up);
+  const horizontal = Math.sqrt(Math.max(offset.lengthSq() - (z * z), 0));
+  return {
+    yaw: Math.atan2(y, x),
+    pitch: Math.atan2(z, horizontal),
+  };
+};
+
+const rebuildCenterModeBounds = () => {
+  const sceneCenter = getModelWorldCenter();
+  const sceneRadius = getSceneRadius();
+  centerModeBounds = buildCenterModeBounds(cameraPoses.value, sceneCenter, sceneRadius);
+  updateOrbitFrame(sceneCenter);
+  return centerModeBounds;
+};
+
+const clampOrbitYaw = (yaw) => {
+  if (!centerModeBounds) return yaw;
+  return clampCenterModeYaw(yaw, centerModeBounds);
+};
+
+const clampOrbitPitch = (pitch) => {
+  if (!centerModeBounds) {
+    return THREE.MathUtils.clamp(
+      pitch,
+      THREE.MathUtils.degToRad(-86),
+      THREE.MathUtils.degToRad(86),
+    );
+  }
+  return clampCenterModePitch(pitch, centerModeBounds);
+};
+
+const clampOrbitRadius = (radius) => {
+  if (!centerModeBounds) return radius;
+  return clampCenterModeRadius(radius, centerModeBounds);
+};
+
+const applyCenterModeBoundsToTarget = () => {
+  if (!centerModeBounds) return;
+  orbitState.targetYaw = clampOrbitYaw(orbitState.targetYaw);
+  orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch);
+};
+
+const syncOrbitTarget = (center = getModelWorldCenter()) => {
+  if (!viewer || !viewer.camera) return;
+
+  updateOrbitFrame(center);
+  const offset = viewer.camera.position.clone().sub(orbitState.center);
+  let radius = offset.length();
+  if (!Number.isFinite(radius) || radius < getOrbitMinRadius()) {
+    radius = Math.max(getSceneRadius() * 1.25, 0.85);
+    const fallback = getOrbitOffsetFromSpherical(0, 0, radius);
+    offset.copy(fallback);
+  }
+
+  orbitState.radius = clampOrbitRadius(radius);
+  orbitState.targetRadius = orbitState.radius;
+  const angles = getOrbitAnglesFromOffset(offset);
+  orbitState.yaw = angles.yaw;
+  orbitState.pitch = clampOrbitPitch(angles.pitch);
+  orbitState.targetYaw = orbitState.yaw;
+  orbitState.targetPitch = orbitState.pitch;
+  applyCenterModeBoundsToTarget();
+};
+
+const getOrbitCameraState = () => {
+  const position = orbitState.center.clone().add(
+    getOrbitOffsetFromSpherical(orbitState.targetYaw, orbitState.targetPitch, orbitState.targetRadius),
+  );
+  const lookMatrix = new THREE.Matrix4().lookAt(position, orbitState.center, orbitState.up);
+  return {
+    position,
+    quaternion: new THREE.Quaternion().setFromRotationMatrix(lookMatrix),
+  };
+};
+
+const buildCameraBezierCurve = (startPos, endPos, targetCenter) => {
+  const sceneRadius = getSceneRadius();
+  const distance = startPos.distanceTo(endPos);
+  const lift = orbitState.up.clone().multiplyScalar(Math.max(sceneRadius * 0.18, distance * 0.14, 0.08));
+  const startForward = targetCenter.clone().sub(startPos).normalize();
+  const endBack = endPos.clone().sub(targetCenter).normalize();
+  const handleDistance = Math.max(distance * 0.35, sceneRadius * 0.35, 0.15);
+
+  return new THREE.CubicBezierCurve3(
+    startPos.clone(),
+    startPos.clone().add(startForward.multiplyScalar(handleDistance)).add(lift),
+    endPos.clone().add(endBack.multiplyScalar(handleDistance * 0.28)).add(lift.multiplyScalar(0.45)),
+    endPos.clone()
+  );
+};
 
 const cancelCinematicFrame = () => {
   if (cinematicFrameHandle) {
@@ -273,10 +870,35 @@ const cancelCinematicFrame = () => {
 
 const stopCameraTweens = () => {
   if (!viewer || !viewer.camera) return;
+  activeCameraFlightId += 1;
+  if (activeCameraTween) {
+    activeCameraTween.kill();
+    activeCameraTween = null;
+  }
+  isOrbitRecenterFlightActive = false;
+  orbitNeedsRecenterAfterPoseFlight = false;
   gsap.killTweensOf(viewer.camera.position);
   gsap.killTweensOf(viewer.camera.quaternion);
   gsap.killTweensOf(viewer.camera);
 };
+
+const interruptCameraFlight = () => {
+  const hadActiveFlight = Boolean(activeCameraTween);
+  stopCameraTweens();
+  if (!hadActiveFlight || !viewer || !viewer.camera) return;
+
+  // 用户输入优先级高于自动飞行，取消后保留当前帧姿态作为新的交互起点。
+  if (viewer.controls) viewer.controls.enabled = true;
+  if (isOrbitMode.value) syncOrbitTarget();
+  renderCameraUpdate();
+};
+
+const interruptCameraFlightFromUserInput = () => {
+  if (!activeCameraTween) return;
+  interruptCameraFlight();
+};
+
+const isCameraFlightLocked = () => Boolean(activeCameraTween);
 
 const setActivePosePresentation = (poseData) => {
   setActivePosePresentationState(poseData);
@@ -319,6 +941,7 @@ const stopCinematicPlayback = (options = {}) => {
 const interruptCinematicPlayback = () => {
   if (!isCinematicPlaying.value && !isCinematicPaused.value) return;
   stopCinematicPlayback({ resetProgress: false });
+  stopInteractionInertia();
 };
 
 const smoothVectorSeries = (vectors, amount) => {
@@ -750,7 +1373,9 @@ const buildLoopBridgeSegment = (mainSegment, worldCenter) => {
 
 const manualMove = (axis, dist) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
   if (viewer.controls) viewer.controls.enabled = false;
 
   if (axis === 'x') viewer.camera.translateX(dist);
@@ -762,7 +1387,9 @@ const manualMove = (axis, dist) => {
 
 const manualRotate = (axis, angleDeg) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
 
   if (viewer.controls) viewer.controls.enabled = false;
 
@@ -786,20 +1413,17 @@ const manualRotate = (axis, angleDeg) => {
 
 // --- 1. 状态管理 ---
 const PHASE = {
-  FLY_IN: 0,
-  DIFFUSION: 1,
-  COLORING: 2,
-  FINISHED: 3
+  INTRO: 0,
+  FINISHED: 1
 };
 
 const animationState = {
   isLoaded: false,
   lastFrameTime: 0,
-  phase: PHASE.FLY_IN,
-
-  flyDuration: 1.5,
-  diffusionDuration: 1.0,
-  colorDuration: 4.0,
+  phase: PHASE.INTRO,
+  introStartTime: 0,
+  introDurationMs: INTRO_DURATION_MS,
+  introCamera: null,
 };
 
 const globalUniforms = {
@@ -809,6 +1433,33 @@ const globalUniforms = {
   uColorRadius: { value: 0 },
   uMaxRadius: { value: 50 }, // 将由自适应逻辑动态更新
   uParticleProgress: { value: 0 },
+  uRevealProgress: { value: 0 },
+  uRevealFeather: { value: 0.085 },
+  uIntroSplatAlpha: { value: 0 },
+};
+
+const normalizeColorChannel = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0.6;
+  return THREE.MathUtils.clamp(numeric > 1 ? numeric / 255 : numeric, 0, 1);
+};
+
+const readSplatRgbColor = (splatMesh, index, outColor) => {
+  outColor.set(0.6, 0.6, 0.6, 1);
+  if (!splatMesh || typeof splatMesh.getSplatColor !== 'function') return outColor;
+
+  try {
+    const returnedColor = splatMesh.getSplatColor(index, outColor);
+    const source = returnedColor || outColor;
+    const r = source.x ?? source.r ?? source[0] ?? outColor.x;
+    const g = source.y ?? source.g ?? source[1] ?? outColor.y;
+    const b = source.z ?? source.b ?? source[2] ?? outColor.z;
+    outColor.set(normalizeColorChannel(r), normalizeColorChannel(g), normalizeColorChannel(b), 1);
+  } catch (error) {
+    if (index === 0) console.warn('[Intro] 读取 splat 颜色失败，粒子颜色回退为灰色:', error);
+  }
+
+  return outColor;
 };
 
 // --- 2. 自适应粒子系统 (核心修改) ---
@@ -816,6 +1467,7 @@ const createParticleSystem = (splatMesh) => {
   if (!viewer) return;
 
   const splatCount = splatMesh.getSplatCount();
+  if (!Number.isFinite(splatCount) || splatCount <= 0) return;
   splatMesh.updateMatrixWorld();
 
   // === A. 预计算：计算包围盒与尺寸 ===
@@ -847,41 +1499,59 @@ const createParticleSystem = (splatMesh) => {
   // === B. 自适应参数计算 ===
 
   // 1. 自适应粒子数量
-  // 逻辑：至少显示 1万个点，最多显示 40万个点。
-  // 如果模型本身小于 4万点，则全部显示。
-  let targetParticleCount = 60000;
-  if (splatCount < 40000) targetParticleCount = splatCount; // 小模型全显
-  else if (splatCount > 1000000) targetParticleCount = 400000; // 大模型上限
-
-  const step = Math.ceil(splatCount / targetParticleCount);
+  // 入场动画只承担过渡表达，按设备预算采样可避免大模型额外分配几十 MB 数组。
+  const particleBudget = isMobileDevice() ? MOBILE_INTRO_PARTICLE_BUDGET : DESKTOP_INTRO_PARTICLE_BUDGET;
+  const targetParticleCount = Math.min(splatCount, particleBudget);
+  const step = Math.max(1, Math.ceil(splatCount / targetParticleCount));
+  const sampledCount = Math.ceil(splatCount / step);
 
   // 2. 自适应粒子大小
   // 逻辑：模型越大，单个粒子在世界空间中应该越大才能被看见。
-  // 系数 150.0 是经验值，表示将最大边长切分多少份。
-  let adaptiveSize = (maxDim / 200.0) * window.devicePixelRatio;
+  // 大场景入场时单点原本偏细，这里略提高世界空间基准尺寸，避免远景点云过于稀薄。
+  let adaptiveSize = (maxDim / 96.0) * window.devicePixelRatio;
   // 限制最小值，防止极小模型看不见
-  if (adaptiveSize < 0.5) adaptiveSize = 0.5;
+  const minParticleSize = isMobileDevice() ? 0.9 : 1.2;
+  if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.8 : 6.4);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
-  const flyRadiusBase = maxDim * 1.0;
+  const flyRadiusBase = maxDim * 1.12;
 
-  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${Math.floor(splatCount / step)}, Size: ${adaptiveSize.toFixed(2)}`);
+  console.log(`[Adaptive] MaxDim: ${maxDim.toFixed(2)}, Particles: ~${sampledCount}, Size: ${adaptiveSize.toFixed(2)}`);
 
   // === C. 生成几何体 ===
   const geometry = new THREE.BufferGeometry();
-  const startPositions = [];
-  const targetPositions = [];
-  const randoms = [];
+  const startPositions = new Float32Array(sampledCount * 3);
+  const targetPositions = new Float32Array(sampledCount * 3);
+  const colors = new Float32Array(sampledCount * 3);
+  const randoms = new Float32Array(sampledCount);
+  const tempColor = new THREE.Vector4(0.6, 0.6, 0.6, 1);
+  let didLogSampleColor = false;
+  let sampleIndex = 0;
 
   for (let i = 0; i < splatCount; i += step) {
     splatMesh.getSplatCenter(i, tempVec);
     tempVec.applyMatrix4(splatMesh.matrixWorld);
 
-    targetPositions.push(tempVec.x, tempVec.y, tempVec.z);
+    const positionIndex = sampleIndex * 3;
+    targetPositions[positionIndex] = tempVec.x;
+    targetPositions[positionIndex + 1] = tempVec.y;
+    targetPositions[positionIndex + 2] = tempVec.z;
+
+    readSplatRgbColor(splatMesh, i, tempColor);
+    colors[positionIndex] = tempColor.x;
+    colors[positionIndex + 1] = tempColor.y;
+    colors[positionIndex + 2] = tempColor.z;
+    if (!didLogSampleColor) {
+      console.log(
+        `[Intro] Sample particle color: ${tempColor.x.toFixed(3)}, ${tempColor.y.toFixed(3)}, ${tempColor.z.toFixed(3)}`
+      );
+      didLogSampleColor = true;
+    }
 
     // 随机分布在远处 (基于自适应的 maxDim)
-    const r = flyRadiusBase + Math.random() * (maxDim * 0.5);
+    const r = flyRadiusBase + Math.random() * (maxDim * 0.65);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
 
@@ -890,25 +1560,32 @@ const createParticleSystem = (splatMesh) => {
     const startY = centerY + r * Math.sin(phi) * Math.sin(theta);
     const startZ = centerZ + r * Math.cos(phi);
 
-    startPositions.push(startX, startY, startZ);
-    randoms.push(Math.random());
+    startPositions[positionIndex] = startX;
+    startPositions[positionIndex + 1] = startY;
+    startPositions[positionIndex + 2] = startZ;
+    randoms[sampleIndex] = Math.random();
+    sampleIndex += 1;
   }
 
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(startPositions, 3));
-  geometry.setAttribute('aTarget', new THREE.Float32BufferAttribute(targetPositions, 3));
-  geometry.setAttribute('aRandom', new THREE.Float32BufferAttribute(randoms, 1));
+  geometry.setAttribute('position', new THREE.BufferAttribute(startPositions, 3));
+  geometry.setAttribute('aTarget', new THREE.BufferAttribute(targetPositions, 3));
+  geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 1));
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uProgress: globalUniforms.uParticleProgress,
       uSize: { value: adaptiveSize }, // 使用计算出的大小
-      uColor: { value: new THREE.Color(0.6, 0.6, 0.6) }
+      uCameraScale: { value: getIntroParticleCameraScale() },
     },
     vertexShader: `
       uniform float uProgress;
       uniform float uSize;
+      uniform float uCameraScale;
       attribute vec3 aTarget;
+      attribute vec3 aColor;
       attribute float aRandom;
+      varying vec3 vColor;
       
       float easeOutCubic(float x) { return 1.0 - pow(1.0 - x, 3.0); }
       
@@ -916,21 +1593,25 @@ const createParticleSystem = (splatMesh) => {
         float t = (uProgress - aRandom * 0.1) / 0.9;
         t = clamp(t, 0.0, 1.0);
         vec3 pos = mix(position, aTarget, easeOutCubic(t));
+        vColor = aColor;
         
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        // 距离衰减 (20.0 是透视缩放因子，配合世界单位的 uSize 使用)
-        gl_PointSize = uSize * (20.0 / -mvPosition.z);
-        if(gl_PointSize < 1.0) gl_PointSize = 1.0;
+        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛，避免入场粒子显得过粗。
+        float pointScale = clamp(uCameraScale, 0.14, 1.12);
+        gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
+        float minPointSize = mix(0.35, 0.85, smoothstep(0.14, 0.6, pointScale));
+        float maxPointSize = max(minPointSize, 22.0 * min(pointScale, 1.0));
+        gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
     `,
     fragmentShader: `
-      uniform vec3 uColor;
+      varying vec3 vColor;
       void main() {
         vec2 coord = gl_PointCoord - vec2(0.5);
         if(length(coord) > 0.5) discard;
-        gl_FragColor = vec4(uColor, 1.0);
+        gl_FragColor = vec4(vColor, 1.0);
       }
     `,
     transparent: true,
@@ -954,6 +1635,9 @@ const applyAdvancedShader = (mesh) => {
   material.uniforms.uColorRadius = globalUniforms.uColorRadius;
   material.uniforms.uMaxRadius = globalUniforms.uMaxRadius;
   material.uniforms.uCenter = globalUniforms.uCenter;
+  material.uniforms.uRevealProgress = globalUniforms.uRevealProgress;
+  material.uniforms.uRevealFeather = globalUniforms.uRevealFeather;
+  material.uniforms.uIntroSplatAlpha = globalUniforms.uIntroSplatAlpha;
 
   material.vertexShader = `varying vec3 vWorldPosition;
 ` + material.vertexShader;
@@ -968,8 +1652,12 @@ const applyAdvancedShader = (mesh) => {
     uniform float uGeoRadius;
     uniform float uColorRadius;
     uniform float uMaxRadius;
+    uniform float uRevealProgress;
+    uniform float uRevealFeather;
+    uniform float uIntroSplatAlpha;
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
+
   `;
   material.fragmentShader = commonFragment + material.fragmentShader;
 
@@ -977,36 +1665,155 @@ const applyAdvancedShader = (mesh) => {
   if (fsEndIndex !== -1) {
     const originalContent = material.fragmentShader.substring(0, fsEndIndex);
     const visualLogic = `
-      float distFromCenter = distance(vWorldPosition, uCenter);
-      
-      if (distFromCenter > uGeoRadius) {
-          discard;
-      }
-      if (distFromCenter > uColorRadius) {
-          if (gl_FragColor.a < 0.8) discard; 
-          gl_FragColor.a = 1.0; 
-          gl_FragColor.rgb = vec3(0.6, 0.6, 0.6);
-      } 
+      vec3 centeredPos = vWorldPosition - uCenter;
+      float distSq = dot(centeredPos, centeredPos);
+      float radius = max(uGeoRadius, 0.0001);
+      float feather = max(uRevealFeather * max(uMaxRadius, 0.0001), 0.001);
+      float innerRadius = max(radius - feather, 0.0);
+      float innerSq = innerRadius * innerRadius;
+      float outerSq = radius * radius;
+      if (distSq > outerSq) discard;
+      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
+      if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
+
+      // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
+      float alphaClip = mix(0.90, 0.02, revealT);
+      if (gl_FragColor.a < alphaClip) discard;
+      gl_FragColor.a *= revealT * uIntroSplatAlpha;
     `;
     material.fragmentShader = originalContent + visualLogic + '}';
   }
   material.needsUpdate = true;
 };
 
-const normalizeMatrixArray = (input) => {
-  if (!Array.isArray(input)) return null;
+const smoothstep01 = (value) => {
+  const t = THREE.MathUtils.clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+};
 
-  if (input.length === 16) {
-    const flat = input.map(value => Number(value));
-    return flat.every(Number.isFinite) ? flat : null;
+const resetIntroUniforms = () => {
+  globalUniforms.uParticleProgress.value = 0;
+  globalUniforms.uRevealProgress.value = 0;
+  globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uGeoRadius.value = 0;
+  globalUniforms.uColorRadius.value = 0;
+  if (particleSystem) {
+    particleSystem.geometry?.dispose?.();
+    particleSystem.material?.dispose?.();
+    if (viewer?.threeScene) viewer.threeScene.remove(particleSystem);
+    particleSystem = null;
+  }
+  particleSystemRevealDone = false;
+};
+
+const resetIntroAnimationVisuals = () => {
+  globalUniforms.uParticleProgress.value = 0;
+  globalUniforms.uRevealProgress.value = 0;
+  globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uGeoRadius.value = 0;
+  globalUniforms.uColorRadius.value = 0;
+  if (particleSystem) {
+    particleSystem.visible = true;
+    if (particleSystem.material) particleSystem.material.opacity = 1;
+  }
+  particleSystemRevealDone = false;
+};
+
+const finalizeIntroAnimation = () => {
+  const splatMesh = viewer?.getSplatMesh?.();
+  if (splatMesh) splatMesh.visible = true;
+  if (particleSystem) particleSystem.visible = false;
+  globalUniforms.uParticleProgress.value = 1;
+  globalUniforms.uRevealProgress.value = 1.5;
+  globalUniforms.uIntroSplatAlpha.value = 1;
+  globalUniforms.uGeoRadius.value = 99999;
+  globalUniforms.uColorRadius.value = 99999;
+  animationState.phase = PHASE.FINISHED;
+  animationState.isLoaded = false;
+  animationState.introCamera = null;
+  if (viewer?.controls) viewer.controls.enabled = true;
+  if (isOrbitMode.value) syncOrbitTarget();
+  updateDebugInfo();
+};
+
+const getFarthestIntroStartPose = (targetPosition, targetPose = null) => {
+  const candidatePoses = Array.isArray(filteredPoses.value) && filteredPoses.value.length >= 2
+    ? filteredPoses.value
+    : cameraPoses.value;
+  if (!viewer || !targetPosition || !Array.isArray(candidatePoses) || candidatePoses.length < 2) return null;
+
+  const targetPoseId = getPosePresentationId(targetPose);
+  let farthestState = null;
+  let farthestDistanceSq = -1;
+
+  for (const pose of candidatePoses) {
+    if (targetPose && getPosePresentationId(pose) === targetPoseId) continue;
+    const state = resolvePoseCameraState(pose);
+    if (!state) continue;
+    const distanceSq = state.position.distanceToSquared(targetPosition);
+    if (distanceSq > farthestDistanceSq) {
+      farthestDistanceSq = distanceSq;
+      farthestState = state;
+    }
   }
 
-  if (input.length === 4 && input.every(row => Array.isArray(row) && row.length === 4)) {
-    const flat = input.flat().map(value => Number(value));
-    return flat.every(Number.isFinite) ? flat : null;
+  return farthestState;
+};
+
+const buildIntroOrbitCamera = (targetPosition, targetQuaternion, targetPose = null, startCameraState = null) => {
+  const center = getModelWorldCenter();
+  const radius = getSceneRadius();
+  const farthestStartState = startCameraState || getFarthestIntroStartPose(targetPosition, targetPose);
+  let startPosition;
+  let startQuaternion;
+
+  if (farthestStartState) {
+    startPosition = farthestStartState.position.clone();
+    startQuaternion = farthestStartState.quaternion.clone();
+  } else {
+    const targetOffset = targetPosition.clone().sub(center);
+    if (targetOffset.lengthSq() < 1e-8) targetOffset.set(Math.max(radius * 2.5, 1), 0, 0);
+
+    const orbitAxis = INTRO_ORBIT_AXIS.clone().normalize();
+    const startOffset = targetOffset.clone()
+      .applyAxisAngle(orbitAxis, THREE.MathUtils.degToRad(115))
+      .multiplyScalar(1.18);
+    const lift = Math.max(radius * 0.22, targetOffset.length() * 0.08, 0.08);
+    startOffset.z += lift;
+
+    startPosition = center.clone().add(startOffset);
+    startQuaternion = makeLookQuaternion(startPosition, targetPosition);
   }
 
-  return null;
+  return {
+    center,
+    startPosition: startPosition.clone(),
+    startQuaternion,
+    targetPosition: targetPosition.clone(),
+    targetQuaternion: targetQuaternion.clone(),
+  };
+};
+
+const beginIntroAnimation = (targetCameraState = null, targetPose = null, startCameraState = null) => {
+  if (!viewer || !viewer.camera) return;
+  const splatMesh = viewer.getSplatMesh();
+  if (!splatMesh) return;
+
+  const targetPosition = targetCameraState?.position?.clone?.() || viewer.camera.position.clone();
+  const targetQuaternion = targetCameraState?.quaternion?.clone?.() || viewer.camera.quaternion.clone();
+  animationState.introCamera = buildIntroOrbitCamera(targetPosition, targetQuaternion, targetPose, startCameraState);
+  animationState.introStartTime = performance.now();
+  animationState.lastFrameTime = Date.now();
+  animationState.phase = PHASE.INTRO;
+  animationState.isLoaded = true;
+
+  resetIntroAnimationVisuals();
+  splatMesh.visible = true;
+  viewer.camera.position.copy(animationState.introCamera.startPosition);
+  viewer.camera.quaternion.copy(animationState.introCamera.startQuaternion);
+  viewer.camera.updateProjectionMatrix();
+  updateIntroParticleCameraScale();
+  if (viewer.controls) viewer.controls.enabled = false;
 };
 
 const normalizeImageId = (value) => {
@@ -1085,36 +1892,36 @@ const findPoseByInitialTarget = (target) => {
   return bestDiff <= 1e-4 ? bestPose : null;
 };
 
-const maybeApplyInitialTarget = (forceFallback = false) => {
-  if (!pendingInitialTarget || didApplyInitialTarget) return;
+const resolveInitialTargetPose = (forceFallback = false) => {
+  if (!pendingInitialTarget) return null;
 
   if (!pendingInitialTarget.imageId) {
     const preferredDefaultPose = getPreferredDefaultPose();
-    if (preferredDefaultPose) {
-      didApplyInitialTarget = true;
-      flyToImage(preferredDefaultPose);
-      return;
-    }
+    if (preferredDefaultPose) return preferredDefaultPose;
   }
 
   const resolvedPose = findPoseByInitialTarget(pendingInitialTarget);
-  if (resolvedPose) {
-    didApplyInitialTarget = true;
-    flyToImage(resolvedPose);
-    return;
-  }
+  if (resolvedPose) return resolvedPose;
 
-  if (!forceFallback) return;
-  if (pendingInitialTarget.imageId && !posesFetchSettled) return;
+  if (!forceFallback) return null;
+  if (pendingInitialTarget.imageId && !posesFetchSettled) return null;
 
   const fallbackMatrix = normalizeMatrixArray(pendingInitialTarget.matrix);
-  if (!fallbackMatrix) return;
+  if (!fallbackMatrix) return null;
 
-  didApplyInitialTarget = true;
-  flyToImage({
+  return {
     matrix: fallbackMatrix,
     image_url: pendingInitialTarget.imageId || '',
-  });
+  };
+};
+
+const maybeApplyInitialTarget = (forceFallback = false) => {
+  if (!pendingInitialTarget || didApplyInitialTarget) return;
+  const targetPose = resolveInitialTargetPose(forceFallback);
+  if (!targetPose) return;
+
+  didApplyInitialTarget = true;
+  flyToImage(targetPose);
 };
 
 const hasUsablePoseImage = (pose) => {
@@ -1156,6 +1963,50 @@ const maybeApplyDefaultPose = () => {
 
   didApplyDefaultPose = true;
   flyToImage(defaultPose);
+};
+
+const resolveIntroTargetPose = () => {
+  if (pendingInitialTarget && !didApplyInitialTarget) {
+    const targetPose = resolveInitialTargetPose(true);
+    if (targetPose) {
+      didApplyInitialTarget = true;
+      return targetPose;
+    }
+  }
+
+  if (!pendingInitialTarget) {
+    const firstPose = (Array.isArray(filteredPoses.value) && filteredPoses.value[0])
+      || (Array.isArray(cameraPoses.value) && cameraPoses.value[0])
+      || null;
+    if (firstPose) {
+      didApplyDefaultPose = true;
+      return firstPose;
+    }
+  }
+
+  return null;
+};
+
+const beginIntroAnimationToResolvedPose = () => {
+  const targetPose = resolveIntroTargetPose();
+  const targetCameraState = targetPose ? resolvePoseCameraState(targetPose) : null;
+  const introStartState = targetPose ? getFarthestIntroStartPose(targetCameraState?.position || null, targetPose) : null;
+
+  if (targetPose) setActivePosePresentation(targetPose);
+  if (targetCameraState?.fl_y && targetCameraState?.h) {
+    sceneMetadata.value.h = targetCameraState.h;
+    manualFocalPx.value = Number(targetCameraState.fl_y.toFixed(1));
+    applyFocalLengthPx(targetCameraState.fl_y);
+  } else {
+    applyFocalLengthPx(DEFAULT_FOCAL_PX);
+  }
+
+  if (!targetPose || !targetCameraState) {
+    finalizeIntroAnimation();
+    return;
+  }
+
+  beginIntroAnimation(targetCameraState, targetPose, introStartState);
 };
 
 const resolvePoseCameraState = (poseData) => {
@@ -1463,33 +2314,6 @@ const toggleCinematicPlayback = () => {
 const toggleCinematicPanel = () => {
   if (!canPlayCinematic.value) return;
   showCinematicPanel.value = !showCinematicPanel.value;
-  if (showCinematicPanel.value) {
-    showFocalSettings.value = false;
-  }
-};
-
-const toggleTopMenu = () => {
-  showTopMenu.value = !showTopMenu.value;
-};
-
-const exitViewer = () => {
-  if (window.BrainDanceChannel) {
-    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'exit' }));
-  }
-};
-
-const switchRenderer = (useSpark) => {
-  if (useSparkRenderer.value === useSpark) return;
-  useSparkRenderer.value = useSpark;
-  if (window.BrainDanceChannel) {
-    window.BrainDanceChannel.postMessage(JSON.stringify({ action: 'switchViewer', useSpark }));
-  }
-};
-
-const onDocumentClickForMenu = (e) => {
-  if (!showTopMenu.value) return;
-  if (topMenuRef.value && topMenuRef.value.contains(e.target)) return;
-  showTopMenu.value = false;
 };
 
 const rebuildCinematicAtCurrentProgress = () => {
@@ -1533,6 +2357,7 @@ const flyToImage = (poseData, options = {}) => {
     return;
   }
   if (!options.keepCinematic) interruptCinematicPlayback();
+  stopInteractionInertia();
 
   const cam = viewer.camera;
   const targetPosition = targetCameraState.position;
@@ -1564,17 +2389,22 @@ const flyToImage = (poseData, options = {}) => {
 
   stopCameraTweens();
   gsap.killTweensOf(animState);
+  activeCameraFlightId += 1;
+  const flightId = activeCameraFlightId;
 
   // 开始丝滑运镜
-  gsap.to(animState, {
+  activeCameraTween = gsap.to(animState, {
     t: 1.0,
     duration: 1.5,
     ease: "power3.inOut",
     onUpdate: () => {
+      if (flightId !== activeCameraFlightId) return;
       cam.position.lerpVectors(startPos, targetPosition, animState.t);
       cam.quaternion.slerpQuaternions(startQuat, targetQuaternion, animState.t);
     },
     onComplete: () => {
+      if (flightId !== activeCameraFlightId) return;
+      activeCameraTween = null;
       // 记录初始飞到后的欧拉角
       const euler = new THREE.Euler().setFromQuaternion(cam.quaternion, 'YXZ');
       arrivalEuler.value = {
@@ -1584,6 +2414,9 @@ const flyToImage = (poseData, options = {}) => {
       };
       rotationDelta.value = { x: 0, y: 0 }; // 飞跃新镜头时，重置手动偏差
       orbitTouchState.roll = 0;
+      if (isOrbitMode.value) {
+        orbitNeedsRecenterAfterPoseFlight = true;
+      }
       updateDebugInfo();
 
       if (viewer.controls) viewer.controls.enabled = true;
@@ -1592,22 +2425,31 @@ const flyToImage = (poseData, options = {}) => {
 };
 
 const getViewerConfig = () => {
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
+  const canUseSharedMemory = window.crossOriginIsolated === true;
   return {
     'rootElement': containerRef.value,
     'cameraUp': [0, 1, 0],
     'initialCameraPosition': [0, 0, 5],
     'initialCameraLookAt': [0, 0, 0],
     'useBuiltInControls': false,
-    'gpuAcceleratedSort': false,
+    'gpuAcceleratedSort': canUseSharedMemory,
     'webXRMode': GaussianSplats3D.WebXRMode.None,
-    'sharedMemoryForWorkers': false,
+    'sharedMemoryForWorkers': canUseSharedMemory,
+    'integerBasedSort': true,
+    'halfPrecisionCovariancesOnGPU': true,
+    'dynamicScene': false,
+    'sphericalHarmonicsDegree': 0,
+    'enableOptionalEffects': false,
+    'optimizeSplatData': true,
+    'freeIntermediateSplatData': true,
     'antialiased': !isMobile,
+    'sceneRevealMode': GaussianSplats3D.SceneRevealMode.Instant,
   };
 };
 
-// 当前加载的 PLY 和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
-let currentPlyUrl = '/models/scene_auto_sync.ply';
+// 当前加载的模型和位姿的 URL（供外部通过 loadModelFromFlutter 传入）
+let currentPlyUrl = '/models/scene_auto_sync_raw.ply';
 let currentPosesUrl = '/models/webgl_poses_with_tags.json';
 let hasInitializedFromExternalInput = false;
 
@@ -1657,6 +2499,9 @@ const parseInitialInputFromUrl = () => {
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
+  loadingProgress.value = 0;
+  loadingStatusText.value = '准备加载模型';
+  loadError.value = '';
   stopCinematicPlayback();
 
   // 清除旧模型的视角数据和 UI 状态，防止切换模型时残留
@@ -1667,8 +2512,15 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   sceneMetadata.value = {};
 
   // 更新 URL（如果有新传入的值）
+  const hasExplicitModelSwitch = Boolean(plyUrl) && plyUrl !== currentPlyUrl;
   if (plyUrl) currentPlyUrl = plyUrl;
-  if (posesUrl) currentPosesUrl = posesUrl;
+  if (posesUrl !== undefined && posesUrl !== null) {
+    currentPosesUrl = posesUrl;
+  } else if (hasExplicitModelSwitch) {
+    // 单图 SHARP 这类产物如果没有单独的镜头 JSON，就不要复用上一场景的位姿。
+    // 否则会把旧场景的相机飞行逻辑套到当前模型上，表现为进度到 100% 但画面始终看不到模型。
+    currentPosesUrl = '';
+  }
 
   try {
     if (viewer) {
@@ -1689,10 +2541,9 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     }
 
     animationState.isLoaded = false;
-    animationState.phase = PHASE.FLY_IN;
-    globalUniforms.uParticleProgress.value = 0;
-    globalUniforms.uGeoRadius.value = 0;
-    globalUniforms.uColorRadius.value = 0;
+    animationState.phase = PHASE.INTRO;
+    animationState.introCamera = null;
+    resetIntroUniforms();
     pendingInitialTarget = null;
     didApplyInitialTarget = false;
     didApplyDefaultPose = false;
@@ -1702,118 +2553,95 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
     manualFocalPx.value = DEFAULT_FOCAL_PX;
+    createVrHud();
 
-    // 加载模型（优先使用外部传入的云端 URL，缺省使用本地路径）
-    console.log(`[Viewer] 加载模型: ${currentPlyUrl}`);
-    await viewer.addSplatScene(currentPlyUrl, {
-      'showLoadingUI': true,
-        'progressiveLoad': false,
-        'rotation': [0, 0, 0, 1] // [x, y, z, w] Identity Quaternion (No global rotation)
-      });
+    // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
+    await addSplatSceneWithFormatFallback(currentPlyUrl);
 
-    
-    // 告诉 Flutter：模型加载完成
-    isLoading.value = false;
-    if (window.BrainDanceChannel) {
-      window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
-    }
-
-    // 加载相机位姿（支持本地路径与云端 URL）
-    console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
-    fetch(currentPosesUrl)
-      .then(res => res.json())
-      .then(data => {
+    // 加载相机位姿（支持本地路径与云端 URL）；没有位姿时直接结束，不把 SHARP 单图卡在 100%。
+    if (currentPosesUrl && String(currentPosesUrl).trim()) {
+      console.log(`[Viewer] 加载位姿: ${currentPosesUrl}`);
+      loadingStatusText.value = '加载参考镜头';
+      try {
+        const res = await fetch(currentPosesUrl);
+        const data = await res.json();
+        const normalizedPoses = normalizePoseList(data);
         posesFetchSettled = true;
-        // 数据适配
-        if (data.frames) {
+
+        if (normalizedPoses.length > 0) {
+          const firstPose = normalizedPoses[0];
           sceneMetadata.value = {
-            w: data.w,
-            h: data.h,
-            fl_x: data.fl_x,
-            fl_y: data.fl_y
+            w: data?.w || firstPose.w || 0,
+            h: data?.h || firstPose.h || 0,
+            fl_x: data?.fl_x || firstPose.fl_x || 0,
+            fl_y: data?.fl_y || firstPose.fl_y || 0,
           };
-          manualFocalPx.value = Number((data.fl_y || 0).toFixed(1));
-          cameraPoses.value = data.frames.map(frame => {
-            let imgUrl = frame.image_url;
-            if (imgUrl && !imgUrl.startsWith('http')) {
-              if (currentPosesUrl.startsWith('http')) {
-                // Determine base path from currentPosesUrl
-                const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
-                let relPath = imgUrl;
-                const imagesIndex = relPath.indexOf('images/');
-                if (imagesIndex !== -1) {
-                  relPath = relPath.substring(imagesIndex); // Extracts 'images/frame_xxx.jpg' and drops any redundant parent dirs
-                } else if (relPath.startsWith('/models/')) {
-                  relPath = relPath.substring('/models/'.length);
-                } else if (relPath.startsWith('/')) {
-                  relPath = relPath.substring(1);
-                }
-                imgUrl = `${baseUrl}/${relPath}`;
+          manualFocalPx.value = Number((sceneMetadata.value.fl_y || 0).toFixed(1));
+          cameraPoses.value = normalizedPoses.map((pose) => {
+            let imgUrl = pose.image_url || pose.imageUrl || '';
+            if (imgUrl && !imgUrl.startsWith('http') && currentPosesUrl.startsWith('http')) {
+              const baseUrl = currentPosesUrl.substring(0, currentPosesUrl.lastIndexOf('/'));
+              let relPath = imgUrl;
+              const imagesIndex = relPath.indexOf('images/');
+              if (imagesIndex !== -1) {
+                relPath = relPath.substring(imagesIndex);
+              } else if (relPath.startsWith('/models/')) {
+                relPath = relPath.substring('/models/'.length);
+              } else if (relPath.startsWith('/')) {
+                relPath = relPath.substring(1);
               }
+              imgUrl = `${baseUrl}/${relPath}`;
             }
             imgUrl = toViewerSafeAssetUrl(imgUrl);
             return {
-              id: frame.id,
-              matrix: frame.matrix,
+              ...pose,
               image_url: imgUrl,
-              tag: frame.tag,
-              fl_x: frame.fl_x,
-              fl_y: frame.fl_y,
-              w: frame.w || data.w,
-              h: frame.h || data.h
             };
           });
-          // 首次加载按拍摄焦距初始化查看相机
-          if (sceneMetadata.value.fl_y && sceneMetadata.value.h) {
-            applyFocalLengthPx(sceneMetadata.value.fl_y);
-          } else {
-            applyFocalLengthPx(DEFAULT_FOCAL_PX);
-          }
-          maybeApplyInitialTarget(true);
-          maybeApplyDefaultPose();
         } else {
-          cameraPoses.value = data; // 兼容旧格式
-          applyFocalLengthPx(DEFAULT_FOCAL_PX);
-          maybeApplyInitialTarget(true);
-          maybeApplyDefaultPose();
+          console.warn('[Viewer] 位姿 JSON 未解析出有效镜头列表，按无位姿场景处理');
+          cameraPoses.value = [];
+          sceneMetadata.value = {};
         }
-      })
-      .catch(err => {
+      } catch (err) {
         posesFetchSettled = true;
         console.error("加载位姿失败:", err);
-        applyFocalLengthPx(DEFAULT_FOCAL_PX);
-        maybeApplyInitialTarget(true);
-      });
+        cameraPoses.value = [];
+        sceneMetadata.value = {};
+      }
+    } else {
+      posesFetchSettled = true;
+      cameraPoses.value = [];
+    }
+
+    setDefaultViewModeForScene(cameraPoses.value.length > 0);
+    rebuildCenterModeBounds();
+    if (isOrbitMode.value) {
+      syncOrbitTarget();
+      applyCenterModeBoundsToTarget();
+      applyOrbitCamera(true);
+    }
 
     const splatMesh = viewer.getSplatMesh();
     splatMesh.visible = false;
+    createParticleSystem(splatMesh);
+    applyAdvancedShader(splatMesh);
 
-    setTimeout(() => {
-      if (splatMesh) {
-        // 先生成粒子系统，这会计算出 uCenter 和 uMaxRadius
-        createParticleSystem(splatMesh);
-        // 然后应用 Shader
-        applyAdvancedShader(splatMesh);
-        
-          if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
-            pendingInitialTarget = {
-              matrix: initialTarget.matrix || null,
-              imageId: initialTarget.imageId || null
-            };
-            maybeApplyInitialTarget(posesFetchSettled);
-            setTimeout(() => { maybeApplyInitialTarget(false); }, 50);
-            if (!initialTarget.imageId) {
-              setTimeout(() => { maybeApplyInitialTarget(true); }, 800);
-            }
-          } else {
-            setTimeout(() => { maybeApplyDefaultPose(); }, 80);
-          }
+    // 模型本体已经可渲染后，就先关闭 loading 遮罩。
+    // 对单图 SHARP 这类没有位姿信息的场景，后续只剩参考镜头/入场动画收尾，不应继续挡住用户视图。
+    isLoading.value = false;
 
-        animationState.lastFrameTime = Date.now();
-        animationState.startTime = Date.now();
-        animationState.isLoaded = true;
-      }
-    }, 200);
+    if (initialTarget && (initialTarget.matrix || initialTarget.imageId)) {
+      pendingInitialTarget = {
+        matrix: initialTarget.matrix || null,
+        imageId: initialTarget.imageId || null
+      };
+    }
+
+    beginIntroAnimationToResolvedPose();
+    if (window.BrainDanceChannel) {
+      window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'success', msg: '模型加载完成' }));
+    }
     // --- 5. 动画循环 (120 FPS 上限) ---
     let lastDrawTime = performance.now();
     const fpsInterval = 1000 / 120; // 目标 120 帧
@@ -1829,6 +2657,11 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       // 更新上一帧时间，这会保留超出的那一点时间以防长期的漂移
       lastDrawTime = nowPerf - (elapsedSinceDraw % fpsInterval);
 
+      if (isVRMode.value) {
+        updateVrInteraction(nowPerf);
+      }
+
+      updateIntroParticleCameraScale();
       viewer.update();
       viewer.render();
 
@@ -1846,54 +2679,45 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       const dt = (now - animationState.lastFrameTime) / 1000 || 0.016;
       animationState.lastFrameTime = now;
 
-      // 1. 飞入
-      if (animationState.phase === PHASE.FLY_IN) {
-        const speed = 1.0 / animationState.flyDuration;
-        let p = globalUniforms.uParticleProgress.value + (dt * speed);
+      if (animationState.phase === PHASE.INTRO) {
+        const rawT = THREE.MathUtils.clamp(
+          (performance.now() - animationState.introStartTime) / animationState.introDurationMs,
+          0,
+          1
+        );
+        const t = smoothstep01(rawT);
+        const introCamera = animationState.introCamera;
 
-        if (p >= 1.2) { // 稍微给点余量保证完全到达
-          p = 1.2;
-          const splatMesh = viewer.getSplatMesh();
-          if (splatMesh) splatMesh.visible = true;
-
-          animationState.phase = PHASE.DIFFUSION;
-          animationState.diffuseTime = 0;
+        if (introCamera) {
+          viewer.camera.position.lerpVectors(introCamera.startPosition, introCamera.targetPosition, t);
+          viewer.camera.quaternion.slerpQuaternions(introCamera.startQuaternion, introCamera.targetQuaternion, t);
         }
-        globalUniforms.uParticleProgress.value = p;
-      }
+        updateIntroParticleCameraScale();
 
-      // 2. 扩散切换
-      else if (animationState.phase === PHASE.DIFFUSION) {
-        animationState.diffuseTime += dt;
-        const progress = Math.min(animationState.diffuseTime / animationState.diffusionDuration, 1.0);
+        const pointT = smoothstep01(rawT / 0.24);
+        const morphT = smoothstep01(
+          (rawT - INTRO_SPLAT_REVEAL_START) / Math.max(INTRO_SPLAT_REVEAL_END - INTRO_SPLAT_REVEAL_START, 0.001)
+        );
+        globalUniforms.uParticleProgress.value = pointT;
+        globalUniforms.uRevealProgress.value = morphT;
+        globalUniforms.uIntroSplatAlpha.value = morphT;
+        globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
-        const maxR = globalUniforms.uMaxRadius.value;
-        globalUniforms.uGeoRadius.value = progress * (maxR * 1.5); // 确保覆盖角落
-
+        const splatMesh = viewer.getSplatMesh();
+        if (splatMesh) splatMesh.visible = true;
         if (particleSystem && particleSystem.material) {
-          particleSystem.material.opacity = 1.0 - progress;
+          const fadeOutT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_OUT_START, INTRO_PARTICLE_FADE_OUT_END);
+          const fadeInT = THREE.MathUtils.smoothstep(rawT, INTRO_PARTICLE_FADE_IN_START, 0.14);
+          particleSystem.material.opacity = THREE.MathUtils.clamp((1 - fadeOutT) * fadeInT, 0, 1);
+          particleSystem.visible = particleSystem.material.opacity > 0.01;
+          if (!particleSystemRevealDone && rawT >= INTRO_PARTICLE_FADE_OUT_END) {
+            particleSystemRevealDone = true;
+          }
         }
 
-        if (progress >= 1.0) {
-          if (particleSystem) particleSystem.visible = false;
-          globalUniforms.uGeoRadius.value = 99999.0;
-
-          animationState.phase = PHASE.COLORING;
-          animationState.colorStartTime = now;
-        }
-      }
-
-      // 3. 上色
-      else if (animationState.phase === PHASE.COLORING) {
-        const colorTime = (now - animationState.colorStartTime) / 1000;
-        const maxR = globalUniforms.uMaxRadius.value;
-        const progress = colorTime / animationState.colorDuration;
-
-        globalUniforms.uColorRadius.value = progress * (maxR * 1.5);
-
-        if (progress >= 1.0) {
-          animationState.phase = PHASE.FINISHED;
-          globalUniforms.uColorRadius.value = 99999.0;
+        if (rawT >= 1) {
+          finalizeIntroAnimation();
         }
       }
     });
@@ -1919,32 +2743,227 @@ const renderCameraUpdate = () => {
   viewer.camera.updateProjectionMatrix();
   refreshCurrentFocalInfo();
   updateDebugInfo();
-  try { viewer.update(); viewer.render(); } catch (_) {}
+  requestRender();
+};
+
+const applyFreeLookDelta = (deltaYaw, deltaPitch) => {
+  if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
+  interruptCameraFlightFromUserInput();
+  const cam = viewer.camera;
+  reusableYawQuat.setFromAxisAngle(centerModeUp, deltaYaw);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
+  reusablePitchQuat.setFromAxisAngle(right, deltaPitch);
+  // 自由模式只改变相机朝向，不改变相机位置和模型姿态，符合第一人称查看手感。
+  cam.quaternion.premultiply(reusableYawQuat).premultiply(reusablePitchQuat).normalize();
+  renderCameraUpdate();
+};
+
+const startOrbitRecenterFlight = () => {
+  if (!viewer || !viewer.camera || !isOrbitMode.value || !orbitNeedsRecenterAfterPoseFlight) return false;
+
+  interruptCinematicPlayback();
+  stopInteractionInertia();
+  orbitNeedsRecenterAfterPoseFlight = false;
+  if (viewer.controls) viewer.controls.enabled = false;
+
+  const cam = viewer.camera;
+  const targetCenter = orbitState.center.clone();
+  const targetState = getOrbitCameraState();
+  const startPos = cam.position.clone();
+  const startQuat = cam.quaternion.clone();
+  const curve = buildCameraBezierCurve(startPos, targetState.position, targetCenter);
+  const animState = { t: 0 };
+
+  stopCameraTweens();
+  isOrbitRecenterFlightActive = true;
+  orbitNeedsRecenterAfterPoseFlight = false;
+  activeCameraFlightId += 1;
+  const flightId = activeCameraFlightId;
+
+  activeCameraTween = gsap.to(animState, {
+    t: 1,
+    duration: ORBIT_RECENTER_DURATION,
+    ease: 'power3.inOut',
+    onUpdate: () => {
+      if (flightId !== activeCameraFlightId) return;
+      cam.position.copy(curve.getPoint(animState.t));
+      cam.quaternion.slerpQuaternions(startQuat, targetState.quaternion, animState.t).normalize();
+      renderCameraUpdate();
+    },
+    onComplete: () => {
+      if (flightId !== activeCameraFlightId) return;
+      activeCameraTween = null;
+      isOrbitRecenterFlightActive = false;
+      cam.position.copy(targetState.position);
+      cam.quaternion.copy(targetState.quaternion);
+      syncOrbitTarget(targetCenter);
+      applyOrbitCamera(true);
+      orbitTouchState.roll = 0;
+      if (viewer.controls) viewer.controls.enabled = true;
+    }
+  });
+
+  return true;
+};
+
+const applyOrbitCamera = (immediate = false) => {
+  if (!viewer || !viewer.camera) return;
+
+  if (immediate) {
+    orbitState.yaw = orbitState.targetYaw;
+    orbitState.pitch = orbitState.targetPitch;
+    orbitState.radius = clampOrbitRadius(orbitState.targetRadius);
+  }
+
+  const offset = getOrbitOffsetFromSpherical(orbitState.yaw, orbitState.pitch, orbitState.radius);
+
+  viewer.camera.position.copy(orbitState.center).add(offset);
+  viewer.camera.up.copy(orbitState.up);
+  viewer.camera.lookAt(orbitState.center);
+  renderCameraUpdate();
+};
+
+const scheduleInteractionFrame = () => {
+  if (interactionFrameHandle) return;
+  interactionState.lastFrameTime = performance.now();
+  interactionFrameHandle = requestAnimationFrame(stepInteractionInertia);
+};
+
+const stepInteractionInertia = (now) => {
+  interactionFrameHandle = 0;
+  if (!viewer || !viewer.camera) return;
+
+  const dt = Math.min(Math.max((now - interactionState.lastFrameTime) / 1000, 1 / 120), 0.05);
+  interactionState.lastFrameTime = now;
+  let needsNextFrame = false;
+
+  if (interactionState.freeInertiaActive) {
+    if (
+      Math.abs(interactionState.freeVelocityYaw) > 0.00001 ||
+      Math.abs(interactionState.freeVelocityPitch) > 0.00001
+    ) {
+      applyFreeLookDelta(interactionState.freeVelocityYaw, interactionState.freeVelocityPitch);
+      needsNextFrame = true;
+    } else {
+      interactionState.freeInertiaActive = false;
+    }
+  }
+
+  if (interactionState.orbitInertiaActive) {
+    if (
+      Math.abs(interactionState.orbitVelocityYaw) > 0.00001 ||
+      Math.abs(interactionState.orbitVelocityPitch) > 0.00001
+    ) {
+      orbitState.targetYaw += interactionState.orbitVelocityYaw;
+      orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + interactionState.orbitVelocityPitch);
+      applyCenterModeBoundsToTarget();
+      needsNextFrame = true;
+    } else {
+      interactionState.orbitInertiaActive = false;
+    }
+  }
+
+  if (interactionState.zoomInertiaActive) {
+    if (Math.abs(interactionState.orbitZoomVelocity) > 0.0002) {
+      const zoomStep = THREE.MathUtils.clamp(interactionState.orbitZoomVelocity * dt * 4.1, -0.12, 0.12);
+      orbitState.targetRadius = Math.max(
+        getOrbitMinRadius(),
+        orbitState.targetRadius * Math.exp(zoomStep),
+      );
+      needsNextFrame = true;
+    } else {
+      interactionState.zoomInertiaActive = false;
+    }
+  }
+
+  if (centerModeBounds && !interactionState.zoomInertiaActive) {
+    const boundedTargetRadius = clampOrbitRadius(orbitState.targetRadius);
+    if (Math.abs(boundedTargetRadius - orbitState.targetRadius) > 1e-5) {
+      const spring = 1 - Math.exp(-dt * 4.2);
+      orbitState.targetRadius = THREE.MathUtils.lerp(orbitState.targetRadius, boundedTargetRadius, spring);
+      needsNextFrame = true;
+    }
+  }
+
+  if (isOrbitMode.value) {
+    const alpha = 1 - Math.exp(-dt * 12);
+    const targetRadius = clampOrbitRadius(orbitState.targetRadius);
+    orbitState.yaw = THREE.MathUtils.lerp(orbitState.yaw, orbitState.targetYaw, alpha);
+    orbitState.pitch = THREE.MathUtils.lerp(orbitState.pitch, orbitState.targetPitch, alpha);
+    orbitState.radius = THREE.MathUtils.lerp(
+      orbitState.radius,
+      targetRadius,
+      THREE.MathUtils.clamp(alpha * ORBIT_RADIUS_SMOOTHING, ORBIT_RADIUS_MIN_STEP, 0.45),
+    );
+    applyOrbitCamera();
+    if (
+      Math.abs(orbitState.yaw - orbitState.targetYaw) > 0.00001 ||
+      Math.abs(orbitState.pitch - orbitState.targetPitch) > 0.00001 ||
+      Math.abs(orbitState.radius - targetRadius) > 0.0002
+    ) {
+      needsNextFrame = true;
+    }
+  }
+
+  const decay = Math.exp(-dt * 7.5);
+  interactionState.freeVelocityYaw *= decay;
+  interactionState.freeVelocityPitch *= decay;
+  interactionState.orbitVelocityYaw *= decay;
+  interactionState.orbitVelocityPitch *= decay;
+  interactionState.orbitZoomVelocity *= decay;
+
+  if (needsNextFrame) scheduleInteractionFrame();
+};
+
+const stopInteractionInertia = () => {
+  interactionState.freeInertiaActive = false;
+  interactionState.orbitInertiaActive = false;
+  interactionState.zoomInertiaActive = false;
+  interactionState.freeVelocityYaw = 0;
+  interactionState.freeVelocityPitch = 0;
+  interactionState.orbitVelocityYaw = 0;
+  interactionState.orbitVelocityPitch = 0;
+  interactionState.orbitZoomVelocity = 0;
+  if (interactionFrameHandle) {
+    cancelAnimationFrame(interactionFrameHandle);
+    interactionFrameHandle = 0;
+  }
 };
 
 const orbitRotate = (deltaYaw, deltaPitch) => {
   if (!viewer || !viewer.camera) return;
-  viewer.camera.rotateOnWorldAxis(worldUp, -deltaYaw);
-  viewer.camera.rotateX(-deltaPitch);
-  renderCameraUpdate();
+  if (isCameraFlightLocked()) return;
+  if (isOrbitRecenterFlightActive) return;
+  interruptCameraFlightFromUserInput();
+  interactionState.orbitVelocityYaw = deltaYaw;
+  interactionState.orbitVelocityPitch = deltaPitch;
+  interactionState.orbitInertiaActive = false;
+  orbitState.targetYaw += deltaYaw;
+  orbitState.targetPitch = clampOrbitPitch(orbitState.targetPitch + deltaPitch);
+  applyCenterModeBoundsToTarget();
+  scheduleInteractionFrame();
 };
 
 const orbitRoll = (deltaAngleRad) => {
   if (!viewer || !viewer.camera || !Number.isFinite(deltaAngleRad)) return;
-  viewer.camera.rotateZ(deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  if (isCameraFlightLocked()) return;
+  if (isOrbitRecenterFlightActive) return;
+  interruptCameraFlightFromUserInput();
+  viewer.camera.rotateOnWorldAxis(orbitState.up, deltaAngleRad * ORBIT_ROLL_SENSITIVITY);
+  syncOrbitTarget();
   renderCameraUpdate();
 };
 
 const orbitZoom = (zoomFactor) => {
   if (!viewer || !viewer.camera || !Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
-  const sceneDistance = Math.max(0.3, viewer.camera.position.distanceTo(getModelWorldCenter()));
-  const deltaZ = THREE.MathUtils.clamp(
-    (1 - zoomFactor) * sceneDistance * ORBIT_DOLLY_FACTOR,
-    -sceneDistance * 0.25,
-    sceneDistance * 0.25
-  );
-  viewer.camera.translateZ(deltaZ);
-  renderCameraUpdate();
+  if (isCameraFlightLocked()) return;
+  if (isOrbitRecenterFlightActive) return;
+  interruptCameraFlightFromUserInput();
+  const delta = -Math.log(zoomFactor);
+  interactionState.orbitZoomVelocity += delta * 2.0;
+  interactionState.zoomInertiaActive = true;
+  scheduleInteractionFrame();
 };
 
 const getTouchAngle = (touchA, touchB) => {
@@ -1960,12 +2979,17 @@ const normalizeTouchAngleDelta = (delta) => {
 const setupFreeControls = () => {
   if (!viewer) return;
   disposeControls();
+  if (viewer.camera) viewer.camera.up.copy(worldUp);
 };
 
 const setupOrbitControls = () => {
   if (!viewer) return;
   disposeControls();
   orbitTouchState.roll = 0;
+  orbitNeedsRecenterAfterPoseFlight = false;
+  updateOrbitFrame();
+  syncOrbitTarget();
+  applyOrbitCamera(true);
 };
 
 const applyViewMode = () => {
@@ -1982,12 +3006,17 @@ const switchViewMode = (mode) => {
   if (mode !== VIEW_MODE.FREE && mode !== VIEW_MODE.ORBIT) return;
   if (currentViewMode.value === mode) return;
 
+  stopInteractionInertia();
   currentViewMode.value = mode;
   applyViewMode();
 
   if (isOrbitMode.value) {
     syncOrbitTarget();
   }
+};
+
+const setDefaultViewModeForScene = (hasPoses) => {
+  currentViewMode.value = hasPoses ? VIEW_MODE.FREE : VIEW_MODE.ORBIT;
 };
 
 // 修改后的 adjustControlsToModel，直接使用预计算好的值
@@ -2000,6 +3029,7 @@ const adjustControlsToModel = () => {
   const distance = maxDim * 2.0;
 
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
+  viewer.camera.up.copy(centerModeUp);
   viewer.camera.lookAt(worldCenter);
   syncOrbitTarget(worldCenter);
   refreshCurrentFocalInfo();
@@ -2007,14 +3037,52 @@ const adjustControlsToModel = () => {
 
 const onSessionStarted = (session) => {
   isVRMode.value = true;
+  xrSession = session;
+  vrLastFrameTime = 0;
+  createVrHud();
+  drawVrHud();
   if (viewer && viewer.controls) { viewer.controls.dispose(); viewer.controls = null; }
-  session.addEventListener('end', onSessionEnded);
+  if (session) {
+    xrSessionEndHandler = onSessionEnded;
+    session.addEventListener('end', xrSessionEndHandler);
+  }
 };
-const onSessionEnded = () => { isVRMode.value = false; applyViewMode(); };
+const onSessionEnded = () => {
+  if (xrSession && xrSessionEndHandler) {
+    xrSession.removeEventListener('end', xrSessionEndHandler);
+  }
+  xrSession = null;
+  xrSessionEndHandler = null;
+  vrLastFrameTime = 0;
+  if (vrHud?.mesh) vrHud.mesh.visible = false;
+  isVRMode.value = false;
+  applyViewMode();
+};
+const enterVRSession = async () => {
+  if (!viewer?.renderer?.xr || !navigator.xr) return;
+  viewer.renderer.xr.enabled = true;
+  viewer.renderer.xr.setReferenceSpaceType?.('local-floor');
+  const session = await navigator.xr.requestSession('immersive-vr', {
+    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+  });
+  await viewer.renderer.xr.setSession(session);
+  onSessionStarted(session);
+};
+const exitVRSession = async () => {
+  const session = getCurrentXrSession();
+  if (session) await session.end();
+  else onSessionEnded();
+};
 const toggleVRMode = async () => {
   if (!isSecureContext.value) { alert("需HTTPS"); return; }
-  if (isVRMode.value) { if (viewer.xr) viewer.xr.exitVR(); isVRMode.value = false; }
-  else { if (viewer.xr) viewer.xr.enterVR(); isVRMode.value = true; }
+  try {
+    if (isVRMode.value) await exitVRSession();
+    else await enterVRSession();
+  } catch (error) {
+    console.error('[VR] 切换 VR 模式失败:', error);
+    alert('VR 启动失败，请确认浏览器和头显已允许 WebXR');
+    onSessionEnded();
+  }
 };
 const toggleAutoRotate = () => { isAutoRotate.value = !isAutoRotate.value; };
 const checkProtocol = () => {
@@ -2032,7 +3100,8 @@ const pinchState = {
 const orbitTouchState = {
   active: false,
   angle: 0,
-  roll: 0
+  roll: 0,
+  mode: 'idle'
 };
 // const rotationDelta removed here
 
@@ -2042,10 +3111,50 @@ const getTouchDistance = (touchA, touchB) => {
   return Math.hypot(dx, dy);
 };
 
+const resetManualCameraInputState = () => {
+  isDragging.value = false;
+  pinchState.active = false;
+  pinchState.distance = 0;
+  orbitTouchState.active = false;
+  orbitTouchState.angle = 0;
+  orbitTouchState.mode = 'idle';
+};
+
+const handleFreePinchMove = (touches) => {
+  if (!touches || touches.length < 2) return false;
+
+  const nextDistance = getTouchDistance(touches[0], touches[1]);
+  if (!Number.isFinite(nextDistance) || nextDistance <= 0) return true;
+
+  if (pinchState.active && pinchState.distance > 0) {
+    const distanceDelta = nextDistance - pinchState.distance;
+    const normalizedDelta = distanceDelta / Math.max(pinchState.distance, 80);
+    const scaleFactor = THREE.MathUtils.clamp(
+      Math.exp(normalizedDelta * PINCH_ZOOM_STEP),
+      0.72,
+      1.38
+    );
+    zoomByFocalScale(scaleFactor);
+  }
+
+  // Flutter WebView 有时不会可靠派发“第二根手指按下”的 touchstart，
+  // 因此双指 touchmove 必须也能兜底进入 pinch 状态。
+  pinchState.active = true;
+  pinchState.distance = nextDistance;
+  isDragging.value = false;
+  return true;
+};
+
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
-  if (showTopMenu.value) showTopMenu.value = false;
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
+  stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.button !== 0) return;
     isDragging.value = true;
@@ -2062,6 +3171,8 @@ const onMouseDown = (e) => {
 };
 
 const onMouseMove = (e) => {
+  if (isCameraFlightLocked()) return;
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!isDragging.value || !viewer || !viewer.camera) return;
     const dx = e.clientX - lastMouse.x;
@@ -2076,28 +3187,35 @@ const onMouseMove = (e) => {
   const dx = e.clientX - lastMouse.x;
   const dy = e.clientY - lastMouse.y;
 
-  // 计算增量
-  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
-
-  // X轴旋转 (俯仰) - 本地轴
-  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
-
-  // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
-
-  viewer.camera.updateProjectionMatrix();
-  updateDebugInfo();
+  const deltaYaw = dx * FREE_LOOK_SENSITIVITY;
+  const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
+  interactionState.freeVelocityYaw = deltaYaw;
+  interactionState.freeVelocityPitch = deltaPitch;
+  applyFreeLookDelta(deltaYaw, deltaPitch);
 
   lastMouse.x = e.clientX;
   lastMouse.y = e.clientY;
 };
 
 const onMouseUp = () => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
+    if (isDragging.value) {
+      interactionState.orbitInertiaActive = true;
+      scheduleInteractionFrame();
+    }
     isDragging.value = false;
     pinchState.active = false;
     orbitTouchState.active = false;
     return;
+  }
+  if (isDragging.value) {
+    interactionState.freeInertiaActive = true;
+    scheduleInteractionFrame();
   }
   isDragging.value = false;
   pinchState.active = false;
@@ -2105,10 +3223,15 @@ const onMouseUp = () => {
 
 const onWheel = (e) => {
   if (!viewer || !viewer.camera) return;
+  if (isCameraFlightLocked()) return;
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
   if (isOrbitMode.value) {
     const zoomFactor = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
     orbitZoom(zoomFactor);
+    interactionState.zoomInertiaActive = true;
+    scheduleInteractionFrame();
     return;
   }
   const direction = e.deltaY < 0 ? (1 + WHEEL_ZOOM_STEP) : (1 / (1 + WHEEL_ZOOM_STEP));
@@ -2117,7 +3240,14 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
+  if (isOrbitMode.value && startOrbitRecenterFlight()) return;
   interruptCinematicPlayback();
+  interruptCameraFlight();
+  stopInteractionInertia();
   if (isOrbitMode.value) {
     if (e.touches.length >= 2) {
       isDragging.value = false;
@@ -2125,11 +3255,13 @@ const onTouchStart = (e) => {
       pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
       orbitTouchState.active = true;
       orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      orbitTouchState.mode = 'pending';
       return;
     }
 
     pinchState.active = false;
     orbitTouchState.active = false;
+    orbitTouchState.mode = 'idle';
     if (e.touches.length === 1) {
       isDragging.value = true;
       lastMouse.x = e.touches[0].clientX;
@@ -2141,10 +3273,12 @@ const onTouchStart = (e) => {
     isDragging.value = false;
     pinchState.active = true;
     pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    orbitTouchState.mode = 'idle';
     return;
   }
 
   pinchState.active = false;
+  orbitTouchState.mode = 'idle';
   if (e.touches.length === 1) {
     isDragging.value = true;
     lastMouse.x = e.touches[0].clientX;
@@ -2153,24 +3287,52 @@ const onTouchStart = (e) => {
 };
 
 const onTouchMove = (e) => {
+  if (isCameraFlightLocked()) return;
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
     if (!viewer || !viewer.camera || e.touches.length === 0) return;
+    if (isOrbitRecenterFlightActive || startOrbitRecenterFlight()) return;
 
     if (e.touches.length >= 2) {
       const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
       const nextAngle = getTouchAngle(e.touches[0], e.touches[1]);
+      const distanceDelta = pinchState.active && pinchState.distance > 0
+        ? nextDistance - pinchState.distance
+        : 0;
+      const angleDelta = orbitTouchState.active
+        ? normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle)
+        : 0;
 
-      if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
-        orbitZoom(nextDistance / pinchState.distance);
+      if (orbitTouchState.mode === 'pending') {
+        if (Math.abs(distanceDelta) > ORBIT_TOUCH_PINCH_DISTANCE_EPS) {
+          orbitTouchState.mode = 'pinch';
+        } else if (Math.abs(angleDelta) >= ORBIT_TOUCH_ROTATE_ANGLE_EPS) {
+          orbitTouchState.mode = 'rotate';
+        }
       }
-      if (orbitTouchState.active) {
-        orbitRoll(normalizeTouchAngleDelta(nextAngle - orbitTouchState.angle));
+
+      if (orbitTouchState.mode === 'pinch') {
+        if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
+          orbitZoom(nextDistance / pinchState.distance);
+        }
+        pinchState.distance = nextDistance;
+        orbitTouchState.angle = nextAngle;
+      } else if (orbitTouchState.mode === 'rotate') {
+        if (Math.abs(angleDelta) >= ORBIT_TOUCH_ROTATE_ANGLE_EPS) {
+          orbitRoll(angleDelta);
+          orbitTouchState.angle = nextAngle;
+        }
+        pinchState.distance = nextDistance;
+      } else {
+        // 维持初始参考值不动，让慢速缩放或旋转能在后续移动里累积到可判定阈值。
+        if (!pinchState.active || pinchState.distance <= 0) {
+          pinchState.distance = nextDistance;
+          orbitTouchState.angle = nextAngle;
+        }
       }
 
       pinchState.active = true;
-      pinchState.distance = nextDistance;
       orbitTouchState.active = true;
-      orbitTouchState.angle = nextAngle;
       isDragging.value = false;
       return;
     }
@@ -2187,14 +3349,7 @@ const onTouchMove = (e) => {
   if (!viewer || !viewer.camera || e.touches.length === 0) return;
 
   if (e.touches.length >= 2) {
-    const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
-    if (pinchState.active && pinchState.distance > 0 && nextDistance > 0) {
-      const scale = nextDistance / pinchState.distance;
-      zoomByFocalScale(1 + ((scale - 1) * PINCH_ZOOM_STEP));
-    }
-    pinchState.active = true;
-    pinchState.distance = nextDistance;
-    isDragging.value = false;
+    handleFreePinchMove(e.touches);
     return;
   }
 
@@ -2203,28 +3358,32 @@ const onTouchMove = (e) => {
   const dx = e.touches[0].clientX - lastMouse.x;
   const dy = e.touches[0].clientY - lastMouse.y;
 
-  const deltaPitch = dy * DRAG_ROTATE_SENSITIVITY;
-
-  rotationDelta.value.x += deltaPitch;
-
-  viewer.camera.rotateX(deltaPitch * Math.PI / 180);
-  // 左右平移 (移动视角左右而不是旋转)
-  viewer.camera.translateX(-dx * DRAG_PAN_SENSITIVITY);
-
-  viewer.camera.updateProjectionMatrix();
-  updateDebugInfo();
+  const deltaYaw = dx * FREE_LOOK_SENSITIVITY;
+  const deltaPitch = -dy * FREE_LOOK_SENSITIVITY;
+  interactionState.freeVelocityYaw = deltaYaw;
+  interactionState.freeVelocityPitch = deltaPitch;
+  rotationDelta.value.x += THREE.MathUtils.radToDeg(deltaPitch);
+  rotationDelta.value.y += THREE.MathUtils.radToDeg(deltaYaw);
+  applyFreeLookDelta(deltaYaw, deltaPitch);
 
   lastMouse.x = e.touches[0].clientX;
   lastMouse.y = e.touches[0].clientY;
 };
 
 const onTouchEnd = (e) => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
+  if (isOrbitRecenterFlightActive) return;
   if (isOrbitMode.value) {
+    const wasPinching = pinchState.active;
     if (e.touches.length >= 2) {
       pinchState.active = true;
       pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
       orbitTouchState.active = true;
       orbitTouchState.angle = getTouchAngle(e.touches[0], e.touches[1]);
+      orbitTouchState.mode = 'pending';
       isDragging.value = false;
       return;
     }
@@ -2233,6 +3392,15 @@ const onTouchEnd = (e) => {
     pinchState.distance = 0;
     orbitTouchState.active = false;
     orbitTouchState.angle = 0;
+    orbitTouchState.mode = 'idle';
+    if (isDragging.value) {
+      interactionState.orbitInertiaActive = true;
+      scheduleInteractionFrame();
+    }
+    if (wasPinching) {
+      interactionState.zoomInertiaActive = true;
+      scheduleInteractionFrame();
+    }
     isDragging.value = false;
 
     if (e.touches.length === 1) {
@@ -2245,12 +3413,18 @@ const onTouchEnd = (e) => {
   if (e.touches.length >= 2) {
     pinchState.active = true;
     pinchState.distance = getTouchDistance(e.touches[0], e.touches[1]);
+    orbitTouchState.mode = 'idle';
     isDragging.value = false;
     return;
   }
 
   pinchState.active = false;
   pinchState.distance = 0;
+  orbitTouchState.mode = 'idle';
+  if (isDragging.value) {
+    interactionState.freeInertiaActive = true;
+    scheduleInteractionFrame();
+  }
   isDragging.value = false;
 
   if (e.touches.length === 1) {
@@ -2258,6 +3432,15 @@ const onTouchEnd = (e) => {
     lastMouse.y = e.touches[0].clientY;
     isDragging.value = true;
   }
+};
+
+const onCapturedUserCameraInput = () => {
+  if (isCameraFlightLocked()) {
+    resetManualCameraInputState();
+    return;
+  }
+  if (isOrbitRecenterFlightActive) return;
+  interruptCameraFlightFromUserInput();
 };
 
 function onTimePeelingSelect(model) {
@@ -2279,7 +3462,6 @@ function onTimePeelingSelect(model) {
 }
 
 onMounted(() => {
-  document.addEventListener('click', onDocumentClickForMenu, true);
   if (containerRef.value) {
     checkProtocol();
 
@@ -2287,7 +3469,11 @@ onMounted(() => {
     window.setModelListForTimePeeling = (list, currentId) => {
       console.log('[Flutter->WebGL] 收到模型列表:', list, '当前模型:', currentId);
       if (Array.isArray(list)) {
-        modelList.value = list;
+        // 兼容不同上游字段命名，确保预览图不会因为字段名变体而丢失。
+        modelList.value = list.map((model) => ({
+          ...model,
+          previewImg: model.previewImg || model.previewImage || model.preview_url || model.preview || '',
+        }));
         if (currentId) {
           activeModelId.value = currentId;
         } else if (list.length > 0 && !activeModelId.value) {
@@ -2324,10 +3510,6 @@ onMounted(() => {
       }
     };
 
-    window.setRendererStateFromFlutter = (useSpark) => {
-      useSparkRenderer.value = !!useSpark;
-    };
-
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -2349,20 +3531,34 @@ onMounted(() => {
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointerdown', onCapturedUserCameraInput, true);
+    window.addEventListener('pointermove', onCapturedUserCameraInput, true);
+    window.addEventListener('touchstart', onCapturedUserCameraInput, true);
+    window.addEventListener('touchmove', onCapturedUserCameraInput, true);
+    window.addEventListener('wheel', onCapturedUserCameraInput, true);
   }
 });
 
 onBeforeUnmount(async () => {
-  document.removeEventListener('click', onDocumentClickForMenu, true);
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
   window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('pointerdown', onCapturedUserCameraInput, true);
+  window.removeEventListener('pointermove', onCapturedUserCameraInput, true);
+  window.removeEventListener('touchstart', onCapturedUserCameraInput, true);
+  window.removeEventListener('touchmove', onCapturedUserCameraInput, true);
+  window.removeEventListener('wheel', onCapturedUserCameraInput, true);
+  stopInteractionInertia();
   stopCinematicPlayback();
 
   if (viewer) {
     try {
       if (viewer.renderer) viewer.renderer.setAnimationLoop(null);
     } catch (_) {}
+    try {
+      await exitVRSession();
+    } catch (_) {}
+    destroyVrHud();
     try {
       await viewer.dispose();
     } catch (_) {}
@@ -2394,147 +3590,101 @@ onBeforeUnmount(async () => {
     />
 
     <div class="top-hud">
-      <div class="top-hud-row">
-        <button class="exit-btn" @click="exitViewer"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M15 18l-6-6 6-6" stroke="currentColor"
-              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
+      <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+        <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
+          class="search-input" />
+        <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
+      </div>
 
-        <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-          <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
-            class="search-input" />
-          <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
-        </div>
-
-        <div class="top-menu-wrapper" ref="topMenuRef"
-          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-          <button class="top-menu-btn archive-btn archive-btn--ghost"
-            :class="{ active: showTopMenu }" @click="toggleTopMenu">
-            <span class="top-menu-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor"
-                  stroke-width="2" stroke-linecap="round" fill="none"/>
-              </svg>
-            </span>
+      <div class="top-actions">
+        <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
+            @click="switchViewMode(VIEW_MODE.FREE)">
+            自由模式
           </button>
-
-          <div class="top-menu-dropdown archive-card" :class="{ open: showTopMenu }">
-            <div class="renderer-switch">
-              <button class="mode-chip" :class="{ active: !useSparkRenderer }"
-                @click="switchRenderer(false)">
-                原版
-              </button>
-              <button class="mode-chip" :class="{ active: useSparkRenderer }"
-                @click="switchRenderer(true)">
-                Spark
-              </button>
+          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
+            @click="switchViewMode(VIEW_MODE.ORBIT)">
+            中心模式
+          </button>
+        </div>
+        <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
+        </button>
+        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
+          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
+          @mousedown.stop @touchstart.stop @touchend.stop>
+          <span class="cinematic-trigger-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path
+                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
+            </svg>
+          </span>
+          <span>运镜</span>
+        </button>
+        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
+          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+          <div class="cinematic-head">
+            <div>
+              <div class="eyebrow">Camera Move</div>
+              <div class="cinematic-title">自动运镜</div>
             </div>
-            <div class="menu-divider"></div>
-            <div class="view-mode-switch">
-              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
-                @click="switchViewMode(VIEW_MODE.FREE)">
-                自由模式
-              </button>
-              <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
-                @click="switchViewMode(VIEW_MODE.ORBIT)">
-                Orbit 模式
-              </button>
-            </div>
-            <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings">
-              {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
-            </button>
-            <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
-              :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel">
-              <span class="cinematic-trigger-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path
-                    d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
-                </svg>
-              </span>
-              <span>运镜</span>
-            </button>
-            <div class="cinematic-panel" v-if="canPlayCinematic && showCinematicPanel">
-              <div class="cinematic-head">
-                <div>
-                  <div class="eyebrow">Camera Move</div>
-                  <div class="cinematic-title">自动运镜</div>
-                </div>
-                <div class="cinematic-head-actions">
-                  <label class="cinematic-loop-toggle">
-                    <input type="checkbox" v-model="cinematicLoop" />
-                    <span>循环</span>
-                  </label>
-                  <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div class="cinematic-actions">
-                <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
-                  {{ cinematicButtonLabel }}
-                </button>
-                <button class="archive-btn archive-btn--ghost cinematic-secondary"
-                  @click="stopCinematicPlayback()"
-                  :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
-                  停止
-                </button>
-              </div>
-              <div class="cinematic-progress-row">
-                <span>进度</span>
-                <span>{{ Math.round(cinematicProgress * 100) }}%</span>
-              </div>
-              <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
-                step="1" disabled />
-              <div class="cinematic-progress-row">
-                <span>速度</span>
-                <span>{{ cinematicSpeed.toFixed(2) }}x</span>
-              </div>
-              <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
-                @input="onCinematicSpeedChange" />
-              <div class="cinematic-progress-row">
-                <span>平滑</span>
-                <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
-              </div>
-              <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
-                step="0.05" @input="onCinematicStyleChange" />
-              <label class="cinematic-focus-toggle">
-                <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
-                <span>主体锁定</span>
+            <div class="cinematic-head-actions">
+              <label class="cinematic-loop-toggle">
+                <input type="checkbox" v-model="cinematicLoop" />
+                <span>循环</span>
               </label>
-            </div>
-            <div class="focal-panel-inline" v-if="showFocalSettings">
-              <div class="eyebrow">Lens Control</div>
-              <div class="focal-title">镜头焦距</div>
-              <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
-                @input="onManualFocalChange" />
-              <div class="focal-row">
-                <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
-                  step="1" @change="onManualFocalChange" />
-                <span>px</span>
-              </div>
-              <div class="focal-row">
-                <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
-              </div>
-              <div class="focal-row">
-                <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
-              </div>
-              <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
+              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
+                ×
+              </button>
             </div>
           </div>
+          <div class="cinematic-actions">
+            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
+              {{ cinematicButtonLabel }}
+            </button>
+            <button class="archive-btn archive-btn--ghost cinematic-secondary"
+              @click="stopCinematicPlayback()"
+              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
+              停止
+            </button>
+          </div>
+          <div class="cinematic-progress-row">
+            <span>进度</span>
+            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
+          </div>
+          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
+            step="1" disabled />
+          <div class="cinematic-progress-row">
+            <span>速度</span>
+            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
+            @input="onCinematicSpeedChange" />
+          <div class="cinematic-progress-row">
+            <span>平滑</span>
+            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
+          </div>
+          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
+            step="0.05" @input="onCinematicStyleChange" />
+          <label class="cinematic-focus-toggle">
+            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
+            <span>主体锁定</span>
+          </label>
         </div>
-
+        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
       </div>
-      <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
     </div>
 
     <div v-if="isLoading" class="loading-overlay">
       <div class="loading-card">
         <div class="loading-dot"></div>
         <div class="loading-title">场景正在展开</div>
-        <div class="loading-copy">模型与参考镜头正在同步到工作台。</div>
+        <div class="loading-copy">{{ loadingStatusText }}</div>
+        <div class="loading-progress" aria-hidden="true">
+          <div class="loading-progress-fill" :style="{ width: `${Math.round(loadingProgress * 100)}%` }"></div>
+        </div>
+        <div class="loading-percent">{{ Math.round(loadingProgress * 100) }}%</div>
       </div>
     </div>
 
@@ -2556,6 +3706,26 @@ onBeforeUnmount(async () => {
       <button @click="toggleAutoRotate" :class="{ active: isAutoRotate }">
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
+    </div>
+
+    <div class="focal-settings-panel" v-if="showFocalSettings"
+      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+      <div class="eyebrow">Lens Control</div>
+      <div class="focal-title">镜头焦距</div>
+      <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
+        @input="onManualFocalChange" />
+      <div class="focal-row">
+        <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
+          step="1" @change="onManualFocalChange" />
+        <span>px</span>
+      </div>
+      <div class="focal-row">
+        <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
+      </div>
+      <div class="focal-row">
+        <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
+      </div>
+      <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -2598,29 +3768,36 @@ onBeforeUnmount(async () => {
     -->
 
     <!-- 参考图对比悬浮窗 -->
-    <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
-      <div class="eyebrow">Reference Still</div>
-      <div class="ref-title">参考原图</div>
-      <img :src="activeImage" class="ref-img" />
-      <div class="ref-info" v-if="activeTag">
-        <span class="info-tag info-tag--accent">{{ activeTag }}</span>
+    <transition name="ref-fade">
+      <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
+        <div class="eyebrow">Reference Still</div>
+        <div class="ref-title">参考原图</div>
+        <img 
+          :src="activeImage" 
+          class="ref-img" 
+          :class="{ 'ref-img--loaded': loadedRefImages[activeImage] }"
+          @load="loadedRefImages[activeImage] = true"
+        />
+        <div class="ref-info" v-if="activeTag">
+          <span class="info-tag info-tag--accent">{{ activeTag }}</span>
+        </div>
+        <div class="ref-info" v-if="sceneMetadata.fl_y">
+          <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
+          <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
+            Math.PI)).toFixed(1) }}°</span>
+          <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
+        </div>
+        <div class="ref-hint">点击关闭对比</div>
       </div>
-      <div class="ref-info" v-if="sceneMetadata.fl_y">
-        <span class="info-tag">焦距: {{ (sceneMetadata.fl_y).toFixed(1) }} px</span>
-        <span class="info-tag">FOV: {{ (2 * Math.atan(sceneMetadata.h / (2 * sceneMetadata.fl_y)) * (180 /
-          Math.PI)).toFixed(1) }}°</span>
-        <span class="info-tag">分辨率: {{ sceneMetadata.w }}x{{ sceneMetadata.h }}</span>
-      </div>
-      <div class="ref-hint">点击关闭对比</div>
-    </div>
+    </transition>
   </div>
 </template>
 
 <style scoped>
 .app-container {
-  --flutter-safe-top: 56px;
+  --flutter-safe-top: 92px;
   --flutter-safe-left: 14px;
-  --flutter-safe-right: 14px;
+  --flutter-safe-right: 154px;
 
   --bg-gradient-1: rgba(228, 232, 237, 0.16);
   --bg-gradient-2: rgba(107, 122, 143, 0.14);
@@ -2745,137 +3922,27 @@ onBeforeUnmount(async () => {
 
 .top-hud {
   position: absolute;
-  top: var(--flutter-safe-top);
+  top: calc(var(--flutter-safe-top) + 56px);
   left: var(--flutter-safe-left);
-  right: var(--flutter-safe-left);
-  width: auto;
-  z-index: 160;
+  right: auto;
+  width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
+  z-index: 120;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 12px;
 }
 
-.top-hud-row {
+.top-actions {
   display: flex;
+  width: auto;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
-  width: 100%;
-}
-
-.top-menu-wrapper {
-  position: relative;
   flex: 0 0 auto;
-}
-
-.top-menu-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  padding: 0;
-  border-radius: 16px;
-}
-
-.top-menu-btn.active {
-  background: var(--chip-active-bg);
-  color: var(--chip-active-text);
-}
-
-.top-menu-icon {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
-}
-
-.top-menu-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-.exit-btn {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  border: none;
-  cursor: pointer;
-  background: var(--card-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--card-border);
-  box-shadow: 0 4px 12px var(--card-shadow);
-  backdrop-filter: blur(18px);
-  transition: background 150ms ease, transform 100ms ease;
-}
-
-.exit-btn:active {
-  transform: scale(0.92);
-}
-
-.exit-btn svg {
-  width: 24px;
-  height: 24px;
-}
-
-.renderer-switch {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 14px;
-  background: var(--chip-hover-bg);
-}
-
-.renderer-switch .mode-chip {
-  flex: 1;
-}
-
-.menu-divider {
-  height: 1px;
-  background: var(--card-border);
-  margin: 2px 0;
-}
-
-.top-menu-dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  min-width: 200px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 200;
-  opacity: 0;
-  transform: translateY(-6px);
-  pointer-events: none;
-  transition: opacity 180ms ease-out, transform 180ms ease-out;
-}
-
-.top-menu-dropdown.open {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.top-menu-dropdown .view-mode-switch {
-  width: 100%;
-  justify-content: center;
-}
-
-.top-menu-dropdown .cinematic-panel {
-  width: 100%;
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-  backdrop-filter: none;
-  padding: 8px 0 0;
-  border-top: 1px solid var(--card-border);
-  position: static;
-  border-radius: 0;
+  align-self: flex-start;
+  justify-content: flex-start;
+  flex-wrap: wrap;
 }
 
 .view-mode-switch {
@@ -3117,6 +4184,30 @@ onBeforeUnmount(async () => {
   color: var(--loading-copy-text);
 }
 
+.loading-progress {
+  width: 100%;
+  height: 6px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+
+.loading-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 160ms ease-out;
+}
+
+.loading-percent {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .error-overlay {
   position: absolute;
   inset: 0;
@@ -3199,12 +4290,22 @@ button.active {
   z-index: auto;
 }
 
-.focal-panel-inline {
+.focal-settings-panel {
+  position: absolute;
+  top: calc(var(--flutter-safe-top) + 130px);
+  right: var(--flutter-safe-right);
+  z-index: 120;
+  width: 236px;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 0 0;
-  border-top: 1px solid var(--card-border);
+  box-shadow: 0 16px 28px var(--card-shadow);
+  backdrop-filter: blur(16px);
 }
 
 .focal-title {
@@ -3236,7 +4337,7 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 68px);
+  top: calc(var(--flutter-safe-top) + 56px);
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
@@ -3257,11 +4358,31 @@ button.active {
   font-weight: 600;
 }
 
+/* 浮窗过渡动画 */
+.ref-fade-enter-active,
+.ref-fade-leave-active {
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ref-fade-enter-from,
+.ref-fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+
 .ref-img {
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--card-border);
   margin-bottom: 6px;
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: scale(0.95);
+  filter: blur(4px);
+}
+.ref-img.ref-img--loaded {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0px);
 }
 
 .ref-info {
@@ -3338,7 +4459,6 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
-  align-self: flex-start;
   color: var(--text-primary);
   background: var(--fps-bg);
   border: 1px solid var(--card-border);
@@ -3366,40 +4486,24 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   .app-container {
-    --flutter-safe-top: 48px;
+    --flutter-safe-top: 84px;
     --flutter-safe-left: 12px;
-    --flutter-safe-right: 12px;
+    --flutter-safe-right: 144px;
   }
 
   .top-hud {
     left: var(--flutter-safe-left);
-    right: var(--flutter-safe-left);
-    width: auto;
+    right: auto;
+    width: min(520px, calc(100vw - var(--flutter-safe-left) - var(--flutter-safe-right)));
     gap: 8px;
   }
 
-  .top-hud-row {
-    gap: 6px;
-  }
-
-  .exit-btn {
-    width: 44px;
-    height: 44px;
-  }
-
-  .exit-btn svg {
-    width: 20px;
-    height: 20px;
-  }
-
-  .top-menu-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-  }
-
-  .top-menu-dropdown {
-    min-width: 180px;
+  .top-actions {
+    width: auto;
+    max-width: 100%;
+    align-self: flex-start;
+    justify-content: flex-start;
+    gap: 8px;
   }
 
   .view-mode-switch {
@@ -3438,13 +4542,16 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: calc(var(--flutter-safe-top) + 56px);
+    top: calc(var(--flutter-safe-top) + 48px);
     right: 12px;
     width: 112px;
     min-width: 112px;
     padding: 7px;
   }
 
+  .focal-settings-panel {
+    top: calc(var(--flutter-safe-top) + 122px);
+  }
 }
 
 @media (prefers-color-scheme: dark) {

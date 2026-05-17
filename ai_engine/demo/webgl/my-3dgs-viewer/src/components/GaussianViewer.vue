@@ -9,6 +9,7 @@ const isVRMode = ref(false);
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
+const sceneReveal = ref(0);
 let viewer = null;
 let particleSystem = null;
 
@@ -29,6 +30,8 @@ const animationState = {
   diffusionDuration: 1.0, 
   colorDuration: 4.0,    
 };
+
+const easeOutQuint = (t) => 1 - Math.pow(1 - t, 5);
 
 const globalUniforms = {
   uTime: { value: 0 },
@@ -238,6 +241,7 @@ const getViewerConfig = () => {
 const initViewer = async () => {
   if (isLoading.value) return;
   isLoading.value = true;
+  sceneReveal.value = 0;
 
   try {
     if (viewer) {
@@ -292,6 +296,7 @@ const initViewer = async () => {
       const now = Date.now();
       const dt = (now - animationState.lastFrameTime) / 1000 || 0.016;
       animationState.lastFrameTime = now;
+      sceneReveal.value = Math.min(1, sceneReveal.value + dt / 0.75);
 
       // 1. 飞入
       if (animationState.phase === PHASE.FLY_IN) {
@@ -411,6 +416,7 @@ onBeforeUnmount(async () => {
 <template>
   <div class="app-container">
     <div ref="containerRef" class="viewer-container"></div>
+    <div class="scene-mask" :style="{ opacity: 1 - easeOutQuint(sceneReveal) }"></div>
     <div v-if="isLoading" class="loading-overlay">正在处理...</div>
     <div class="controls-ui">
       <button v-if="isSecureContext" @click="toggleVRMode" :class="{ active: isVRMode }">
@@ -425,9 +431,10 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container { position: relative; width: 100vw; height: 100vh; background-color: #000000; }
-.viewer-container { width: 100%; height: 100%; }
+.viewer-container { width: 100%; height: 100%; transition: opacity 420ms cubic-bezier(0.22, 1, 0.36, 1), filter 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+.scene-mask { position: absolute; inset: 0; pointer-events: none; z-index: 80; background: radial-gradient(circle at center, rgba(0,0,0,0.02), rgba(0,0,0,0.34)); transition: opacity 420ms cubic-bezier(0.22, 1, 0.36, 1); }
 .controls-ui { position: absolute; top: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 100; }
-.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; }
+.loading-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.86); color: white; display: flex; justify-content: center; align-items: center; z-index: 200; font-size: 20px; transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1); }
 button { background: rgba(0,0,0,0.6); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; }
 button.active { background: #22c55e; border-color: #22c55e; }
 </style>
