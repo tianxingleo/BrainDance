@@ -506,36 +506,6 @@ class _RecallLocalQnaPanel extends StatelessWidget {
             localAnswerStatus,
             style: TextStyle(color: hintColor, fontSize: 12, height: 1.35),
           ),
-          if (contextPreview.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text(
-              '本次喂给模型的记忆片段',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isDark ? darkInput : theme.grayColor3,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                contextPreview,
-                style: TextStyle(
-                  color: hintColor,
-                  fontSize: 12.5,
-                  height: 1.45,
-                ),
-                maxLines: 10,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
           if (reasoningText.isNotEmpty) ...[
             const SizedBox(height: 14),
             Theme(

@@ -638,7 +638,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       '1. hit_count > 0 时，必须回答具体内容，不能只说有记录。'
       '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
       '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
-      '4. 用户询问最近模型、有哪些模型、模型列表或盘点时，按证据列出 2 到 5 条模型摘要，并给出简短结论。'
+      '4. 用户询问最近模型、有哪些模型、模型列表或盘点时，按证据列出 2 到 4 条模型摘要，并给出简短结论。'
       '5. 其他单点问题可以简短回答，但不要只输出一个模型名。'
       '6. 输出必须是自然语言或简短列表，不要输出 JSON、代码块或键值对。'
       '7. 不复述问题，不解释规则，不说‘根据给定证据’。'
@@ -651,8 +651,14 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
     if (_localQnaModel == null || !_isLocalModelReady) {
-      showAppToast(context, textLocalize('local_model_load_first'));
-      return;
+      await _loadLocalQnaModel();
+      if (!mounted) {
+        return;
+      }
+      if (_localQnaModel == null || !_isLocalModelReady) {
+        showAppToast(context, textLocalize('local_model_load_first'));
+        return;
+      }
     }
 
     // 1. 构建紧凑的 retrieval payload，尽量减少端侧上下文占用
@@ -686,7 +692,7 @@ extension _RecallPageLocalAi on _RecallPageState {
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 220,
+              maxTokens: 160,
               temp: 0.0,
               topK: 1,
               topP: 1.0,
@@ -752,7 +758,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       final expandedQuery = _expandQuery(question);
       matches = await _localRagIndex.search(
         expandedQuery,
-        limit: 5,
+        limit: 4,
         minScore: 0.08,
       );
     } catch (_) {
@@ -771,20 +777,17 @@ extension _RecallPageLocalAi on _RecallPageState {
     final evidence = matches
         .map((item) {
           final metaInfo = _toMap(item['meta_info']);
-          final tags = _joinList(item['tags']);
-          final objects = _joinList(item['objects']);
+          final tags = _limitText(_joinList(item['tags']), 36);
+          final objects = _limitText(_joinList(item['objects']), 36);
           final summary = _summarizeEvidence(metaInfo);
 
           return {
-            'id': item['id']?.toString() ?? '',
-            'score': (item['similarity'] as num?)?.toDouble() ?? 0.0,
-            'object': objects,
-            'tags': tags,
-            'summary': summary,
-            'scene_id': item['scene_id']?.toString() ?? '',
+            'object': objects.isEmpty ? '未命名模型' : objects,
+            if (tags.isNotEmpty) 'tags': tags,
+            if (summary.isNotEmpty) 'summary': summary,
           };
         })
-        .take(5)
+        .take(4)
         .toList();
 
     return {
@@ -927,7 +930,7 @@ extension _RecallPageLocalAi on _RecallPageState {
 
   String _summarizeEvidence(Map<String, dynamic> metaInfo) {
     final parts = _collectStrings(metaInfo)
-        .take(4)
+        .take(2)
         .map((item) => item.trim())
         .where((item) => item.isNotEmpty)
         .toList();
@@ -935,7 +938,15 @@ extension _RecallPageLocalAi on _RecallPageState {
       return '';
     }
     final summary = parts.join('；');
-    return summary.length > 120 ? summary.substring(0, 120) : summary;
+    return _limitText(summary, 72);
+  }
+
+  String _limitText(String value, int maxLength) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxLength) {
+      return trimmed;
+    }
+    return trimmed.substring(0, maxLength).trimRight();
   }
 
   String _joinList(dynamic rawList) {
