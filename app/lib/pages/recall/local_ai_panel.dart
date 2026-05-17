@@ -572,8 +572,8 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                     Text(
                       localAnswerStatus.contains('问答完成') ||
                               localAnswerStatus.contains('回答完成')
-                          ? '查看思考过程'
-                          : 'Agent 正在思考...',
+                          ? '查看过程摘要'
+                          : 'Agent 正在整理...',
                       style: TextStyle(
                         color: textColor,
                         fontSize: 13,

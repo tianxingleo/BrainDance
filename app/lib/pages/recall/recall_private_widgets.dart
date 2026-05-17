@@ -291,11 +291,7 @@ class _AgentProcessPanelState extends State<_AgentProcessPanel> {
     final filtered = <AgentStep>[];
 
     for (final step in rawSteps) {
-      if (step.type == 'thought') {
-        continue;
-      }
-
-      if (step.type == 'status') {
+      if (step.type == 'status' || step.type == 'thought') {
         final title = step.compactTitle.trim();
         if (title.isEmpty) {
           continue;
@@ -910,10 +906,6 @@ class _AnimatedMarkdownAnswer extends StatefulWidget {
 }
 
 class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
-  Timer? _timer;
-  int _visibleLength = 0;
-  String _animatedText = '';
-
   String _prepareStreamingMarkdown(String text) {
     if (text.isEmpty) return text;
     final parts = text.split('```');
@@ -924,53 +916,8 @@ class _AnimatedMarkdownAnswerState extends State<_AnimatedMarkdownAnswer> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _animatedText = widget.data;
-    _visibleLength = widget.data.length;
-  }
-
-  @override
-  void didUpdateWidget(covariant _AnimatedMarkdownAnswer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.data == widget.data) {
-      return;
-    }
-    final next = widget.data;
-    if (!next.startsWith(_animatedText)) {
-      _timer?.cancel();
-      _animatedText = next;
-      _visibleLength = next.length;
-      return;
-    }
-    _animatedText = next;
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(milliseconds: 14), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_visibleLength >= _animatedText.length) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _visibleLength = (_visibleLength + 3).clamp(0, _animatedText.length);
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final visibleText = _prepareStreamingMarkdown(
-      _animatedText.substring(0, _visibleLength),
-    );
+    final visibleText = _prepareStreamingMarkdown(widget.data);
     return MarkdownBody(
       data: visibleText,
       builders: {'code': _CodeElementBuilder(widget.isDark, context)},
