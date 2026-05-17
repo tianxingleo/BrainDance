@@ -64,7 +64,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
       if (downloadedPath != null) {
         _localModelPathController.text = downloadedPath;
@@ -330,12 +330,20 @@ extension _RecallPageLocalAi on _RecallPageState {
     }
 
     final modelPath = await _getPrivateModelPathForUrl(modelUrl);
-    setState(() {
+    final partialPath = '$modelPath.part';
+    final targetFile = File(modelPath);
+    final partialFile = File(partialPath);
+    final partialBytes = await partialFile.exists()
+        ? await partialFile.length()
+        : 0;
+    _refreshState(() {
       _isModelDownloading = true;
-      _modelDownloadProgress = 0;
-      _modelDownloadedBytes = 0;
+      _modelDownloadProgress = null;
+      _modelDownloadedBytes = partialBytes;
       _modelDownloadTotalBytes = null;
-      _localAnswerStatus = '正在下载模型到应用私有目录...';
+      _localAnswerStatus = partialBytes > 0
+          ? '正在继续下载模型，已保留 ${(partialBytes / 1024 / 1024).toStringAsFixed(1)} MB...'
+          : '正在下载模型到应用私有目录...';
       _localModelPathController.text = modelPath;
     });
 
@@ -343,29 +351,32 @@ extension _RecallPageLocalAi on _RecallPageState {
       await _persistLocalModelUrl(modelUrl);
       await _persistLocalModelPath(modelPath);
 
-      await Dio().download(
-        modelUrl,
-        modelPath,
-        deleteOnError: true,
-        options: Options(
-          responseType: ResponseType.stream,
-          followRedirects: true,
-          receiveTimeout: const Duration(minutes: 30),
-          sendTimeout: const Duration(minutes: 2),
-        ),
-        onReceiveProgress: (received, total) {
+      if (await targetFile.exists()) {
+        final fileSize = await targetFile.length();
+        if (fileSize >= 100 * 1024 * 1024) {
           if (!mounted) return;
-          setState(() {
-            _modelDownloadedBytes = received;
-            _modelDownloadTotalBytes = total > 0 ? total : null;
-            _modelDownloadProgress = total > 0 ? received / total : null;
+          _refreshState(() {
+            _isModelDownloading = false;
+            _modelDownloadProgress = 1;
+            _modelDownloadedBytes = fileSize;
+            _modelDownloadTotalBytes = fileSize;
+            _selectedLocalModelUrl = modelUrl;
+            _downloadedLocalModelPathsByUrl[modelUrl] = modelPath;
+            _localAnswerStatus =
+                '模型已在应用私有目录：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
           });
-        },
-      );
+          showAppToast(context, textLocalize('local_model_download_success'));
+          return;
+        }
+      }
 
-      final fileSize = await File(modelPath).length();
+      final fileSize = await _downloadModelWithResume(
+        modelUrl: modelUrl,
+        targetFile: targetFile,
+        partialFile: partialFile,
+      );
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
@@ -379,14 +390,98 @@ extension _RecallPageLocalAi on _RecallPageState {
     } catch (e) {
       if (!mounted) return;
       debugPrint('[RecallLocalAI] model download error: $e');
-      setState(() {
+      final keptBytes = await partialFile.exists()
+          ? await partialFile.length()
+          : 0;
+      if (!mounted) return;
+      _refreshState(() {
         _isModelDownloading = false;
-        _modelDownloadProgress = null;
-        _modelDownloadedBytes = 0;
+        _modelDownloadedBytes = keptBytes;
         _modelDownloadTotalBytes = null;
-        _localAnswerStatus = textLocalize('local_model_download_fail');
+        _modelDownloadProgress = null;
+        _localAnswerStatus = keptBytes > 0
+            ? '${textLocalize('local_model_download_fail')}，已保留 ${(keptBytes / 1024 / 1024).toStringAsFixed(1)} MB，下次会继续下载'
+            : textLocalize('local_model_download_fail');
       });
       showAppToast(context, textLocalize('local_model_download_fail'));
+    }
+  }
+
+  Future<int> _downloadModelWithResume({
+    required String modelUrl,
+    required File targetFile,
+    required File partialFile,
+  }) async {
+    final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+    final uri = Uri.parse(encodedUrl);
+    var existingBytes = await partialFile.exists()
+        ? await partialFile.length()
+        : 0;
+
+    final client = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
+    IOSink? sink;
+    try {
+      final request = await client.getUrl(uri);
+      request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+      if (existingBytes > 0) {
+        request.headers.set('Range', 'bytes=$existingBytes-');
+      }
+
+      final response = await request.close();
+      if (response.statusCode == HttpStatus.ok && existingBytes > 0) {
+        // 服务端不支持 Range 时必须丢弃旧分片，否则会拼出损坏文件。
+        await partialFile.delete();
+        existingBytes = 0;
+      } else if (response.statusCode != HttpStatus.ok &&
+          response.statusCode != HttpStatus.partialContent) {
+        final errorBody = await response.transform(utf8.decoder).join();
+        throw Exception('HTTP ${response.statusCode}: $errorBody');
+      }
+
+      final totalBytes = response.contentLength > 0
+          ? response.contentLength + existingBytes
+          : -1;
+      var receivedBytes = existingBytes;
+
+      if (mounted) {
+        _refreshState(() {
+          _modelDownloadedBytes = receivedBytes;
+          _modelDownloadTotalBytes = totalBytes > 0 ? totalBytes : null;
+          _modelDownloadProgress = totalBytes > 0
+              ? receivedBytes / totalBytes
+              : null;
+        });
+      }
+
+      sink = partialFile.openWrite(
+        mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+      );
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        if (!mounted) {
+          continue;
+        }
+        _refreshState(() {
+          _modelDownloadedBytes = receivedBytes;
+          _modelDownloadTotalBytes = totalBytes > 0 ? totalBytes : null;
+          _modelDownloadProgress = totalBytes > 0
+              ? receivedBytes / totalBytes
+              : null;
+        });
+      }
+      await sink.close();
+      sink = null;
+
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+      await partialFile.rename(targetFile.path);
+      return targetFile.length();
+    } finally {
+      await sink?.close();
+      client.close(force: true);
     }
   }
 
