@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../configs/supabase_config.dart';
@@ -33,6 +34,10 @@ class LocalModelCatalogService {
   static const String _catalogObjectPath = 'catalog/model_catalog.json';
 
   const LocalModelCatalogService();
+
+  @visibleForTesting
+  List<LocalModelCatalogItem> parseCatalogForTesting(dynamic decoded) =>
+      _parseCatalog(decoded);
 
   Future<List<LocalModelCatalogItem>> fetchCatalog() async {
     final items = <LocalModelCatalogItem>[];
@@ -169,6 +174,27 @@ class LocalModelCatalogService {
       return null;
     }
 
+    final objectPath = _readString(raw, const [
+      'object_path',
+      'path',
+      'key',
+      'storage_path',
+    ]);
+    final prefix = _readString(raw, const ['prefix']);
+    final type = _readString(raw, const ['type']);
+    final isDirectoryRelease =
+        (prefix != null && prefix.isNotEmpty) ||
+        (objectPath != null && objectPath.endsWith('/'));
+    final isDownloadableModel =
+        (objectPath != null && objectPath.toLowerCase().endsWith('.gguf')) ||
+        type?.toLowerCase() == 'gguf';
+
+    // 端侧 llamadart 只能直接加载 GGUF 文件。catalog 里可能同时记录
+    // HF merged 或 LoRA release 目录，这类目录不应出现在手机下载列表里。
+    if (isDirectoryRelease || !isDownloadableModel) {
+      return null;
+    }
+
     final name =
         _readString(raw, const [
           'name',
@@ -176,17 +202,12 @@ class LocalModelCatalogService {
           'display_name',
           'model_name',
         ]) ??
-        _readString(raw, const ['slug', 'id']);
+        _readString(raw, const ['slug', 'id']) ??
+        _buildDisplayNameFromPath(objectPath ?? '');
     final downloadUrl =
         _readString(raw, const ['download_url', 'url', 'public_url', 'href']) ??
         _buildPublicUrl(
-          _readString(raw, const [
-                'object_path',
-                'path',
-                'key',
-                'storage_path',
-              ]) ??
-              '',
+          objectPath ?? '',
           bucket:
               _readString(raw, const ['bucket', 'bucket_id']) ??
               SupabaseConfig.localModelBucket,
@@ -202,7 +223,8 @@ class LocalModelCatalogService {
       return null;
     }
 
-    final id = _readString(raw, const ['id', 'slug']) ?? downloadUrl;
+    final id =
+        _readString(raw, const ['id', 'slug']) ?? objectPath ?? downloadUrl;
 
     return LocalModelCatalogItem(
       id: id,
@@ -298,6 +320,18 @@ class LocalModelCatalogService {
       return '';
     }
     return segments.last;
+  }
+
+  String? _buildDisplayNameFromPath(String objectPath) {
+    final fileName = _extractFileName(objectPath);
+    if (fileName.isEmpty) {
+      return null;
+    }
+    return fileName
+        .replaceAll(RegExp(r'\.gguf$', caseSensitive: false), '')
+        .replaceAll('-', ' ')
+        .replaceAll('_', ' ')
+        .trim();
   }
 
   String? _inferBucketFromUrl(String url) {
