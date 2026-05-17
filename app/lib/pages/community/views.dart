@@ -14,20 +14,18 @@ import 'models.dart';
 
 class CommunityExploreView extends StatelessWidget {
   final List<CommunityPost> posts;
-  final int selectedIndex;
-  final ValueChanged<int> onSelect;
-  final ValueChanged<CommunityPost> onOpenViewer;
-  final ValueChanged<CommunityPost> onOpenLocationHub;
-  final CommunityPost? selectedPost;
+  final String? selectedPlaceName;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onClearFilter;
+  final ValueChanged<CommunityPost> onTapPost;
 
   const CommunityExploreView({
     super.key,
     required this.posts,
-    required this.selectedIndex,
+    required this.selectedPlaceName,
     required this.onSelect,
-    required this.onOpenViewer,
-    required this.onOpenLocationHub,
-    required this.selectedPost,
+    required this.onClearFilter,
+    required this.onTapPost,
   });
 
   @override
@@ -93,6 +91,15 @@ class CommunityExploreView extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (selectedPlaceName != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ActionChip(
+                          label: Text(textLocalize('community_show_all')),
+                          avatar: const Icon(Icons.clear_rounded, size: 16),
+                          onPressed: onClearFilter,
+                        ),
+                      ),
                     BDStatusPill(
                       label: '${posts.length} PINS',
                       icon: Icons.public_rounded,
@@ -135,9 +142,8 @@ class CommunityExploreView extends StatelessWidget {
                             ),
                           ),
                           ...posts.asMap().entries.map((entry) {
-                            final index = entry.key;
                             final post = entry.value;
-                            final isSelected = index == selectedIndex;
+                            final isSelected = post.placeName == selectedPlaceName;
                             final offset = _projectPoint(
                               post.latitude,
                               post.longitude,
@@ -148,7 +154,7 @@ class CommunityExploreView extends StatelessWidget {
                               left: offset.dx - 16,
                               top: offset.dy - 16,
                               child: GestureDetector(
-                                onTap: () => onSelect(index),
+                                onTap: () => onSelect(post.placeName),
                                 child: AnimatedContainer(
                                   duration: BDMotion.durationNormal,
                                   curve: BDMotion.curveFluid,
@@ -184,98 +190,72 @@ class CommunityExploreView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          if (selectedPost != null)
-            _SelectedLocationCard(
-              post: selectedPost!,
-              relatedCount: posts
-                  .where((p) => p.placeName == selectedPost!.placeName)
-                  .length,
-              onOpenViewer: () => onOpenViewer(selectedPost!),
-              onOpenLocationHub: () => onOpenLocationHub(selectedPost!),
-            ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 154,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: posts.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
+          Builder(builder: (context) {
+            final displayPosts = selectedPlaceName == null
+                ? posts
+                : posts.where((p) => p.placeName == selectedPlaceName).toList();
+            return ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: displayPosts.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
-                final post = posts[index];
-                final isActive = index == selectedIndex;
-                return SizedBox(
-                  width: 244,
-                  child: InkWell(
-                    borderRadius: BDDesign.radiusLarge,
-                    onTap: () => onSelect(index),
-                    child: AnimatedContainer(
-                      duration: BDMotion.durationNormal,
-                      curve: BDMotion.curveFluid,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? (isDark
-                                ? AppTheme.darkSurfaceElevated
-                                : const Color(0xFFF7FAFD))
-                            : (isDark
-                                ? AppTheme.darkSurface.withValues(alpha: 0.94)
-                                : Colors.white.withValues(alpha: 0.88)),
-                        borderRadius: BDDesign.radiusLarge,
-                        border: Border.all(
-                          color: isActive
-                              ? const Color(0xFF2E7CF6)
-                              : (isDark
-                                  ? Colors.white.withValues(alpha: 0.06)
-                                  : BDDesign.colorMutedBlue
-                                      .withValues(alpha: 0.08)),
+                final post = displayPosts[index];
+                final isActive = post.placeName == selectedPlaceName;
+              return InkWell(
+                borderRadius: BDDesign.radiusLarge,
+                onTap: () => onTapPost(post),
+                child: BDPanelCard(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      _CommunityThumbnail(
+                        imageUrl: post.coverUrl,
+                        height: 118,
+                        width: 104,
+                        icon: Icons.terrain_rounded,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(post.placeName,
+                                style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 4),
+                            Text(
+                                '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
+                                style: TextStyle(
+                                    color: hintColor, fontSize: 12.5)),
+                            const SizedBox(height: 8),
+                            Text(post.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: textColor,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2)),
+                            const SizedBox(height: 8),
+                            BDStatusPill(
+                              label: post.modelName,
+                              icon: Icons.view_in_ar_rounded,
+                              color: isActive
+                                  ? const Color(0xFF2E7CF6)
+                                  : BDDesign.colorMutedBlue,
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          _CommunityThumbnail(
-                            imageUrl: post.coverUrl,
-                            height: 130,
-                            width: 88,
-                            icon: Icons.explore_rounded,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(post.placeName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: textColor,
-                                        fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 6),
-                                Text(post.title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: textColor
-                                            .withValues(alpha: 0.86),
-                                        height: 1.25)),
-                                const Spacer(),
-                                BDStatusPill(
-                                  label: post.modelName,
-                                  icon: Icons.view_in_ar_rounded,
-                                  color: isActive
-                                      ? const Color(0xFF2E7CF6)
-                                      : BDDesign.colorMutedBlue,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ),
-                );
-              },
-            ),
-          ),
+                ),
+              );
+            },
+          );
+          }),
         ],
       ),
     );
@@ -894,101 +874,6 @@ class CommunityMetricCard extends StatelessWidget {
 }
 
 // ------- Private Helpers -------
-
-class _SelectedLocationCard extends StatelessWidget {
-  final CommunityPost post;
-  final int relatedCount;
-  final VoidCallback onOpenViewer;
-  final VoidCallback onOpenLocationHub;
-
-  const _SelectedLocationCard({
-    required this.post,
-    required this.relatedCount,
-    required this.onOpenViewer,
-    required this.onOpenLocationHub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-
-    return BDPanelCard(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              _CommunityThumbnail(
-                imageUrl: post.coverUrl,
-                height: 118,
-                width: 104,
-                icon: Icons.terrain_rounded,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(post.placeName,
-                        style: TextStyle(
-                            color: textColor,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    Text(
-                        '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
-                        style: TextStyle(
-                            color: hintColor, fontSize: 12.5)),
-                    const SizedBox(height: 10),
-                    Text(post.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: textColor,
-                            fontWeight: FontWeight.w700,
-                            height: 1.2)),
-                    const SizedBox(height: 8),
-                    Text(
-                        '这一地点已聚合 $relatedCount 条记忆，优先展示当前最热的 3D 模型。',
-                        style: TextStyle(
-                            color: hintColor, height: 1.35)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: onOpenViewer,
-                  icon: const Icon(Icons.travel_explore_rounded),
-                  label: Text(
-                      textLocalize('community_open_model')),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onOpenLocationHub,
-                  icon: const Icon(Icons.map_rounded),
-                  label: Text(
-                      textLocalize('community_view_location')),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _CommunityThumbnail extends StatelessWidget {
   final String? imageUrl;

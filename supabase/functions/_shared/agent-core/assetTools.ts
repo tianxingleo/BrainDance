@@ -32,6 +32,8 @@ export type ListedModelAsset = {
   description: string | null;
   tags: string[];
   created_at: string;
+  preview_img_path: string | null;
+  ply_path: string | null;
 };
 
 export type ModelAssetBundle = {
@@ -194,6 +196,8 @@ const listedModelAssetSchema = z.object({
   description: z.string().nullable(),
   tags: z.array(z.string()),
   created_at: z.string(),
+  preview_img_path: z.string().nullable(),
+  ply_path: z.string().nullable(),
 });
 
 const modelAssetBundleSchema = z.object({
@@ -676,6 +680,8 @@ function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
     description: row.description,
     tags: safeArray(row.tags),
     created_at: row.created_at,
+    preview_img_path: row.preview_img_path ?? null,
+    ply_path: row.ply_path ?? null,
   }));
 }
 

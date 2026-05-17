@@ -1,4 +1,5 @@
 import { SpatialSearchAgentOptions } from "../spatialAgent.ts";
+import { type LongTermMemory } from "../longTermMemory.ts";
 
 export function buildAgentContextBlock(
   options: SpatialSearchAgentOptions,
@@ -121,6 +122,38 @@ export function buildAgentContextBlock(
       }
       if (prefs.timeRange) {
         parts.push(`  - 偏好时间范围: ${prefs.timeRange}`);
+      }
+    }
+  }
+
+  if (options.longTermMemory) {
+    const ltm = options.longTermMemory;
+    const hasPrefs = ltm.preferredRegions.length > 0 ||
+      ltm.preferredAssetTypes.length > 0 ||
+      ltm.preferredObjects.length > 0 ||
+      ltm.preferredTimeRanges.length > 0;
+    if (hasPrefs || ltm.recentSearches.length > 0) {
+      parts.push("\n=== 长期记忆：用户历史偏好 ===");
+      parts.push(
+        "以下是该用户跨会话积累的搜索偏好。当搜索结果有多个候选时，可优先展示符合用户历史偏好的结果，并在回答中说明「根据您的历史偏好，我优先搜索了...」：",
+      );
+      if (ltm.preferredRegions.length > 0) {
+        parts.push(`  - 常搜区域: ${ltm.preferredRegions.join("、")}`);
+      }
+      if (ltm.preferredAssetTypes.length > 0) {
+        parts.push(`  - 常搜资产类型: ${ltm.preferredAssetTypes.join("、")}`);
+      }
+      if (ltm.preferredObjects.length > 0) {
+        parts.push(`  - 常搜物体: ${ltm.preferredObjects.join("、")}`);
+      }
+      if (ltm.preferredTimeRanges.length > 0) {
+        parts.push(`  - 常用时间范围: ${ltm.preferredTimeRanges.join("、")}`);
+      }
+      if (ltm.recentSearches.length > 0) {
+        parts.push(`  - 最近搜索 (共 ${ltm.searchCount} 次):`);
+        for (const s of ltm.recentSearches.slice(-5)) {
+          parts.push(`    · "${s.query}" → ${s.topResultSummary}`);
+        }
       }
     }
   }

@@ -84,8 +84,10 @@ serve(async (req: Request) => {
       currentMode: parsed.data.currentMode,
       candidateSceneIds: parsed.data.candidateSceneIds,
       sessionId: parsed.data.sessionId,
+      userId: parsed.data.userId,
       conversationSummary: parsed.data.conversationSummary,
       sessionState: parsed.data.sessionState,
+      shortTermMemory: parsed.data.shortTermMemory,
     };
 
     if (isStreamingRequest(req)) {

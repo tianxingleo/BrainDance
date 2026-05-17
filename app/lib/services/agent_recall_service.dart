@@ -180,6 +180,41 @@ class AgentRecallResponse {
     final evidenceMap = rawEvidence is Map
         ? Map<String, dynamic>.from(rawEvidence)
         : null;
+
+    final assetCtx = json['asset_context'] is Map
+        ? Map<String, dynamic>.from(json['asset_context'] as Map)
+        : null;
+
+    // Build lookup from asset_context bundle/list for enriching candidates
+    final Map<String, Map<String, dynamic>> assetLookup = {};
+    if (assetCtx != null) {
+      for (final source in ['bundle', 'list']) {
+        final items = assetCtx[source] as List?;
+        if (items == null) continue;
+        for (final item in items) {
+          if (item is Map) {
+            final id = item['id']?.toString() ?? '';
+            if (id.isNotEmpty) {
+              assetLookup[id] = Map<String, dynamic>.from(item);
+            }
+          }
+        }
+      }
+    }
+
+    final candidates = rawCandidates.map((item) {
+      final map = Map<String, dynamic>.from(item as Map);
+      final modelId = map['model_id']?.toString() ?? '';
+      final enrichment = assetLookup[modelId];
+      if (enrichment != null) {
+        map['display_name'] ??= enrichment['display_name'];
+        map['tags'] ??= enrichment['tags'];
+        map['preview_img_path'] ??= enrichment['preview_img_path'];
+        map['created_at'] ??= enrichment['created_at'];
+      }
+      return AgentCandidate.fromJson(map);
+    }).toList();
+
     return AgentRecallResponse(
       mode: json['mode']?.toString() ?? 'spatial_search',
       answer: json['answer']?.toString() ?? '',
@@ -195,12 +230,7 @@ class AgentRecallResponse {
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      candidates: rawCandidates
-          .map(
-            (item) =>
-                AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
-          )
-          .toList(),
+      candidates: candidates,
       toolTrace: ((json['tool_trace'] as List?) ?? [])
           .map(
             (item) =>
@@ -211,9 +241,7 @@ class AgentRecallResponse {
           ? Map<String, dynamic>.from(json['response_resolution'] as Map)
           : null,
       selectedCandidateReason: json['selected_candidate_reason']?.toString(),
-      assetContext: json['asset_context'] is Map
-          ? Map<String, dynamic>.from(json['asset_context'] as Map)
-          : null,
+      assetContext: assetCtx,
       compareContext: json['compare_context'] is Map
           ? Map<String, dynamic>.from(json['compare_context'] as Map)
           : null,
@@ -399,6 +427,10 @@ class AgentCandidate {
   final double score;
   final String description;
   final String? poseImageId;
+  final String? displayName;
+  final List<String> tags;
+  final String? previewImgPath;
+  final String? createdAt;
 
   AgentCandidate({
     required this.sceneId,
@@ -406,6 +438,10 @@ class AgentCandidate {
     required this.score,
     required this.description,
     this.poseImageId,
+    this.displayName,
+    this.tags = const [],
+    this.previewImgPath,
+    this.createdAt,
   });
 
   factory AgentCandidate.fromJson(Map<String, dynamic> json) {
@@ -415,6 +451,13 @@ class AgentCandidate {
       score: (json['score'] as num?)?.toDouble() ?? 0.0,
       description: json['description']?.toString() ?? '',
       poseImageId: json['pose_image_id']?.toString(),
+      displayName: json['display_name']?.toString(),
+      tags: (json['tags'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      previewImgPath: json['preview_img_path']?.toString(),
+      createdAt: json['created_at']?.toString(),
     );
   }
 }
@@ -615,6 +658,8 @@ class AgentRecallService {
           if (currentMode != null) 'currentMode': currentMode,
           if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
           if (sessionId != null) 'sessionId': sessionId,
+          if (_client.auth.currentUser?.id != null)
+            'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
           if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
@@ -715,6 +760,8 @@ class AgentRecallService {
           if (currentMode != null) 'currentMode': currentMode,
           if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
           if (sessionId != null) 'sessionId': sessionId,
+          if (_client.auth.currentUser?.id != null)
+            'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
           if (shortTermMemory != null) 'shortTermMemory': shortTermMemory,
