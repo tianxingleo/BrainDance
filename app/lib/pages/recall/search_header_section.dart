@@ -110,6 +110,11 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
     super.dispose();
   }
 
+  void _submitCurrentSearch() {
+    FocusScope.of(context).unfocus();
+    widget.onSubmit(widget.searchController.text);
+  }
+
   @override
   Widget build(BuildContext context) {
     final panelBorderColor = _isSearchFocused
@@ -170,6 +175,27 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
                           },
                           onTap: widget.onTapSearchMode,
                         ),
+                        IconButton(
+                          onPressed: _submitCurrentSearch,
+                          tooltip: '搜索',
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 36,
+                            height: 36,
+                          ),
+                          padding: EdgeInsets.zero,
+                          splashColor: Colors.transparent,
+                          highlightColor: Colors.transparent,
+                          hoverColor: Colors.transparent,
+                          focusColor: Colors.transparent,
+                          icon: Icon(
+                            Icons.search_rounded,
+                            size: 18,
+                            color: widget.isDark
+                                ? Colors.white.withValues(alpha: 0.68)
+                                : BDDesign.colorMutedBlue,
+                          ),
+                        ),
                         if (hasText)
                           IconButton(
                             onPressed: widget.onClear,
@@ -219,7 +245,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
                 ),
               ),
               onSubmitted: (value) {
-                widget.onSubmit(value);
+                _submitCurrentSearch();
               },
               onChanged: widget.onChanged,
             ),
