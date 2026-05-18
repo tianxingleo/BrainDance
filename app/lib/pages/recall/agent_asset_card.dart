@@ -9,8 +9,10 @@ class AgentAssetCard extends StatelessWidget {
   final List<String> tags;
   final String? previewImgPath;
   final double? score;
+  final String scoreLabel;
   final bool isDark;
   final VoidCallback? onOpen;
+  final String actionLabel;
 
   const AgentAssetCard({
     super.key,
@@ -19,8 +21,10 @@ class AgentAssetCard extends StatelessWidget {
     this.tags = const [],
     this.previewImgPath,
     this.score,
+    this.scoreLabel = '置信度',
     required this.isDark,
     this.onOpen,
+    this.actionLabel = '打开场景',
   });
 
   String? get _thumbnailUrl {
@@ -54,8 +58,10 @@ class AgentAssetCard extends StatelessWidget {
           description: description,
           tags: tags,
           score: score,
+          scoreLabel: scoreLabel,
           isDark: isDark,
           onOpen: onOpen,
+          actionLabel: actionLabel,
         );
       },
       transitionBuilder: (ctx, anim, secondAnim, child) {
@@ -142,7 +148,7 @@ class AgentAssetCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            '${(score! * 100).toStringAsFixed(0)}%',
+                            '$scoreLabel ${(score! * 100).toStringAsFixed(0)}%',
                             style: TextStyle(
                               color: BDDesign.colorMutedBlue,
                               fontSize: 11,
@@ -237,8 +243,10 @@ class _AssetDetailDialog extends StatelessWidget {
   final String description;
   final List<String> tags;
   final double? score;
+  final String scoreLabel;
   final bool isDark;
   final VoidCallback? onOpen;
+  final String actionLabel;
 
   const _AssetDetailDialog({
     this.url,
@@ -246,8 +254,10 @@ class _AssetDetailDialog extends StatelessWidget {
     required this.description,
     required this.tags,
     this.score,
+    this.scoreLabel = '置信度',
     required this.isDark,
     this.onOpen,
+    this.actionLabel = '打开场景',
   });
 
   @override
@@ -346,7 +356,7 @@ class _AssetDetailDialog extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '${(score! * 100).toStringAsFixed(0)}%',
+                                  '$scoreLabel ${(score! * 100).toStringAsFixed(0)}%',
                                   style: TextStyle(
                                     color: BDDesign.colorMutedBlue,
                                     fontSize: 12,
@@ -417,8 +427,8 @@ class _AssetDetailDialog extends StatelessWidget {
                               },
                               icon: const Icon(Icons.open_in_new_rounded,
                                   size: 16),
-                              label: const Text('打开场景',
-                                  style: TextStyle(fontSize: 14)),
+                              label: Text(actionLabel,
+                                  style: const TextStyle(fontSize: 14)),
                             ),
                           ),
                         ],

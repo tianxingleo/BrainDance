@@ -150,6 +150,11 @@ const candidateSchema = z.object({
   score: z.number().min(0).max(1),
   description: z.string(),
   pose_image_id: z.string().nullable(),
+  display_name: z.string().nullable().optional(),
+  ply_path: z.string().nullable().optional(),
+  preview_img_path: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  created_at: z.string().optional(),
 });
 
 const toolTraceEntrySchema = z.object({
@@ -524,8 +529,11 @@ const assetContextSchema = z.object({
 const poseSearchRowSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
+  display_name: z.string().nullable().optional(),
   description: z.string().nullable(),
+  tags: z.array(z.string()).nullable().optional(),
   ply_path: z.string().nullable(),
+  preview_img_path: z.string().nullable().optional(),
   created_at: z.string(),
   user_id: z.string().nullable(),
   similarity: z.number(),
@@ -541,6 +549,7 @@ const sceneSearchRowSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   user_id: z.string().nullable(),
+  display_name: z.string().nullable().optional(),
   description: z.string().nullable(),
   objects: z.array(z.string()).nullable(),
   tags: z.array(z.string()).nullable(),
@@ -599,6 +608,7 @@ type SceneRow = {
   id: string;
   scene_id: string;
   user_id: string | null;
+  display_name?: string | null;
   description: string | null;
   objects: string[] | null;
   tags: string[] | null;
@@ -618,8 +628,11 @@ type PoseFrame = {
 type PoseSearchRow = {
   id: string;
   scene_id: string;
+  display_name?: string | null;
   description: string | null;
+  tags?: string[] | null;
   ply_path: string | null;
+  preview_img_path?: string | null;
   created_at: string;
   user_id: string | null;
   similarity: number;
@@ -629,6 +642,7 @@ type PoseSearchRow = {
 type SceneCandidate = {
   modelId: string;
   sceneId: string;
+  displayName?: string | null;
   userId: string | null;
   description: string;
   objects: string[];
@@ -1900,21 +1914,59 @@ async function buildPoseTool(
         }
       }
 
+      const assetMap = new Map<string, SceneRow>();
+      if (modelIds.length > 0) {
+        const { data: assetRows, error: assetError } = await supabase
+          .from("model_assets")
+          .select(
+            "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, display_name",
+          )
+          .in("id", modelIds);
+
+        if (assetError) {
+          throw new Error(`pose_semantic_search 资产补全失败: ${assetError.message}`);
+        }
+
+        for (const assetRow of assetRows ?? []) {
+          if (typeof assetRow.id === "string") {
+            assetMap.set(assetRow.id, assetRow as SceneRow);
+          }
+        }
+      }
+
       for (const row of rows) {
         const modelId = String(row.id ?? "");
+        const asset = assetMap.get(modelId);
         const rawFrames = Array.isArray(row.matched_frames)
           ? row.matched_frames as Array<Record<string, unknown>>
           : [];
 
         enriched.push({
           id: modelId,
-          scene_id: String(row.scene_id ?? ""),
-          description: typeof row.description === "string"
+          scene_id: asset?.scene_id ?? String(row.scene_id ?? ""),
+          display_name: typeof asset?.display_name === "string"
+            ? asset.display_name
+            : null,
+          description: typeof asset?.description === "string"
+            ? asset.description
+            : typeof row.description === "string"
             ? row.description
             : null,
-          ply_path: typeof row.ply_path === "string" ? row.ply_path : null,
-          created_at: String(row.created_at ?? ""),
-          user_id: typeof row.user_id === "string" ? row.user_id : null,
+          tags: safeArray(asset?.tags),
+          ply_path: typeof asset?.ply_path === "string"
+            ? asset.ply_path
+            : typeof row.ply_path === "string"
+            ? row.ply_path
+            : null,
+          preview_img_path: typeof asset?.preview_img_path === "string"
+            ? asset.preview_img_path
+            : null,
+          created_at: asset?.created_at ?? String(row.created_at ?? ""),
+          user_id: typeof asset?.user_id === "string"
+            ? asset.user_id
+            : typeof row.user_id === "string"
+            ? row.user_id
+            : null,
           similarity: Number(row.similarity ?? 0),
           matched_frames: rawFrames.map((frame) => ({
             image_name: String(frame.image_name ?? ""),
@@ -2046,6 +2098,9 @@ function mergeSceneCandidate(
   if (!existing.description && partial.description) {
     existing.description = partial.description;
   }
+  if (!existing.displayName && partial.displayName) {
+    existing.displayName = partial.displayName;
+  }
   if (!existing.plyPath && partial.plyPath) existing.plyPath = partial.plyPath;
   if (!existing.previewImgPath && partial.previewImgPath) {
     existing.previewImgPath = partial.previewImgPath;
@@ -2081,14 +2136,18 @@ function collectSceneCandidates(
       mergeSceneCandidate(candidates, {
         modelId: row.id,
         sceneId: row.scene_id,
+        displayName: row.display_name ?? null,
         userId: row.user_id,
         description: row.description ?? "",
         objects: [],
-        tags: sortedFrames.map((frame) => frame.tag ?? "").filter((value) =>
-          value.length > 0
-        ),
+        tags: [
+          ...safeArray(row.tags),
+          ...sortedFrames.map((frame) => frame.tag ?? "").filter((value) =>
+            value.length > 0
+          ),
+        ],
         plyPath: row.ply_path,
-        previewImgPath: null,
+        previewImgPath: row.preview_img_path ?? null,
         createdAt: row.created_at,
         metaInfo: {},
         sourceScores: {
@@ -2108,6 +2167,7 @@ function collectSceneCandidates(
     mergeSceneCandidate(candidates, {
       modelId: row.id,
       sceneId: row.scene_id,
+      displayName: row.display_name ?? null,
       userId: row.user_id,
       description: row.description ?? "",
       objects: safeArray(row.objects),
@@ -2126,6 +2186,21 @@ function collectSceneCandidates(
   }
 
   return rows.length;
+}
+
+function serializeSceneCandidate(c: SceneCandidate & { score: number }) {
+  return {
+    scene_id: c.sceneId,
+    model_id: c.modelId,
+    score: c.score,
+    display_name: c.displayName ?? null,
+    description: c.description,
+    pose_image_id: c.bestPose?.image_name ?? null,
+    ply_path: c.plyPath ?? null,
+    preview_img_path: c.previewImgPath ?? null,
+    tags: c.tags,
+    created_at: c.createdAt,
+  };
 }
 
 export function scoreSceneCandidate(
@@ -4111,6 +4186,7 @@ export async function runSpatialSearchAgent(
   const finalScene = rankedCandidates.find((c) => c.sceneId === selection.selectedSceneId) ?? bestCandidate;
   const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId ? finalScene.bestPose : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({ scene: finalScene ?? null, selectedPose: finalPose, supabase, bucket: env.storageBucket });
+  const topCandidates = deduplicatedCandidates.slice(0, 5).map(serializeSceneCandidate);
 
   return finalizeResponseWithLongTermMemory(supabase, {
     success: true,
@@ -4126,8 +4202,8 @@ export async function runSpatialSearchAgent(
       imageId: finalPose?.image_name ?? null,
     },
     evidence: finalScene ? { sceneId: finalScene.sceneId, modelId: finalScene.modelId, similarity: selection.confidence, matchedFrames: finalPose ? [{ imageName: finalPose.image_name, similarity: finalPose.similarity, transformMatrix: finalPose.transform_matrix, tag: finalPose.tag }] : [], description: finalScene.description, tags: finalScene.tags } : null,
-    candidates: deduplicatedCandidates.slice(0, 5).map((c) => ({ scene_id: c.sceneId, model_id: c.modelId, score: c.score, description: c.description, pose_image_id: c.bestPose?.image_name ?? null })),
-    top_candidates: deduplicatedCandidates.slice(0, 5).map((c) => ({ scene_id: c.sceneId, model_id: c.modelId, score: c.score, description: c.description, pose_image_id: c.bestPose?.image_name ?? null })),
+    candidates: topCandidates,
+    top_candidates: topCandidates,
     selected_candidate_reason: selection.selectionReason,
     tool_trace: trace,
     asset_context: serializeAssetContext(assetState),

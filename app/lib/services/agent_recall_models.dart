@@ -172,6 +172,57 @@ class AgentRecallResponse {
     final evidenceMap = rawEvidence is Map
         ? Map<String, dynamic>.from(rawEvidence)
         : null;
+    var candidates = rawCandidates
+        .map(
+          (item) =>
+              AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+
+    if (candidates.isEmpty) {
+      final evidenceSceneId = evidenceMap?['sceneId']?.toString() ?? '';
+      final evidenceModelId = evidenceMap?['modelId']?.toString() ?? '';
+      final evidenceSimilarity =
+          (evidenceMap?['similarity'] as num?)?.toDouble() ?? 0.0;
+      final evidenceDesc = evidenceMap?['description']?.toString() ?? '';
+      final evidenceTags =
+          (evidenceMap?['tags'] as List?)?.map((e) => e.toString()).toList() ??
+              const <String>[];
+
+      final actions = ((json['actions'] as List?) ?? [])
+          .map((a) => a is Map ? Map<String, dynamic>.from(a) : null)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      final openScene = actions.firstWhere(
+        (a) => a['type'] == 'open_scene',
+        orElse: () => const <String, dynamic>{},
+      );
+      final payload = openScene['payload'] is Map
+          ? Map<String, dynamic>.from(openScene['payload'] as Map)
+          : const <String, dynamic>{};
+
+      final synthSceneId = evidenceSceneId.isNotEmpty
+          ? evidenceSceneId
+          : payload['sceneId']?.toString() ?? '';
+      final synthModelId = evidenceModelId.isNotEmpty
+          ? evidenceModelId
+          : payload['modelId']?.toString() ?? '';
+      final synthPly = payload['ply']?.toString();
+
+      if (synthSceneId.isNotEmpty && evidenceSimilarity > 0) {
+        candidates = [
+          AgentCandidate(
+            sceneId: synthSceneId,
+            modelId: synthModelId,
+            score: evidenceSimilarity,
+            description: evidenceDesc,
+            tags: evidenceTags,
+            plyPath: synthPly,
+          ),
+        ];
+      }
+    }
+
     return AgentRecallResponse(
       mode: json['mode']?.toString() ?? 'spatial_search',
       answer: json['answer']?.toString() ?? '',
@@ -187,12 +238,7 @@ class AgentRecallResponse {
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      candidates: rawCandidates
-          .map(
-            (item) =>
-                AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
-          )
-          .toList(),
+      candidates: candidates,
       toolTrace: ((json['tool_trace'] as List?) ?? [])
           .map(
             (item) =>
@@ -388,6 +434,11 @@ class AgentCandidate {
   final double score;
   final String description;
   final String? poseImageId;
+  final String? displayName;
+  final List<String> tags;
+  final String? previewImgPath;
+  final String? createdAt;
+  final String? plyPath;
 
   AgentCandidate({
     required this.sceneId,
@@ -395,6 +446,11 @@ class AgentCandidate {
     required this.score,
     required this.description,
     this.poseImageId,
+    this.displayName,
+    this.tags = const [],
+    this.previewImgPath,
+    this.createdAt,
+    this.plyPath,
   });
 
   factory AgentCandidate.fromJson(Map<String, dynamic> json) {
@@ -404,6 +460,14 @@ class AgentCandidate {
       score: (json['score'] as num?)?.toDouble() ?? 0.0,
       description: json['description']?.toString() ?? '',
       poseImageId: json['pose_image_id']?.toString(),
+      displayName: json['display_name']?.toString(),
+      tags: (json['tags'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      previewImgPath: json['preview_img_path']?.toString(),
+      createdAt: json['created_at']?.toString(),
+      plyPath: json['ply_path']?.toString(),
     );
   }
 }

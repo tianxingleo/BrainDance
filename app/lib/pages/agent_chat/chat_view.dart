@@ -333,17 +333,30 @@ extension _AgentChatView on _AgentChatPageState {
               ),
             ),
         ] else if (topCandidates.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          for (final candidate in topCandidates)
+          const SizedBox(height: 12),
+          for (int i = 0; i < topCandidates.length; i++)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
-                style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
+              padding: const EdgeInsets.only(bottom: 12),
+              child: AgentAssetCard(
+                displayName: topCandidates[i].displayName ??
+                    (topCandidates[i].description.isNotEmpty
+                        ? topCandidates[i].description
+                        : topCandidates[i].sceneId),
+                description: topCandidates[i].description.isNotEmpty
+                    ? topCandidates[i].description
+                    : '场景 ${topCandidates[i].sceneId}',
+                tags: topCandidates[i].tags,
+                previewImgPath: topCandidates[i].previewImgPath,
+                score: topCandidates[i].score,
+                isDark: isDark,
+                actionLabel: i == 0 ? '飞到视角' : '打开场景',
+                onOpen: _buildCandidateOnOpen(topCandidates[i], i, result),
               ),
             ),
         ],
-        if (hasActions && !(isAssetMode && assetModels.isNotEmpty)) ...[
+        if (hasActions &&
+            !(isAssetMode && assetModels.isNotEmpty) &&
+            topCandidates.isEmpty) ...[
           const SizedBox(height: 12),
           _buildOpenSceneButton(result!, isDark),
         ],
@@ -670,6 +683,33 @@ extension _AgentChatView on _AgentChatPageState {
           initialModelUrl: modelUrl,
           posesUrl: posesUrl,
           sceneId: sceneId,
+        ),
+      );
+    };
+  }
+
+  VoidCallback? _buildCandidateOnOpen(
+    AgentCandidate candidate,
+    int index,
+    AgentRecallResponse? result,
+  ) {
+    if (index == 0 && result != null) {
+      return () => _openResult(result);
+    }
+    final plyPath = candidate.plyPath ?? '';
+    if (plyPath.isEmpty || candidate.sceneId.isEmpty) return null;
+    return () {
+      final modelUrl =
+          plyPath.startsWith('http://') || plyPath.startsWith('https://')
+              ? plyPath
+              : toPublicUrl(plyPath);
+      final posesUrl = toPosesUrl(plyPath);
+      unawaited(
+        openViewer(
+          context,
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: candidate.sceneId,
         ),
       );
     };

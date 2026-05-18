@@ -47,6 +47,7 @@
 - 2026-03-27 已新增批量联调脚本与高发散测试集：`run_agent_recall_batch_suite.py` 可以批量调用 `agent-recall`，并基于 `agent_recall_batch_suite.json` 覆盖闲聊、检索、对比、写操作、多轮续聊和 `SSE / NDJSON` 协议兼容，输出逐 case 调试结果与汇总报告。
 - 2026-03-27 已补充 Flutter 最终回答去重兼容：Recall 页消费 `agent-recall` 的 `message.delta` 时，会同时兼容“真正增量片段”和“累计全文片段”两种上游流式正文格式，避免在“你是谁”这类 direct answer 场景里把同一段回答重复拼成两到三遍。
 - 2026-04-28 已补充 Flutter Recall 页静态兼容修复：为拆分到 `part` 扩展中的状态刷新统一增加 `_refreshState()` 包装，避免新版 Dart 分析器把扩展内直接调用 `setState` 识别为 `invalid_use_of_protected_member`；同时把 `integration_test` 骨架中的 `skip` 参数改为 `bool`，对齐当前 `flutter_test` 签名。
+- 2026-05-18 已补充 `pose_semantic_search` 前端呈现优化：共享 Core 会为空间候选补齐 `display_name / preview_img_path / ply_path / tags / created_at`，Flutter Recall 与独立 Agent Chat 页会把空间候选渲染为与 `read_model_assets` 一致的资产卡片，并在卡片上明确显示“置信度”。
 
 ## 2026-03-26 修复记录
 
