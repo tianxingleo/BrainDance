@@ -335,6 +335,26 @@ extension _RecallPageSearch on _RecallPageState {
     );
   }
 
+  VoidCallback? _buildAssetCardOnOpen(Map<String, dynamic> model) {
+    final plyPath = model['ply_path']?.toString() ?? '';
+    final sceneId = model['scene_id']?.toString() ?? '';
+    if (plyPath.isEmpty || sceneId.isEmpty) return null;
+    return () {
+      final modelUrl = plyPath.startsWith('http://') || plyPath.startsWith('https://')
+          ? plyPath
+          : _toPublicUrl(plyPath);
+      final posesUrl = _toPosesUrl(plyPath);
+      unawaited(
+        openViewer(
+          context,
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: sceneId,
+        ),
+      );
+    };
+  }
+
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
     if (_searchMode == RecallSearchMode.localAi) {
@@ -445,6 +465,9 @@ extension _RecallPageSearch on _RecallPageState {
         _resetAgentUiState(preserveSession: false);
       }
     });
+    if (mode == RecallSearchMode.agent && _agentConversationHistory.isEmpty) {
+      unawaited(_fetchAgentGreeting());
+    }
     final keyword = _searchController.text.trim();
     if (keyword.isNotEmpty) {
       unawaited(_searchModels(keyword));
@@ -509,12 +532,14 @@ extension _RecallPageSearch on _RecallPageState {
     return Column(
       children: [
         for (int i = 0; i < _agentConversationHistory.length; i++) ...[
-          _buildUserBubble(
-            _agentConversationHistory[i].userQuery,
-            isDark,
-            textColor,
-          ),
-          const SizedBox(height: 8),
+          if (_agentConversationHistory[i].userQuery.isNotEmpty)
+            _buildUserBubble(
+              _agentConversationHistory[i].userQuery,
+              isDark,
+              textColor,
+            ),
+          if (_agentConversationHistory[i].userQuery.isNotEmpty)
+            const SizedBox(height: 8),
           if (i == 0)
             _buildAgentResultCard(isDark, textColor)
           else
@@ -577,6 +602,28 @@ extension _RecallPageSearch on _RecallPageState {
         result != null && result.actions.any((a) => a.type == 'open_scene');
     final topCandidates = result?.candidates.take(3).toList() ?? [];
 
+    // For asset_metadata mode, extract models from assetContext
+    final isAssetMode = result?.mode == 'asset_metadata';
+    final assetModels = <Map<String, dynamic>>[];
+    if (isAssetMode && result?.assetContext != null) {
+      final ctx = result!.assetContext!;
+      final bundle = ctx['bundle'] as List?;
+      final list = ctx['list'] as List?;
+      final source = bundle ?? list;
+      if (source != null) {
+        for (final item in source.take(5)) {
+          if (item is Map) {
+            final m = Map<String, dynamic>.from(item);
+            final rawImg = m['preview_img_path']?.toString() ?? '';
+            if (rawImg.isNotEmpty) {
+              m['preview_img_path'] = _normalizeStorageUrl(rawImg);
+            }
+            assetModels.add(m);
+          }
+        }
+      }
+    }
+
     return BDPanelCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -618,7 +665,24 @@ extension _RecallPageSearch on _RecallPageState {
               hintColor: hintColor,
             ),
           ],
-          if (topCandidates.isNotEmpty) ...[
+          if (isAssetMode && assetModels.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final model in assetModels)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: AgentAssetCard(
+                  displayName: model['display_name']?.toString(),
+                  description: model['description']?.toString() ?? '',
+                  tags: (model['tags'] as List?)
+                          ?.map((e) => e.toString())
+                          .toList() ??
+                      const [],
+                  previewImgPath: model['preview_img_path']?.toString(),
+                  isDark: isDark,
+                  onOpen: _buildAssetCardOnOpen(model),
+                ),
+              ),
+          ] else if (topCandidates.isNotEmpty) ...[
             const SizedBox(height: 10),
             for (final candidate in topCandidates)
               Padding(
@@ -633,7 +697,8 @@ extension _RecallPageSearch on _RecallPageState {
                 ),
               ),
           ],
-          if (hasActions) ...[
+          if (hasActions &&
+              !(isAssetMode && assetModels.isNotEmpty)) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -680,6 +745,28 @@ extension _RecallPageSearch on _RecallPageState {
     final topCandidates = _agentResult?.candidates.take(3).toList() ?? [];
     final followUp = _agentResult?.followUp;
 
+    // For asset_metadata mode, extract models from assetContext
+    final isActiveAssetMode = _agentResult?.mode == 'asset_metadata';
+    final activeAssetModels = <Map<String, dynamic>>[];
+    if (isActiveAssetMode && _agentResult?.assetContext != null) {
+      final ctx = _agentResult!.assetContext!;
+      final bundle = ctx['bundle'] as List?;
+      final list = ctx['list'] as List?;
+      final source = bundle ?? list;
+      if (source != null) {
+        for (final item in source.take(5)) {
+          if (item is Map) {
+            final m = Map<String, dynamic>.from(item);
+            final rawImg = m['preview_img_path']?.toString() ?? '';
+            if (rawImg.isNotEmpty) {
+              m['preview_img_path'] = _normalizeStorageUrl(rawImg);
+            }
+            activeAssetModels.add(m);
+          }
+        }
+      }
+    }
+
     if (chatMessage == null) {
       final fallbackAnswer = _agentResult?.answer.trim() ?? '';
       final fallbackStatus = followUp?.message.trim() ?? '';
@@ -710,7 +797,24 @@ extension _RecallPageSearch on _RecallPageState {
                 builders: {'code': _CodeElementBuilder(isDark, context)},
               ),
             ],
-            if (topCandidates.isNotEmpty) ...[
+            if (isActiveAssetMode && activeAssetModels.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final model in activeAssetModels)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: AgentAssetCard(
+                    displayName: model['display_name']?.toString(),
+                    description: model['description']?.toString() ?? '',
+                    tags: (model['tags'] as List?)
+                            ?.map((e) => e.toString())
+                            .toList() ??
+                        const [],
+                    previewImgPath: model['preview_img_path']?.toString(),
+                    isDark: isDark,
+                    onOpen: _buildAssetCardOnOpen(model),
+                  ),
+                ),
+            ] else if (topCandidates.isNotEmpty) ...[
               const SizedBox(height: 10),
               for (final candidate in topCandidates)
                 Padding(
@@ -725,7 +829,8 @@ extension _RecallPageSearch on _RecallPageState {
                   ),
                 ),
             ],
-            if (hasActions) ...[
+            if (hasActions &&
+                !(isActiveAssetMode && activeAssetModels.isNotEmpty)) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -1061,6 +1166,7 @@ extension _RecallPageSearch on _RecallPageState {
                 ),
               ],
 
+              if (!isActiveAssetMode || activeAssetModels.isEmpty) ...[
               if (_agentResult?.mode != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -1085,8 +1191,26 @@ extension _RecallPageSearch on _RecallPageState {
                   style: TextStyle(color: hintColor, fontSize: 12),
                 ),
               ],
+              ],
 
-              if (topCandidates.isNotEmpty) ...[
+              if (isActiveAssetMode && activeAssetModels.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (final model in activeAssetModels)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: AgentAssetCard(
+                      displayName: model['display_name']?.toString(),
+                      description: model['description']?.toString() ?? '',
+                      tags: (model['tags'] as List?)
+                              ?.map((e) => e.toString())
+                              .toList() ??
+                          const [],
+                      previewImgPath: model['preview_img_path']?.toString(),
+                      isDark: isDark,
+                      onOpen: _buildAssetCardOnOpen(model),
+                    ),
+                  ),
+              ] else if (topCandidates.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(
                   '候选结果',
@@ -1111,7 +1235,8 @@ extension _RecallPageSearch on _RecallPageState {
                   ),
               ],
 
-              if (hasActions) ...[
+              if (hasActions &&
+                  !(isActiveAssetMode && activeAssetModels.isNotEmpty)) ...[
                 const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,

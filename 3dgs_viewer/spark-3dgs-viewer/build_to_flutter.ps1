@@ -2,6 +2,9 @@
 # Build the Spark Vite viewer and sync the output to Flutter assets (webgl_spark only).
 # Usage: run .\build_to_flutter.ps1 in spark-3dgs-viewer/
 
+$scriptDir = $PSScriptRoot
+Push-Location $scriptDir
+
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Building Spark Vite project..." -ForegroundColor Cyan
 Write-Host "====================================="
@@ -17,7 +20,6 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "  Syncing to Flutter assets (webgl_spark)..." -ForegroundColor Cyan
 Write-Host "====================================="
 
-$scriptDir = $PSScriptRoot
 $target = Join-Path $scriptDir "..\..\app\assets\webgl_spark"
 
 Remove-Item -Recurse -Force "$target\assets" -ErrorAction SilentlyContinue
@@ -51,3 +53,5 @@ Write-Host "   Synced: $target" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Done! Flutter app will use the new Spark production build." -ForegroundColor Green
 Write-Host "Run 'flutter run' in the app/ directory." -ForegroundColor Green
+
+Pop-Location

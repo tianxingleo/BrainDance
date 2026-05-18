@@ -5,7 +5,6 @@ import '../configs/motion_tokens.dart';
 import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
-import 'community.dart';
 
 PageRoute<T> _verticalSlideRoute<T>({
   required WidgetBuilder builder,
@@ -78,20 +77,6 @@ class CreateGuidePage extends StatelessWidget {
                           context,
                           _verticalSlideRoute(
                             builder: (_) => const GeneratePage(),
-                            fromTop: false,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildEntryCard(
-                        context,
-                        icon: Icons.groups_rounded,
-                        title: textLocalize('community'),
-                        subtitle: textLocalize('create_community_desc'),
-                        onTap: () => Navigator.push(
-                          context,
-                          _verticalSlideRoute(
-                            builder: (_) => const CommunityPage(),
                             fromTop: false,
                           ),
                         ),

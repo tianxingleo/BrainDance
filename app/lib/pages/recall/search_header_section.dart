@@ -486,11 +486,6 @@ class RecallSearchModeSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 modeTile(
-                  mode: RecallSearchMode.agent,
-                  icon: Icons.travel_explore_rounded,
-                ),
-                const SizedBox(height: 10),
-                modeTile(
                   mode: RecallSearchMode.cloud,
                   icon: Icons.cloud_rounded,
                 ),

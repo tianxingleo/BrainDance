@@ -11,8 +11,10 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
+import 'pages/agent_chat.dart';
 import 'pages/settings.dart';
 import 'pages/create_guide.dart';
+import 'pages/community.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -174,6 +176,7 @@ class Home extends ConsumerWidget {
         ),
       ),
       themeMode: themeModeAsync,
+      themeAnimationDuration: Duration.zero,
       initialRoute: canEnterApp
           ? '/'
           : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
@@ -473,7 +476,7 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
-  static const int _pageCount = 3;
+  static const int _pageCount = 5;
 
   int _previousIndex = 0;
   int _lastTabIndex = 0; // 上次不同的 tab，用于同 tab 重复点击时回退
@@ -510,7 +513,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     // 首帧只渲染当前页，首帧结束后立即预热其余 Tab 页面（Offstage），消除首次切换掉帧
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      setState(() => _builtPages.addAll({1, 2}));
+      setState(() => _builtPages.addAll({1, 2, 3, 4}));
     });
   }
 
@@ -527,8 +530,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
       case 0:
         page = const RecallPage();
       case 1:
-        page = const CreateGuidePage();
+        page = const AgentChatPage();
       case 2:
+        page = const CreateGuidePage();
+      case 3:
+        page = const CommunityPage();
+      case 4:
         page = const SettingsPage();
       default:
         page = const RecallPage();
@@ -540,7 +547,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void _switchToPage(int newIndex) {
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) {
-      if (newIndex == 1 && _lastTabIndex != oldIndex) {
+      final createIdx = 2;
+      if ((newIndex == 1 || newIndex == createIdx) && _lastTabIndex != oldIndex) {
         _switchToPage(_lastTabIndex);
       } else if (newIndex == 0) {
         ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
@@ -652,9 +660,17 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
+                          icon: Icons.travel_explore_rounded,
+                          label: textLocalize("agent"),
+                        ),
+                        NavIslandItem(
                           icon: Icons.add_rounded,
                           label: textLocalize("create"),
                           isLarge: true,
+                        ),
+                        NavIslandItem(
+                          icon: Icons.groups_rounded,
+                          label: textLocalize("community"),
                         ),
                         NavIslandItem(
                           icon: Icons.settings_rounded,

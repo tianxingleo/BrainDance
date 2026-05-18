@@ -48,6 +48,7 @@ import 'recall/processing_section.dart';
 import 'recall/rename_model_dialog.dart';
 import 'recall/search_header_section.dart';
 import 'recall/search_mode.dart';
+import 'recall/agent_asset_card.dart';
 
 part 'recall/recall_agent_runtime.dart';
 part 'recall/recall_local_ai.dart';

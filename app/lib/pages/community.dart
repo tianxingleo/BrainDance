@@ -25,7 +25,7 @@ class _CommunityPageState extends State<CommunityPage>
 
   List<CommunityPost> _posts = const [];
   List<CommunityModelOption> _shareableModels = const [];
-  int _selectedMapIndex = 0;
+  String? _selectedPlaceName;
   bool _isLoading = true;
   int _tabIndex = 0;
 
@@ -81,8 +81,6 @@ class _CommunityPageState extends State<CommunityPage>
     setState(() {
       _posts = posts;
       _shareableModels = models;
-      _selectedMapIndex =
-          posts.isEmpty ? 0 : _selectedMapIndex.clamp(0, posts.length - 1);
       _isLoading = false;
     });
   }
@@ -129,7 +127,7 @@ class _CommunityPageState extends State<CommunityPage>
       ),
     );
   }
-
+  
   void _openViewer(CommunityPost post) {
     openViewer(
       context,
@@ -222,7 +220,6 @@ class _CommunityPageState extends State<CommunityPage>
       },
     );
   }
-
   void _toggleSubmitModel(CommunityModelOption model) {
     setState(() {
       if (_selectedSubmitModels.any((m) => m.id == model.id)) {
@@ -328,8 +325,6 @@ class _CommunityPageState extends State<CommunityPage>
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final selectedPost =
-        _posts.isEmpty ? null : _posts[_selectedMapIndex];
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -398,13 +393,12 @@ class _CommunityPageState extends State<CommunityPage>
                         children: [
                           CommunityExploreView(
                             posts: _posts,
-                            selectedIndex: _selectedMapIndex,
-                            onSelect: (i) => setState(
-                                () => _selectedMapIndex = i),
-                            onOpenViewer: _openViewer,
-                            onOpenLocationHub:
-                                _openLocationHub,
-                            selectedPost: selectedPost,
+                            selectedPlaceName: _selectedPlaceName,
+                            onSelect: (placeName) => setState(
+                                () => _selectedPlaceName = placeName),
+                            onClearFilter: () => setState(
+                                () => _selectedPlaceName = null),
+                            onTapPost: _openDetail,
                           ),
                           CommunityDiscoverView(
                             posts: _filteredPosts,

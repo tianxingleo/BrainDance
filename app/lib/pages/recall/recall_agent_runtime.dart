@@ -594,4 +594,37 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       _completeAgentRun();
     }
   }
+
+  Future<void> _fetchAgentGreeting() async {
+    _ensureAgentSessionId();
+    final greetingMessage = ChatMessage(isUser: false, liveStatus: '正在加载...');
+    setState(() {
+      _agentConversationHistory.insert(
+        0,
+        AgentConversationEntry(
+          userQuery: '',
+          timestamp: DateTime.now(),
+          agentMessage: greetingMessage,
+        ),
+      );
+    });
+
+    try {
+      final result = await AgentRecallService().query(
+        '你好',
+        sessionId: _agentSessionId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _agentConversationHistory.first.agentResult = result;
+        greetingMessage.finalAnswer = result.answer;
+      });
+      _rememberAgentResponse('你好', result);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        greetingMessage.finalAnswer = '你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。';
+      });
+    }
+  }
 }

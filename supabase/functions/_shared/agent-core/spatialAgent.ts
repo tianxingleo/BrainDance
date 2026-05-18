@@ -43,6 +43,12 @@ import {
   summarizePlaceChangeTimeline,
 } from "./memoryTools.ts";
 import { runTimeCompareAgent } from "../../time-compare-agent/agent.ts";
+import {
+  type LongTermMemory,
+  loadLongTermMemory,
+  shouldPersistLongTermMemory,
+  persistLongTermMemory,
+} from "./longTermMemory.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -449,6 +455,8 @@ const assetContextSchema = z.object({
     description: z.string().nullable(),
     tags: z.array(z.string()),
     created_at: z.string(),
+    preview_img_path: z.string().nullable(),
+    ply_path: z.string().nullable(),
   })).nullable(),
   bundle: z.array(z.object({
     id: z.string(),
@@ -570,9 +578,11 @@ export type SpatialSearchAgentOptions = {
   currentMode?: "search" | "compare" | "batch_edit" | "collection" | null;
   candidateSceneIds?: string[];
   sessionId?: string;
+  userId?: string;
   conversationSummary?: string | null;
   sessionState?: z.infer<typeof sessionStateSchema> | null;
   shortTermMemory?: ShortTermMemory | null;
+  longTermMemory?: LongTermMemory | null;
 };
 
 type RuntimeEnv = {
@@ -1222,14 +1232,74 @@ export function isDirectReplyQuery(query: string): boolean {
   return DIRECT_REPLY_TOKENS.has(normalized);
 }
 
-function buildDirectReplyAnswer(query: string): string {
+function buildDirectReplyAnswer(query: string, ltm: LongTermMemory | null): string {
   const normalized = normalizeDirectReplyQuery(query);
 
   if (["谢谢", "多谢", "谢了", "辛苦了"].includes(normalized)) {
     return "不客气，我在。你可以直接说要找什么场景、比较哪个时间段，或者想整理哪些模型。";
   }
 
-  return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
+  if (!ltm || ltm.searchCount === 0) {
+    return "你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。";
+  }
+
+  return buildPersonalizedGreeting(ltm);
+}
+
+function buildPersonalizedGreeting(ltm: LongTermMemory): string {
+  const lines: string[] = ["你好，欢迎回来！根据你的历史使用记录，我整理了你的偏好概况：\n"];
+
+  // 偏好概况
+  const profileLines: string[] = [];
+  if (ltm.preferredRegions.length > 0) {
+    profileLines.push(`• 常关注区域：${ltm.preferredRegions.join("、")}`);
+  }
+  if (ltm.preferredObjects.length > 0) {
+    profileLines.push(`• 常搜物体：${ltm.preferredObjects.join("、")}`);
+  }
+  if (ltm.preferredAssetTypes.length > 0) {
+    profileLines.push(`• 偏好资产类型：${ltm.preferredAssetTypes.join("、")}`);
+  }
+  if (ltm.preferredTimeRanges.length > 0) {
+    profileLines.push(`• 关注时间段：${ltm.preferredTimeRanges.join("、")}`);
+  }
+  if (profileLines.length > 0) {
+    lines.push(profileLines.join("\n"));
+  }
+
+  // 最近搜索回顾
+  const recentCount = Math.min(ltm.recentSearches.length, 3);
+  if (recentCount > 0) {
+    lines.push(`\n最近${recentCount}次搜索：`);
+    const recents = ltm.recentSearches.slice(-recentCount);
+    for (const entry of recents) {
+      const summary = entry.topResultSummary ? ` → ${entry.topResultSummary}` : "";
+      lines.push(`• 「${entry.query}」${summary}`);
+    }
+  }
+
+  // 建议
+  lines.push("\n基于你的偏好，以下是一些建议：");
+  const suggestions: string[] = [];
+  const lastSearch = ltm.recentSearches[ltm.recentSearches.length - 1];
+  if (lastSearch) {
+    suggestions.push(`继续探索「${lastSearch.query}」相关内容`);
+  }
+  if (ltm.preferredRegions.length > 0 && ltm.preferredObjects.length > 0) {
+    suggestions.push(`查看${ltm.preferredRegions[0]}区域的${ltm.preferredObjects[0]}变化`);
+  }
+  if (ltm.preferredAssetTypes.length > 0) {
+    suggestions.push(`浏览最新的${ltm.preferredAssetTypes[0]}资产`);
+  }
+  if (suggestions.length === 0) {
+    suggestions.push("告诉我你想找什么场景或物体");
+  }
+  for (let i = 0; i < suggestions.length; i++) {
+    lines.push(`${i + 1}. ${suggestions[i]}`);
+  }
+
+  lines.push("\n你可以直接输入想搜索的内容，或选择上面的建议开始。");
+  return lines.join("\n");
 }
 
 function extractModelTextContent(content: unknown): string {
@@ -1255,6 +1325,23 @@ function extractModelTextContent(content: unknown): string {
     })
     .filter((item) => item.length > 0);
   return textParts.join("\n").trim();
+}
+
+function extractLastAgentTextFromMessages(messages: unknown[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as any;
+    if (msg?._getType?.() === "tool" || msg?.constructor?.name === "ToolMessage") {
+      continue;
+    }
+    if (msg?._getType?.() === "human" || msg?.constructor?.name === "HumanMessage") {
+      break;
+    }
+    const text = extractModelTextContent(msg?.content);
+    if (text && !msg?.tool_calls?.length) {
+      return text;
+    }
+  }
+  return "";
 }
 
 export async function buildGeneralAssistantFallbackAnswer(
@@ -2549,6 +2636,21 @@ async function executeParallelSpatialToolLoop(input: {
   return { candidates, trace };
 }
 
+function buildStopSearchTool(): DynamicStructuredTool {
+  return new DynamicStructuredTool({
+    name: "stop_search",
+    description:
+      "当你认为当前已收集到足够的信息来回答用户问题时调用此工具。调用后将立即停止工具循环并进入最终回答整理阶段。你应该在以下情况调用：1) 已有高置信度候选；2) 继续搜索不会带来增量信息；3) 问题已可直接回答。",
+    schema: z.object({
+      reason: z.string().describe("为什么认为当前信息已足够，简要说明判断依据"),
+      confidence: z.number().min(0).max(1).describe("对当前结果的置信度，0-1"),
+    }),
+    func: async ({ reason, confidence }) => {
+      return JSON.stringify({ stopped: true, reason, confidence });
+    },
+  });
+}
+
 function buildTimeCompareTool(): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "time_compare",
@@ -2671,6 +2773,20 @@ async function executeUnifiedAgentLoop(input: {
       const toolResult = await tool.invoke(toolArgs);
       const resultText = typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
 
+      if (toolCall.name === "stop_search") {
+        tr.push({ toolName: "stop_search", args: toolArgs, resultSummary: `LLM 主动停止: ${toolArgs.reason ?? ""}` });
+        await emitProgress(callbacks, {
+          event: "tool_result",
+          data: { name: "stop_search", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, count: 0, round: state.round },
+        });
+        await emitProgress(callbacks, {
+          event: "status",
+          data: { phase: "llm_stop_decision", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, detail: `置信度: ${toolArgs.confidence ?? "N/A"}` },
+        });
+        msgs.push(new ToolMessage({ tool_call_id: toolCall.id ?? toolCall.name, content: resultText }));
+        return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
+      }
+
       const isSpatialTool = ["pose_semantic_search", "scene_metadata_search", "recent_scene_search"].includes(tool.name);
       const isAssetTool = !isSpatialTool && tool.name !== "time_compare";
       let count = 0;
@@ -2698,22 +2814,9 @@ async function executeUnifiedAgentLoop(input: {
 
   async function checkStopNode(state: UnifiedState): Promise<Partial<UnifiedState>> {
     if (state.shouldStop) return {};
-    const hasSpatialTools = state.trace.some((t) =>
-      ["pose_semantic_search", "scene_metadata_search", "recent_scene_search"].includes(t.toolName)
-    );
-    const hasAssetTools = state.trace.some((t) =>
-      !["pose_semantic_search", "scene_metadata_search", "recent_scene_search", "time_compare"].includes(t.toolName)
-    );
-    if (hasSpatialTools && !shouldForceAnotherToolRound({ intent: { rewrittenQuery: query, targetType: "scene", reasoning: "" } as any, candidates: state.candidates, trace: state.trace })) {
-      await emitProgress(callbacks, { event: "status", data: { phase: "unified_stop_spatial", summary: "空间检索证据已充足" } });
+    if (state.round >= UNIFIED_MAX_ROUNDS) {
+      await emitProgress(callbacks, { event: "status", data: { phase: "max_rounds_reached", summary: `已达最大轮次 ${UNIFIED_MAX_ROUNDS}，强制停止` } });
       return { shouldStop: true };
-    }
-    if (hasAssetTools) {
-      const stopDecision = shouldStopAssetToolLoop({ state: state.assetState, trace: state.trace });
-      if (stopDecision.stop) {
-        await emitProgress(callbacks, { event: "status", data: { phase: "unified_stop_asset", summary: stopDecision.reason } });
-        return { shouldStop: true };
-      }
     }
     return {};
   }
@@ -3258,6 +3361,46 @@ export function buildUpdatedShortTermMemory(
   return memory;
 }
 
+function finalizeResponseWithLongTermMemory(
+  supabase: SupabaseClient,
+  response: SpatialSearchResponse,
+  options: SpatialSearchAgentOptions,
+  query: string,
+): SpatialSearchResponse {
+  const result = finalizeResponse(response, options);
+
+  if (options.userId) {
+    const turnCount = result.short_term_memory?.turnCount ?? 0;
+    const shortTermPrefs = result.short_term_memory?.preferences ?? {};
+    if (shouldPersistLongTermMemory(turnCount, options.longTermMemory ?? null, shortTermPrefs)) {
+      const intentObjects: string[] = [];
+      const intentRegions: string[] = [];
+      if (result.intent) {
+        if (result.intent.objectHint) intentObjects.push(result.intent.objectHint);
+        if (result.intent.sceneHint) intentObjects.push(result.intent.sceneHint);
+        if (result.intent.locationHint) intentRegions.push(result.intent.locationHint);
+      }
+      const topSummary = result.top_candidates?.length > 0
+        ? `${result.top_candidates[0].description ?? result.top_candidates[0].scene_id} (score: ${result.top_candidates[0].score.toFixed(2)})`
+        : result.answer.slice(0, 100);
+
+      persistLongTermMemory(supabase, {
+        userId: options.userId,
+        currentShortTermPreferences: shortTermPrefs,
+        currentQuery: query,
+        responseMode: result.mode,
+        topResultSummary: topSummary,
+        intentObjects,
+        intentRegions,
+      }, options.longTermMemory ?? null).catch((err) => {
+        console.error("[LongTermMemory] async persist error:", err);
+      });
+    }
+  }
+
+  return result;
+}
+
 function finalizeResponse(
   response: SpatialSearchResponse,
   options?: SpatialSearchAgentOptions,
@@ -3779,6 +3922,11 @@ export async function runSpatialSearchAgent(
   const env = ensureRuntimeEnv();
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
+
+  if (options.userId && !options.longTermMemory) {
+    options.longTermMemory = await loadLongTermMemory(supabase, options.userId);
+  }
+
   await emitProgress(callbacks, {
     event: "status",
     data: {
@@ -3810,7 +3958,7 @@ export async function runSpatialSearchAgent(
         confidence: 1,
         reason: "当前输入属于闲聊问候，无需进入检索链路",
       },
-      answer: buildDirectReplyAnswer(query),
+      answer: buildDirectReplyAnswer(query, options.longTermMemory ?? null),
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: null,
@@ -3858,6 +4006,7 @@ export async function runSpatialSearchAgent(
     buildSummarizeCollectionTool(supabase),
     buildGroupModelsIntoThreadTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildTimeCompareTool(),
+    buildStopSearchTool(),
   ];
 
   // --- 执行统一 Agent 循环 ---
@@ -3877,25 +4026,31 @@ export async function runSpatialSearchAgent(
   }
 
   if (mode === "asset_metadata") {
-    return finalizeResponse({
+    const agentAnswer = extractLastAgentTextFromMessages(finalMessages);
+    const reason = assetState.lastToolName
+      ? `资产模式最后一次有效工具为 ${assetState.lastToolName}`
+      : null;
+    const answer = agentAnswer || reason || "当前没有生成有效的模型资产结果。";
+
+    return finalizeResponseWithLongTermMemory(supabase, {
       success: true,
       mode: "asset_metadata",
       intent: null,
       selection: { scene_id: null, model_id: null, pose_image_id: null, confidence: 0, reason: "当前请求属于模型资产元数据操作" },
-      answer: buildAssetAnswer(assetState, { query }) ?? "当前没有生成有效的模型资产结果。",
+      answer,
       actions: [],
       viewer_payload: emptyViewerPayload(),
       evidence: assetState.poseSummary ? { pose_summary: assetState.poseSummary } : assetState.relatedModels ? { related_models: assetState.relatedModels } : null,
       candidates: [],
       top_candidates: [],
-      selected_candidate_reason: assetState.lastToolName ? `资产模式最后一次有效工具为 ${assetState.lastToolName}` : null,
+      selected_candidate_reason: reason,
       tool_trace: trace,
       asset_context: serializeAssetContext(assetState),
       compare_context: assetState.placeVersions ? { place_versions: assetState.placeVersions } : null,
       collection_context: assetState.collectionSummary ? { collection_summary: assetState.collectionSummary } : null,
       creative_context: null,
       memory_graph_context: null,
-    }, options);
+    }, options, query);
   }
 
   // --- spatial_search 响应 ---
@@ -3925,13 +4080,12 @@ export async function runSpatialSearchAgent(
   })();
 
   if (rankedCandidates.length === 0) {
-    const lastMsg = finalMessages[finalMessages.length - 1];
-    const agentAnswer = typeof (lastMsg as any)?.content === "string" ? (lastMsg as any).content : "";
+    const agentAnswer = extractLastAgentTextFromMessages(finalMessages);
     const fallbackAnswer = agentAnswer ||
       await buildGeneralAssistantFallbackAnswer(model, query, options).catch(() =>
         "我是 BrainDance 的空间记忆智能管理助手，可以帮你检索场景、比较时间变化，并整理模型资产。你也可以继续告诉我具体想找什么。"
       );
-    return finalizeResponse({
+    return finalizeResponseWithLongTermMemory(supabase, {
       success: true,
       mode: "spatial_search",
       intent: pseudoIntent,
@@ -3949,7 +4103,7 @@ export async function runSpatialSearchAgent(
       collection_context: null,
       creative_context: null,
       memory_graph_context: null,
-    }, options);
+    }, options, query);
   }
 
   const selection = buildDeterministicSpatialSelection({ rankedCandidates });
@@ -3958,7 +4112,7 @@ export async function runSpatialSearchAgent(
   const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId ? finalScene.bestPose : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({ scene: finalScene ?? null, selectedPose: finalPose, supabase, bucket: env.storageBucket });
 
-  return finalizeResponse({
+  return finalizeResponseWithLongTermMemory(supabase, {
     success: true,
     mode: "spatial_search",
     intent: pseudoIntent,
@@ -3981,5 +4135,5 @@ export async function runSpatialSearchAgent(
     collection_context: null,
     creative_context: null,
     memory_graph_context: null,
-  }, options);
+  }, options, query);
 }

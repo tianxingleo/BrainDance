@@ -58,6 +58,7 @@ export const agentRecallRequestSchema = z.object({
     .nullable().optional(),
   candidateSceneIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
+  userId: z.string().optional(),
   conversationSummary: z.string().nullable().optional(),
   shortTermMemory: shortTermMemorySchema,
   sessionState: sessionStateSchema,

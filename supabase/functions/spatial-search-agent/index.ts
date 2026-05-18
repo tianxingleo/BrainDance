@@ -18,7 +18,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { query, selectedModelIds, executionMode } = await req.json();
+    const { query, selectedModelIds, executionMode, userId } = await req.json();
 
     if (!query || typeof query !== "string") {
       return errorResponse("缺少或无效的搜索语句 'query'", 400);
@@ -42,6 +42,7 @@ serve(async (req: Request) => {
     const result = await runSpatialSearchAgent(query.trim(), {
       selectedModelIds: normalizedSelectedModelIds,
       executionMode: normalizedExecutionMode,
+      userId: typeof userId === "string" ? userId : undefined,
     });
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
