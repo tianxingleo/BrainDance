@@ -14,13 +14,7 @@ class CommunityRepository {
 
   String get currentUserId => _client.auth.currentUser?.id ?? '';
 
-  // ---- Posts ----
-
-  Future<List<CommunityPost>> fetchPosts() async {
-    try {
-      final response = await _client
-          .from('community_posts')
-          .select('''
+  static const _postSelect = '''
             id,
             title,
             caption,
@@ -34,11 +28,20 @@ class CommunityRepository {
             metadata,
             model_assets (
               scene_id,
+              display_name,
               description,
               ply_path,
               preview_img_path
             )
-          ''')
+          ''';
+
+  // ---- Posts ----
+
+  Future<List<CommunityPost>> fetchPosts() async {
+    try {
+      final response = await _client
+          .from('community_posts')
+          .select(_postSelect)
           .order('created_at', ascending: false)
           .limit(24);
 
@@ -90,6 +93,11 @@ class CommunityRepository {
           isPublic: metadata['is_public'] != false,
           likeCount: (metadata['likes'] as List?)?.length ?? 0,
           favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
+          viewCount: _readViewCount(metadata),
+          isLikedByCurrentUser:
+              _containsUser(metadata['likes'], currentUserId),
+          isFavoritedByCurrentUser:
+              _containsUser(metadata['favorites'], currentUserId),
           extraImages: List<Map<String, dynamic>>.from(
               metadata['images'] ?? []),
           commentCount: (metadata['comments'] as List?)?.length ?? 0,
@@ -108,6 +116,111 @@ class CommunityRepository {
     } catch (_) {}
 
     return [..._localDrafts, ..._demoPosts];
+  }
+
+  Future<List<CommunityPost>> fetchMyPosts() async {
+    final uid = currentUserId;
+    if (uid.isEmpty) return const [];
+
+    try {
+      final response = await _client
+          .from('community_posts')
+          .select(_postSelect)
+          .eq('user_id', uid)
+          .order('created_at', ascending: false);
+      final posts = response.map<CommunityPost>((raw) {
+        final map = Map<String, dynamic>.from(raw);
+        final model = map['model_assets'] is Map
+            ? Map<String, dynamic>.from(map['model_assets'] as Map)
+            : <String, dynamic>{};
+        final metadata = _parseMetadata(map['metadata']);
+        final modelUrl = _normalizeStorageUrl(
+          model['ply_path']?.toString() ?? '',
+        );
+        final previewUrl = _normalizeStorageUrl(
+          map['cover_image_url']?.toString().isNotEmpty == true
+              ? map['cover_image_url']!.toString()
+              : (model['preview_img_path']?.toString() ?? ''),
+        );
+
+        return CommunityPost(
+          id: map['id'].toString(),
+          title: map['title']?.toString() ??
+              textLocalize('community_unnamed_memory'),
+          caption: map['caption']?.toString() ??
+              model['description']?.toString() ??
+              '',
+          placeName: map['place_name']?.toString() ??
+              textLocalize('community_no_location'),
+          latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
+          longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
+          authorName: map['user_id']?.toString() ??
+              textLocalize('community_anonymous'),
+          modelName: map['model_name']?.toString() ??
+              model['display_name']?.toString() ??
+              model['scene_id']?.toString() ??
+              '3D 模型',
+          modelUrl: modelUrl,
+          posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
+          coverUrl: previewUrl,
+          createdAt: DateTime.tryParse(
+                map['created_at']?.toString() ?? '',
+              ) ??
+              DateTime.now(),
+          tags: _extractTags(
+            model['description']?.toString(),
+            map['place_name']?.toString(),
+          ),
+          isPublic: metadata['is_public'] != false,
+          likeCount: (metadata['likes'] as List?)?.length ?? 0,
+          favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
+          commentCount: (metadata['comments'] as List?)?.length ?? 0,
+          viewCount: _readViewCount(metadata),
+          isLikedByCurrentUser: _containsUser(metadata['likes'], uid),
+          isFavoritedByCurrentUser:
+              _containsUser(metadata['favorites'], uid),
+          extraImages: List<Map<String, dynamic>>.from(
+            metadata['images'] ?? [],
+          ),
+        );
+      }).toList();
+
+      return [
+        ..._localDrafts.where((post) => post.id.startsWith('local-$uid-')),
+        ...posts,
+      ];
+    } catch (_) {}
+
+    return _localDrafts.where((post) => post.id.startsWith('local-$uid-')).toList();
+  }
+
+  Future<List<CommunityPost>> fetchFavoritePosts() async {
+    if (currentUserId.isEmpty) return const [];
+    final posts = await fetchPosts();
+    return posts.where((post) => post.isFavoritedByCurrentUser).toList();
+  }
+
+  Future<List<CommunityPost>> fetchLikedPosts() async {
+    if (currentUserId.isEmpty) return const [];
+    final posts = await fetchPosts();
+    return posts.where((post) => post.isLikedByCurrentUser).toList();
+  }
+
+  Future<CommunityStats> fetchCommunityStats() async {
+    final posts = await fetchMyPosts();
+    final shareableModels = await fetchShareableModels();
+    final draft = await loadDraft();
+
+    return CommunityStats(
+      postCount: posts.length,
+      viewCount: posts.fold(0, (sum, post) => sum + post.viewCount),
+      likeCount: posts.fold(0, (sum, post) => sum + post.likeCount),
+      favoriteCount:
+          posts.fold(0, (sum, post) => sum + post.favoriteCount),
+      commentCount: posts.fold(0, (sum, post) => sum + post.commentCount),
+      draftCount: draft.isEmpty ? 0 : 1,
+      shareableModelCount: shareableModels.length,
+    );
   }
 
   // ---- Shareable models ----
@@ -335,6 +448,68 @@ class CommunityRepository {
     } catch (_) {}
   }
 
+  Future<void> recordPostView(String postId) async {
+    if (postId.startsWith('local-')) return;
+    final metadata = await fetchPostMetadata(postId);
+    final uid = currentUserId;
+    final viewers = List<String>.from(metadata['viewers'] ?? []);
+
+    if (uid.isNotEmpty && viewers.contains(uid)) {
+      return;
+    }
+    if (uid.isNotEmpty) {
+      viewers.add(uid);
+    }
+
+    final updated = {
+      ...metadata,
+      'views': _readViewCount(metadata) + 1,
+      'viewers': viewers,
+    };
+    await setMetadata(postId, updated);
+  }
+
+  Future<void> updatePost(
+    String postId, {
+    String? title,
+    String? caption,
+    String? placeName,
+    double? latitude,
+    double? longitude,
+    bool? isPublic,
+  }) async {
+    final update = <String, dynamic>{
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    if (title != null) update['title'] = title;
+    if (caption != null) update['caption'] = caption;
+    if (placeName != null) update['place_name'] = placeName;
+    if (latitude != null) update['latitude'] = latitude;
+    if (longitude != null) update['longitude'] = longitude;
+
+    if (isPublic != null) {
+      final metadata = await fetchPostMetadata(postId);
+      update['metadata'] = {...metadata, 'is_public': isPublic};
+    }
+
+    try {
+      await _client.from('community_posts').update(update).eq('id', postId);
+    } catch (_) {}
+  }
+
+  Future<void> togglePostVisibility(CommunityPost post) async {
+    await updatePost(post.id, isPublic: !post.isPublic);
+  }
+
+  Future<void> deletePost(String postId) async {
+    _localDrafts.removeWhere((post) => post.id == postId);
+    if (postId.startsWith('local-')) return;
+
+    try {
+      await _client.from('community_posts').delete().eq('id', postId);
+    } catch (_) {}
+  }
+
   Future<void> _updateMetadata(
     String postId,
     Map<String, dynamic> metadata,
@@ -387,6 +562,25 @@ class CommunityRepository {
       } catch (_) {}
     }
     return {};
+  }
+
+  bool _containsUser(dynamic raw, String uid) {
+    if (uid.isEmpty || raw is! List) return false;
+    return raw.map((value) => value?.toString() ?? '').contains(uid);
+  }
+
+  int _readViewCount(Map<String, dynamic> metadata) {
+    final views = metadata['views'];
+    if (views is num) return views.toInt();
+    if (views is List) return views.length;
+
+    final viewCount = metadata['view_count'];
+    if (viewCount is num) return viewCount.toInt();
+
+    final viewers = metadata['viewers'];
+    if (viewers is List) return viewers.length;
+
+    return 0;
   }
 
   String _normalizeStorageUrl(String raw) {

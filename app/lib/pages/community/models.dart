@@ -69,6 +69,9 @@ class CommunityPost {
   final int likeCount;
   final int favoriteCount;
   final int commentCount;
+  final int viewCount;
+  final bool isLikedByCurrentUser;
+  final bool isFavoritedByCurrentUser;
 
   const CommunityPost({
     required this.id,
@@ -88,6 +91,9 @@ class CommunityPost {
     this.likeCount = 0,
     this.favoriteCount = 0,
     this.commentCount = 0,
+    this.viewCount = 0,
+    this.isLikedByCurrentUser = false,
+    this.isFavoritedByCurrentUser = false,
     this.extraImages = const [],
   });
 
@@ -98,6 +104,9 @@ class CommunityPost {
     int? likeCount,
     int? favoriteCount,
     int? commentCount,
+    int? viewCount,
+    bool? isLikedByCurrentUser,
+    bool? isFavoritedByCurrentUser,
   }) {
     return CommunityPost(
       id: id,
@@ -117,11 +126,36 @@ class CommunityPost {
       likeCount: likeCount ?? this.likeCount,
       favoriteCount: favoriteCount ?? this.favoriteCount,
       commentCount: commentCount ?? this.commentCount,
+      viewCount: viewCount ?? this.viewCount,
+      isLikedByCurrentUser:
+          isLikedByCurrentUser ?? this.isLikedByCurrentUser,
+      isFavoritedByCurrentUser:
+          isFavoritedByCurrentUser ?? this.isFavoritedByCurrentUser,
       extraImages: extraImages,
     );
   }
 
   String get relativeTimeLabel => formatRelativeTime(createdAt);
+}
+
+class CommunityStats {
+  final int postCount;
+  final int viewCount;
+  final int likeCount;
+  final int favoriteCount;
+  final int commentCount;
+  final int draftCount;
+  final int shareableModelCount;
+
+  const CommunityStats({
+    this.postCount = 0,
+    this.viewCount = 0,
+    this.likeCount = 0,
+    this.favoriteCount = 0,
+    this.commentCount = 0,
+    this.draftCount = 0,
+    this.shareableModelCount = 0,
+  });
 }
 
 class CommunityComment {

@@ -673,8 +673,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("community"),
                         ),
                         NavIslandItem(
-                          icon: Icons.settings_rounded,
-                          label: textLocalize("manage"),
+                          icon: Icons.person_rounded,
+                          label: textLocalize("mine"),
                         ),
                       ],
                     ),

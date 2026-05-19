@@ -40,7 +40,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
     super.initState();
     _post = widget.post;
     _buildImageEntries();
-    _loadMetadata();
+    _recordViewAndLoadMetadata();
     _loadComments();
   }
 
@@ -103,8 +103,15 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
         likeCount: (meta['likes'] as List?)?.length ?? 0,
         favoriteCount: (meta['favorites'] as List?)?.length ?? 0,
         commentCount: (meta['comments'] as List?)?.length ?? 0,
+        viewCount: _readViewCount(meta),
       );
     });
+  }
+
+  Future<void> _recordViewAndLoadMetadata() async {
+    await _repository.recordPostView(_post.id);
+    if (!mounted) return;
+    await _loadMetadata();
   }
 
   Future<void> _loadComments() async {
@@ -495,6 +502,11 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                     ),
                     const SizedBox(width: 8),
                     _ActionButton(
+                      icon: Icons.visibility_outlined,
+                      label: '${_post.viewCount}',
+                      onTap: () {},
+                    ),
+                    _ActionButton(
                       icon: _isLiked
                           ? Icons.favorite_rounded
                           : Icons.favorite_outline_rounded,
@@ -558,6 +570,17 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
       posesUrl: _currentPosesUrl,
       sceneId: _currentModelName,
     );
+  }
+
+  int _readViewCount(Map<String, dynamic> metadata) {
+    final views = metadata['views'];
+    if (views is num) return views.toInt();
+    if (views is List) return views.length;
+    final viewCount = metadata['view_count'];
+    if (viewCount is num) return viewCount.toInt();
+    final viewers = metadata['viewers'];
+    if (viewers is List) return viewers.length;
+    return 0;
   }
 }
 
