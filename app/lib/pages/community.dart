@@ -52,7 +52,6 @@ class _CommunityPageState extends State<CommunityPage>
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
     _loadCommunity();
-    _loadDraft();
   }
 
   void _onTabChanged() {
@@ -83,6 +82,7 @@ class _CommunityPageState extends State<CommunityPage>
       _shareableModels = models;
       _isLoading = false;
     });
+    _loadDraft(); // safe: _shareableModels is now populated
   }
 
   Future<void> _loadDraft() async {
