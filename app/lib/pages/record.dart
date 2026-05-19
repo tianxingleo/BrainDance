@@ -466,16 +466,18 @@ class _RecordPageState extends ConsumerState<RecordPage>
         .from('braindance-assets')
         .upload(storagePath, file)
         .then((result) {
-      _streamingSuccessCount++;
-      debugPrint('[_captureAndUpload] uploaded $frameLabel → $result');
-    }).catchError((e) {
-      _streamingFailCount++;
-      debugPrint('[_captureAndUpload] upload failed: $e');
-    }).whenComplete(() {
-      try {
-        file.deleteSync();
-      } catch (_) {}
-    });
+          _streamingSuccessCount++;
+          debugPrint('[_captureAndUpload] uploaded $frameLabel → $result');
+        })
+        .catchError((e) {
+          _streamingFailCount++;
+          debugPrint('[_captureAndUpload] upload failed: $e');
+        })
+        .whenComplete(() {
+          try {
+            file.deleteSync();
+          } catch (_) {}
+        });
 
     if (_streamingActive) {
       _pendingUploads.add(uploadFuture);
@@ -1094,10 +1096,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         onPressed: () async {
                           final next = !ref.read(streamingModeProvider);
                           ref.read(streamingModeProvider.notifier).state = next;
-                          await RecoConfig.switchResolution(
-                            next ? ResolutionPreset.low : ResolutionPreset.max,
-                          );
-                          if (mounted) setState(() {});
                         },
                       ),
                     ),
