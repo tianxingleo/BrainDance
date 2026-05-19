@@ -292,11 +292,22 @@ extension _RecallPageModelActions on _RecallPageState {
 
     try {
       // Update display_name on model_assets (source of truth)
-      await Supabase.instance.client
+      final updateResult = await Supabase.instance.client
           .from('model_assets')
           .update({'display_name': newName})
           .eq('scene_id', sceneId)
-          .select();
+          .select('id');
+
+      if (updateResult == null ||
+          (updateResult is List && updateResult.isEmpty)) {
+        if (mounted) {
+          debugPrint(
+            '[RecallModelActions] rename update returned empty for scene_id=$sceneId',
+          );
+          showAppToast(context, textLocalize('recall_rename_fail'));
+        }
+        return;
+      }
 
       // Also update processing_tasks so the name appears in task list
       try {
