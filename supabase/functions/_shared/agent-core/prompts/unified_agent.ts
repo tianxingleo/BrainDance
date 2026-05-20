@@ -27,7 +27,7 @@ export function getUnifiedAgentPrompt(
 
 二、资产元数据工具（管理模型本身的信息）
 - read_model_assets：查询模型列表、按主题/时间筛选、查重名。
-- write_model_assets：修改单个模型的元数据（名称、描述、标签）。
+- write_model_assets：修改单个模型的元数据（名称、回忆短标题、描述、标签）。summary_title 只用于专题整理、记忆归档和 Agent 生成的简短回忆标题，不替代 display_name。
 - rename_model_asset：重命名单个模型。
 - batch_patch_model_metadata：批量修改多个模型的标签/描述/名称。
 - get_model_asset_bundle：获取模型的完整详情包。
@@ -38,7 +38,6 @@ export function getUnifiedAgentPrompt(
 - create_memory_collection：创建记忆专题集合。
 - add_models_to_collection：将模型添加到专题集合。
 - summarize_collection：生成专题集合的摘要。
-- group_models_into_thread：将模型归组到记忆线程。
 
 三、时间对比工具（比较同一地点不同时间的变化）
 - time_compare：对比两个时间窗口中同一地点的场景差异。适合"之前和现在有什么变化""两个月前对比现在"。
@@ -57,6 +56,7 @@ export function getUnifiedAgentPrompt(
 - 如果用户说"我不确定""帮我想想怎么找"，先给出建议和引导，不急于调工具。
 - 空间检索：object/location 优先 pose_semantic_search；scene 优先 scene_metadata_search；time 优先 recent_scene_search。
 - 资产操作：写入前必须先读取确认范围；批量操作优先 batch_patch_model_metadata；preview 模式下只产生预览不执行。
+- 当用户明确要求“专题整理”“记忆归档”“生成回忆标题”时，可以用 write_model_assets 写 summaryTitle；普通重命名只改 displayName，不要顺手改 summaryTitle。
 - 时间对比：用户明确在比较不同时间的变化时使用 time_compare。
 - 如果一个工具已经把最高价值信息带回来了，就进入回答，不要机械凑够轮次。
 - 如果下一轮只是在重复相同思路、相同参数或低价值补充，应主动停止。

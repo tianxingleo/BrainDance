@@ -22,6 +22,8 @@ Deno.test("collectAssetToolResult 会记录 write_model_assets 的预览结果",
             scene_id: "scene_a",
             old_display_name: "旧名字1",
             new_display_name: "test1",
+            old_summary_title: null,
+            new_summary_title: "宿舍桌面记忆",
             old_description: null,
             new_description: null,
             old_tags: ["原标签"],
@@ -46,6 +48,7 @@ Deno.test("collectAssetToolResult 会记录 write_model_assets 的预览结果",
   assertEquals(count, 2);
   assertEquals(state.operation?.tool_name, "write_model_assets");
   assertEquals(state.operation?.preview[0]?.new_display_name, "test1");
+  assertEquals(state.operation?.preview[0]?.new_summary_title, "宿舍桌面记忆");
   assertEquals(state.operation?.preview[1]?.new_display_name, "test2");
 });
 
@@ -61,6 +64,7 @@ Deno.test("buildAssetAnswer 会输出重名模型摘要", () => {
             id: "550e8400-e29b-41d4-a716-446655440000",
             scene_id: "scene_1",
             display_name: "客厅扫描",
+            summary_title: null,
             description: null,
             tags: [],
             created_at: "2026-03-27T10:00:00Z",
@@ -69,6 +73,7 @@ Deno.test("buildAssetAnswer 会输出重名模型摘要", () => {
             id: "550e8400-e29b-41d4-a716-446655440001",
             scene_id: "scene_2",
             display_name: "客厅扫描",
+            summary_title: null,
             description: null,
             tags: [],
             created_at: "2026-03-27T11:00:00Z",

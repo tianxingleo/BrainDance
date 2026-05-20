@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/animated_network_image.dart';
 import 'package:flutter/material.dart';
@@ -15,17 +16,15 @@ import 'models.dart';
 
 class CommunityExploreView extends StatelessWidget {
   final List<CommunityPost> posts;
-  final String? selectedPlaceName;
-  final ValueChanged<String> onSelect;
-  final VoidCallback onClearFilter;
+  final CommunityMapViewport mapViewport;
+  final VoidCallback onOpenMap;
   final ValueChanged<CommunityPost> onTapPost;
 
   const CommunityExploreView({
     super.key,
     required this.posts,
-    required this.selectedPlaceName,
-    required this.onSelect,
-    required this.onClearFilter,
+    required this.mapViewport,
+    required this.onOpenMap,
     required this.onTapPost,
   });
 
@@ -92,17 +91,8 @@ class CommunityExploreView extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (selectedPlaceName != null)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ActionChip(
-                          label: Text(textLocalize('community_show_all')),
-                          avatar: const Icon(Icons.clear_rounded, size: 16),
-                          onPressed: onClearFilter,
-                        ),
-                      ),
                     BDStatusPill(
-                      label: '${posts.length} PINS',
+                      label: 'ZOOM ${mapViewport.zoom}',
                       icon: Icons.public_rounded,
                       color: BDDesign.colorMutedBlue,
                     ),
@@ -113,76 +103,67 @@ class CommunityExploreView extends StatelessWidget {
                   builder: (context, constraints) {
                     final mapWidth = constraints.maxWidth;
                     final mapHeight = math.max(240.0, mapWidth * 0.58);
-                    return SizedBox(
-                      height: mapHeight,
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(26),
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: isDark
-                                      ? const [
-                                          Color(0xFF11161C),
-                                          Color(0xFF1D2833),
-                                          Color(0xFF11161C),
-                                        ]
-                                      : const [
-                                          Color(0xFFEAF1F8),
-                                          Color(0xFFDDE8F2),
-                                          Color(0xFFF7FBFF),
-                                        ],
-                                ),
+                    return GestureDetector(
+                      onTap: onOpenMap,
+                      child: SizedBox(
+                        height: mapHeight,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(26),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              CommunityAmapPreview(
+                                viewport: mapViewport,
+                                width: mapWidth.round().clamp(320, 1024),
+                                height: mapHeight.round().clamp(240, 1024),
                               ),
-                              child: CustomPaint(
-                                painter: _WorldMapPainter(isDark: isDark),
-                              ),
-                            ),
-                          ),
-                          ...posts.asMap().entries.map((entry) {
-                            final post = entry.value;
-                            final isSelected = post.placeName == selectedPlaceName;
-                            final offset = _projectPoint(
-                              post.latitude,
-                              post.longitude,
-                              mapWidth,
-                              mapHeight,
-                            );
-                            return Positioned(
-                              left: offset.dx - 16,
-                              top: offset.dy - 16,
-                              child: GestureDetector(
-                                onTap: () => onSelect(post.placeName),
-                                child: AnimatedContainer(
-                                  duration: BDMotion.durationNormal,
-                                  curve: BDMotion.curveFluid,
-                                  width: isSelected ? 34 : 28,
-                                  height: isSelected ? 34 : 28,
+                              Positioned(
+                                right: 12,
+                                top: 12,
+                                child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: isSelected
-                                        ? const Color(0xFFE9654B)
-                                        : const Color(0xFF2E7CF6),
+                                    color: (isDark
+                                            ? Colors.black
+                                            : Colors.white)
+                                        .withValues(alpha: 0.82),
+                                    borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.92,
-                                      ),
-                                      width: 3,
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.08)
+                                          : BDDesign.colorMutedBlue
+                                              .withValues(alpha: 0.10),
                                     ),
                                   ),
-                                  child: Icon(
-                                    Icons.location_on_rounded,
-                                    color: Colors.white,
-                                    size: isSelected ? 18 : 16,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.open_in_full_rounded,
+                                          color: hintColor,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '调整地图',
+                                          style: TextStyle(
+                                            color: hintColor,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                            );
-                          }),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -192,70 +173,73 @@ class CommunityExploreView extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Builder(builder: (context) {
-            final displayPosts = selectedPlaceName == null
-                ? posts
-                : posts.where((p) => p.placeName == selectedPlaceName).toList();
             return ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: displayPosts.length,
+              itemCount: posts.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
-                final post = displayPosts[index];
-                final isActive = post.placeName == selectedPlaceName;
-              return InkWell(
-                borderRadius: BDDesign.radiusLarge,
-                onTap: () => onTapPost(post),
-                child: BDPanelCard(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      _CommunityThumbnail(
-                        imageUrl: post.coverUrl,
-                        height: 118,
-                        width: 104,
-                        icon: Icons.terrain_rounded,
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(post.placeName,
+                final post = posts[index];
+                return InkWell(
+                  borderRadius: BDDesign.radiusLarge,
+                  onTap: () => onTapPost(post),
+                  child: BDPanelCard(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        _CommunityThumbnail(
+                          imageUrl: post.coverUrl,
+                          height: 118,
+                          width: 104,
+                          icon: Icons.terrain_rounded,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                post.placeName,
                                 style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 4),
-                            Text(
+                                  color: textColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
                                 '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
                                 style: TextStyle(
-                                    color: hintColor, fontSize: 12.5)),
-                            const SizedBox(height: 8),
-                            Text(post.title,
+                                  color: hintColor,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                post.title,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                    color: textColor,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.2)),
-                            const SizedBox(height: 8),
-                            BDStatusPill(
-                              label: post.modelName,
-                              icon: Icons.view_in_ar_rounded,
-                              color: isActive
-                                  ? const Color(0xFF2E7CF6)
-                                  : BDDesign.colorMutedBlue,
-                            ),
-                          ],
+                                  color: textColor,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              BDStatusPill(
+                                label: post.modelName,
+                                icon: Icons.view_in_ar_rounded,
+                                color: BDDesign.colorMutedBlue,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
-          );
+                );
+              },
+            );
           }),
         ],
       ),
@@ -989,83 +973,6 @@ class _CommunityEmptyState extends StatelessWidget {
       ),
     );
   }
-}
-
-class _WorldMapPainter extends CustomPainter {
-  final bool isDark;
-
-  const _WorldMapPainter({required this.isDark});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..color = (isDark ? Colors.white : BDDesign.colorMutedBlue)
-          .withValues(alpha: 0.08)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    for (var i = 1; i < 6; i++) {
-      final dy = size.height * i / 6;
-      canvas.drawLine(Offset(0, dy), Offset(size.width, dy), gridPaint);
-    }
-
-    final landPaint = Paint()
-      ..color = isDark
-          ? const Color(0xFFAFD0E9).withValues(alpha: 0.16)
-          : const Color(0xFF8AA9C7).withValues(alpha: 0.28);
-
-    void drawLand(List<Offset> points) {
-      final path = Path()
-        ..moveTo(
-            points.first.dx * size.width, points.first.dy * size.height);
-      for (final point in points.skip(1)) {
-        path.lineTo(point.dx * size.width, point.dy * size.height);
-      }
-      path.close();
-      canvas.drawPath(path, landPaint);
-    }
-
-    drawLand(const [
-      Offset(0.08, 0.20),
-      Offset(0.20, 0.13),
-      Offset(0.28, 0.17),
-      Offset(0.32, 0.28),
-      Offset(0.25, 0.40),
-      Offset(0.18, 0.38),
-      Offset(0.13, 0.46),
-      Offset(0.09, 0.35),
-    ]);
-    drawLand(const [
-      Offset(0.42, 0.18),
-      Offset(0.52, 0.13),
-      Offset(0.62, 0.18),
-      Offset(0.67, 0.30),
-      Offset(0.61, 0.36),
-      Offset(0.54, 0.32),
-      Offset(0.49, 0.35),
-      Offset(0.46, 0.26),
-    ]);
-    drawLand(const [
-      Offset(0.67, 0.23),
-      Offset(0.82, 0.19),
-      Offset(0.92, 0.28),
-      Offset(0.88, 0.42),
-      Offset(0.78, 0.43),
-      Offset(0.71, 0.36),
-    ]);
-  }
-
-  @override
-  bool shouldRepaint(covariant _WorldMapPainter oldDelegate) {
-    return oldDelegate.isDark != isDark;
-  }
-}
-
-Offset _projectPoint(double lat, double lng, double w, double h) {
-  return Offset(
-    ((lng + 180) / 360 * w).clamp(16.0, w - 16.0),
-    ((90 - lat) / 180 * h).clamp(16.0, h - 16.0),
-  );
 }
 
 class _LocationPreset {

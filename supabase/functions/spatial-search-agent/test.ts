@@ -11,6 +11,7 @@ import {
   normalizeExplicitTimeRange,
   parseSpatialIntentHeuristically,
   parseDeterministicAssetRenameIntent,
+  pickSpatialSearchAnswerAfterStop,
   scoreSceneCandidate,
   shouldStopAssetToolLoop,
   shouldForceAnotherToolRound,
@@ -91,7 +92,6 @@ Deno.test("buildResponseResolutionFromResponse 会为通用 fallback 标注 gene
       related_models: null,
       place_versions: null,
       collection_summary: null,
-      thread_grouping: null,
     },
     compare_context: null,
     collection_context: null,
@@ -121,7 +121,6 @@ Deno.test("shouldStopAssetToolLoop 会在生成写入预览后停止", () => {
       relatedModels: null,
       placeVersions: null,
       collectionSummary: null,
-      threadGrouping: null,
     },
     trace: [{
       toolName: "batch_patch_model_metadata",
@@ -153,7 +152,6 @@ Deno.test("shouldStopAssetToolLoop 会在多轮只剩列表读取时停止", () 
       relatedModels: null,
       placeVersions: null,
       collectionSummary: null,
-      threadGrouping: null,
     },
     trace: [
       {
@@ -579,6 +577,31 @@ Deno.test("shouldForceAnotherToolRound 在证据充分时返回 false", () => {
   });
 
   assertEquals(shouldContinue, false);
+});
+
+Deno.test("pickSpatialSearchAnswerAfterStop 优先使用 stop_search 后的用户可读总结", () => {
+  const answer = pickSpatialSearchAnswerAfterStop({
+    trace: [
+      { toolName: "pose_semantic_search" },
+      { toolName: "stop_search" },
+    ],
+    stopSummary: "我已经找到最相关的桌面模型，可以直接打开查看。",
+    deterministicAnswer: "已找到匹配的空间候选。",
+  });
+
+  assertEquals(answer, "我已经找到最相关的桌面模型，可以直接打开查看。");
+});
+
+Deno.test("pickSpatialSearchAnswerAfterStop 在没有 stop_search 总结时保留确定性回答", () => {
+  const answer = pickSpatialSearchAnswerAfterStop({
+    trace: [
+      { toolName: "pose_semantic_search" },
+    ],
+    stopSummary: "我已经找到最相关的桌面模型。",
+    deterministicAnswer: "已找到匹配的空间候选。",
+  });
+
+  assertEquals(answer, "已找到匹配的空间候选。");
 });
 
 Deno.test("shouldForceAnotherToolRound 在单个高分交叉证据候选时不再强制续轮", () => {

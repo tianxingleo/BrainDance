@@ -13,6 +13,7 @@ type ModelAssetRow = {
   scene_id: string;
   description: string | null;
   display_name: string | null;
+  summary_title: string | null;
   objects: string[] | null;
   tags: string[] | null;
   preview_img_path: string | null;
@@ -29,6 +30,7 @@ export type ListedModelAsset = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  summary_title: string | null;
   description: string | null;
   tags: string[];
   created_at: string;
@@ -40,6 +42,7 @@ export type ModelAssetBundle = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  summary_title: string | null;
   description: string | null;
   objects: string[];
   tags: string[];
@@ -78,6 +81,8 @@ export type AssetOperationResult = {
     scene_id: string;
     old_display_name: string | null;
     new_display_name: string | null;
+    old_summary_title?: string | null;
+    new_summary_title?: string | null;
     old_description: string | null;
     new_description: string | null;
     old_tags: string[];
@@ -96,11 +101,6 @@ export type AssetToolState = {
   relatedModels: RelatedModelSummary[] | null;
   placeVersions: PlaceVersionsResult | null;
   collectionSummary: MemoryCollectionSummary | null;
-  threadGrouping: {
-    model_ids: string[];
-    place_id: string;
-    memory_thread_id: string;
-  } | null;
 };
 
 type AssetToolRuntimeOptions = {
@@ -157,10 +157,16 @@ const writeModelAssetsSchema = z.object({
   updates: z.array(z.object({
     modelId: z.string().uuid(),
     displayName: z.string().trim().min(1).max(120).optional(),
+    summaryTitle: z.string().trim().min(1).max(80).optional(),
     description: z.string().trim().max(2000).optional(),
     tags: z.array(z.string().trim().min(1)).optional(),
   }).refine((item) =>
-    Boolean(item.displayName || item.description !== undefined || item.tags), {
+    Boolean(
+      item.displayName ||
+        item.summaryTitle ||
+        item.description !== undefined ||
+        item.tags,
+    ), {
     message: "每条更新至少包含一个可写字段",
   })).min(1).max(20),
   dryRun: z.boolean().default(true),
@@ -193,6 +199,7 @@ const listedModelAssetSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  summary_title: z.string().nullable(),
   description: z.string().nullable(),
   tags: z.array(z.string()),
   created_at: z.string(),
@@ -204,6 +211,7 @@ const modelAssetBundleSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  summary_title: z.string().nullable(),
   description: z.string().nullable(),
   objects: z.array(z.string()),
   tags: z.array(z.string()),
@@ -242,6 +250,8 @@ const assetOperationSchema = z.object({
     scene_id: z.string(),
     old_display_name: z.string().nullable(),
     new_display_name: z.string().nullable(),
+    old_summary_title: z.string().nullable().optional(),
+    new_summary_title: z.string().nullable().optional(),
     old_description: z.string().nullable(),
     new_description: z.string().nullable(),
     old_tags: z.array(z.string()),
@@ -269,13 +279,11 @@ const relatedModelSummarySchema = z.object({
   relation_score: z.number(),
   created_at: z.string(),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   version_label: z.string().nullable(),
 });
 
 const placeVersionsResultSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   versions: z.array(z.object({
     model_id: z.string(),
     scene_id: z.string(),
@@ -348,14 +356,6 @@ const assetToolResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("memory_collection_summary"),
     summary: memoryCollectionSummarySchema,
-  }),
-  z.object({
-    kind: z.literal("group_models_into_thread"),
-    result: z.object({
-      model_ids: z.array(z.string()),
-      place_id: z.string(),
-      memory_thread_id: z.string(),
-    }),
   }),
   z.object({
     kind: z.literal("memory_collection"),
@@ -435,7 +435,7 @@ async function fetchModelAssets(
   const { data, error } = await supabase
     .from("model_assets")
     .select(
-      "id, scene_id, description, display_name, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+      "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
     )
     .in("id", modelIds)
     .order("created_at", { ascending: true });
@@ -540,6 +540,7 @@ async function buildBundle(
       id: row.id,
       scene_id: row.scene_id,
       display_name: row.display_name?.trim() || null,
+      summary_title: row.summary_title?.trim() || null,
       description: row.description,
       objects: safeArray(row.objects),
       tags: safeArray(row.tags),
@@ -629,6 +630,8 @@ function buildPatchedPreview(
       scene_id: row.scene_id,
       old_display_name: row.display_name?.trim() || null,
       new_display_name: nextName,
+      old_summary_title: row.summary_title?.trim() || null,
+      new_summary_title: row.summary_title?.trim() || null,
       old_description: row.description,
       new_description: nextDescription,
       old_tags: oldTags,
@@ -677,6 +680,7 @@ function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
     id: row.id,
     scene_id: row.scene_id,
     display_name: row.display_name?.trim() || null,
+    summary_title: row.summary_title?.trim() || null,
     description: row.description,
     tags: safeArray(row.tags),
     created_at: row.created_at,
@@ -733,9 +737,6 @@ export function buildAssetAnswer(
   }
   if (state.placeVersions) {
     return `已列出 ${state.placeVersions.versions.length} 个地点版本。`;
-  }
-  if (state.threadGrouping) {
-    return `已将 ${state.threadGrouping.model_ids.length} 个模型归入同一记忆线程。`;
   }
   if (state.list) {
     return isRecommendation
@@ -891,7 +892,7 @@ export function buildReadModelAssetsTool(
       let builder = supabase
         .from("model_assets")
         .select(
-          "id, scene_id, description, display_name, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+          "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
         )
         .order("created_at", { ascending: false })
         .limit(Math.max(input.limit * 5, 20));
@@ -1006,6 +1007,8 @@ export function buildRenameModelAssetTool(
           scene_id: row.scene_id,
           old_display_name: row.display_name?.trim() || null,
           new_display_name: input.newName,
+          old_summary_title: row.summary_title?.trim() || null,
+          new_summary_title: row.summary_title?.trim() || null,
           old_description: row.description,
           new_description: row.description,
           old_tags: safeArray(row.tags),
@@ -1075,7 +1078,7 @@ export function buildWriteModelAssetsTool(
   return new DynamicStructuredTool({
     name: "write_model_assets",
     description:
-      "通用模型资产写库工具。支持一次更新多个模型的 display_name、description、tags；适合“分别改名”“逐条修改”这类请求。",
+      "通用模型资产写库工具。支持一次更新多个模型的 display_name、summary_title、description、tags；summary_title 仅用于 Agent 专题整理/记忆归档的简短回忆标题，不替代用户可编辑名称。",
     schema: writeModelAssetsSchema,
     func: async (input) => {
       const targetIds = restrictModelIds(
@@ -1101,6 +1104,8 @@ export function buildWriteModelAssetsTool(
           scene_id: row.scene_id,
           old_display_name: row.display_name?.trim() || null,
           new_display_name: update.displayName ?? row.display_name?.trim() ?? null,
+          old_summary_title: row.summary_title?.trim() || null,
+          new_summary_title: update.summaryTitle ?? row.summary_title?.trim() ?? null,
           old_description: row.description,
           new_description: update.description ?? row.description,
           old_tags: safeArray(row.tags),
@@ -1110,13 +1115,20 @@ export function buildWriteModelAssetsTool(
 
       if (!dryRun) {
         for (const item of preview) {
+          const requestedUpdate = input.updates.find((update) =>
+            update.modelId === item.model_id
+          );
+          const updatePayload: Record<string, unknown> = {
+            display_name: item.new_display_name,
+            description: item.new_description,
+            tags: item.new_tags,
+          };
+          if (requestedUpdate?.summaryTitle !== undefined) {
+            updatePayload.summary_title = item.new_summary_title ?? null;
+          }
           const { error } = await supabase
             .from("model_assets")
-            .update({
-              display_name: item.new_display_name,
-              description: item.new_description,
-              tags: item.new_tags,
-            })
+            .update(updatePayload)
             .eq("id", item.model_id);
           if (error) {
             throw new Error(`write_model_assets 执行失败: ${error.message}`);
@@ -1214,7 +1226,6 @@ export function createEmptyAssetToolState(): AssetToolState {
     relatedModels: null,
     placeVersions: null,
     collectionSummary: null,
-    threadGrouping: null,
   };
 }
 
@@ -1270,10 +1281,6 @@ export function collectAssetToolResult(
   if (parsed.kind === "memory_collection_summary" && parsed.summary) {
     state.collectionSummary = parsed.summary;
     return state.collectionSummary.model_count;
-  }
-  if (parsed.kind === "group_models_into_thread" && parsed.result) {
-    state.threadGrouping = parsed.result;
-    return state.threadGrouping?.model_ids.length ?? 0;
   }
   if (parsed.kind === "memory_collection") {
     return 1;

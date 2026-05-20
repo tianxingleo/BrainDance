@@ -16,7 +16,6 @@ type ModelAssetRow = {
   meta_info: Record<string, unknown> | null;
   agent_meta: Record<string, unknown> | null;
   place_id: string | null;
-  memory_thread_id: string | null;
   version_label: string | null;
   created_at: string;
 };
@@ -78,13 +77,11 @@ export type RelatedModelSummary = {
   relation_score: number;
   created_at: string;
   place_id: string | null;
-  memory_thread_id: string | null;
   version_label: string | null;
 };
 
 export type PlaceVersionsResult = {
   place_id: string | null;
-  memory_thread_id: string | null;
   versions: Array<{
     model_id: string;
     scene_id: string;
@@ -137,7 +134,6 @@ export type StoryOutline = {
 
 export type RecentPlaceTrend = {
   place_id: string | null;
-  memory_thread_id: string | null;
   related_models: string[];
   trend: string;
   pose_counts: number[];
@@ -155,7 +151,6 @@ export type MissingObjectPattern = {
 
 export type PlaceTimelineSummary = {
   place_id: string | null;
-  memory_thread_id: string | null;
   timeline: Array<{
     model_id: string;
     created_at: string;
@@ -169,14 +164,12 @@ export type MemoryGraphSummary = {
   focus_model_id: string;
   related_model_ids: string[];
   place_id: string | null;
-  memory_thread_id: string | null;
   summary: string;
   key_relationships: string[];
 };
 
 const listPlaceVersionsSchema = z.object({
   placeId: z.string().uuid().nullable().optional(),
-  memoryThreadId: z.string().uuid().nullable().optional(),
   modelId: z.string().uuid().nullable().optional(),
   limit: z.number().int().min(1).max(20).default(10),
 });
@@ -207,14 +200,6 @@ const addModelsToCollectionSchema = z.object({
 
 const summarizeCollectionSchema = z.object({
   collectionId: z.string().uuid(),
-});
-
-const groupModelsIntoThreadSchema = z.object({
-  modelIds: z.array(z.string().uuid()).min(1).max(50),
-  placeId: z.string().uuid().nullable().optional(),
-  memoryThreadId: z.string().uuid().nullable().optional(),
-  versionLabelByModel: z.record(z.string(), z.string().trim().max(120))
-    .default({}),
 });
 
 function safeArray(value: unknown): string[] {
@@ -278,7 +263,7 @@ async function fetchModelAssets(
   const { data, error } = await supabase
     .from("model_assets")
     .select(
-      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, memory_thread_id, version_label, created_at",
+      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
     .in("id", modelIds);
 
@@ -410,7 +395,6 @@ export async function findRelatedModels(
         relation_score: Number(link.score ?? 0),
         created_at: related.created_at,
         place_id: related.place_id,
-        memory_thread_id: related.memory_thread_id,
         version_label: related.version_label,
       });
     }
@@ -421,7 +405,7 @@ export async function findRelatedModels(
   let builder = supabase
     .from("model_assets")
     .select(
-      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, memory_thread_id, version_label, created_at",
+      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
     .neq("id", input.modelId)
     .limit(Math.max(input.limit * 5, 20));
@@ -431,8 +415,6 @@ export async function findRelatedModels(
   }
   if (base.place_id) {
     builder = builder.eq("place_id", base.place_id);
-  } else if (base.memory_thread_id) {
-    builder = builder.eq("memory_thread_id", base.memory_thread_id);
   }
 
   const { data, error } = await builder.order("created_at", { ascending: false });
@@ -446,10 +428,7 @@ export async function findRelatedModels(
       const sharedTags = row.tags!.filter((tag) => base.tags!.includes(tag));
       const sharedObjects = row.objects!.filter((item) => base.objects!.includes(item));
       const samePlace = base.place_id && row.place_id === base.place_id ? 0.45 : 0;
-      const sameThread = base.memory_thread_id && row.memory_thread_id === base.memory_thread_id
-        ? 0.35
-        : 0;
-      const score = samePlace + sameThread +
+      const score = samePlace +
         Math.min(sharedTags.length * 0.08, 0.24) +
         Math.min(sharedObjects.length * 0.05, 0.15);
       return {
@@ -458,13 +437,10 @@ export async function findRelatedModels(
         display_name: row.display_name,
         relation_type: samePlace
           ? "same_place"
-          : sameThread
-          ? "same_thread"
           : "metadata_overlap",
         relation_score: Number(score.toFixed(4)),
         created_at: row.created_at,
         place_id: row.place_id,
-        memory_thread_id: row.memory_thread_id,
         version_label: row.version_label,
       };
     })
@@ -487,29 +463,25 @@ export async function listPlaceVersions(
   input: z.infer<typeof listPlaceVersionsSchema>,
 ): Promise<PlaceVersionsResult> {
   let placeId = input.placeId ?? null;
-  let memoryThreadId = input.memoryThreadId ?? null;
 
-  if (input.modelId && (!placeId || !memoryThreadId)) {
+  if (input.modelId && !placeId) {
     const [base] = await fetchModelAssets(supabase, [input.modelId]);
     if (!base) {
       throw new Error(`未找到模型 ${input.modelId}`);
     }
     placeId = placeId ?? base.place_id;
-    memoryThreadId = memoryThreadId ?? base.memory_thread_id;
   }
 
   let builder = supabase
     .from("model_assets")
     .select(
-      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, memory_thread_id, version_label, created_at",
+      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
     .order("created_at", { ascending: true })
     .limit(input.limit);
 
   if (placeId) {
     builder = builder.eq("place_id", placeId);
-  } else if (memoryThreadId) {
-    builder = builder.eq("memory_thread_id", memoryThreadId);
   } else if (input.modelId) {
     builder = builder.eq("id", input.modelId);
   }
@@ -521,7 +493,6 @@ export async function listPlaceVersions(
 
   return {
     place_id: placeId,
-    memory_thread_id: memoryThreadId,
     versions: ((data ?? []) as ModelAssetRow[]).map((row) => ({
       model_id: row.id,
       scene_id: row.scene_id,
@@ -614,7 +585,7 @@ export async function summarizeCollection(
   const { data: items, error: itemError } = await supabase
     .from("memory_collection_items")
     .select(
-      "collection_id, sort_order, note, model_assets(id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, memory_thread_id, version_label, created_at)",
+      "collection_id, sort_order, note, model_assets(id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at)",
     )
     .eq("collection_id", input.collectionId)
     .order("sort_order", { ascending: true });
@@ -664,40 +635,6 @@ export async function summarizeCollection(
       ? `该专题当前收录 ${normalizedItems.length} 个模型，时间跨度从 ${firstDate} 到 ${lastDate}。高频主题包括 ${tagSuggestions.join("、") || "未标注主题"}。`
       : "该专题目前还没有收录模型。",
     tag_suggestions: tagSuggestions,
-  };
-}
-
-export async function groupModelsIntoThread(
-  supabase: SupabaseClient,
-  input: z.infer<typeof groupModelsIntoThreadSchema>,
-  options: AssetToolRuntimeOptions = {},
-): Promise<{
-  model_ids: string[];
-  place_id: string;
-  memory_thread_id: string;
-}> {
-  const modelIds = restrictModelIds(input.modelIds, options.selectedModelIds);
-  const placeId = input.placeId ?? crypto.randomUUID();
-  const memoryThreadId = input.memoryThreadId ?? crypto.randomUUID();
-
-  for (const modelId of modelIds) {
-    const { error } = await supabase
-      .from("model_assets")
-      .update({
-        place_id: placeId,
-        memory_thread_id: memoryThreadId,
-        version_label: input.versionLabelByModel[modelId] ?? null,
-      })
-      .eq("id", modelId);
-    if (error) {
-      throw new Error(`更新模型线程归组失败: ${error.message}`);
-    }
-  }
-
-  return {
-    model_ids: modelIds,
-    place_id: placeId,
-    memory_thread_id: memoryThreadId,
   };
 }
 
@@ -836,7 +773,6 @@ export async function getRecentPlaceTrend(
   const trend = trendLabel(objectCounts);
   return {
     place_id: versions.place_id,
-    memory_thread_id: versions.memory_thread_id,
     related_models: versions.versions.map((item) => item.model_id),
     trend,
     pose_counts: poseCounts,
@@ -879,7 +815,6 @@ export async function summarizePlaceChangeTimeline(
   });
   return {
     place_id: versions.place_id,
-    memory_thread_id: versions.memory_thread_id,
     timeline: versions.versions,
     summary: versions.versions.length > 1
       ? `该地点共有 ${versions.versions.length} 个版本，时间从 ${versions.versions[0].created_at.slice(0, 10)} 延续到 ${versions.versions[versions.versions.length - 1].created_at.slice(0, 10)}。`
@@ -901,7 +836,6 @@ export async function buildPersonalMemoryGraphSummary(
   });
   const keyRelationships = dedupeStrings([
     base.place_id ? "同一地点版本链" : "",
-    base.memory_thread_id ? "同一记忆线程" : "",
     ...related.map((item) => item.relation_type),
   ]).filter(Boolean);
 
@@ -909,7 +843,6 @@ export async function buildPersonalMemoryGraphSummary(
     focus_model_id: base.id,
     related_model_ids: related.map((item) => item.model_id),
     place_id: base.place_id,
-    memory_thread_id: base.memory_thread_id,
     summary: `${currentDisplayName(base)} 当前关联 ${related.length} 个近邻记忆，主要关系包括 ${keyRelationships.join("、") || "弱关联"}。`,
     key_relationships: keyRelationships,
   };
@@ -940,7 +873,7 @@ export function buildFindRelatedModelsTool(
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "find_related_models",
-    description: "查找可能属于同一地点、同一线程或描述相近的模型版本。",
+    description: "查找可能属于同一地点或描述相近的模型版本。",
     schema: findRelatedModelsSchema,
     func: async (input) => {
       const [modelId] = restrictModelIds([input.modelId], options.selectedModelIds);
@@ -958,7 +891,7 @@ export function buildListPlaceVersionsTool(
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "list_place_versions",
-    description: "列出同一地点或同一记忆线程下的时间顺序版本。",
+    description: "列出同一地点下的时间顺序版本。",
     schema: listPlaceVersionsSchema,
     func: async (input) => {
       const result = await listPlaceVersions(supabase, input);
@@ -1025,20 +958,3 @@ export function buildSummarizeCollectionTool(
   });
 }
 
-export function buildGroupModelsIntoThreadTool(
-  supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
-): DynamicStructuredTool {
-  return new DynamicStructuredTool({
-    name: "group_models_into_thread",
-    description: "把多个模型归入同一地点与记忆线程，可附带版本标签。",
-    schema: groupModelsIntoThreadSchema,
-    func: async (input) => {
-      const result = await groupModelsIntoThread(supabase, input, options);
-      return JSON.stringify({
-        kind: "group_models_into_thread",
-        result,
-      });
-    },
-  });
-}

@@ -3,6 +3,7 @@ import {
   type SupabaseClient,
 } from "https://esm.sh/@supabase/supabase-js@2";
 import {
+  AIMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
@@ -31,7 +32,6 @@ import {
   buildCreateMemoryCollectionTool,
   buildFindRelatedModelsTool,
   buildGetPoseSummaryTool,
-  buildGroupModelsIntoThreadTool,
   buildListPlaceVersionsTool,
   buildPersonalMemoryGraphSummary,
   buildSummarizeCollectionTool,
@@ -227,13 +227,11 @@ const relatedModelSummarySchema = z.object({
   relation_score: z.number(),
   created_at: z.string(),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   version_label: z.string().nullable(),
 });
 
 const placeVersionsSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   versions: z.array(z.object({
     model_id: z.string(),
     scene_id: z.string(),
@@ -299,7 +297,6 @@ const creativeTaskSchema = z.object({
 
 const recentPlaceTrendSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   related_models: z.array(z.string()),
   trend: z.string(),
   pose_counts: z.array(z.number()),
@@ -317,7 +314,6 @@ const missingObjectPatternSchema = z.object({
 
 const placeTimelineSummarySchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   timeline: z.array(z.object({
     model_id: z.string(),
     created_at: z.string(),
@@ -331,7 +327,6 @@ const memoryGraphSummarySchema = z.object({
   focus_model_id: z.string(),
   related_model_ids: z.array(z.string()),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   summary: z.string(),
   key_relationships: z.array(z.string()),
 });
@@ -519,11 +514,6 @@ const assetContextSchema = z.object({
   related_models: z.array(relatedModelSummarySchema).nullable().optional(),
   place_versions: placeVersionsSchema.nullable().optional(),
   collection_summary: memoryCollectionSummarySchema.nullable().optional(),
-  thread_grouping: z.object({
-    model_ids: z.array(z.string()),
-    place_id: z.string(),
-    memory_thread_id: z.string(),
-  }).nullable().optional(),
 });
 
 const poseSearchRowSchema = z.object({
@@ -687,6 +677,13 @@ export type AgentProgressEvent =
     event: "thought" | "thinking";
     data: {
       content: string;
+    };
+  }
+  | {
+    event: "message";
+    data: {
+      delta: string;
+      done?: boolean;
     };
   }
   | {
@@ -1157,6 +1154,97 @@ function summarizeToolResult(toolName: string, count: number): string {
   return `${toolName} 返回 ${count} 条候选`;
 }
 
+function buildStopSearchSummaryPayload(input: {
+  query: string;
+  stopReason: unknown;
+  stopConfidence: unknown;
+  trace: ToolTraceEntry[];
+  candidates: Map<string, SceneCandidate>;
+  assetState: AssetToolState;
+}): Record<string, unknown> {
+  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
+    candidate,
+  ) => ({
+    scene_id: candidate.sceneId,
+    model_id: candidate.modelId,
+    display_name: candidate.displayName ?? null,
+    description: candidate.description,
+    tags: candidate.tags,
+    best_pose: candidate.bestPose
+      ? {
+        image_name: candidate.bestPose.image_name,
+        similarity: candidate.bestPose.similarity,
+        tag: candidate.bestPose.tag,
+      }
+      : null,
+    source_scores: candidate.sourceScores,
+  }));
+
+  return {
+    user_query: input.query,
+    stop_reason: typeof input.stopReason === "string" ? input.stopReason : "",
+    stop_confidence: typeof input.stopConfidence === "number"
+      ? input.stopConfidence
+      : null,
+    tool_trace: input.trace,
+    spatial_candidates: topCandidates,
+    asset_context: serializeAssetContext(input.assetState),
+  };
+}
+
+async function buildStopSearchUserFacingSummary(input: {
+  model: ChatOpenAI;
+  query: string;
+  stopReason: unknown;
+  stopConfidence: unknown;
+  trace: ToolTraceEntry[];
+  candidates: Map<string, SceneCandidate>;
+  assetState: AssetToolState;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<string> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "stop_search_summary",
+      summary: "Agent 已停止继续调用工具，正在整理当前结果概述",
+    },
+  });
+
+  const payload = buildStopSearchSummaryPayload(input);
+  const result = await input.model.invoke([
+    new SystemMessage(
+      [
+        "你是 BrainDance 的空间记忆 Agent。",
+        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
+        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
+        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
+        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
+        "不要编造工具结果中不存在的场景、数量或字段。",
+        "控制在 2 到 4 句，语气自然、明确。",
+      ].join("\n"),
+    ),
+    new HumanMessage(
+      `用户问题：${input.query}\n\n当前工具结果摘要：\n${
+        JSON.stringify(payload, null, 2)
+      }\n\n请输出给用户看的最终回答。`,
+    ),
+  ]);
+
+  return extractModelTextContent(result.content).trim();
+}
+
+export function pickSpatialSearchAnswerAfterStop(input: {
+  trace: Array<{ toolName: string }>;
+  stopSummary: string;
+  deterministicAnswer: string;
+}): string {
+  const hasStopSearch = input.trace.some((entry) =>
+    entry.toolName === "stop_search"
+  );
+  const summary = input.stopSummary.trim();
+  return hasStopSearch && summary ? summary : input.deterministicAnswer;
+}
+
 function serializeAssetOperation(state: AssetToolState) {
   return state.operation
     ? {
@@ -1180,7 +1268,6 @@ function serializeAssetContext(state: AssetToolState) {
     related_models: state.relatedModels,
     place_versions: state.placeVersions,
     collection_summary: state.collectionSummary,
-    thread_grouping: state.threadGrouping,
   };
 }
 
@@ -2859,6 +2946,26 @@ async function executeUnifiedAgentLoop(input: {
           data: { phase: "llm_stop_decision", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, detail: `置信度: ${toolArgs.confidence ?? "N/A"}` },
         });
         msgs.push(new ToolMessage({ tool_call_id: toolCall.id ?? toolCall.name, content: resultText }));
+        const stopSummary = await buildStopSearchUserFacingSummary({
+          model,
+          query,
+          stopReason: toolArgs.reason,
+          stopConfidence: toolArgs.confidence,
+          trace: tr,
+          candidates: cands,
+          assetState: aState,
+          callbacks,
+        }).catch((error) => {
+          console.warn(
+            `[SpatialAgent] stop_search summary failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return "";
+        });
+        if (stopSummary) {
+          msgs.push(new AIMessage(stopSummary));
+        }
         return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
       }
 
@@ -2934,7 +3041,6 @@ function inferResponseMode(trace: ToolTraceEntry[]): AgentMode {
     "batch_patch_model_metadata", "get_model_asset_bundle", "compare_model_assets",
     "get_pose_summary", "find_related_models", "list_place_versions",
     "create_memory_collection", "add_models_to_collection", "summarize_collection",
-    "group_models_into_thread",
   ];
   if (assetToolNames.some((n) => toolNames.has(n))) return "asset_metadata";
   return "spatial_search";
@@ -3154,10 +3260,10 @@ export function shouldStopAssetToolLoop(input: {
       reason: "已经拿到结构化对比结果，可以直接进入回答整理。",
     };
   }
-  if (state.collectionSummary || state.threadGrouping) {
+  if (state.collectionSummary) {
     return {
       stop: true,
-      reason: "专题或线程整理结果已经生成，当前工具链目标已完成。",
+      reason: "专题整理结果已经生成，当前工具链目标已完成。",
     };
   }
   if (state.poseSummary || state.relatedModels || state.placeVersions) {
@@ -4079,7 +4185,6 @@ export async function runSpatialSearchAgent(
     buildCreateMemoryCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildAddModelsToCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildSummarizeCollectionTool(supabase),
-    buildGroupModelsIntoThreadTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildTimeCompareTool(),
     buildStopSearchTool(),
   ];
@@ -4187,13 +4292,19 @@ export async function runSpatialSearchAgent(
   const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId ? finalScene.bestPose : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({ scene: finalScene ?? null, selectedPose: finalPose, supabase, bucket: env.storageBucket });
   const topCandidates = deduplicatedCandidates.slice(0, 5).map(serializeSceneCandidate);
+  const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
+  const answer = pickSpatialSearchAnswerAfterStop({
+    trace,
+    stopSummary: stopSearchSummary,
+    deterministicAnswer: selection.answer,
+  });
 
   return finalizeResponseWithLongTermMemory(supabase, {
     success: true,
     mode: "spatial_search",
     intent: pseudoIntent,
     selection: { scene_id: selection.selectedSceneId, model_id: selection.selectedModelId, pose_image_id: selection.selectedPoseImageId, confidence: selection.confidence, reason: selection.selectionReason },
-    answer: selection.answer,
+    answer,
     actions: finalActions,
     viewer_payload: {
       ply: finalScene ? publicUrlForPath(supabase, env.storageBucket, finalScene.plyPath) : null,

@@ -2,6 +2,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/pages/community/detail.dart';
+import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
@@ -25,9 +26,13 @@ class _CommunityPageState extends State<CommunityPage>
 
   List<CommunityPost> _posts = const [];
   List<CommunityModelOption> _shareableModels = const [];
-  String? _selectedPlaceName;
   bool _isLoading = true;
   int _tabIndex = 0;
+  CommunityMapViewport _mapViewport = const CommunityMapViewport(
+    latitude: 30.243,
+    longitude: 120.150,
+    zoom: 10,
+  );
 
   // Discover tab
   final Set<String> _selectedTags = {};
@@ -126,6 +131,35 @@ class _CommunityPageState extends State<CommunityPage>
         },
       ),
     );
+  }
+
+  Future<void> _openMapPage() async {
+    final result = await Navigator.push<CommunityMapViewport>(
+      context,
+      PageRouteBuilder(
+        transitionDuration: BDMotion.durationNormal,
+        reverseTransitionDuration: BDMotion.durationNormal,
+        opaque: true,
+        pageBuilder: (_, __, ___) =>
+            CommunityMapPage(initialViewport: _mapViewport),
+        transitionsBuilder: (_, animation, __, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.0, 1.0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOutCubic,
+              ),
+            ),
+            child: child,
+          );
+        },
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _mapViewport = result);
   }
   
   void _openViewer(CommunityPost post) {
@@ -393,11 +427,8 @@ class _CommunityPageState extends State<CommunityPage>
                         children: [
                           CommunityExploreView(
                             posts: _posts,
-                            selectedPlaceName: _selectedPlaceName,
-                            onSelect: (placeName) => setState(
-                                () => _selectedPlaceName = placeName),
-                            onClearFilter: () => setState(
-                                () => _selectedPlaceName = null),
+                            mapViewport: _mapViewport,
+                            onOpenMap: _openMapPage,
                             onTapPost: _openDetail,
                           ),
                           CommunityDiscoverView(
