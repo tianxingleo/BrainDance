@@ -85,20 +85,6 @@ class CreateGuidePage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    _buildEntryCard(
-                      context,
-                      icon: Icons.groups_rounded,
-                      title: textLocalize('community'),
-                      subtitle: textLocalize('create_community_desc'),
-                      onTap: () => Navigator.push(
-                        context,
-                        _verticalSlideRoute(
-                          builder: (_) => const CommunityPage(),
-                          fromTop: false,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
