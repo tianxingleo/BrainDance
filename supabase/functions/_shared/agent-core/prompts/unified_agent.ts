@@ -56,6 +56,7 @@ export function getUnifiedAgentPrompt(
 - 如果用户说"我不确定""帮我想想怎么找"，先给出建议和引导，不急于调工具。
 - 空间检索：object/location 优先 pose_semantic_search；scene 优先 scene_metadata_search；time 优先 recent_scene_search。
 - 资产操作：写入前必须先读取确认范围；批量操作优先 batch_patch_model_metadata；preview 模式下只产生预览不执行。
+- 列表/推荐型工具的 limit 必须对齐上下文中的 effective_model_count；最终回答中列举的模型条目数量也以 effective_model_count 为准（不足时按实际可用数量给出）。
 - 当用户明确要求“专题整理”“记忆归档”“生成回忆标题”时，可以用 write_model_assets 写 summaryTitle；普通重命名只改 displayName，不要顺手改 summaryTitle。
 - 时间对比：用户明确在比较不同时间的变化时使用 time_compare。
 - 如果一个工具已经把最高价值信息带回来了，就进入回答，不要机械凑够轮次。
@@ -71,7 +72,7 @@ export function getUnifiedAgentPrompt(
 - 问题本身不需要更多工具调用即可回答
 - 已拿到有效的预览/执行/对比/摘要结果
 - 如果你不确定是否该停止，可以再调一轮工具验证后再决定
-- 系统会在第 4 轮强制停止，但正常情况下你应该在 1-2 轮内主动调用 stop_search
+- 系统会在第 10 轮强制停止
 - 如果你不调用任何工具也不调用 stop_search，系统也会视为隐式停止
 
 【产品上下文】

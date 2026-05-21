@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/pages/community/map_marker.dart';
 import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/animated_network_image.dart';
@@ -16,9 +17,17 @@ import 'models.dart';
 
 class CommunityExploreView extends StatelessWidget {
   final List<CommunityPost> posts;
+  final int totalPosts;
+  final int viewportPosts;
   final CommunityMapViewport mapViewport;
+  final List<CommunityMapMarker> mapMarkers;
   final VoidCallback onOpenMap;
   final ValueChanged<CommunityPost> onTapPost;
+  final List<String> availableTags;
+  final String? selectedTag;
+  final ValueChanged<String> onToggleTag;
+  final VoidCallback onClearFilters;
+  final double tagRadiusKm;
 
   const CommunityExploreView({
     super.key,
@@ -26,6 +35,14 @@ class CommunityExploreView extends StatelessWidget {
     required this.mapViewport,
     required this.onOpenMap,
     required this.onTapPost,
+    this.totalPosts = 0,
+    this.viewportPosts = 0,
+    this.mapMarkers = const [],
+    this.availableTags = const [],
+    this.selectedTag,
+    required this.onToggleTag,
+    required this.onClearFilters,
+    this.tagRadiusKm = 0,
   });
 
   @override
@@ -37,7 +54,9 @@ class CommunityExploreView extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
 
-    if (posts.isEmpty) return const _CommunityEmptyState();
+    if (totalPosts == 0) return const _CommunityEmptyState();
+    final boundsReady = mapViewport.bounds != null;
+    final hasTag = selectedTag != null && selectedTag!.isNotEmpty;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
@@ -116,6 +135,7 @@ class CommunityExploreView extends StatelessWidget {
                                 viewport: mapViewport,
                                 width: mapWidth.round().clamp(320, 1024),
                                 height: mapHeight.round().clamp(240, 1024),
+                                markers: mapMarkers,
                               ),
                               Positioned(
                                 right: 12,
@@ -172,75 +192,100 @@ class CommunityExploreView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          Builder(builder: (context) {
-            return ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: posts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final post = posts[index];
-                return InkWell(
-                  borderRadius: BDDesign.radiusLarge,
-                  onTap: () => onTapPost(post),
-                  child: BDPanelCard(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
-                      children: [
-                        _CommunityThumbnail(
-                          imageUrl: post.coverUrl,
-                          height: 118,
-                          width: 104,
-                          icon: Icons.terrain_rounded,
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                post.placeName,
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
-                                style: TextStyle(
-                                  color: hintColor,
-                                  fontSize: 12.5,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                post.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: textColor,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.2,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              BDStatusPill(
-                                label: post.modelName,
-                                icon: Icons.view_in_ar_rounded,
-                                color: BDDesign.colorMutedBlue,
-                              ),
-                            ],
+          _ExploreFilterBar(
+            isDark: isDark,
+            textColor: textColor,
+            hintColor: hintColor,
+            boundsReady: boundsReady,
+            zoom: mapViewport.zoom,
+            tagRadiusKm: tagRadiusKm,
+            visibleCount: viewportPosts,
+            totalCount: totalPosts,
+            filteredCount: posts.length,
+            availableTags: availableTags,
+            selectedTag: selectedTag,
+            onToggleTag: onToggleTag,
+            onClearFilters: onClearFilters,
+          ),
+          const SizedBox(height: 12),
+          if (posts.isEmpty)
+            _ExploreEmptyHint(
+              isDark: isDark,
+              textColor: textColor,
+              hintColor: hintColor,
+              hasTag: hasTag,
+              onClearFilters: onClearFilters,
+            )
+          else
+            Builder(builder: (context) {
+              return ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: posts.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final post = posts[index];
+                  return InkWell(
+                    borderRadius: BDDesign.radiusLarge,
+                    onTap: () => onTapPost(post),
+                    child: BDPanelCard(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          _CommunityThumbnail(
+                            imageUrl: post.coverUrl,
+                            height: 118,
+                            width: 104,
+                            icon: Icons.terrain_rounded,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  post.placeName,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${post.latitude.toStringAsFixed(3)}, ${post.longitude.toStringAsFixed(3)}',
+                                  style: TextStyle(
+                                    color: hintColor,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  post.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                BDStatusPill(
+                                  label: post.modelName,
+                                  icon: Icons.view_in_ar_rounded,
+                                  color: BDDesign.colorMutedBlue,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            );
-          }),
+                  );
+                },
+              );
+            }),
         ],
       ),
     );
@@ -981,4 +1026,231 @@ class _LocationPreset {
   final double longitude;
 
   const _LocationPreset(this.name, this.latitude, this.longitude);
+}
+
+// ============================================================
+// Explore filter bar + empty hint
+// ============================================================
+
+class _ExploreFilterBar extends StatelessWidget {
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+  final bool boundsReady;
+  final int zoom;
+  final double tagRadiusKm;
+  final int visibleCount;
+  final int totalCount;
+  final int filteredCount;
+  final List<String> availableTags;
+  final String? selectedTag;
+  final ValueChanged<String> onToggleTag;
+  final VoidCallback onClearFilters;
+
+  const _ExploreFilterBar({
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+    required this.boundsReady,
+    required this.zoom,
+    required this.tagRadiusKm,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.filteredCount,
+    required this.availableTags,
+    required this.selectedTag,
+    required this.onToggleTag,
+    required this.onClearFilters,
+  });
+
+  String _radiusLabel() {
+    if (tagRadiusKm >= 1) {
+      return '${tagRadiusKm.toStringAsFixed(tagRadiusKm >= 10 ? 0 : 1)} km';
+    }
+    return '${(tagRadiusKm * 1000).round()} m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasTag = selectedTag != null && selectedTag!.isNotEmpty;
+    final summary = boundsReady
+        ? (hasTag
+            ? '当前区域 · 含 “$selectedTag” · ${_radiusLabel()} 内 $filteredCount 条'
+            : '当前区域 $visibleCount/$totalCount 条 · ZOOM $zoom')
+        : '调整地图后将按可视区域筛选 · 共 $totalCount 条';
+    return BDPanelCard(
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.travel_explore_rounded,
+                size: 18,
+                color: hintColor,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  summary,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              if (hasTag)
+                TextButton.icon(
+                  onPressed: onClearFilters,
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  label: const Text('清除'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    minimumSize: const Size(0, 32),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+            ],
+          ),
+          if (availableTags.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: availableTags.map((tag) {
+                final selected = tag == selectedTag;
+                return _TagPill(
+                  label: tag,
+                  selected: selected,
+                  isDark: isDark,
+                  onTap: () => onToggleTag(tag),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TagPill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _TagPill({
+    required this.label,
+    required this.selected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = selected
+        ? Colors.white
+        : (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: BDMotion.durationFast,
+        curve: BDMotion.curveFluid,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF2E7CF6)
+              : (isDark
+                  ? AppTheme.darkSurfaceElevated
+                  : const Color(0xFFF3F5F9)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF2E7CF6)
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : BDDesign.colorMutedBlue.withValues(alpha: 0.12)),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExploreEmptyHint extends StatelessWidget {
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+  final bool hasTag;
+  final VoidCallback onClearFilters;
+
+  const _ExploreEmptyHint({
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+    required this.hasTag,
+    required this.onClearFilters,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BDPanelCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                hasTag
+                    ? Icons.filter_alt_off_rounded
+                    : Icons.public_off_rounded,
+                color: hintColor,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  hasTag ? '当前区域内没有匹配该标签的帖子' : '当前区域里还没有空间记忆',
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasTag ? '试试切换其它标签，或清除筛选查看区域内全部帖子。' : '滑动或缩放地图，看看其它区域。',
+            style: TextStyle(color: hintColor, height: 1.4, fontSize: 12.5),
+          ),
+          if (hasTag) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: onClearFilters,
+                icon: const Icon(Icons.close_rounded, size: 16),
+                label: const Text('清除筛选'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }

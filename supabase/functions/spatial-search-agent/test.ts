@@ -9,6 +9,7 @@ import {
   isAssetDiscoveryQuery,
   isDirectReplyQuery,
   normalizeExplicitTimeRange,
+  parseModelPresentation,
   parseSpatialIntentHeuristically,
   parseDeterministicAssetRenameIntent,
   pickSpatialSearchAnswerAfterStop,
@@ -658,4 +659,24 @@ Deno.test("shouldForceAnotherToolRound 在单个高分交叉证据候选时不�
   });
 
   assertEquals(shouldContinue, false);
+});
+
+Deno.test("parseModelPresentation 在 spatial_search 模式下使用更小默认值", () => {
+  const presentation = parseModelPresentation("找一下红色杯子", {
+    mode: "spatial_search",
+  });
+  assertEquals(presentation.requested_model_count, null);
+  assertEquals(presentation.effective_model_count, 3);
+  assertEquals(presentation.default_model_count, 3);
+  assertEquals(presentation.max_model_count, 10);
+  assertEquals(presentation.source, "default");
+});
+
+Deno.test("parseModelPresentation 在 spatial_search 模式下也会 clamp 到 max 10", () => {
+  const presentation = parseModelPresentation("给我看 30 个候选场景", {
+    mode: "spatial_search",
+  });
+  assertEquals(presentation.requested_model_count, 30);
+  assertEquals(presentation.effective_model_count, 10);
+  assertEquals(presentation.source, "clamped");
 });

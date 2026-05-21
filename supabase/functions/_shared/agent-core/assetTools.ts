@@ -691,9 +691,14 @@ function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
 
 export function buildAssetAnswer(
   state: AssetToolState,
-  options: { query?: string } = {},
+  options: { query?: string; displayCount?: number } = {},
 ): string | null {
   const isRecommendation = isRecommendationQuery(options.query);
+  const fallbackCount = 5;
+  const displayCount = Math.max(
+    1,
+    Math.min(20, options.displayCount ?? fallbackCount),
+  );
 
   if (state.operation) {
     const actionText = state.operation.dry_run ? "预览" : "执行";
@@ -723,8 +728,8 @@ export function buildAssetAnswer(
   }
   if (state.bundle) {
     return isRecommendation
-      ? buildBundleRecommendationAnswer(state.bundle)
-      : buildBundleAnswer(state.bundle);
+      ? buildBundleRecommendationAnswer(state.bundle, displayCount)
+      : buildBundleAnswer(state.bundle, displayCount);
   }
   if (state.collectionSummary) {
     return `已整理专题“${state.collectionSummary.collection.title}”，当前包含 ${state.collectionSummary.model_count} 个模型。`;
@@ -740,8 +745,8 @@ export function buildAssetAnswer(
   }
   if (state.list) {
     return isRecommendation
-      ? buildListRecommendationAnswer(state.list)
-      : buildListAnswer(state.list);
+      ? buildListRecommendationAnswer(state.list, displayCount)
+      : buildListAnswer(state.list, displayCount);
   }
   return null;
 }
@@ -752,6 +757,10 @@ function isRecommendationQuery(query?: string): boolean {
   }
   const normalized = query.replace(/\s+/g, "");
   return /推荐|建议|值得看|先看哪|哪些模型好|有什么模型/.test(normalized);
+}
+
+export function isModelRecommendationQuery(query?: string): boolean {
+  return isRecommendationQuery(query);
 }
 
 function summarizeRecommendationReason(input: {
@@ -793,12 +802,15 @@ function rankRecommendationRows<T extends {
   });
 }
 
-function buildBundleRecommendationAnswer(rows: ModelAssetBundle[]): string {
+function buildBundleRecommendationAnswer(
+  rows: ModelAssetBundle[],
+  displayCount: number = 5,
+): string {
   if (rows.length === 0) {
     return "当前没有找到可推荐的模型。";
   }
 
-  const recommended = rankRecommendationRows(rows).slice(0, 5);
+  const recommended = rankRecommendationRows(rows).slice(0, displayCount);
   const details = recommended.map((row, index) => {
     const name = row.display_name?.trim() || row.scene_id;
     const reason = summarizeRecommendationReason({
@@ -812,12 +824,15 @@ function buildBundleRecommendationAnswer(rows: ModelAssetBundle[]): string {
   return `我先推荐这 ${recommended.length} 个模型：\n${details}\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你细分。`;
 }
 
-function buildListRecommendationAnswer(rows: ListedModelAsset[]): string {
+function buildListRecommendationAnswer(
+  rows: ListedModelAsset[],
+  displayCount: number = 5,
+): string {
   if (rows.length === 0) {
     return "当前没有找到可推荐的模型。";
   }
 
-  const recommended = rankRecommendationRows(rows).slice(0, 5);
+  const recommended = rankRecommendationRows(rows).slice(0, displayCount);
   const details = recommended.map((row, index) => {
     const name = row.display_name?.trim() || row.scene_id;
     const reason = summarizeRecommendationReason({
@@ -830,12 +845,15 @@ function buildListRecommendationAnswer(rows: ListedModelAsset[]): string {
   return `我先从当前候选里推荐这 ${recommended.length} 个模型：\n${details}\n如果你需要更精确的推荐，我可以继续读取其中几个模型的详细摘要再细分。`;
 }
 
-function buildBundleAnswer(rows: ModelAssetBundle[]): string {
+function buildBundleAnswer(
+  rows: ModelAssetBundle[],
+  displayCount: number = 5,
+): string {
   if (rows.length === 0) {
     return "当前没有读取到可用的模型资产摘要。";
   }
 
-  const displayed = rows.slice(0, 5);
+  const displayed = rows.slice(0, displayCount);
   const intro = displayed.length === 1
     ? "我先整理出 1 个可参考的模型："
     : `我先整理出 ${displayed.length} 个可参考的模型：`;
@@ -855,12 +873,15 @@ function buildBundleAnswer(rows: ModelAssetBundle[]): string {
   return `${intro}\n${details}${suffix}`;
 }
 
-function buildListAnswer(rows: ListedModelAsset[]): string {
+function buildListAnswer(
+  rows: ListedModelAsset[],
+  displayCount: number = 5,
+): string {
   if (rows.length === 0) {
     return "当前没有找到匹配的模型资产。";
   }
 
-  const displayed = rows.slice(0, 5);
+  const displayed = rows.slice(0, displayCount);
   const intro = displayed.length === 1
     ? "当前找到 1 个候选模型："
     : `当前找到 ${displayed.length} 个候选模型：`;

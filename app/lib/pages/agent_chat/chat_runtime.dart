@@ -192,6 +192,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
           .map(
             (action) => {
               'type': action.type,
+              if (action.title != null) 'title': action.title,
               'payload': {
                 'sceneId': action.sceneId,
                 if (action.modelId != null) 'modelId': action.modelId,

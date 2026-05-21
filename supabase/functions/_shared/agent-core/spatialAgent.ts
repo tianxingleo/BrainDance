@@ -569,6 +569,14 @@ type AgentMode = z.infer<typeof agentModeSchema>;
 type VisualizationAction = z.infer<typeof visualizationActionSchema>;
 type SelectionResult = z.infer<typeof selectionSchema>;
 
+export type ModelPresentationRequest = {
+  requested_model_count: number | null;
+  effective_model_count: number;
+  default_model_count: number;
+  max_model_count: number;
+  source: "user_explicit" | "default" | "clamped";
+};
+
 export type SpatialSearchAgentOptions = {
   selectedModelIds?: string[];
   executionMode?: "preview" | "execute";
@@ -582,7 +590,36 @@ export type SpatialSearchAgentOptions = {
   sessionState?: z.infer<typeof sessionStateSchema> | null;
   shortTermMemory?: ShortTermMemory | null;
   longTermMemory?: LongTermMemory | null;
+  presentation?: ModelPresentationRequest;
 };
+
+export const ASSET_METADATA_DEFAULT_PRESENTATION = 5;
+export const ASSET_METADATA_MAX_PRESENTATION = 20;
+export const SPATIAL_SEARCH_DEFAULT_PRESENTATION = 3;
+export const SPATIAL_SEARCH_MAX_PRESENTATION = 10;
+
+export const modelPresentationSchema = z.object({
+  requested_model_count: z.number().int().min(1).nullable(),
+  effective_model_count: z.number().int().min(1),
+  default_model_count: z.number().int().min(1),
+  max_model_count: z.number().int().min(1),
+  source: z.enum(["user_explicit", "default", "clamped"]),
+});
+
+export function getPresentationLimitsForMode(
+  mode: "asset_metadata" | "spatial_search",
+): { default_model_count: number; max_model_count: number } {
+  if (mode === "spatial_search") {
+    return {
+      default_model_count: SPATIAL_SEARCH_DEFAULT_PRESENTATION,
+      max_model_count: SPATIAL_SEARCH_MAX_PRESENTATION,
+    };
+  }
+  return {
+    default_model_count: ASSET_METADATA_DEFAULT_PRESENTATION,
+    max_model_count: ASSET_METADATA_MAX_PRESENTATION,
+  };
+}
 
 type RuntimeEnv = {
   dashscopeApiKey: string;
@@ -725,6 +762,7 @@ const responseBaseSchema = z.object({
   short_term_memory: shortTermMemorySchema.nullable().optional(),
   conversation_summary: z.string().nullable().optional(),
   follow_up: agentFollowUpSchema.optional(),
+  presentation: modelPresentationSchema.optional(),
 });
 
 const spatialSearchResponseSchema = responseBaseSchema.extend({
@@ -1612,6 +1650,68 @@ function extractLatestModelCount(query: string): number {
   }
 
   return 1;
+}
+
+export function parseModelPresentation(
+  query: string,
+  options: { mode?: "asset_metadata" | "spatial_search" } = {},
+): ModelPresentationRequest {
+  const trimmed = query.trim();
+  const mode = options.mode ?? "asset_metadata";
+  const { default_model_count, max_model_count } = getPresentationLimitsForMode(
+    mode,
+  );
+
+  let requested: number | null = null;
+
+  if (trimmed) {
+    if (/全部|所有/.test(trimmed) && /(模型|资产|候选|结果|项)/.test(trimmed)) {
+      requested = max_model_count + 1;
+    } else {
+      const explicitPatterns = [
+        /(?:展示|显示|列出|给我|输出|要|看|来|推荐|筛选|筛|挑选?)\s*([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项|名|来个)?\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+        /(?:前|最多|至多|不超过|大约|大概|总共|一共)\s*([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项)?\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+        /(?:top|TOP)\s*([0-9]+)/,
+        /([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项)\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+      ];
+      for (const pattern of explicitPatterns) {
+        const matched = trimmed.match(pattern)?.[1];
+        const parsed = matched ? parseChineseCountToken(matched) : null;
+        if (parsed && parsed > 0) {
+          requested = parsed;
+          break;
+        }
+      }
+    }
+  }
+
+  if (requested == null) {
+    return {
+      requested_model_count: null,
+      effective_model_count: default_model_count,
+      default_model_count,
+      max_model_count,
+      source: "default",
+    };
+  }
+
+  if (requested > max_model_count) {
+    return {
+      requested_model_count: requested,
+      effective_model_count: max_model_count,
+      default_model_count,
+      max_model_count,
+      source: "clamped",
+    };
+  }
+
+  return {
+    requested_model_count: requested,
+    effective_model_count: Math.max(1, requested),
+    default_model_count,
+    max_model_count,
+    source: "user_explicit",
+  };
 }
 
 function isConfirmWriteQuery(query: string): boolean {
@@ -2828,7 +2928,7 @@ function buildTimeCompareTool(): DynamicStructuredTool {
   });
 }
 
-const UNIFIED_MAX_ROUNDS = 4;
+const UNIFIED_MAX_ROUNDS = 10;
 
 async function executeUnifiedAgentLoop(input: {
   model: ChatOpenAI;
@@ -2860,7 +2960,7 @@ async function executeUnifiedAgentLoop(input: {
   await emitPlan(callbacks, "统一 Agent 已启动", [
     `可用工具：${tools.map((t) => t.name).join(", ")}`,
     `执行模式：${options.executionMode ?? "preview"}`,
-    "由 Agent 自主决定调用哪些工具，最多 4 轮",
+    "由 Agent 自主决定调用哪些工具，最多 10 轮",
   ]);
 
   type UnifiedState = {
@@ -3023,7 +3123,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-  });
+  }, { recursionLimit: UNIFIED_MAX_ROUNDS * 2 + 10 });
 
   return {
     candidates: finalState.candidates,
@@ -3237,7 +3337,7 @@ async function executeAgentToolLoop(input: {
     round: 0,
     shouldStop: false,
     forcedToolCalls: null,
-  });
+  }, { recursionLimit: MAX_AGENT_TOOL_ROUNDS * 2 + 10 });
 
   return { candidates: finalState.candidates, trace: finalState.trace };
 }
@@ -3465,7 +3565,7 @@ async function executeAssetToolLoop(input: {
     seenSignatures: seenToolCallSignatures,
     round: 0,
     shouldStop: false,
-  });
+  }, { recursionLimit: MAX_AGENT_TOOL_ROUNDS * 2 + 10 });
 
   return { trace: finalState.trace, state: finalState.assetState };
 }
@@ -3597,6 +3697,7 @@ function finalizeResponse(
     conversation_summary: response.conversation_summary ??
       buildConversationSummaryFromResponse(response),
     follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
+    presentation: response.presentation ?? options?.presentation,
   };
   return spatialSearchResponseSchemaUnion.parse(normalized);
 }
@@ -4104,6 +4205,13 @@ export async function runSpatialSearchAgent(
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
 
+  const assetPresentation = options.presentation ??
+    parseModelPresentation(query, { mode: "asset_metadata" });
+  const spatialPresentation = parseModelPresentation(query, {
+    mode: "spatial_search",
+  });
+  options.presentation = assetPresentation;
+
   if (options.userId && !options.longTermMemory) {
     options.longTermMemory = await loadLongTermMemory(supabase, options.userId);
   }
@@ -4152,6 +4260,7 @@ export async function runSpatialSearchAgent(
       collection_context: null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: spatialPresentation,
     }, options);
   }
 
@@ -4230,6 +4339,7 @@ export async function runSpatialSearchAgent(
       collection_context: assetState.collectionSummary ? { collection_summary: assetState.collectionSummary } : null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: assetPresentation,
     }, options, query);
   }
 
@@ -4283,6 +4393,7 @@ export async function runSpatialSearchAgent(
       collection_context: null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: spatialPresentation,
     }, options, query);
   }
 
@@ -4291,7 +4402,9 @@ export async function runSpatialSearchAgent(
   const finalScene = rankedCandidates.find((c) => c.sceneId === selection.selectedSceneId) ?? bestCandidate;
   const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId ? finalScene.bestPose : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({ scene: finalScene ?? null, selectedPose: finalPose, supabase, bucket: env.storageBucket });
-  const topCandidates = deduplicatedCandidates.slice(0, 5).map(serializeSceneCandidate);
+  const topCandidates = deduplicatedCandidates
+    .slice(0, spatialPresentation.effective_model_count)
+    .map(serializeSceneCandidate);
   const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
   const answer = pickSpatialSearchAnswerAfterStop({
     trace,
@@ -4322,5 +4435,6 @@ export async function runSpatialSearchAgent(
     collection_context: null,
     creative_context: null,
     memory_graph_context: null,
+    presentation: spatialPresentation,
   }, options, query);
 }

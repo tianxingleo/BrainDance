@@ -262,6 +262,8 @@ extension _AgentChatView on _AgentChatPageState {
     final followUp = result?.followUp;
 
     final isAssetMode = result?.mode == 'asset_metadata';
+    final isTimeCompareMode =
+        result?.mode == 'time_compare' && result?.compareData != null;
     final assetModels = <Map<String, dynamic>>[];
     if (isAssetMode && result?.assetContext != null) {
       final ctx = result!.assetContext!;
@@ -315,7 +317,15 @@ extension _AgentChatView on _AgentChatPageState {
                   ),
           ),
         ],
-        if (isAssetMode && assetModels.isNotEmpty) ...[
+        if (isTimeCompareMode) ...[
+          _buildTimeCompareSection(
+            data: result!.compareData!,
+            result: result,
+            isDark: isDark,
+            textColor: textColor,
+            hintColor: hintColor,
+          ),
+        ] else if (isAssetMode && assetModels.isNotEmpty) ...[
           const SizedBox(height: 12),
           for (final model in assetModels)
             Padding(
@@ -356,6 +366,7 @@ extension _AgentChatView on _AgentChatPageState {
         ],
         if (hasActions &&
             !(isAssetMode && assetModels.isNotEmpty) &&
+            !isTimeCompareMode &&
             topCandidates.isEmpty) ...[
           const SizedBox(height: 12),
           _buildOpenSceneButton(result!, isDark),
@@ -369,7 +380,8 @@ extension _AgentChatView on _AgentChatPageState {
           ),
         ],
         if (result?.evidence != null &&
-            !(isAssetMode && assetModels.isNotEmpty)) ...[
+            !(isAssetMode && assetModels.isNotEmpty) &&
+            !isTimeCompareMode) ...[
           const SizedBox(height: 4),
           Text(
             '场景：${result!.evidence!.sceneId}  ·  相似度：${(result.evidence!.similarity * 100).toStringAsFixed(1)}%',
@@ -719,7 +731,7 @@ extension _AgentChatView on _AgentChatPageState {
     return switch (mode) {
       'spatial_search' => '空间检索',
       'asset_metadata' => '资产元数据',
-      'compare' => '场景对比',
+      'time_compare' => '时间对比',
       'collection' => '合集管理',
       'creative' => '创意生成',
       'memory_graph' => '记忆图谱',

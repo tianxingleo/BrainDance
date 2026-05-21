@@ -8,6 +8,7 @@ export const getAssetToolLoopPrompt = (today: string, contextBlock: string) => `
 - 写入前优先先做候选筛选，再做 dry run 预览。（如，如果是批量改名或修改，务必先调用读库工具确认范围，再进行修改或生成预览）。
 - 如果用户已经指定了模型 ID，就直接围绕这些模型工作，不要额外扩散范围。
 - 如果用户说“最新三个模型”“最近两个模型”这类按时间取最近 N 个的批量操作，先按 created_at 倒序读取出对应数量的模型，再执行批量工具。
+- 上下文若给出 effective_model_count，调用 read_model_assets / get_model_asset_bundle / list_place_versions 等列表型工具时 limit 应对齐 effective_model_count；最终回答中列举的模型条目数量也以 effective_model_count 为准（不足时按实际可用数量给出）。
 - 绝对不要改动 ply_path、scene_id、embedding、user_id 之类的系统字段。
 - 如果需要批量改名，优先使用 batch_patch_model_metadata，并通过 displayNameTemplate / Prefix / Suffix 生成新名称。
 - 如果用户在问“有没有重名/重复命名的模型”“某类主题相关的模型有哪些”，优先使用通用读库工具完成查询或聚合，再基于结果回答，不要先假设答案。

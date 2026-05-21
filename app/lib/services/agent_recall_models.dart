@@ -137,6 +137,7 @@ class AgentRecallResponse {
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
+  final CompareContext? compareData;
   final Map<String, dynamic>? collectionContext;
   final Map<String, dynamic>? creativeContext;
   final Map<String, dynamic>? memoryGraphContext;
@@ -155,6 +156,7 @@ class AgentRecallResponse {
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
+    this.compareData,
     this.collectionContext,
     this.creativeContext,
     this.memoryGraphContext,
@@ -255,6 +257,7 @@ class AgentRecallResponse {
       compareContext: json['compare_context'] is Map
           ? Map<String, dynamic>.from(json['compare_context'] as Map)
           : null,
+      compareData: CompareContext.fromJson(json['compare_context']),
       collectionContext: json['collection_context'] is Map
           ? Map<String, dynamic>.from(json['collection_context'] as Map)
           : null,
@@ -546,8 +549,11 @@ class AgentMatchedFrame {
   }
 }
 
+enum AgentActionSlot { baseline, target, unknown }
+
 class AgentAction {
   final String type;
+  final String? title;
   final String sceneId;
   final String? modelId;
   final String? ply;
@@ -557,6 +563,7 @@ class AgentAction {
 
   AgentAction({
     required this.type,
+    this.title,
     required this.sceneId,
     this.modelId,
     this.ply,
@@ -565,6 +572,13 @@ class AgentAction {
     this.matrix,
   });
 
+  AgentActionSlot get slot {
+    final t = title ?? '';
+    if (t.contains('旧版')) return AgentActionSlot.baseline;
+    if (t.contains('新版')) return AgentActionSlot.target;
+    return AgentActionSlot.unknown;
+  }
+
   factory AgentAction.fromJson(Map<String, dynamic> json) {
     final payload = json['payload'] is Map
         ? Map<String, dynamic>.from(json['payload'] as Map)
@@ -572,6 +586,7 @@ class AgentAction {
     final rawMatrix = payload['matrix'] ?? json['matrix'];
     return AgentAction(
       type: json['type']?.toString() ?? '',
+      title: json['title']?.toString(),
       sceneId:
           payload['sceneId']?.toString() ?? json['sceneId']?.toString() ?? '',
       modelId: payload['modelId']?.toString() ?? json['modelId']?.toString(),
@@ -583,6 +598,177 @@ class AgentAction {
           json['imageId']?.toString() ??
           json['imageName']?.toString(),
       matrix: flattenNumericList(rawMatrix),
+    );
+  }
+}
+
+class CompareSceneEvidence {
+  final String sceneId;
+  final String modelId;
+  final String? displayName;
+  final String? description;
+  final String createdAt;
+  final double similarity;
+  final List<String> objects;
+  final List<String> tags;
+  final List<AgentMatchedFrame> matchedFrames;
+  final String? ply;
+  final String? poses;
+
+  CompareSceneEvidence({
+    required this.sceneId,
+    required this.modelId,
+    this.displayName,
+    this.description,
+    required this.createdAt,
+    required this.similarity,
+    required this.objects,
+    required this.tags,
+    required this.matchedFrames,
+    this.ply,
+    this.poses,
+  });
+
+  static CompareSceneEvidence? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, dynamic>.from(raw);
+    final frames = (json['matchedFrames'] as List? ?? const [])
+        .whereType<Map>()
+        .map((m) => AgentMatchedFrame.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+    return CompareSceneEvidence(
+      sceneId: json['sceneId']?.toString() ?? '',
+      modelId: json['modelId']?.toString() ?? '',
+      displayName: json['displayName']?.toString(),
+      description: json['description']?.toString(),
+      createdAt: json['createdAt']?.toString() ?? '',
+      similarity: (json['similarity'] as num?)?.toDouble() ?? 0,
+      objects: (json['objects'] as List? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+      tags: (json['tags'] as List? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+      matchedFrames: frames,
+      ply: json['ply']?.toString(),
+      poses: json['poses']?.toString(),
+    );
+  }
+}
+
+class CompareDiff {
+  final List<String> commonObjects;
+  final List<String> addedObjects;
+  final List<String> removedObjects;
+  final List<String> commonTags;
+  final List<String> addedTags;
+  final List<String> removedTags;
+  final List<String> limitations;
+
+  CompareDiff({
+    required this.commonObjects,
+    required this.addedObjects,
+    required this.removedObjects,
+    required this.commonTags,
+    required this.addedTags,
+    required this.removedTags,
+    required this.limitations,
+  });
+
+  static List<String> _strList(Object? raw) =>
+      (raw as List? ?? const []).map((e) => e.toString()).toList();
+
+  factory CompareDiff.fromJson(Map<String, dynamic> json) => CompareDiff(
+        commonObjects: _strList(json['commonObjects']),
+        addedObjects: _strList(json['addedObjects']),
+        removedObjects: _strList(json['removedObjects']),
+        commonTags: _strList(json['commonTags']),
+        addedTags: _strList(json['addedTags']),
+        removedTags: _strList(json['removedTags']),
+        limitations: _strList(json['limitations']),
+      );
+
+  bool get hasObjectChanges =>
+      addedObjects.isNotEmpty || removedObjects.isNotEmpty;
+  bool get hasTagChanges => addedTags.isNotEmpty || removedTags.isNotEmpty;
+}
+
+class CompareTimeWindow {
+  final String startTime;
+  final String endTime;
+
+  CompareTimeWindow({required this.startTime, required this.endTime});
+
+  factory CompareTimeWindow.fromJson(Map<String, dynamic> json) =>
+      CompareTimeWindow(
+        startTime: json['startTime']?.toString() ?? '',
+        endTime: json['endTime']?.toString() ?? '',
+      );
+}
+
+class CompareWindows {
+  final String originalQuery;
+  final String parsedSearchText;
+  final String? compareFocus;
+  final CompareTimeWindow baseline;
+  final CompareTimeWindow target;
+  final String reasoning;
+
+  CompareWindows({
+    required this.originalQuery,
+    required this.parsedSearchText,
+    this.compareFocus,
+    required this.baseline,
+    required this.target,
+    required this.reasoning,
+  });
+
+  factory CompareWindows.fromJson(Map<String, dynamic> json) {
+    final base = json['baseline'] is Map
+        ? Map<String, dynamic>.from(json['baseline'] as Map)
+        : <String, dynamic>{};
+    final tgt = json['target'] is Map
+        ? Map<String, dynamic>.from(json['target'] as Map)
+        : <String, dynamic>{};
+    return CompareWindows(
+      originalQuery: json['originalQuery']?.toString() ?? '',
+      parsedSearchText: json['parsedSearchText']?.toString() ?? '',
+      compareFocus: json['compareFocus']?.toString(),
+      baseline: CompareTimeWindow.fromJson(base),
+      target: CompareTimeWindow.fromJson(tgt),
+      reasoning: json['reasoning']?.toString() ?? '',
+    );
+  }
+}
+
+class CompareContext {
+  final CompareSceneEvidence? baseline;
+  final CompareSceneEvidence? target;
+  final CompareDiff diff;
+  final CompareWindows? windows;
+
+  CompareContext({
+    required this.baseline,
+    required this.target,
+    required this.diff,
+    required this.windows,
+  });
+
+  static CompareContext? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final json = Map<String, dynamic>.from(raw);
+    final diffMap = json['diff'] is Map
+        ? Map<String, dynamic>.from(json['diff'] as Map)
+        : <String, dynamic>{};
+    return CompareContext(
+      baseline: CompareSceneEvidence.fromJson(json['baseline']),
+      target: CompareSceneEvidence.fromJson(json['target']),
+      diff: CompareDiff.fromJson(diffMap),
+      windows: json['windows'] is Map
+          ? CompareWindows.fromJson(
+              Map<String, dynamic>.from(json['windows'] as Map),
+            )
+          : null,
     );
   }
 }
