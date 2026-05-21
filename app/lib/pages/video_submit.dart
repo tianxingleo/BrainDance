@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:async';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/main.dart'
@@ -53,6 +54,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   bool _shouldClosePage = false;
   bool _deleteVideo = true;
   bool _preprocessCancelled = false;
+  Completer<void>? _cancelPreprocessSignal;
   VideoPreprocessResult? _preprocessResult;
   String? _uploadedStoragePath;
 
@@ -352,6 +354,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
     _cancelToken = CancelToken();
     _preprocessCancelled = false;
+    _cancelPreprocessSignal = Completer<void>();
 
     setState(() {
       _isUploading = true;
@@ -361,32 +364,42 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
     // --- Phase 1: Preprocessing ---
     VideoPreprocessResult? preprocessResult;
-    try {
-      preprocessResult = await VideoPreprocessor.preprocess(
-        File(widget.videoPath),
-        config: _preprocessConfig,
-        onProgress: (progress) {
-          if (mounted) {
-            setState(() {
-              _preprocessProgress = progress;
-            });
-          }
-        },
-      );
-    } catch (e) {
-      if (_preprocessCancelled) {
+    final file = File(widget.videoPath);
+    final fileSize = await file.length();
+    final fileSizeMB = fileSize ~/ 1024 ~/ 1024;
+
+    if (fileSizeMB > 8) {
+      try {
+        preprocessResult = await VideoPreprocessor.preprocess(
+          file,
+          config: _preprocessConfig,
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _preprocessProgress = progress;
+              });
+            }
+          },
+          cancelSignal: _cancelPreprocessSignal,
+        );
+      } on VideoPreprocessCancelledException {
         debugPrint('[VideoSubmit] preprocessing cancelled by user');
         return;
+      } catch (e) {
+        if (_preprocessCancelled) {
+          debugPrint('[VideoSubmit] preprocessing cancelled by user');
+          return;
+        }
+        debugPrint('[VideoSubmit] preprocessing error: $e');
+        if (mounted) {
+          showAppToast(context, textLocalize('video_preprocess_fail'));
+          setState(() {
+            _isUploading = false;
+            _isPreprocessing = false;
+          });
+        }
+        return;
       }
-      debugPrint('[VideoSubmit] preprocessing error: $e');
-      if (mounted) {
-        showAppToast(context, textLocalize('video_preprocess_fail'));
-        setState(() {
-          _isUploading = false;
-          _isPreprocessing = false;
-        });
-      }
-      return;
     }
 
     if (!mounted) return;
@@ -402,27 +415,27 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       final videoStoragePath = '${user.id}/$sceneId/raw/video.mp4';
       _uploadedStoragePath = videoStoragePath;
-      final file = preprocessResult.outputFile;
-      final fileSize = await file.length();
+      final uploadFile = preprocessResult?.outputFile ?? File(widget.videoPath);
+      final uploadFileSize = await uploadFile.length();
       final url =
           '${SupabaseConfig.url}/storage/v1/object/braindance-assets/$videoStoragePath';
       final dio = Dio();
 
       setState(() {
-        _totalFileSize = fileSize;
+        _totalFileSize = uploadFileSize;
         _uploadedBytes = 0;
       });
 
       await dio.post(
         url,
-        data: file.openRead(),
+        data: uploadFile.openRead(),
         options: Options(
           headers: {
             'Authorization':
                 'Bearer ${client.auth.currentSession?.accessToken}',
             'apikey': SupabaseConfig.apiKey,
             'Content-Type': 'video/mp4',
-            'Content-Length': fileSize.toString(),
+            'Content-Length': uploadFileSize.toString(),
           },
         ),
         cancelToken: _cancelToken,
@@ -430,7 +443,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           if (mounted) {
             setState(() {
               _uploadedBytes = count;
-              _uploadProgress = count / fileSize;
+              _uploadProgress = count / uploadFileSize;
             });
           }
         },
@@ -483,6 +496,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       _cleanupPreprocess();
     } finally {
       _cancelToken = null;
+      _cancelPreprocessSignal = null;
       _uploadedStoragePath = null;
       if (mounted) {
         setState(() {
@@ -538,9 +552,6 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue;
     final inputBg = isDark ? const Color(0xFF23232A) : const Color(0xFFF6F8FC);
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final submitBottomPadding = keyboardInset > 0 ? keyboardInset + 8.0 : 32.0;
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -559,6 +570,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
               '[VideoSubmit] preprocessing cancelled by user via back button',
             );
             _preprocessCancelled = true;
+            _cancelPreprocessSignal?.complete();
             FFmpegKitExtended.cancelAllSessions();
             setState(() {
               _isUploading = false;
@@ -828,7 +840,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                         : textLocalize('video_submit_btn'),
                   ),
                 ),
-                SizedBox(height: submitBottomPadding),
+                const SizedBox(height: 32.0),
               ],
             ),
           ),

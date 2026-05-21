@@ -140,7 +140,7 @@ class _AccelWarningBannerState extends ConsumerState<_AccelWarningBanner>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.addStatusListener((s) {
-      if (s == AnimationStatus.dismissed) {
+      if (s == AnimationStatus.dismissed && mounted) {
         ref.read(showAccelBannerProvider.notifier).state = false;
       }
     });
@@ -271,7 +271,7 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.addStatusListener((s) {
-      if (s == AnimationStatus.dismissed) {
+      if (s == AnimationStatus.dismissed && mounted) {
         ref.read(saveFailBubbleProvider.notifier).state = null;
       }
     });
@@ -511,12 +511,14 @@ class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
       duration: const Duration(milliseconds: 250),
       vsync: this,
     );
-    _fade = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
-    _scale = Tween<double>(begin: 0.88, end: 1).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
-    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _scale = Tween<double>(
+      begin: 0.88,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.addStatusListener((s) {
       if (s == AnimationStatus.dismissed && mounted) {
         ref.read(streamingDoneBubbleProvider.notifier).state = null;
@@ -545,12 +547,13 @@ class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
       }
     });
 
-    if (_ctrl.isDismissed && message == null) return const SizedBox.shrink();
+    //if (_ctrl.isDismissed && message == null) return const SizedBox.shrink();
 
     return Positioned.fill(
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
           if (message == null) return const SizedBox.shrink();
 
           return Align(

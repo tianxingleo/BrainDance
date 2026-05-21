@@ -378,6 +378,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           _launchViewer();
         }
       }
+    } else if (originalUrl.isNotEmpty) {
+      // Local file path — serve directly without downloading
+      _localModelPath = originalUrl;
+      if (mounted) _launchViewer();
     } else {
       if (mounted) _launchViewer();
     }
