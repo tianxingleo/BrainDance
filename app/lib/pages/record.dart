@@ -462,7 +462,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _uploadQueue.add((photo.path, frameLabel));
 
     if (mounted) {
-      ref.read(streamingFrameCountProvider.notifier).state = _streamingFrameIndex;
+      ref.read(streamingFrameCountProvider.notifier).state =
+          _streamingFrameIndex;
     }
 
     _processUploadQueue();
@@ -570,7 +571,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       await Supabase.instance.client.from('processing_tasks').insert({
         'scene_id': sceneId,
         'user_id': user.id,
-        'task_type': 'sparse2dgs',
+        'task_type': 'video_dual_chain',
         'task_params': {'image_count': finalCount},
         'status': 'pending',
       });
