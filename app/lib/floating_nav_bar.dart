@@ -260,7 +260,6 @@ class _CreateButtonState extends State<_CreateButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _rotation;
-  late final Animation<double> _colorProgress;
 
   @override
   void initState() {
@@ -272,11 +271,7 @@ class _CreateButtonState extends State<_CreateButton>
     _rotation = Tween<double>(
       begin: 0.0,
       end: 0.125,
-    ).animate(CurvedAnimation(parent: _controller, curve: BDMotion.curveFluid));
-    _colorProgress = CurvedAnimation(
-      parent: _controller,
-      curve: BDMotion.curveFluid,
-    );
+    ).animate(_controller);
 
     if (widget.isSelected) {
       _controller.value = 1.0;
@@ -288,9 +283,9 @@ class _CreateButtonState extends State<_CreateButton>
     super.didUpdateWidget(oldWidget);
     if (widget.isSelected != oldWidget.isSelected) {
       if (widget.isSelected) {
-        _controller.forward(from: 0.0);
+        _controller.animateTo(1.0, curve: BDMotion.curveFluid);
       } else {
-        _controller.reverse();
+        _controller.animateTo(0.0, curve: BDMotion.curveFluid);
       }
     }
   }
@@ -316,7 +311,7 @@ class _CreateButtonState extends State<_CreateButton>
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
-          final t = _colorProgress.value;
+          final t = _controller.value;
           final fillColor = Color.lerp(baseFill, baseIcon, t)!;
           final iconColor = Color.lerp(baseIcon, baseFill, t)!;
 

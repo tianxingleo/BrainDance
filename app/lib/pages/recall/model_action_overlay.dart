@@ -311,7 +311,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                               isDark: widget.isDark,
                               onTap: () async {
                                 widget.onDismiss();
-                                await widget.onDownloadModel(widget.model);
+                                widget.onNavigateToViewer(widget.model, null);
                               },
                             ),
                           if (widget.isOwnModel) ...[
