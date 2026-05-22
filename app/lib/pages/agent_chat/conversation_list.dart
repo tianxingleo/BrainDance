@@ -36,9 +36,10 @@ extension _AgentChatConversationList on _AgentChatPageState {
                       color: textColor,
                       size: 22,
                     ),
-                    onPressed: () {
+                    onPressed: () async {
                       Navigator.pop(context);
-                      _createNewConversation();
+                      await _createNewConversation();
+                      unawaited(_fetchGreeting());
                     },
                   ),
                 ],

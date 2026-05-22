@@ -2327,12 +2327,7 @@ function collectSceneCandidates(
         userId: row.user_id,
         description: row.description ?? "",
         objects: [],
-        tags: [
-          ...safeArray(row.tags),
-          ...sortedFrames.map((frame) => frame.tag ?? "").filter((value) =>
-            value.length > 0
-          ),
-        ],
+        tags: safeArray(row.tags),
         plyPath: row.ply_path,
         previewImgPath: row.preview_img_path ?? null,
         createdAt: row.created_at,

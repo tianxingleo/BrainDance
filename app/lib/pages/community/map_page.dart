@@ -10,11 +10,9 @@ import 'map_marker.dart';
 import 'repository.dart';
 
 const String _tileUrl =
-    'https://cartodb-basemaps-{s}.global.ssl.fastly.net/rastertiles/voyager/{z}/{x}/{y}.png';
-const String _tileFallbackUrl =
-    'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const List<String> _tileSubdomains = ['a', 'b', 'c'];
-const String _osmUserAgent = 'com.braindance.app';
+    'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}';
+const List<String> _tileSubdomains = ['1', '2', '3', '4'];
+const String _tileUserAgent = 'com.braindance.app';
 const double _kMinZoom = 2;
 const double _kMaxZoom = 18;
 const int _kPreviewMarkerLimit = 30;
@@ -62,6 +60,17 @@ CommunityMapViewport _viewportFromCamera(MapCamera camera) {
       west: visible.west,
     ),
   );
+}
+
+bool _isCameraFinite(MapCamera camera) {
+  final c = camera.center;
+  if (!c.latitude.isFinite || !c.longitude.isFinite) return false;
+  if (!camera.zoom.isFinite) return false;
+  final b = camera.visibleBounds;
+  return b.north.isFinite &&
+      b.south.isFinite &&
+      b.east.isFinite &&
+      b.west.isFinite;
 }
 
 class CommunityMapPage extends StatefulWidget {
@@ -147,6 +156,7 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
   }
 
   void _onMapEvent(MapEvent event) {
+    if (!_isCameraFinite(event.camera)) return;
     final updated = _viewportFromCamera(event.camera);
     final prev = _viewport;
     final boundsChanged = prev.bounds == null ||
@@ -165,10 +175,11 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
   }
 
   void _stepZoom(int delta) {
-    final next = (_controller.camera.zoom + delta)
-        .clamp(_kMinZoom, _kMaxZoom)
-        .toDouble();
-    _controller.move(_controller.camera.center, next);
+    final camera = _controller.camera;
+    if (!_isCameraFinite(camera)) return;
+    final next =
+        (camera.zoom + delta).clamp(_kMinZoom, _kMaxZoom).toDouble();
+    _controller.move(camera.center, next);
   }
 
   void _handleMarkerTap(CommunityMapMarker marker) {
@@ -286,9 +297,8 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                               children: [
                                 TileLayer(
                                   urlTemplate: _tileUrl,
-                                  fallbackUrl: _tileFallbackUrl,
                                   subdomains: _tileSubdomains,
-                                  userAgentPackageName: _osmUserAgent,
+                                  userAgentPackageName: _tileUserAgent,
                                   maxZoom: _kMaxZoom,
                                   retinaMode:
                                       RetinaMode.isHighDensity(context),
@@ -421,9 +431,8 @@ class _CommunityAmapPreviewState extends State<CommunityAmapPreview> {
         children: [
           TileLayer(
             urlTemplate: _tileUrl,
-            fallbackUrl: _tileFallbackUrl,
             subdomains: _tileSubdomains,
-            userAgentPackageName: _osmUserAgent,
+            userAgentPackageName: _tileUserAgent,
             maxZoom: _kMaxZoom,
             retinaMode: RetinaMode.isHighDensity(context),
           ),
