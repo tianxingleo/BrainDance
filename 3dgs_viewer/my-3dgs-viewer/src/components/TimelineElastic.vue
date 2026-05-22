@@ -31,7 +31,7 @@ const points = computed(() => {
   const count = Math.max(1, props.items.length);
   return props.items.map((item, i) => {
     const fraction = count > 1 ? i / (count - 1) : 0.5;
-    const padding = 40; 
+    const padding = 40;
     const w = Math.max(0, width.value - padding * 2);
     return {
       ...item,
@@ -44,13 +44,15 @@ const pathD = ref('');
 const thumbX = ref(0);
 const thumbY = ref(BASE_Y);
 const formattedTime = ref('');
+const isBent = ref(false);
 
 function updateVisuals() {
   const x = state.x;
   thumbX.value = x;
-  
+
   const ty = BASE_Y + (PEAK_Y - BASE_Y) * state.bend;
   thumbY.value = ty;
+  isBent.value = state.bend > 0.01;
 
   if (state.bend <= 0.01) {
     pathD.value = `M 0 ${BASE_Y} L ${width.value} ${BASE_Y}`;
@@ -59,7 +61,7 @@ function updateVisuals() {
     const rx = Math.min(width.value, x + BEND_WIDTH);
     const cpL = x - BEND_WIDTH * 0.4;
     const cpR = x + BEND_WIDTH * 0.4;
-    
+
     pathD.value = `M 0 ${BASE_Y} L ${lx} ${BASE_Y} C ${cpL} ${BASE_Y}, ${cpL} ${ty}, ${x} ${ty} C ${cpR} ${ty}, ${cpR} ${BASE_Y}, ${rx} ${BASE_Y} L ${width.value} ${BASE_Y}`;
   }
 }
@@ -75,9 +77,9 @@ onMounted(() => {
   if (containerRef.value) {
     resizeObserver.observe(containerRef.value);
   }
-  
+
   gsap.ticker.add(updateVisuals);
-  
+
   watch(() => props.activeId, () => {
     if (!isDragging) snapToActive(true);
   }, { immediate: true });
@@ -95,9 +97,9 @@ function snapToActive(animate = true) {
   if (idx === -1 || points.value.length === 0) return;
   activeIndex.value = idx;
   formattedTime.value = points.value[idx].formattedTime || '';
-  
+
   const targetX = points.value[idx].x;
-  
+
   if (animate) {
     gsap.killTweensOf(state);
     gsap.to(state, {
@@ -116,14 +118,14 @@ function snapToActive(animate = true) {
 function handlePointerDown(e) {
   isDragging = true;
   updateFromEvent(e);
-  
+
   gsap.killTweensOf(state);
   gsap.to(state, {
     bend: 0.65,
     duration: 0.2,
     ease: "power2.out"
   });
-  
+
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
   window.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -137,7 +139,7 @@ function handlePointerMove(e) {
 
 function handleTouchMove(e) {
   if (!isDragging) return;
-  e.preventDefault(); 
+  e.preventDefault();
   updateFromEvent(e.touches[0]);
 }
 
@@ -145,7 +147,7 @@ function updateFromEvent(e) {
   if (!containerRef.value) return;
   const rect = containerRef.value.getBoundingClientRect();
   const tx = Math.max(15, Math.min(width.value - 15, e.clientX - rect.left));
-  
+
   // Find nearest
   let bestIdx = 0;
   let minDist = Infinity;
@@ -162,7 +164,7 @@ function updateFromEvent(e) {
   if (minDist < 16) {
     finalX = nearest.x + (tx - nearest.x) * 0.2; // stickiness/damping
   }
-  
+
   state.x = finalX;
   activeIndex.value = bestIdx;
   formattedTime.value = points.value[bestIdx].formattedTime || '';
@@ -175,7 +177,7 @@ function handlePointerUp() {
   window.removeEventListener('pointerup', handlePointerUp);
   window.removeEventListener('touchmove', handleTouchMove);
   window.removeEventListener('touchend', handlePointerUp);
-  
+
   const nearest = points.value[activeIndex.value];
   if (nearest) {
     // 松手时明确抛出选中项，由父组件负责真正触发模型切换。
@@ -208,7 +210,7 @@ function handlePointerUp() {
     </svg>
     <div class="te-thumb" :style="{ transform: 'translate3d(' + thumbX + 'px,' + thumbY + 'px,0) translate(-50%,-50%)' }">
       <div class="te-thumb-inner"></div>
-      <div class="te-preview-panel" :class="{ 'te-preview-panel-dragging': isDragging }">
+      <div class="te-preview-panel" :class="{ 'te-preview-panel--visible': isBent, 'te-preview-panel-dragging': isDragging }">
         <div v-if="points[activeIndex]?.previewImg" class="te-preview-img-wrap">
           <img :src="points[activeIndex].previewImg" class="te-preview-img" :class="{ 'te-preview-loaded': loadedThumbs[points[activeIndex].previewImg] }" draggable="false" />
         </div>
@@ -230,6 +232,11 @@ function handlePointerUp() {
   margin: 0 10px 0;
   flex: 1;
   overflow: visible;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.timeline-elastic-wrap:focus-visible {
+  outline: none;
 }
 .timeline-elastic-wrap:active {
   cursor: grabbing;
@@ -303,7 +310,9 @@ function handlePointerUp() {
   border-style: solid;
   border-color: rgba(30, 30, 32, 0.85) transparent transparent transparent;
 }
-.te-preview-panel-dragging, .timeline-elastic-wrap:hover .te-preview-panel {
+.te-preview-panel--visible,
+.te-preview-panel-dragging,
+.timeline-elastic-wrap:hover .te-preview-panel {
   opacity: 1;
   transform: translateY(0) scale(1);
 }
