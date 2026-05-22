@@ -36,7 +36,9 @@ class CommunityMapMarker {
   LatLng get latLng => LatLng(latitude, longitude);
 
   bool get hasValidLocation =>
-      latitude != 0 || longitude != 0;
+      latitude.isFinite &&
+      longitude.isFinite &&
+      (latitude != 0 || longitude != 0);
 }
 
 /// Fixed geographic grid cell size (degrees) used for bucketing markers.
