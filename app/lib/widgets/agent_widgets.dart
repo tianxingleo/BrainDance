@@ -34,13 +34,28 @@ class AgentProcessPanel extends StatefulWidget {
   State<AgentProcessPanel> createState() => _AgentProcessPanelState();
 }
 
-class _AgentProcessPanelState extends State<AgentProcessPanel> {
-  final ScrollController _scrollController = ScrollController();
+class _AgentProcessPanelState extends State<AgentProcessPanel>
+    with SingleTickerProviderStateMixin {
   static const int _maxStatusSteps = 8;
+  late final AnimationController _expandController;
+  late final CurvedAnimation _expandCurve;
 
   @override
   void initState() {
     super.initState();
+    _expandController = AnimationController(
+      vsync: this,
+      duration: BDMotion.durationNormal,
+      reverseDuration: const Duration(milliseconds: 220),
+    );
+    _expandCurve = CurvedAnimation(
+      parent: _expandController,
+      curve: BDMotion.curveEnter,
+      reverseCurve: BDMotion.curveExit,
+    );
+    if (!_shouldCollapse()) {
+      _expandController.value = 1.0;
+    }
     widget.chatMessage.addListener(_handleMessageChanged);
   }
 
@@ -51,38 +66,47 @@ class _AgentProcessPanelState extends State<AgentProcessPanel> {
       oldWidget.chatMessage.removeListener(_handleMessageChanged);
       widget.chatMessage.addListener(_handleMessageChanged);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    _syncExpansion();
   }
 
   @override
   void dispose() {
     widget.chatMessage.removeListener(_handleMessageChanged);
-    _scrollController.dispose();
+    _expandController.dispose();
     super.dispose();
   }
 
   void _handleMessageChanged() {
     if (!mounted) return;
     setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    _syncExpansion();
   }
 
-  void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
-    _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-    );
+  bool _shouldCollapse() {
+    final steps = _buildDisplaySteps(widget.chatMessage.steps);
+    return widget.chatMessage.isProcessCollapsed &&
+        !widget.isSearching &&
+        steps.isNotEmpty;
+  }
+
+  void _syncExpansion() {
+    if (_shouldCollapse()) {
+      if (_expandController.status != AnimationStatus.dismissed &&
+          _expandController.status != AnimationStatus.reverse) {
+        _expandController.reverse();
+      }
+    } else {
+      if (_expandController.status != AnimationStatus.completed &&
+          _expandController.status != AnimationStatus.forward) {
+        _expandController.forward();
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final steps = _buildDisplaySteps(widget.chatMessage.steps);
-    final shouldCollapse =
-        widget.chatMessage.isProcessCollapsed &&
-        !widget.isSearching &&
-        steps.isNotEmpty;
+    final shouldCollapse = _shouldCollapse();
     final summaryLabel =
         steps.isEmpty ? '等待关键步骤' : '查看 ${steps.length} 个关键步骤';
     final panelColor =
@@ -91,37 +115,41 @@ class _AgentProcessPanelState extends State<AgentProcessPanel> {
         ? Colors.white.withValues(alpha: 0.08)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.14);
 
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      child: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: panelColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            InkWell(
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(14)),
-              onTap: steps.isEmpty
-                  ? null
-                  : () {
-                      widget.chatMessage.isProcessCollapsed =
-                          !widget.chatMessage.isProcessCollapsed;
-                    },
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.memory_rounded, size: 15, color: widget.hintColor),
-                    const SizedBox(width: 8),
-                    Expanded(
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: steps.isEmpty
+                ? null
+                : () {
+                    widget.chatMessage.isProcessCollapsed =
+                        !widget.chatMessage.isProcessCollapsed;
+                  },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                children: [
+                  Icon(Icons.memory_rounded, size: 15, color: widget.hintColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: child,
+                      ),
                       child: Text(
                         shouldCollapse ? summaryLabel : '执行过程',
+                        key: ValueKey<bool>(shouldCollapse),
                         style: TextStyle(
                           color: widget.textColor,
                           fontSize: 12.5,
@@ -130,39 +158,46 @@ class _AgentProcessPanelState extends State<AgentProcessPanel> {
                         ),
                       ),
                     ),
-                    if (steps.isNotEmpty)
-                      Icon(
-                        shouldCollapse
-                            ? Icons.expand_more_rounded
-                            : Icons.expand_less_rounded,
+                  ),
+                  if (steps.isNotEmpty)
+                    RotationTransition(
+                      turns: Tween<double>(begin: 0, end: 0.5)
+                          .animate(_expandCurve),
+                      child: Icon(
+                        Icons.expand_more_rounded,
                         size: 18,
                         color: widget.hintColor,
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox.shrink(),
-              secondChild: Padding(
+          ),
+          ClipRect(
+            child: AnimatedBuilder(
+              animation: _expandCurve,
+              builder: (context, child) {
+                final value = _expandCurve.value.clamp(0.0, 1.0);
+                if (value == 0) return const SizedBox.shrink();
+                return Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: value,
+                  child: Opacity(opacity: value, child: child),
+                );
+              },
+              child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: AgentStepTimeline(
                   steps: steps,
                   isDark: widget.isDark,
                   textColor: widget.textColor,
                   hintColor: widget.hintColor,
-                  scrollController: _scrollController,
                   onRetry: widget.onRetry,
                 ),
               ),
-              crossFadeState: shouldCollapse
-                  ? CrossFadeState.showFirst
-                  : CrossFadeState.showSecond,
-              duration: const Duration(milliseconds: 220),
-              sizeCurve: Curves.easeOutCubic,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -207,7 +242,6 @@ class AgentStepTimeline extends StatelessWidget {
     required this.isDark,
     required this.textColor,
     required this.hintColor,
-    required this.scrollController,
     required this.onRetry,
   });
 
@@ -215,35 +249,23 @@ class AgentStepTimeline extends StatelessWidget {
   final bool isDark;
   final Color textColor;
   final Color hintColor;
-  final ScrollController scrollController;
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    final fadeBase =
-        isDark ? const Color(0xFF10161F) : const Color(0xFFF6F9FC);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 220),
-      child: ShaderMask(
-        shaderCallback: (bounds) {
-          return LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [fadeBase.withValues(alpha: 0), fadeBase, fadeBase],
-            stops: const [0, 0.18, 1],
-          ).createShader(bounds);
-        },
-        blendMode: BlendMode.dstIn,
-        child: ListView.separated(
-          controller: scrollController,
-          padding: EdgeInsets.zero,
-          itemCount: steps.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final step = steps[index];
-            return ListenableBuilder(
-              listenable: step,
+    if (steps.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int i = 0; i < steps.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          _AgentStepEntryAnimator(
+            key: ValueKey(identityHashCode(steps[i])),
+            child: ListenableBuilder(
+              listenable: steps[i],
               builder: (context, _) {
+                final step = steps[i];
                 switch (step.type) {
                   case 'status':
                     return AgentStatusStepTile(
@@ -270,10 +292,58 @@ class AgentStepTimeline extends StatelessWidget {
                     return const SizedBox.shrink();
                 }
               },
-            );
-          },
-        ),
-      ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AgentStepEntryAnimator extends StatefulWidget {
+  const _AgentStepEntryAnimator({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AgentStepEntryAnimator> createState() =>
+      _AgentStepEntryAnimatorState();
+}
+
+class _AgentStepEntryAnimatorState extends State<_AgentStepEntryAnimator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: BDMotion.durationNormal,
+    );
+    _opacity = CurvedAnimation(parent: _controller, curve: BDMotion.curveEnter);
+    _offset = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _controller, curve: BDMotion.curveFluid),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(position: _offset, child: widget.child),
     );
   }
 }
@@ -455,22 +525,32 @@ class AgentToolStepTile extends StatefulWidget {
 }
 
 class _AgentToolStepTileState extends State<AgentToolStepTile>
-    with AutomaticKeepAliveClientMixin {
-  final ExpansibleController _controller = ExpansibleController();
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _expand;
+  late final CurvedAnimation _expandCurve;
+  late final Animation<double> _iconTurns;
   bool _wasCompleted = false;
   bool _didInitialAutoExpand = false;
 
   @override
-  bool get wantKeepAlive => true;
-
-  @override
   void initState() {
     super.initState();
+    _expand = AnimationController(
+      vsync: this,
+      duration: BDMotion.durationNormal,
+      reverseDuration: const Duration(milliseconds: 220),
+    );
+    _expandCurve = CurvedAnimation(
+      parent: _expand,
+      curve: BDMotion.curveEnter,
+      reverseCurve: BDMotion.curveExit,
+    );
+    _iconTurns = Tween<double>(begin: 0, end: 0.5).animate(_expandCurve);
     _wasCompleted = widget.step.isCompleted;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!widget.step.isCompleted && mounted) {
         _didInitialAutoExpand = true;
-        _controller.expand();
+        _expand.forward();
       }
     });
     widget.step.addListener(_handleStepChange);
@@ -479,32 +559,42 @@ class _AgentToolStepTileState extends State<AgentToolStepTile>
   @override
   void dispose() {
     widget.step.removeListener(_handleStepChange);
+    _expand.dispose();
     super.dispose();
   }
 
   void _handleStepChange() {
+    if (!mounted) return;
     final isCompleted = widget.step.isCompleted;
     if (isCompleted && !_wasCompleted) {
       _wasCompleted = true;
       Future.delayed(const Duration(milliseconds: 450), () {
-        if (mounted) _controller.collapse();
+        if (mounted) _expand.reverse();
       });
       return;
     }
     if (!isCompleted && _wasCompleted) {
       _wasCompleted = false;
-      if (mounted) _controller.expand();
+      _expand.forward();
       return;
     }
-    if (!isCompleted && !_didInitialAutoExpand && mounted) {
+    if (!isCompleted && !_didInitialAutoExpand) {
       _didInitialAutoExpand = true;
-      _controller.expand();
+      _expand.forward();
+    }
+  }
+
+  void _toggle() {
+    if (_expand.status == AnimationStatus.completed ||
+        _expand.status == AnimationStatus.forward) {
+      _expand.reverse();
+    } else {
+      _expand.forward();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
     final toolName = widget.step.toolName ?? '未命名工具';
     final isDone = widget.step.isCompleted;
 
@@ -531,122 +621,155 @@ class _AgentToolStepTileState extends State<AgentToolStepTile>
               : Colors.white.withValues(alpha: 0.08),
         ),
       ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          controller: _controller,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          iconColor: hintColor,
-          collapsedIconColor: hintColor,
-          title: Row(
-            children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: iconBgColor,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(
-                  isDone
-                      ? Icons.terminal_rounded
-                      : Icons.developer_mode_rounded,
-                  size: 15,
-                  color: const Color(0xFF9FD3FF),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$titlePrefix $toolName',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: textColor,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      statusLabel,
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        color: hintColor,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (!isDone)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Color(0xFF9FD3FF)),
-                    ),
-                  ),
-                )
-              else
-                Icon(
-                  Icons.check_circle_rounded,
-                  size: 16,
-                  color: const Color(0xFF42B883).withValues(alpha: 0.9),
-                ),
-            ],
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: detailPanelColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: widget.isDark
-                      ? Colors.white12
-                      : Colors.white.withValues(alpha: 0.08),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
                 children: [
-                  Text(
-                    textLocalize('agent_status_tool_args'),
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      isDone
+                          ? Icons.terminal_rounded
+                          : Icons.developer_mode_rounded,
+                      size: 15,
+                      color: const Color(0xFF9FD3FF),
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  HighlightView(
-                    widget.step.content.isEmpty ? '{}' : widget.step.content,
-                    language: 'json',
-                    theme: atomOneDarkTheme,
-                    padding: EdgeInsets.zero,
-                    textStyle: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      height: 1.45,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$titlePrefix $toolName',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: textColor,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          statusLabel,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: hintColor,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (!isDone)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6),
+                      child: SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                              Color(0xFF9FD3FF)),
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(
+                        Icons.check_circle_rounded,
+                        size: 16,
+                        color: const Color(0xFF42B883).withValues(alpha: 0.9),
+                      ),
+                    ),
+                  RotationTransition(
+                    turns: _iconTurns,
+                    child: Icon(
+                      Icons.expand_more_rounded,
+                      size: 18,
+                      color: hintColor,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+          ClipRect(
+            child: AnimatedBuilder(
+              animation: _expandCurve,
+              builder: (context, child) {
+                final value = _expandCurve.value.clamp(0.0, 1.0);
+                if (value == 0) return const SizedBox.shrink();
+                return Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: value,
+                  child: Opacity(opacity: value, child: child),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: detailPanelColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: widget.isDark
+                          ? Colors.white12
+                          : Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        textLocalize('agent_status_tool_args'),
+                        style: TextStyle(
+                          color: hintColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      HighlightView(
+                        widget.step.content.isEmpty
+                            ? '{}'
+                            : widget.step.content,
+                        language: 'json',
+                        theme: atomOneDarkTheme,
+                        padding: EdgeInsets.zero,
+                        textStyle: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
