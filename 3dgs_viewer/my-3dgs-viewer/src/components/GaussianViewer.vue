@@ -3444,6 +3444,10 @@ const onCapturedUserCameraInput = () => {
 };
 
 function onTimePeelingSelect(model) {
+  if (!model.ply) {
+    alert('该模型尚未下载，无法进入。');
+    return;
+  }
   activeModelId.value = model.id;
   // 通知 Flutter 切换模型（Flutter 负责下载后回调 loadModelFromFlutter）
   if (window.BrainDanceChannel) {

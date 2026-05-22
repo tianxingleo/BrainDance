@@ -211,7 +211,7 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   box-shadow: 0 8px 24px var(--card-shadow, rgba(0, 0, 0, 0.1));
-  padding: 22px 0 14px 12px;
+  padding: 16px 0 14px 12px;
 }
 
 /* 切换按钮 */
@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
   gap: 6px;
   flex-shrink: 0;
   padding-right: 10px;
-  margin-bottom: 26px;
+  margin-bottom: 18px;
 }
 
 .bs-tab {
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   overflow-x: auto;
   overflow-y: visible;
-  padding: 16px 36px 28px;
+  padding: 12px 36px 22px;
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: grab;
@@ -278,7 +278,7 @@ onBeforeUnmount(() => {
 }
 .bs-track--timeline {
   gap: 0;
-  padding-top: 72px;
+  padding-top: 64px;
   padding-bottom: 14px;
   -webkit-mask-image: none;
   mask-image: none;
@@ -293,8 +293,8 @@ onBeforeUnmount(() => {
 /* 缩略图项 */
 .bs-item {
   position: relative;
-  width: 96px;
-  height: 68px;
+  width: 97px;
+  height: 65px;
   flex-shrink: 0;
   border-radius: 12px;
   overflow: hidden;

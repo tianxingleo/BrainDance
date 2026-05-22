@@ -8,9 +8,9 @@ const props = defineProps({
 });
 const emit = defineEmits(['select']);
 
-const SVG_HEIGHT = 84;
-const BASE_Y = 56;     // The flat line Y
-const PEAK_Y = 24;     // The Y at the thumb
+const SVG_HEIGHT = 96;
+const BASE_Y = 68;     // The flat line Y
+const PEAK_Y = 32;     // The Y at the thumb
 const BEND_WIDTH = 50; // The horizontal spread of the curve
 
 const containerRef = ref(null);
