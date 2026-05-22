@@ -48,6 +48,8 @@
 - 2026-03-27 已补充 Flutter 最终回答去重兼容：Recall 页消费 `agent-recall` 的 `message.delta` 时，会同时兼容“真正增量片段”和“累计全文片段”两种上游流式正文格式，避免在“你是谁”这类 direct answer 场景里把同一段回答重复拼成两到三遍。
 - 2026-04-28 已补充 Flutter Recall 页静态兼容修复：为拆分到 `part` 扩展中的状态刷新统一增加 `_refreshState()` 包装，避免新版 Dart 分析器把扩展内直接调用 `setState` 识别为 `invalid_use_of_protected_member`；同时把 `integration_test` 骨架中的 `skip` 参数改为 `bool`，对齐当前 `flutter_test` 签名。
 - 2026-05-18 已补充 `pose_semantic_search` 前端呈现优化：共享 Core 会为空间候选补齐 `display_name / preview_img_path / ply_path / tags / created_at`，Flutter Recall 与独立 Agent Chat 页会把空间候选渲染为与 `read_model_assets` 一致的资产卡片，并在卡片上明确显示“置信度”。
+- 2026-05-20 已补充 Agent 专题整理/记忆归档的 `summary_title` 写入能力：`write_model_assets` 现在可在 dry-run/确认执行链路中逐条写入 `summaryTitle`，该字段只作为 Agent 生成的简短回忆标题，不替代用户可编辑的 `display_name`；普通重命名仍只应修改 `displayName`。
+- 2026-05-21 已移除 `memory_thread` 相关 Agent 能力：共享 Core 不再暴露 `group_models_into_thread` 工具，不再在提示词、状态机、资产上下文或关系评分里使用 `memory_thread_id`；版本链能力仅保留基于 `place_id` 的 `list_place_versions` 与相关模型辅助查询。
 
 ## 2026-03-26 修复记录
 

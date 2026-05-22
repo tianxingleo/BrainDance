@@ -5,6 +5,7 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'map_marker.dart';
 import 'models.dart';
 
 class CommunityRepository {
@@ -116,6 +117,162 @@ class CommunityRepository {
     } catch (_) {}
 
     return [..._localDrafts, ..._demoPosts];
+  }
+
+  // ---- Map markers ----
+
+  /// Lightweight read path used by the community map. Independent of
+  /// [fetchPosts] so the map isn't bound to the 24-row feed limit.
+  Future<List<CommunityMapMarker>> fetchMapMarkers({
+    int limit = 500,
+    bool onlyPublic = true,
+  }) async {
+    final markers = <CommunityMapMarker>[];
+
+    // Local optimistic drafts first — they have no metadata payload.
+    for (final p in _localDrafts) {
+      if (p.latitude == 0 && p.longitude == 0) continue;
+      markers.add(CommunityMapMarker(
+        id: p.id,
+        title: p.title,
+        placeName: p.placeName,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        coverUrl: p.coverUrl,
+        createdAt: p.createdAt,
+        likeCount: p.likeCount,
+        viewCount: p.viewCount,
+      ));
+    }
+
+    try {
+      final response = await _client
+          .from('community_posts')
+          .select(
+            'id, title, place_name, latitude, longitude, cover_image_url, '
+            'created_at, user_id, metadata',
+          )
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      final uid = currentUserId;
+      for (final raw in response) {
+        final map = Map<String, dynamic>.from(raw);
+        final lat = (map['latitude'] as num?)?.toDouble() ?? 0;
+        final lng = (map['longitude'] as num?)?.toDouble() ?? 0;
+        if (lat == 0 && lng == 0) continue;
+
+        final metadata = _parseMetadata(map['metadata']);
+        final isPublic = metadata['is_public'] != false;
+        if (onlyPublic && !isPublic) {
+          final ownerId = map['user_id']?.toString() ?? '';
+          if (uid.isEmpty || ownerId != uid) continue;
+        }
+
+        markers.add(CommunityMapMarker(
+          id: map['id'].toString(),
+          title: map['title']?.toString() ??
+              textLocalize('community_unnamed_memory'),
+          placeName: map['place_name']?.toString() ??
+              textLocalize('community_no_location'),
+          latitude: lat,
+          longitude: lng,
+          coverUrl: _normalizeStorageUrl(
+            map['cover_image_url']?.toString() ?? '',
+          ),
+          createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+              DateTime.now(),
+          likeCount: (metadata['likes'] as List?)?.length ?? 0,
+          viewCount: _readViewCount(metadata),
+        ));
+      }
+    } catch (_) {
+      // Fall back to demo posts so the map isn't empty during offline dev.
+      for (final p in _demoPosts) {
+        if (p.latitude == 0 && p.longitude == 0) continue;
+        markers.add(CommunityMapMarker(
+          id: p.id,
+          title: p.title,
+          placeName: p.placeName,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          coverUrl: p.coverUrl,
+          createdAt: p.createdAt,
+          likeCount: p.likeCount,
+          viewCount: p.viewCount,
+        ));
+      }
+    }
+
+    // De-dup by id, keeping first occurrence (local drafts win).
+    final seen = <String>{};
+    return markers.where((m) => seen.add(m.id)).toList();
+  }
+
+  /// Loads a single post by id. Used by the map page to navigate into the
+  /// existing detail view from a marker tap.
+  Future<CommunityPost?> fetchPostById(String postId) async {
+    if (postId.startsWith('local-')) {
+      final hit = _localDrafts.where((p) => p.id == postId);
+      return hit.isEmpty ? null : hit.first;
+    }
+    try {
+      final response = await _client
+          .from('community_posts')
+          .select(_postSelect)
+          .eq('id', postId)
+          .maybeSingle();
+      if (response == null) return null;
+      final map = Map<String, dynamic>.from(response);
+      final model = map['model_assets'] is Map
+          ? Map<String, dynamic>.from(map['model_assets'] as Map)
+          : <String, dynamic>{};
+      final modelUrl = _normalizeStorageUrl(model['ply_path']?.toString() ?? '');
+      final previewUrl = _normalizeStorageUrl(
+        map['cover_image_url']?.toString().isNotEmpty == true
+            ? map['cover_image_url']!.toString()
+            : (model['preview_img_path']?.toString() ?? ''),
+      );
+      final metadata = _parseMetadata(map['metadata']);
+      return CommunityPost(
+        id: map['id'].toString(),
+        title: map['title']?.toString() ??
+            textLocalize('community_unnamed_memory'),
+        caption: map['caption']?.toString() ??
+            model['description']?.toString() ?? '',
+        placeName: map['place_name']?.toString() ??
+            textLocalize('community_no_location'),
+        latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
+        longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
+        authorName: map['user_id']?.toString() ??
+            textLocalize('community_anonymous'),
+        modelName: map['model_name']?.toString() ??
+            model['display_name']?.toString() ??
+            model['scene_id']?.toString() ?? '3D 模型',
+        modelUrl: modelUrl,
+        posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
+        coverUrl: previewUrl,
+        createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+            DateTime.now(),
+        tags: _extractTags(
+          model['description']?.toString(),
+          map['place_name']?.toString(),
+        ),
+        isPublic: metadata['is_public'] != false,
+        likeCount: (metadata['likes'] as List?)?.length ?? 0,
+        favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
+        commentCount: (metadata['comments'] as List?)?.length ?? 0,
+        viewCount: _readViewCount(metadata),
+        isLikedByCurrentUser:
+            _containsUser(metadata['likes'], currentUserId),
+        isFavoritedByCurrentUser:
+            _containsUser(metadata['favorites'], currentUserId),
+        extraImages:
+            List<Map<String, dynamic>>.from(metadata['images'] ?? []),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<CommunityPost>> fetchMyPosts() async {

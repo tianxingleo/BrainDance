@@ -2,6 +2,9 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/pages/community/detail.dart';
+import 'package:braindance/pages/community/filtering.dart';
+import 'package:braindance/pages/community/map_marker.dart';
+import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
@@ -25,12 +28,20 @@ class _CommunityPageState extends State<CommunityPage>
 
   List<CommunityPost> _posts = const [];
   List<CommunityModelOption> _shareableModels = const [];
-  String? _selectedPlaceName;
+  List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
   int _tabIndex = 0;
+  CommunityMapViewport _mapViewport = const CommunityMapViewport(
+    latitude: 30.243,
+    longitude: 120.150,
+    zoom: 10,
+  );
 
   // Discover tab
   final Set<String> _selectedTags = {};
+
+  // Explore tab — viewport + tag filter
+  String? _exploreTag;
 
   // Submit tab — multi-model
   final List<CommunityModelOption> _selectedSubmitModels = [];
@@ -76,10 +87,12 @@ class _CommunityPageState extends State<CommunityPage>
     setState(() => _isLoading = true);
     final posts = await _repository.fetchPosts();
     final models = await _repository.fetchShareableModels();
+    final markers = await _repository.fetchMapMarkers();
     if (!mounted) return;
     setState(() {
       _posts = posts;
       _shareableModels = models;
+      _mapMarkers = markers;
       _isLoading = false;
     });
     _loadDraft(); // safe: _shareableModels is now populated
@@ -126,6 +139,63 @@ class _CommunityPageState extends State<CommunityPage>
         },
       ),
     );
+  }
+
+  Future<void> _openMapPage() async {
+    final result = await Navigator.push<CommunityMapViewport>(
+      context,
+      PageRouteBuilder(
+        transitionDuration: BDMotion.durationNormal,
+        reverseTransitionDuration: BDMotion.durationNormal,
+        opaque: true,
+        pageBuilder: (_, __, ___) => CommunityMapPage(
+          initialViewport: _mapViewport,
+          onMarkerTap: _openPostFromMarker,
+          onMarkerLongPress: _openLocationHubFromMarker,
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.0, 1.0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOutCubic,
+              ),
+            ),
+            child: child,
+          );
+        },
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _mapViewport = result);
+  }
+
+  Future<void> _openPostFromMarker(CommunityMapMarker marker) async {
+    final cached = _posts.where((p) => p.id == marker.id);
+    if (cached.isNotEmpty) {
+      _openDetail(cached.first);
+      return;
+    }
+    final post = await _repository.fetchPostById(marker.id);
+    if (!mounted) return;
+    if (post == null) {
+      showAppToast(context, '帖子已不可用');
+      return;
+    }
+    _openDetail(post);
+  }
+
+  void _openLocationHubFromMarker(CommunityMapMarker marker) {
+    final peers =
+        _posts.where((p) => p.placeName == marker.placeName).toList();
+    if (peers.isNotEmpty) {
+      _openLocationHub(peers.first);
+      return;
+    }
+    _openPostFromMarker(marker);
   }
   
   void _openViewer(CommunityPost post) {
@@ -322,6 +392,42 @@ class _CommunityPageState extends State<CommunityPage>
     return filtered;
   }
 
+  /// Posts visible in the current map viewport. Used as the base set for
+  /// the explore tab list, and as the source for the tag chip suggestions.
+  List<CommunityPost> get _viewportPosts =>
+      filterPostsByBounds(_posts, _mapViewport.bounds);
+
+  /// Final explore-tab list: viewport posts, then optionally narrowed by
+  /// the selected tag and the zoom-derived radius around the viewport center.
+  List<CommunityPost> get _exploreFilteredPosts {
+    final base = _viewportPosts;
+    final tag = _exploreTag;
+    if (tag == null || tag.isEmpty) return base;
+    final tagged = filterPostsByTag(base, tag);
+    final origin = _mapViewport.bounds?.center ??
+        (latitude: _mapViewport.latitude, longitude: _mapViewport.longitude);
+    return filterPostsByRadius(
+      tagged,
+      origin,
+      tagRadiusKmForZoom(_mapViewport.zoom),
+    );
+  }
+
+  void _onExploreToggleTag(String tag) {
+    setState(() {
+      if (_exploreTag == tag) {
+        _exploreTag = null;
+      } else {
+        _exploreTag = tag;
+      }
+    });
+  }
+
+  void _onExploreClearFilters() {
+    if (_exploreTag == null) return;
+    setState(() => _exploreTag = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
@@ -392,13 +498,19 @@ class _CommunityPageState extends State<CommunityPage>
                         index: _tabIndex,
                         children: [
                           CommunityExploreView(
-                            posts: _posts,
-                            selectedPlaceName: _selectedPlaceName,
-                            onSelect: (placeName) => setState(
-                                () => _selectedPlaceName = placeName),
-                            onClearFilter: () => setState(
-                                () => _selectedPlaceName = null),
+                            posts: _exploreFilteredPosts,
+                            totalPosts: _posts.length,
+                            viewportPosts: _viewportPosts.length,
+                            mapViewport: _mapViewport,
+                            mapMarkers: _mapMarkers,
+                            onOpenMap: _openMapPage,
                             onTapPost: _openDetail,
+                            availableTags: rankTagsFromPosts(_viewportPosts),
+                            selectedTag: _exploreTag,
+                            onToggleTag: _onExploreToggleTag,
+                            onClearFilters: _onExploreClearFilters,
+                            tagRadiusKm:
+                                tagRadiusKmForZoom(_mapViewport.zoom),
                           ),
                           CommunityDiscoverView(
                             posts: _filteredPosts,
