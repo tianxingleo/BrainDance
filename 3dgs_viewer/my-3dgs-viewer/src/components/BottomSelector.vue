@@ -205,13 +205,13 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   gap: 0;
   pointer-events: auto;
-  background: var(--card-bg, rgba(249, 249, 248, 0.88));
+  background: linear-gradient(180deg, rgba(249, 249, 248, 0.72) 0%, rgba(249, 249, 248, 0.88) 100%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-radius: 20px;
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   box-shadow: 0 8px 24px var(--card-shadow, rgba(0, 0, 0, 0.1));
-  padding: 10px 0 14px 12px;
+  padding: 22px 0 14px 12px;
 }
 
 /* 切换按钮 */
@@ -221,6 +221,7 @@ onBeforeUnmount(() => {
   gap: 6px;
   flex-shrink: 0;
   padding-right: 10px;
+  margin-bottom: 26px;
 }
 
 .bs-tab {
@@ -237,6 +238,10 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   outline: none;
+}
+.bs-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55);
 }
 .bs-tab--active {
   background: rgba(204, 154, 92, 0.88);
@@ -269,10 +274,11 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
   mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  -webkit-tap-highlight-color: transparent;
 }
 .bs-track--timeline {
   gap: 0;
-  padding-top: 52px;
+  padding-top: 72px;
   padding-bottom: 14px;
   -webkit-mask-image: none;
   mask-image: none;
@@ -304,6 +310,15 @@ onBeforeUnmount(() => {
   transform: scale(0.84);
   transform-origin: center;
   will-change: transform, opacity;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bs-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55), 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
+}
+.bs-item--active:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.55), 0 4px 16px rgba(204, 154, 92, 0.3);
 }
 .bs-item--active {
   border-color: #CC9A5C;
@@ -323,7 +338,8 @@ onBeforeUnmount(() => {
   display: block;
   user-select: none;
   -webkit-user-drag: none;
-  background: rgba(30, 30, 32, 0.5);
+  -webkit-tap-highlight-color: transparent;
+  background: linear-gradient(135deg, rgba(60, 60, 66, 0.35) 0%, rgba(40, 40, 46, 0.45) 100%);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   opacity: 0;
