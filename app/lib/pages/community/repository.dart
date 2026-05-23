@@ -74,7 +74,9 @@ class CommunityRepository {
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName: map['user_id']?.toString() ??
+          userId: map['user_id']?.toString() ?? '',
+          authorName: metadata['author_email']?.toString() ??
+              map['user_id']?.toString() ??
               textLocalize('community_anonymous'),
           modelName:
               map['model_name']?.toString() ??
@@ -109,7 +111,7 @@ class CommunityRepository {
       final visible = posts.where((p) {
         if (p.isPublic) return true;
         final uid = currentUserId;
-        return uid.isNotEmpty && p.authorName == uid;
+        return uid.isNotEmpty && p.userId == uid;
       }).toList();
 
       final merged = [..._localDrafts, ...visible];
@@ -232,7 +234,9 @@ class CommunityRepository {
             textLocalize('community_no_location'),
         latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
         longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-        authorName: map['user_id']?.toString() ??
+        userId: map['user_id']?.toString() ?? '',
+        authorName: metadata['author_email']?.toString() ??
+            map['user_id']?.toString() ??
             textLocalize('community_anonymous'),
         modelName: map['model_name']?.toString() ??
             model['display_name']?.toString() ??
@@ -299,7 +303,9 @@ class CommunityRepository {
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName: map['user_id']?.toString() ??
+          userId: map['user_id']?.toString() ?? '',
+          authorName: metadata['author_email']?.toString() ??
+              map['user_id']?.toString() ??
               textLocalize('community_anonymous'),
           modelName: map['model_name']?.toString() ??
               model['display_name']?.toString() ??
@@ -464,6 +470,7 @@ class CommunityRepository {
         'cover_image_url': model.coverUrl,
         'metadata': {
           'is_public': draft.isPublic,
+          'author_email': _client.auth.currentUser?.email ?? '',
           'likes': <String>[],
           'favorites': <String>[],
           'comments': <Map<String, dynamic>>[],

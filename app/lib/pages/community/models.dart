@@ -59,6 +59,7 @@ class CommunityPost {
   final double latitude;
   final double longitude;
   final String authorName;
+  final String userId;
   final String modelName;
   final String modelUrl;
   final String? posesUrl;
@@ -81,6 +82,7 @@ class CommunityPost {
     required this.latitude,
     required this.longitude,
     required this.authorName,
+    this.userId = '',
     required this.modelName,
     required this.modelUrl,
     required this.posesUrl,
@@ -116,6 +118,7 @@ class CommunityPost {
       latitude: latitude,
       longitude: longitude,
       authorName: authorName,
+      userId: userId,
       modelName: modelName,
       modelUrl: modelUrl,
       posesUrl: posesUrl,
