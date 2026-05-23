@@ -393,4 +393,71 @@ onBeforeUnmount(() => {
   line-height: 1.2;
 }
 
+/* 暗色主题：跟随 .app-container[data-theme="dark"] 由 Flutter 推送 */
+[data-theme="dark"] .bs-root {
+  background: linear-gradient(
+    180deg,
+    rgba(22, 24, 30, 0.78) 0%,
+    rgba(22, 24, 30, 0.92) 100%
+  );
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .bs-tab {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 247, 250, 0.6);
+}
+
+[data-theme="dark"] .bs-tab:hover:not(.bs-tab--active) {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(245, 247, 250, 0.92);
+}
+
+[data-theme="dark"] .bs-tab--active {
+  background: rgba(204, 154, 92, 0.92);
+  color: #1a1a1f;
+  box-shadow: 0 2px 10px rgba(204, 154, 92, 0.35);
+}
+
+[data-theme="dark"] .bs-tab:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .bs-item {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .bs-item:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2),
+    0 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .bs-item:hover:not(.bs-item--active) {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+[data-theme="dark"] .bs-item--active {
+  border-color: #CC9A5C;
+  box-shadow: 0 6px 18px rgba(204, 154, 92, 0.4);
+}
+
+[data-theme="dark"] .bs-item--active:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22),
+    0 6px 18px rgba(204, 154, 92, 0.4);
+}
+
+[data-theme="dark"] .bs-thumb {
+  background: linear-gradient(
+    135deg,
+    rgba(40, 40, 46, 0.45) 0%,
+    rgba(20, 20, 26, 0.6) 100%
+  );
+}
+
+[data-theme="dark"] .bs-thumb--empty {
+  color: rgba(245, 247, 250, 0.4);
+}
+
 </style>

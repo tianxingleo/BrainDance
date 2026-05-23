@@ -22,7 +22,7 @@ void showAppToast(BuildContext context, String message) {
       : const Color(0x22000000);
 
   final overlay = Overlay.of(context);
-  final bottomPadding = MediaQuery.of(context).padding.bottom;
+  final bottomPadding = MediaQuery.paddingOf(context).bottom;
 
   final entry = OverlayEntry(
     builder: (_) => IgnorePointer(

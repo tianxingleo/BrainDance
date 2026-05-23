@@ -73,8 +73,10 @@ class CommunityRepository {
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName:
-              map['user_id']?.toString() ?? textLocalize('community_anonymous'),
+          userId: map['user_id']?.toString() ?? '',
+          authorName: metadata['author_email']?.toString() ??
+              map['user_id']?.toString() ??
+              textLocalize('community_anonymous'),
           modelName:
               map['model_name']?.toString() ??
               model['display_name']?.toString() ??
@@ -111,14 +113,16 @@ class CommunityRepository {
       final visible = posts.where((p) {
         if (p.isPublic) return true;
         final uid = currentUserId;
-        return uid.isNotEmpty && p.authorName == uid;
+        return uid.isNotEmpty && p.userId == uid;
       }).toList();
 
       final merged = [..._localDrafts, ...visible];
       if (merged.isNotEmpty) return merged;
-    } catch (_) {}
+    } catch (_) {
+      rethrow;
+    }
 
-    return [..._localDrafts, ..._demoPosts];
+    return [];
   }
 
   // ---- Map markers ----
@@ -257,10 +261,11 @@ class CommunityRepository {
             textLocalize('community_no_location'),
         latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
         longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-        authorName:
-            map['user_id']?.toString() ?? textLocalize('community_anonymous'),
-        modelName:
-            map['model_name']?.toString() ??
+        userId: map['user_id']?.toString() ?? '',
+        authorName: metadata['author_email']?.toString() ??
+            map['user_id']?.toString() ??
+            textLocalize('community_anonymous'),
+        modelName: map['model_name']?.toString() ??
             model['display_name']?.toString() ??
             model['scene_id']?.toString() ??
             '3D 模型',
@@ -327,10 +332,11 @@ class CommunityRepository {
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName:
-              map['user_id']?.toString() ?? textLocalize('community_anonymous'),
-          modelName:
-              map['model_name']?.toString() ??
+          userId: map['user_id']?.toString() ?? '',
+          authorName: metadata['author_email']?.toString() ??
+              map['user_id']?.toString() ??
+              textLocalize('community_anonymous'),
+          modelName: map['model_name']?.toString() ??
               model['display_name']?.toString() ??
               model['scene_id']?.toString() ??
               '3D 模型',
@@ -499,27 +505,25 @@ class CommunityRepository {
 
     try {
       // Insert and get back the server-assigned id
-      final insertResult = await _client
-          .from('community_posts')
-          .insert({
-            'user_id': _client.auth.currentUser?.id ?? 'local-user',
-            'model_asset_id': model.id,
-            'model_name': model.sceneId,
-            'title': draft.title,
-            'caption': draft.caption,
-            'place_name': draft.placeName,
-            'latitude': draft.latitude,
-            'longitude': draft.longitude,
-            'cover_image_url': model.coverUrl,
-            'metadata': {
-              'is_public': draft.isPublic,
-              'likes': <String>[],
-              'favorites': <String>[],
-              'comments': <Map<String, dynamic>>[],
-              'images': extraImagesMeta,
-            },
-          })
-          .select('id');
+      final insertResult = await _client.from('community_posts').insert({
+        'user_id': _client.auth.currentUser?.id ?? 'local-user',
+        'model_asset_id': model.id,
+        'model_name': model.sceneId,
+        'title': draft.title,
+        'caption': draft.caption,
+        'place_name': draft.placeName,
+        'latitude': draft.latitude,
+        'longitude': draft.longitude,
+        'cover_image_url': model.coverUrl,
+        'metadata': {
+          'is_public': draft.isPublic,
+          'author_email': _client.auth.currentUser?.email ?? '',
+          'likes': <String>[],
+          'favorites': <String>[],
+          'comments': <Map<String, dynamic>>[],
+          'images': extraImagesMeta,
+        },
+      }).select('id');
 
       if (insertResult is List && insertResult.isNotEmpty) {
         final realId = insertResult[0]['id']?.toString();

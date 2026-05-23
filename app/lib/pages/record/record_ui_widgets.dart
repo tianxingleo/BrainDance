@@ -360,6 +360,119 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
   }
 }
 
+// ===== Streaming Done Bubble =====
+class _StreamingDoneBubble extends ConsumerStatefulWidget {
+  const _StreamingDoneBubble();
+
+  @override
+  ConsumerState<_StreamingDoneBubble> createState() =>
+      _StreamingDoneBubbleState();
+}
+
+class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  Timer? _dismissTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      duration: const Duration(milliseconds: 280),
+      vsync: this,
+    );
+    _fade = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.dismissed && mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state = null;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissTimer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = ref.watch(streamingDoneBubbleProvider);
+
+    ref.listen(streamingDoneBubbleProvider, (prev, next) {
+      if (next != null) {
+        _dismissTimer?.cancel();
+        _ctrl.forward();
+        _dismissTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) _ctrl.reverse();
+        });
+      }
+    });
+
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
+          if (message == null) return const SizedBox.shrink();
+
+          return Align(
+            alignment: const Alignment(0, 0.30),
+            child: FadeTransition(
+              opacity: _fade,
+              child: GestureDetector(
+                onTap: () {
+                  _dismissTimer?.cancel();
+                  _ctrl.reverse();
+                },
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 32),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xE6282828),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withAlpha(18)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        color: Colors.white.withAlpha(180),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          message,
+                          style: TextStyle(
+                            color: Colors.white.withAlpha(220),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 // ===== Center Bubble (reusable) =====
 class _CenterBubble extends ConsumerStatefulWidget {
   final StateProvider<bool> provider;
@@ -467,129 +580,6 @@ class _CenterBubbleState extends ConsumerState<_CenterBubble>
                         Flexible(
                           child: Text(
                             widget.message,
-                            style: TextStyle(
-                              color: Colors.white.withAlpha(220),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ===== Streaming Done Bubble (center) =====
-class _StreamingDoneBubble extends ConsumerStatefulWidget {
-  const _StreamingDoneBubble();
-
-  @override
-  ConsumerState<_StreamingDoneBubble> createState() =>
-      _StreamingDoneBubbleState();
-}
-
-class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _fade;
-  late final Animation<double> _scale;
-  Timer? _dismissTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      duration: const Duration(milliseconds: 250),
-      vsync: this,
-    );
-    _fade = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-    _scale = Tween<double>(
-      begin: 0.88,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-    _ctrl.addStatusListener((s) {
-      if (s == AnimationStatus.dismissed && mounted) {
-        ref.read(streamingDoneBubbleProvider.notifier).state = null;
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _dismissTimer?.cancel();
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final message = ref.watch(streamingDoneBubbleProvider);
-
-    ref.listen(streamingDoneBubbleProvider, (prev, next) {
-      if (next != null) {
-        _dismissTimer?.cancel();
-        _ctrl.forward();
-        _dismissTimer = Timer(const Duration(seconds: 6), () {
-          if (mounted) _ctrl.reverse();
-        });
-      }
-    });
-
-    //if (_ctrl.isDismissed && message == null) return const SizedBox.shrink();
-
-    return Positioned.fill(
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (context, child) {
-          if (_ctrl.isDismissed) return const SizedBox.shrink();
-          if (message == null) return const SizedBox.shrink();
-
-          return Align(
-            alignment: const Alignment(0, 0.30),
-            child: FadeTransition(
-              opacity: _fade,
-              child: ScaleTransition(
-                scale: _scale,
-                child: GestureDetector(
-                  onTap: () {
-                    _dismissTimer?.cancel();
-                    _ctrl.reverse();
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 13,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xE6282828),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withAlpha(18)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.check_circle_outline_rounded,
-                          color: BDDesign.colorFadedOlive,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 10),
-                        Flexible(
-                          child: Text(
-                            message,
                             style: TextStyle(
                               color: Colors.white.withAlpha(220),
                               fontSize: 13,

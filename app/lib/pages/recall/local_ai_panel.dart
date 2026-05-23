@@ -367,7 +367,7 @@ class _RecallLocalQnaPanel extends StatelessWidget {
                               ConstrainedBox(
                                 constraints: BoxConstraints(
                                   maxHeight:
-                                      MediaQuery.of(context).size.height * 0.5,
+                                      MediaQuery.sizeOf(context).height * 0.5,
                                 ),
                                 child: ListView.builder(
                                   shrinkWrap: true,

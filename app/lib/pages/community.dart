@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -8,22 +10,26 @@ import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
+import 'package:braindance/services/network_service.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/widgets/app_toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class CommunityPage extends StatefulWidget {
+import '../main.dart' show myPostsRefreshSignal;
+
+class CommunityPage extends ConsumerStatefulWidget {
   const CommunityPage({super.key});
 
   @override
-  State<CommunityPage> createState() => _CommunityPageState();
+  ConsumerState<CommunityPage> createState() => _CommunityPageState();
 }
 
 enum _CommunitySubPage { recommend, search, submit }
 
-class _CommunityPageState extends State<CommunityPage> {
+class _CommunityPageState extends ConsumerState<CommunityPage> {
   final CommunityRepository _repository = CommunityRepository();
   _CommunitySubPage? _currentPage;
   int _searchFocusTrigger = 0;
@@ -32,6 +38,8 @@ class _CommunityPageState extends State<CommunityPage> {
   List<CommunityModelOption> _shareableModels = const [];
   List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
+  bool _isOffline = false;
+  Timer? _retryTimer;
   CommunityMapViewport _mapViewport = const CommunityMapViewport(
     latitude: 30.243,
     longitude: 120.150,
@@ -73,12 +81,15 @@ class _CommunityPageState extends State<CommunityPage> {
     _submitPlaceController = TextEditingController();
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
+    networkService.addListener(_onNetworkChanged);
     _loadCommunity();
     _loadSearchHistory();
   }
 
   @override
   void dispose() {
+    networkService.removeListener(_onNetworkChanged);
+    _retryTimer?.cancel();
     _submitTitleController.dispose();
     _submitCaptionController.dispose();
     _submitPlaceController.dispose();
@@ -120,19 +131,59 @@ class _CommunityPageState extends State<CommunityPage> {
     _persistSearchHistory();
   }
 
-  Future<void> _loadCommunity() async {
-    setState(() => _isLoading = true);
-    final posts = await _repository.fetchPosts();
-    final models = await _repository.fetchShareableModels();
-    final markers = await _repository.fetchMapMarkers();
+  void _onNetworkChanged() {
     if (!mounted) return;
-    setState(() {
-      _posts = posts;
-      _shareableModels = models;
-      _mapMarkers = markers;
-      _isLoading = false;
+    if (networkService.isConnected && _isOffline) {
+      _loadCommunity();
+    } else if (!networkService.isConnected && !_isOffline) {
+      setState(() => _isOffline = true);
+    }
+  }
+
+  Future<void> _loadCommunity() async {
+    if (!networkService.isConnected) {
+      setState(() {
+        _isOffline = true;
+        _isLoading = false;
+      });
+      _startRetry();
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      final posts = await _repository.fetchPosts();
+      final models = await _repository.fetchShareableModels();
+      final markers = await _repository.fetchMapMarkers();
+      if (!mounted) return;
+      _retryTimer?.cancel();
+      setState(() {
+        _posts = posts;
+        _shareableModels = models;
+        _mapMarkers = markers;
+        _isOffline = false;
+        _isLoading = false;
+      });
+      _loadDraft();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isOffline = true;
+        _isLoading = false;
+      });
+      _startRetry();
+    }
+  }
+
+  void _startRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_isOffline) {
+        _retryTimer?.cancel();
+        return;
+      }
+      if (_isLoading) return;
+      _loadCommunity();
     });
-    _loadDraft();
   }
 
   Future<void> _loadDraft() async {
@@ -371,23 +422,25 @@ class _CommunityPageState extends State<CommunityPage> {
     final caption = _submitCaptionController.text.trim();
     final place = _submitPlaceController.text.trim();
 
-    if (lat == null ||
-        lng == null ||
-        title.isEmpty ||
-        caption.isEmpty ||
-        place.isEmpty) {
+    if (title.isEmpty || caption.isEmpty) {
       showAppToast(context, textLocalize('community_fill_all'));
       return false;
     }
 
     setState(() => _isSubmitting = true);
 
+    final effectivePlace =
+        place.isEmpty ? textLocalize('community_no_location') : place;
+    final hasBoth = lat != null && lng != null;
+    final effectiveLat = hasBoth ? lat! : 0.0;
+    final effectiveLng = hasBoth ? lng! : 0.0;
+
     final result = CommunityComposerResult(
       title: title,
       caption: caption,
-      placeName: place,
-      latitude: lat,
-      longitude: lng,
+      placeName: effectivePlace,
+      latitude: effectiveLat,
+      longitude: effectiveLng,
       models: _selectedSubmitModels,
       tags: _selectedSubmitModels
           .expand((m) => m.description.split(RegExp(r'[\s,，]+')))
@@ -411,28 +464,41 @@ class _CommunityPageState extends State<CommunityPage> {
     });
 
     await _repository.clearDraft();
+    ref.read(myPostsRefreshSignal.notifier).state++;
     showAppToast(context, textLocalize('community_joined'));
     return true;
   }
 
-  /// Posts visible in the current map viewport.
-  List<CommunityPost> get _viewportPosts =>
-      filterPostsByBounds(_posts, _mapViewport.bounds);
+  /// Posts without location info — always shown at the end.
+  List<CommunityPost> get _noLocationPosts =>
+      _posts.where((p) => p.latitude == 0 && p.longitude == 0).toList();
 
-  /// Final explore-tab list: viewport posts, narrowed by tag and radius.
+  /// Posts with valid coordinates, filtered by viewport.
+  List<CommunityPost> get _viewportPosts {
+    final geoPosts =
+        _posts.where((p) => p.latitude != 0 || p.longitude != 0).toList();
+    return filterPostsByBounds(geoPosts, _mapViewport.bounds);
+  }
+
+  /// Final explore-tab list: viewport posts + tag filter, then no-location posts.
   List<CommunityPost> get _exploreFilteredPosts {
-    final base = _viewportPosts;
+    var base = _viewportPosts;
+    var noLoc = _noLocationPosts;
     final tag = _exploreTag;
-    if (tag == null || tag.isEmpty) return base;
-    final tagged = filterPostsByTag(base, tag);
-    final origin =
-        _mapViewport.bounds?.center ??
-        (latitude: _mapViewport.latitude, longitude: _mapViewport.longitude);
-    return filterPostsByRadius(
-      tagged,
-      origin,
-      tagRadiusKmForZoom(_mapViewport.zoom),
-    );
+    if (tag != null && tag.isNotEmpty) {
+      base = filterPostsByTag(base, tag);
+      final origin =
+          _mapViewport.bounds?.center ??
+          (latitude: _mapViewport.latitude,
+              longitude: _mapViewport.longitude);
+      base = filterPostsByRadius(
+        base,
+        origin,
+        tagRadiusKmForZoom(_mapViewport.zoom),
+      );
+      noLoc = filterPostsByTag(noLoc, tag);
+    }
+    return [...base, ...noLoc];
   }
 
   void _onExploreToggleTag(String tag) {
@@ -456,6 +522,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
   void _openSubmit() => setState(() => _currentPage = _CommunitySubPage.submit);
   void _goBack() {
+    FocusManager.instance.primaryFocus?.unfocus();
     FocusScope.of(context).unfocus();
     setState(() => _currentPage = null);
   }
@@ -479,7 +546,7 @@ class _CommunityPageState extends State<CommunityPage> {
       child: Container(
         padding: EdgeInsets.fromLTRB(
           20,
-          MediaQuery.of(context).padding.top + 12,
+          MediaQuery.paddingOf(context).top + 12,
           20,
           10,
         ),
@@ -521,11 +588,14 @@ class _CommunityPageState extends State<CommunityPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _lastSearchQuery ??
-                                textLocalize('community_search_placeholder'),
+                            (_lastSearchQuery != null &&
+                                    _lastSearchQuery!.isNotEmpty)
+                                ? _lastSearchQuery!
+                                : textLocalize('community_search_placeholder'),
                             maxLines: 1,
                             style: TextStyle(
-                              color: _lastSearchQuery != null
+                              color: (_lastSearchQuery != null &&
+                                      _lastSearchQuery!.isNotEmpty)
                                   ? textColor
                                   : hintColor,
                               fontSize: 13,
@@ -584,10 +654,9 @@ class _CommunityPageState extends State<CommunityPage> {
               onSearch: _addToSearchHistory,
               onClearHistory: _clearSearchHistory,
               onTapPost: (post) {
-                _goBack();
+                FocusManager.instance.primaryFocus?.unfocus();
                 _openDetail(post);
               },
-              focusOnMount: true,
               focusTrigger: _searchFocusTrigger,
               searchFieldLeftInset: 52,
             ),
@@ -653,8 +722,12 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final topSafe = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final topSafe = MediaQuery.paddingOf(context).top;
+
+    ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != null && prev != next) _loadCommunity();
+    });
 
     return PopScope(
       canPop: _currentPage == null,
@@ -673,22 +746,26 @@ class _CommunityPageState extends State<CommunityPage> {
                   children: [
                     if (_isLoading)
                       const Center(child: CircularProgressIndicator())
+                    else if (_isOffline)
+                      const _CommunityOfflineState()
                     else
-                      Padding(
-                        padding: EdgeInsets.only(top: topSafe + 60),
-                        child: CommunityRecommendView(
-                          posts: _exploreFilteredPosts,
-                          totalPosts: _posts.length,
-                          viewportPosts: _viewportPosts.length,
-                          mapViewport: _mapViewport,
-                          mapMarkers: _mapMarkers,
-                          onOpenMap: _openMapPage,
-                          onTapPost: _openDetail,
-                          availableTags: rankTagsFromPosts(_viewportPosts),
-                          selectedTag: _exploreTag,
-                          onToggleTag: _onExploreToggleTag,
-                          onClearFilters: _onExploreClearFilters,
-                          tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                      RepaintBoundary(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: topSafe + 60),
+                          child: CommunityRecommendView(
+                            posts: _exploreFilteredPosts,
+                            totalPosts: _posts.length,
+                            viewportPosts: _viewportPosts.length,
+                            mapViewport: _mapViewport,
+                            mapMarkers: _mapMarkers,
+                            onOpenMap: _openMapPage,
+                            onTapPost: _openDetail,
+                            availableTags: rankTagsFromPosts(_viewportPosts),
+                            selectedTag: _exploreTag,
+                            onToggleTag: _onExploreToggleTag,
+                            onClearFilters: _onExploreClearFilters,
+                            tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                          ),
                         ),
                       ),
                     AnimatedPositioned(
@@ -700,7 +777,12 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: _buildSearchOverlay(),
+                      child: RepaintBoundary(
+                        child: ExcludeFocus(
+                          excluding: _currentPage != _CommunitySubPage.search,
+                          child: _buildSearchOverlay(),
+                        ),
+                      ),
                     ),
                     AnimatedPositioned(
                       duration: BDMotion.durationNormal,
@@ -711,13 +793,60 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: _buildSubmitOverlay(),
+                      child: RepaintBoundary(
+                        child: ExcludeFocus(
+                          excluding: _currentPage != _CommunitySubPage.submit,
+                          child: _buildSubmitOverlay(),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-            if (_currentPage == null) _buildFloatingHeader(isDark),
+            if (_currentPage == null)
+              RepaintBoundary(child: _buildFloatingHeader(isDark)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommunityOfflineState extends StatelessWidget {
+  const _CommunityOfflineState();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final topSafe = MediaQuery.paddingOf(context).top;
+    final textColor =
+        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.48)
+        : BDDesign.colorMutedBlue;
+
+    return Padding(
+      padding: EdgeInsets.only(top: topSafe + 100),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 48, color: hintColor),
+            const SizedBox(height: 16),
+            Text(
+              textLocalize('community_offline_title'),
+              style: TextStyle(
+                color: textColor,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              textLocalize('community_offline_hint'),
+              style: TextStyle(color: hintColor, fontSize: 14, height: 1.4),
+            ),
           ],
         ),
       ),

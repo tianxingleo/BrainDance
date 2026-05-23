@@ -15,7 +15,7 @@ class _SimpleMotionGuidanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final cardWidth = (size.width * 0.42).clamp(170.0, 220.0);
     final progressValue = switch (motionState) {
       _MotionState.steady => 0.18,

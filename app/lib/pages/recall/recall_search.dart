@@ -587,7 +587,7 @@ extension _RecallPageSearch on _RecallPageState {
       alignment: Alignment.centerRight,
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+          maxWidth: MediaQuery.sizeOf(context).width * 0.75,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
@@ -1339,7 +1339,7 @@ extension _RecallPageSearch on _RecallPageState {
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
@@ -1418,7 +1418,7 @@ extension _RecallPageSearch on _RecallPageState {
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),

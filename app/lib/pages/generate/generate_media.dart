@@ -50,111 +50,22 @@ extension _GenerateMediaX on _GeneratePageState {
     return msg;
   }
 
-  /// Reads video duration in seconds from an MP4/MOV file header.
-  /// Returns null if the file cannot be parsed.
-  static double? _readVideoDurationSeconds(File file) {
-    try {
-      final raf = file.openSync();
-      try {
-        final fileSize = raf.lengthSync();
-        int offset = 0;
-        while (offset + 8 <= fileSize) {
-          raf.setPositionSync(offset);
-          final atomSize =
-              (raf.readByteSync() << 24) |
-              (raf.readByteSync() << 16) |
-              (raf.readByteSync() << 8) |
-              raf.readByteSync();
-          final type = String.fromCharCodes(raf.readSync(4));
-          if (atomSize < 8 || offset + atomSize > fileSize) break;
+  static Future<double?> _probeVideoDuration(File file) async {
+    final info = await VideoPreprocessor.probe(file);
+    if (info == null) return null;
+    final durRaw = info['duration'];
+    if (durRaw == null) return null;
 
-          if (type == 'moov') {
-            return _parseMoovMvhd(raf, offset + 8, atomSize - 8);
-          }
-          offset += atomSize;
-        }
+    final durStr = durRaw.toString();
+    final secs = double.tryParse(durStr);
+    if (secs != null) return secs;
 
-        // If moov wasn't found in the forward scan, try reading
-        // backward from the end of the file (streaming-optimized MP4s
-        // often place moov at the tail).
-        final scanBuf = Uint8List(32);
-        int tailOffset = fileSize - scanBuf.length;
-        while (tailOffset >= 0) {
-          raf.setPositionSync(tailOffset);
-          raf.readSync(scanBuf.length);
-          for (int i = scanBuf.length - 8; i >= 0; i--) {
-            final t = String.fromCharCodes(scanBuf.sublist(i + 4, i + 8));
-            if (t == 'moov') {
-              final moovSize =
-                  (scanBuf[i] << 24) |
-                  (scanBuf[i + 1] << 16) |
-                  (scanBuf[i + 2] << 8) |
-                  scanBuf[i + 3];
-              final moovStart = tailOffset + i;
-              if (moovSize >= 8 && moovStart + moovSize <= fileSize) {
-                return _parseMoovMvhd(raf, moovStart + 8, moovSize - 8);
-              }
-            }
-          }
-          tailOffset -= scanBuf.length ~/ 2;
-        }
-      } finally {
-        raf.closeSync();
-      }
-    } catch (e) {
-      debugPrint('[GenerateMedia] mp4 parse error: $e');
-    }
-    return null;
-  }
-
-  static double? _parseMoovMvhd(RandomAccessFile raf, int start, int length) {
-    final end = start + length;
-    int offset = start;
-    while (offset + 16 <= end) {
-      raf.setPositionSync(offset);
-      final size =
-          (raf.readByteSync() << 24) |
-          (raf.readByteSync() << 16) |
-          (raf.readByteSync() << 8) |
-          raf.readByteSync();
-      final type = String.fromCharCodes(raf.readSync(4));
-      if (size < 8) break;
-
-      if (type == 'mvhd') {
-        raf.setPositionSync(offset + 8);
-        final version = raf.readByteSync();
-        raf.readSync(3);
-
-        int timescale;
-        int duration;
-        if (version == 1) {
-          raf.readSync(16);
-          final tsB = raf.readSync(4);
-          timescale = (tsB[0] << 24) | (tsB[1] << 16) | (tsB[2] << 8) | tsB[3];
-          final dHi =
-              (raf.readByteSync() << 24) |
-              (raf.readByteSync() << 16) |
-              (raf.readByteSync() << 8) |
-              raf.readByteSync();
-          final dLo =
-              (raf.readByteSync() << 24) |
-              (raf.readByteSync() << 16) |
-              (raf.readByteSync() << 8) |
-              raf.readByteSync();
-          duration = (dHi << 32) | dLo;
-        } else {
-          raf.readSync(8);
-          final tsB = raf.readSync(4);
-          timescale = (tsB[0] << 24) | (tsB[1] << 16) | (tsB[2] << 8) | tsB[3];
-          final dB = raf.readSync(4);
-          duration = (dB[0] << 24) | (dB[1] << 16) | (dB[2] << 8) | dB[3];
-        }
-        if (timescale > 0) {
-          return duration / timescale;
-        }
-        break;
-      }
-      offset += size;
+    final parts = durStr.split(':');
+    if (parts.length == 3) {
+      final h = double.tryParse(parts[0]) ?? 0;
+      final m = double.tryParse(parts[1]) ?? 0;
+      final s = double.tryParse(parts[2]) ?? 0;
+      return h * 3600 + m * 60 + s;
     }
     return null;
   }
@@ -176,7 +87,7 @@ extension _GenerateMediaX on _GeneratePageState {
     }
 
     // Check duration (10 min limit)
-    final durationSeconds = _readVideoDurationSeconds(file);
+    final durationSeconds = await _probeVideoDuration(file);
     if (durationSeconds != null &&
         durationSeconds > _GeneratePageState.videoDurationLimitSeconds) {
       debugPrint(

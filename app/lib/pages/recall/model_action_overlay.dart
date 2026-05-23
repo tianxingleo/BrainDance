@@ -122,7 +122,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
     const actionWidth = 128.0;

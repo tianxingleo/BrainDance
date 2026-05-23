@@ -25,8 +25,9 @@ class RecallOverviewCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: BDPanelCard(
-        glass: true,
+      child: BDGlassSurface(
+        noBlur: true,
+        variant: BDGlassVariant.panel,
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

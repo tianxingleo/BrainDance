@@ -45,6 +45,7 @@ import {
 import { runTimeCompareAgent } from "../../time-compare-agent/agent.ts";
 import {
   type LongTermMemory,
+  buildLongTermMemorySignal,
   loadLongTermMemory,
   shouldPersistLongTermMemory,
   persistLongTermMemory,
@@ -153,6 +154,7 @@ const candidateSchema = z.object({
   display_name: z.string().nullable().optional(),
   ply_path: z.string().nullable().optional(),
   preview_img_path: z.string().nullable().optional(),
+  objects: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   created_at: z.string().optional(),
 });
@@ -1200,9 +1202,18 @@ function buildStopSearchSummaryPayload(input: {
   candidates: Map<string, SceneCandidate>;
   assetState: AssetToolState;
 }): Record<string, unknown> {
-  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
-    candidate,
-  ) => ({
+  const pseudoIntent: Pick<SpatialIntent, "rewrittenQuery" | "targetType"> = {
+    rewrittenQuery: input.query,
+    targetType: "scene",
+  };
+  const rankedWithScore = [...input.candidates.values()]
+    .map((candidate) => ({
+      candidate,
+      score: scoreSceneCandidate(candidate, pseudoIntent),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const topCandidates = rankedWithScore.slice(0, 5).map(({ candidate, score }) => ({
     scene_id: candidate.sceneId,
     model_id: candidate.modelId,
     display_name: candidate.displayName ?? null,
@@ -1216,7 +1227,13 @@ function buildStopSearchSummaryPayload(input: {
       }
       : null,
     source_scores: candidate.sourceScores,
+    fused_score: score,
   }));
+
+  const topScore = rankedWithScore[0]?.score ?? 0;
+  const hasMultiSourceEvidence = [...input.candidates.values()].some((c) =>
+    Object.keys(c.sourceScores).length >= 2
+  );
 
   return {
     user_query: input.query,
@@ -1226,6 +1243,9 @@ function buildStopSearchSummaryPayload(input: {
       : null,
     tool_trace: input.trace,
     spatial_candidates: topCandidates,
+    candidate_count: input.candidates.size,
+    top_fused_score: topScore,
+    has_multi_source_evidence: hasMultiSourceEvidence,
     asset_context: serializeAssetContext(input.assetState),
   };
 }
@@ -1253,12 +1273,24 @@ async function buildStopSearchUserFacingSummary(input: {
     new SystemMessage(
       [
         "你是 BrainDance 的空间记忆 Agent。",
-        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
-        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
-        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
-        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
-        "不要编造工具结果中不存在的场景、数量或字段。",
-        "控制在 2 到 4 句，语气自然、明确。",
+        "你刚刚主动调用了 stop_search，现在需要基于已有工具结果生成一段直接反馈给前端用户的中文自然语言回答。",
+        "",
+        "【判断依据按优先级】",
+        "1) top_fused_score（系统融合分，权威信号）",
+        "2) has_multi_source_evidence（是否有交叉证据）",
+        "3) candidate_count（候选数量）",
+        "4) stop_confidence（你刚才的自评，仅作参考，不要单独依赖）",
+        "",
+        "【硬规则 — 必须严格执行】",
+        "- candidate_count = 0 或 top_fused_score < 0.45：必须明确告诉用户没有找到匹配，不要描述任何候选当作答案。建议用户补充时间、地点或物体描述。",
+        "- 0.45 ≤ top_fused_score < 0.62 或 has_multi_source_evidence = false：使用保留语气（如 可能 / 或许 / 相关性不高），并主动询问是否就是用户想找的，不要用肯定句陈述场景。",
+        "- top_fused_score ≥ 0.62 且 has_multi_source_evidence = true：才能用肯定语气描述命中场景。",
+        "- 资产操作预览：说明当前只是预览以及下一步需要确认。",
+        "",
+        "【表述要求】",
+        "- 不要提及 JSON、内部 trace、工具链、stop_search、score、置信度等系统术语。",
+        "- 不要编造工具结果中不存在的场景、数量或字段。",
+        "- 控制在 2 到 4 句，语气自然、明确。否定时也要明确，不要含糊其辞。",
       ].join("\n"),
     ),
     new HumanMessage(
@@ -2380,6 +2412,7 @@ function serializeSceneCandidate(c: SceneCandidate & { score: number }) {
     pose_image_id: c.bestPose?.image_name ?? null,
     ply_path: c.plyPath ?? null,
     preview_img_path: c.previewImgPath ?? null,
+    objects: c.objects,
     tags: c.tags,
     created_at: c.createdAt,
   };
@@ -2966,6 +2999,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Set<string>;
     round: number;
     shouldStop: boolean;
+    implicitStopRetried: boolean;
   };
 
   const UnifiedStateAnnotation = Annotation.Root({
@@ -2976,6 +3010,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Annotation<Set<string>>({ reducer: (_, b) => b, default: () => new Set() }),
     round: Annotation<number>({ reducer: (_, b) => b, default: () => 0 }),
     shouldStop: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
+    implicitStopRetried: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
   });
 
   async function agentNode(state: UnifiedState): Promise<Partial<UnifiedState>> {
@@ -2989,6 +3024,39 @@ async function executeUnifiedAgentLoop(input: {
     msgs.push(response);
     const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
     if (toolCalls.length === 0) {
+      if (!state.implicitStopRetried) {
+        await emitProgress(callbacks, {
+          event: "status",
+          data: {
+            phase: "implicit_stop_nudge",
+            summary: "Agent 未调用任何工具，注入提示要求显式 stop_search 收口",
+          },
+        });
+        await emitThought(
+          callbacks,
+          "本轮没有产生工具调用，但根据 stop_search 协议需要显式收口。先注入提示给模型一次机会。",
+        );
+        msgs.push(new SystemMessage(
+          [
+            "你刚才这一轮没有调用任何工具，也没有调用 stop_search。",
+            "请显式收口：必须调用 stop_search 工具，并在参数中说明：",
+            "- reason：本次为什么停止（例如 已拿到足够候选 / 未找到匹配 / 问题不需要工具）",
+            "- confidence：0-1 之间，根据当前候选可信度真实评估",
+            "  · 已有候选且 score≥0.62 且语义对齐用户问题 → 0.7-1.0",
+            "  · 候选弱、相关性不强、语义偏离 → 0.2-0.5",
+            "  · 完全未找到匹配 → 0-0.2，请在 reason 中明确说明",
+            "如果你之前打算直接给出自然语言回答，请先调用 stop_search，系统会基于你的工具结果生成最终回答。",
+          ].join("\n"),
+        ));
+        return { messages: msgs, round, shouldStop: false, implicitStopRetried: true };
+      }
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "implicit_stop_after_nudge",
+          summary: "Agent 在被提示后仍未调用 stop_search，按隐式停止处理",
+        },
+      });
       return { messages: msgs, round, shouldStop: true };
     }
     return { messages: msgs, round, shouldStop: false };
@@ -3006,11 +3074,21 @@ async function executeUnifiedAgentLoop(input: {
     const toolCalls = Array.isArray(lastAiMsg?.tool_calls) ? lastAiMsg.tool_calls : [];
 
     let executedAny = false;
+    const duplicatedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     for (const toolCall of toolCalls) {
       const toolArgs = toolCall.args ?? {};
       const sig = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
       if (seen.has(sig)) {
-        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}`);
+        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}，提示模型换思路`);
+        duplicatedToolCalls.push({ name: toolCall.name, args: toolArgs });
+        msgs.push(new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: JSON.stringify({
+            skipped: true,
+            reason: "duplicate_call",
+            message: `已跳过：${toolCall.name} 用相同参数已经在前面的轮次执行过，结果不会变化。`,
+          }),
+        }));
         continue;
       }
       seen.add(sig);
@@ -3084,6 +3162,30 @@ async function executeUnifiedAgentLoop(input: {
     }
 
     if (!executedAny) {
+      if (duplicatedToolCalls.length > 0) {
+        const duplicatedSummary = duplicatedToolCalls
+          .map((tc) => `${tc.name}(${stringifyToolArgs(tc.args)})`)
+          .join("; ");
+        msgs.push(new SystemMessage(
+          [
+            `本轮你请求的所有工具调用都已经在之前用相同参数执行过：${duplicatedSummary}。`,
+            "重复调用不会带来新信息，请改变策略：",
+            "1) 换工具（pose_semantic_search / scene_metadata_search / recent_scene_search 之间切换）；",
+            "2) 或显著修改参数（改写 query、放宽/收紧时间窗口、调整 sceneId/limit）；",
+            "3) 如果当前候选已经足够回答问题，调用 stop_search；",
+            "4) 如果确认无法找到匹配，也请调用 stop_search 并在 reason 中说明，不要再重复同一调用。",
+          ].join("\n"),
+        ));
+        await emitProgress(callbacks, {
+          event: "status",
+          data: {
+            phase: "duplicate_tool_calls_detected",
+            summary: `检测到 ${duplicatedToolCalls.length} 个重复工具调用，已注入策略切换提示`,
+            detail: duplicatedSummary,
+          },
+        });
+        return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: false };
+      }
       return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
     }
     return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen };
@@ -3106,7 +3208,7 @@ async function executeUnifiedAgentLoop(input: {
     .addEdge("agent", "executeTools")
     .addEdge("executeTools", "checkStop")
     .addConditionalEdges("checkStop", (s: UnifiedState) =>
-      s.shouldStop || s.round >= UNIFIED_MAX_ROUNDS ? "__end__" : "agent"
+      s.shouldStop ? "__end__" : "agent"
     )
     .compile();
 
@@ -3118,7 +3220,8 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-  }, { recursionLimit: UNIFIED_MAX_ROUNDS * 2 + 10 });
+    implicitStopRetried: false,
+  }, { recursionLimit: Number.MAX_SAFE_INTEGER });
 
   return {
     candidates: finalState.candidates,
@@ -3646,28 +3749,14 @@ function finalizeResponseWithLongTermMemory(
   const result = finalizeResponse(response, options);
 
   if (options.userId) {
-    const turnCount = result.short_term_memory?.turnCount ?? 0;
-    const shortTermPrefs = result.short_term_memory?.preferences ?? {};
-    if (shouldPersistLongTermMemory(turnCount, options.longTermMemory ?? null, shortTermPrefs)) {
-      const intentObjects: string[] = [];
-      const intentRegions: string[] = [];
-      if (result.intent) {
-        if (result.intent.objectHint) intentObjects.push(result.intent.objectHint);
-        if (result.intent.sceneHint) intentObjects.push(result.intent.sceneHint);
-        if (result.intent.locationHint) intentRegions.push(result.intent.locationHint);
-      }
-      const topSummary = result.top_candidates?.length > 0
-        ? `${result.top_candidates[0].description ?? result.top_candidates[0].scene_id} (score: ${result.top_candidates[0].score.toFixed(2)})`
-        : result.answer.slice(0, 100);
-
+    const signal = buildLongTermMemorySignal(query, result);
+    if (shouldPersistLongTermMemory(options.longTermMemory ?? null, signal)) {
       persistLongTermMemory(supabase, {
         userId: options.userId,
-        currentShortTermPreferences: shortTermPrefs,
         currentQuery: query,
         responseMode: result.mode,
-        topResultSummary: topSummary,
-        intentObjects,
-        intentRegions,
+        topResultSummary: signal.topResultSummary,
+        signal,
       }, options.longTermMemory ?? null).catch((err) => {
         console.error("[LongTermMemory] async persist error:", err);
       });

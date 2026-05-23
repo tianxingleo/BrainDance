@@ -413,7 +413,7 @@ class _TaskListPageState extends State<TaskListPage> {
   Widget _buildEmptyState(TDThemeData theme, bool isDark, Color textColor) {
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
@@ -466,7 +466,7 @@ class _TaskListPageState extends State<TaskListPage> {
   Widget _buildErrorState(TDThemeData theme, bool isDark, Color textColor) {
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),

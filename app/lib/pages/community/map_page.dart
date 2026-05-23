@@ -1,21 +1,31 @@
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'amap_search.dart';
 import 'filtering.dart';
 import 'map_marker.dart';
 import 'repository.dart';
+import 'widgets/map_overlay_widgets.dart';
+import 'widgets/map_search_widgets.dart';
 
-const String _tileUrl =
+const String kCommunityMapTileUrl =
     'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}';
-const List<String> _tileSubdomains = ['1', '2', '3', '4'];
-const String _tileUserAgent = 'com.braindance.app';
-const double _kMinZoom = 2;
-const double _kMaxZoom = 18;
+const List<String> kCommunityMapTileSubdomains = ['1', '2', '3', '4'];
+const String kCommunityMapTileUserAgent = 'com.braindance.app';
+const double kCommunityMapMinZoom = 2;
+const double kCommunityMapMaxZoom = 18;
 const int _kPreviewMarkerLimit = 30;
+
+const String _tileUrl = kCommunityMapTileUrl;
+const List<String> _tileSubdomains = kCommunityMapTileSubdomains;
+const String _tileUserAgent = kCommunityMapTileUserAgent;
+const double _kMinZoom = kCommunityMapMinZoom;
+const double _kMaxZoom = kCommunityMapMaxZoom;
 
 class CommunityMapViewport {
   final double latitude;
@@ -98,12 +108,24 @@ class CommunityMapPage extends StatefulWidget {
 class _CommunityMapPageState extends State<CommunityMapPage> {
   final MapController _controller = MapController();
   final CommunityRepository _repository = CommunityRepository();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   late CommunityMapViewport _viewport;
   bool _returningViewport = false;
   List<CommunityMapMarker> _allMarkers = const [];
   List<CommunityMapMarker> _visibleMarkers = const [];
   int _markerLimit = MarkerLimitPreference.defaultLimit;
   bool _markersLoading = true;
+
+  // 搜索状态
+  String _searchKeyword = '';
+  List<AmapPoi> _searchResults = const [];
+  bool _searchLoading = false;
+  String? _searchError;
+  AmapPoi? _selectedSearchPoi;
+  bool _searchResultsOpen = false;
+  CancelToken? _searchCancelToken;
+  int _searchSeq = 0;
 
   @override
   void initState() {
@@ -146,6 +168,9 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
 
   @override
   void dispose() {
+    _searchCancelToken?.cancel('disposed');
+    _searchController.dispose();
+    _searchFocus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -203,6 +228,75 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
       builder: (ctx) => _MarkerLimitSheet(current: _markerLimit),
     );
     if (picked != null) _applyMarkerLimit(picked);
+  }
+
+  Future<void> _runSearch(String raw) async {
+    final keyword = raw.trim();
+    if (keyword.isEmpty) {
+      _clearSearch();
+      return;
+    }
+    _searchCancelToken?.cancel('superseded');
+    final token = CancelToken();
+    final seq = ++_searchSeq;
+    setState(() {
+      _searchKeyword = keyword;
+      _searchLoading = true;
+      _searchError = null;
+      _searchResultsOpen = true;
+      _searchCancelToken = token;
+    });
+    try {
+      final results = await AmapSearchService.instance.searchByText(
+        keyword,
+        cancelToken: token,
+      );
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = results;
+        _searchLoading = false;
+      });
+    } on AmapSearchException catch (e) {
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = const [];
+        _searchLoading = false;
+        _searchError = e.message;
+      });
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) return;
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = const [];
+        _searchLoading = false;
+        _searchError = '网络异常，请稍后重试';
+      });
+    }
+  }
+
+  void _clearSearch() {
+    _searchCancelToken?.cancel('cleared');
+    _searchController.clear();
+    setState(() {
+      _searchKeyword = '';
+      _searchResults = const [];
+      _searchLoading = false;
+      _searchError = null;
+      _searchResultsOpen = false;
+      _selectedSearchPoi = null;
+      _searchCancelToken = null;
+    });
+  }
+
+  void _handlePoiTap(AmapPoi poi) {
+    final currentZoom = _controller.camera.zoom;
+    final targetZoom = currentZoom < 15 ? 15.0 : currentZoom;
+    _controller.move(poi.location, targetZoom);
+    setState(() {
+      _selectedSearchPoi = poi;
+      _searchResultsOpen = false;
+    });
+    _searchFocus.unfocus();
   }
 
   @override
@@ -270,6 +364,24 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                     ],
                   ),
                   const SizedBox(height: 14),
+                  MapSearchBar(
+                    controller: _searchController,
+                    focusNode: _searchFocus,
+                    isDark: isDark,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                    loading: _searchLoading,
+                    hasKeyword: _searchKeyword.isNotEmpty,
+                    onSubmitted: _runSearch,
+                    onClear: _clearSearch,
+                    onFocusResults: () {
+                      if (_searchKeyword.isNotEmpty &&
+                          (!_searchResultsOpen || _searchResults.isNotEmpty)) {
+                        setState(() => _searchResultsOpen = true);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 14),
                   Expanded(
                     child: BDPanelCard(
                       padding: EdgeInsets.zero,
@@ -308,22 +420,45 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                                   onTap: _handleMarkerTap,
                                   onLongPress: _handleMarkerLongPress,
                                 ),
+                                if (_selectedSearchPoi != null)
+                                  SearchPinLayer(poi: _selectedSearchPoi!),
                               ],
                             ),
-                            _MapHintPill(
-                              text: '单指拖拽，双指缩放',
-                              isDark: isDark,
-                              hintColor: hintColor,
+                            Positioned(
+                              left: 14,
+                              top: 14,
+                              child: MapHintPill(
+                                text: '单指拖拽，双指缩放',
+                                isDark: isDark,
+                                hintColor: hintColor,
+                              ),
                             ),
                             Positioned(
                               right: 12,
                               bottom: 12,
-                              child: _ZoomControls(
+                              child: MapZoomControls(
                                 isDark: isDark,
                                 onZoomIn: () => _stepZoom(1),
                                 onZoomOut: () => _stepZoom(-1),
                               ),
                             ),
+                            if (_searchResultsOpen && _searchKeyword.isNotEmpty)
+                              Positioned(
+                                left: 8,
+                                right: 8,
+                                top: 8,
+                                child: SearchResultsOverlay(
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  hintColor: hintColor,
+                                  loading: _searchLoading,
+                                  error: _searchError,
+                                  results: _searchResults,
+                                  onTap: _handlePoiTap,
+                                  onClose: () => setState(
+                                      () => _searchResultsOpen = false),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -446,83 +581,6 @@ class _CommunityAmapPreviewState extends State<CommunityAmapPreview> {
   }
 }
 
-class _MapHintPill extends StatelessWidget {
-  final String text;
-  final bool isDark;
-  final Color hintColor;
-
-  const _MapHintPill({
-    required this.text,
-    required this.isDark,
-    required this.hintColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: 14,
-      top: 14,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: (isDark ? Colors.black : Colors.white).withValues(alpha: 0.76),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            text,
-            style: TextStyle(color: hintColor, fontSize: 12),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ZoomControls extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onZoomIn;
-  final VoidCallback onZoomOut;
-
-  const _ZoomControls({
-    required this.isDark,
-    required this.onZoomIn,
-    required this.onZoomOut,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bgColor =
-        (isDark ? Colors.black : Colors.white).withValues(alpha: 0.82);
-    final iconColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            onPressed: onZoomIn,
-            icon: Icon(Icons.add_rounded, color: iconColor),
-          ),
-          Container(
-            width: 24,
-            height: 1,
-            color: iconColor.withValues(alpha: 0.18),
-          ),
-          IconButton(
-            onPressed: onZoomOut,
-            icon: Icon(Icons.remove_rounded, color: iconColor),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _MarkerLimitSheet extends StatefulWidget {
   final int current;
 
@@ -572,7 +630,7 @@ class _MarkerLimitSheetState extends State<_MarkerLimitSheet> {
         16,
         20,
         16,
-        20 + MediaQuery.of(context).viewInsets.bottom,
+        20 + MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: BDPanelCard(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),

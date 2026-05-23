@@ -3,11 +3,16 @@ import 'dart:math' as math;
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/pages/community/amap_search.dart';
+import 'package:braindance/pages/community/location_picker.dart';
 import 'package:braindance/pages/community/map_marker.dart';
 import 'package:braindance/pages/community/map_page.dart';
+import 'package:braindance/services/location_service.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/animated_network_image.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'models.dart';
 
@@ -57,49 +62,22 @@ class CommunityRecommendView extends StatelessWidget {
 
     if (totalPosts == 0) return const _CommunityEmptyState();
 
-    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 80.0;
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(16, 4, 16, bottomPad),
       child: Column(
         children: [
           // 地图面板
-          BDPanelCard(
+          Container(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'World Memory Map',
-                            style: TextStyle(
-                              color: textColor,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            textLocalize('community_map_hint'),
-                            style: TextStyle(color: hintColor, height: 1.35),
-                          ),
-                        ],
-                      ),
-                    ),
-                    BDStatusPill(
-                      label: 'ZOOM ${mapViewport.zoom}',
-                      icon: Icons.public_rounded,
-                      color: BDDesign.colorMutedBlue,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                LayoutBuilder(
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppTheme.darkSurface.withValues(alpha: 0.94)
+                  : BDDesign.colorPaperWhite.withValues(alpha: 0.94),
+              borderRadius: BDDesign.radiusLarge,
+            ),
+            child: LayoutBuilder(
                   builder: (context, constraints) {
                     final mapWidth = constraints.maxWidth;
                     final mapHeight = math.max(200.0, mapWidth * 0.48);
@@ -169,8 +147,6 @@ class CommunityRecommendView extends StatelessWidget {
                     );
                   },
                 ),
-              ],
-            ),
           ),
           const SizedBox(height: 14),
           // 标签筛选栏
@@ -189,7 +165,7 @@ class CommunityRecommendView extends StatelessWidget {
             onToggleTag: onToggleTag,
             onClearFilters: onClearFilters,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           // 模型列表
           if (posts.isEmpty)
             _ExploreEmptyHint(
@@ -312,6 +288,7 @@ class CommunityExploreView extends StatefulWidget {
   final bool focusOnMount;
   final int focusTrigger;
   final double searchFieldLeftInset;
+  final ValueChanged<String>? onSearchChanged;
 
   const CommunityExploreView({
     super.key,
@@ -324,6 +301,7 @@ class CommunityExploreView extends StatefulWidget {
     this.focusOnMount = false,
     this.focusTrigger = 0,
     this.searchFieldLeftInset = 16,
+    this.onSearchChanged,
   });
 
   @override
@@ -415,6 +393,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
               if (v.trim().isEmpty && _query.isNotEmpty) {
                 setState(() => _query = '');
               }
+              widget.onSearchChanged?.call(v);
             },
             decoration: InputDecoration(
               hintText: textLocalize('community_search_placeholder'),
@@ -458,7 +437,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   }
 
   Widget _buildSuggestions(bool isDark, Color textColor, Color hintColor) {
-    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 80.0;
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
       child: Column(
@@ -541,7 +520,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
     Color hintColor,
     List<CommunityPost> results,
   ) {
-    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 80.0;
     if (results.isEmpty) {
       return Padding(
         padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
@@ -702,14 +681,6 @@ class CommunitySubmitView extends StatefulWidget {
   final VoidCallback onSaveDraft;
   final double searchFieldLeftInset;
 
-  static const _presets = <_LocationPreset>[
-    _LocationPreset('西湖', 30.243, 120.150),
-    _LocationPreset('外滩', 31.240, 121.490),
-    _LocationPreset('东京塔', 35.659, 139.745),
-    _LocationPreset('巴黎左岸', 48.853, 2.349),
-    _LocationPreset('纽约中央公园', 40.782, -73.965),
-  ];
-
   const CommunitySubmitView({
     super.key,
     required this.shareableModels,
@@ -755,27 +726,28 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
 
   bool get _isTitleValid => widget.titleController.text.trim().isNotEmpty;
   bool get _isCaptionValid => widget.captionController.text.trim().isNotEmpty;
-  bool get _isPlaceValid => widget.placeController.text.trim().isNotEmpty;
-  bool get _isLatValid =>
-      double.tryParse(widget.latController.text.trim()) != null;
-  bool get _isLngValid =>
-      double.tryParse(widget.lngController.text.trim()) != null;
+  bool get _isPlaceValid => true;
   bool get _isModelValid => widget.selectedModels.isNotEmpty;
 
-  bool _validate() {
-    setState(() => _hasAttemptedSubmit = true);
-    return _isModelValid &&
-        _isTitleValid &&
-        _isCaptionValid &&
-        _isPlaceValid &&
-        _isLatValid &&
-        _isLngValid;
-  }
-
   void _handleSubmit() {
-    if (_validate()) {
-      widget.onSubmit();
+    setState(() => _hasAttemptedSubmit = true);
+
+    final missing = <String>[];
+    if (!widget.selectedModels.isNotEmpty) {
+      missing.add(textLocalize('community_field_model'));
     }
+    if (!widget.titleController.text.trim().isNotEmpty) {
+      missing.add(textLocalize('community_field_title'));
+    }
+    if (!widget.captionController.text.trim().isNotEmpty) {
+      missing.add(textLocalize('community_field_caption'));
+    }
+
+    if (missing.isNotEmpty) {
+      showAppToast(context, '${textLocalize('community_required_hint')}${missing.join('、')}');
+      return;
+    }
+    widget.onSubmit();
   }
 
   @override
@@ -805,7 +777,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
       return inputBorder;
     }
 
-    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+    final bottomPad = MediaQuery.paddingOf(context).bottom + 80.0;
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(16, 4, 16, bottomPad),
@@ -883,8 +855,8 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
               child: BDPanelCard(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: RawScrollbar(
-                  thumbVisibility: true,
-                  trackVisibility: true,
+                  thumbVisibility: false,
+                  trackVisibility: false,
                   thickness: 4,
                   radius: const Radius.circular(2),
                   thumbColor: isDark
@@ -893,8 +865,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                   trackColor: isDark
                       ? Colors.white.withValues(alpha: 0.06)
                       : Colors.black.withValues(alpha: 0.04),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: ClipRRect(
+                    borderRadius: BDDesign.radiusLarge,
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: _filteredModels.length,
                     separatorBuilder: (_, __) =>
                         const Divider(height: 1, indent: 48),
@@ -951,6 +925,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                         ),
                       );
                     },
+                  ),
                   ),
                 ),
               ),
@@ -1098,6 +1073,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
             }).toList(),
           ),
           const SizedBox(height: 10),
+          // 地点（可选）
           TextField(
             controller: widget.placeController,
             onChanged: (_) {
@@ -1105,6 +1081,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
             },
             decoration: InputDecoration(
               labelText: textLocalize('community_input_place'),
+              hintText: textLocalize('community_field_optional'),
               filled: true,
               fillColor: inputFill,
               border: _fieldBorder(_isPlaceValid),
@@ -1115,54 +1092,13 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
             ),
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: widget.latController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
-                  onChanged: (_) {
-                    if (_hasAttemptedSubmit) setState(() {});
-                  },
-                  decoration: InputDecoration(
-                    labelText: textLocalize('community_input_lat'),
-                    filled: true,
-                    fillColor: inputFill,
-                    border: _fieldBorder(_isLatValid),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: widget.lngController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
-                  ),
-                  onChanged: (_) {
-                    if (_hasAttemptedSubmit) setState(() {});
-                  },
-                  decoration: InputDecoration(
-                    labelText: textLocalize('community_input_lng'),
-                    filled: true,
-                    fillColor: inputFill,
-                    border: _fieldBorder(_isLngValid),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          _SubmitLocationSection(
+            placeController: widget.placeController,
+            latController: widget.latController,
+            lngController: widget.lngController,
+            isDark: isDark,
+            textColor: textColor,
+            hintColor: hintColor,
           ),
           const SizedBox(height: 20),
 
@@ -1462,14 +1398,6 @@ class _CommunityEmptyState extends StatelessWidget {
   }
 }
 
-class _LocationPreset {
-  final String name;
-  final double latitude;
-  final double longitude;
-
-  const _LocationPreset(this.name, this.latitude, this.longitude);
-}
-
 // ============================================================
 // Explore filter bar + empty hint (used by recommend tab)
 // ============================================================
@@ -1557,10 +1485,10 @@ class _ExploreFilterBar extends StatelessWidget {
             ],
           ),
           if (availableTags.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 4,
+              runSpacing: 4,
               children: availableTags.map((tag) {
                 final selected = tag == selectedTag;
                 return _TagPill(
@@ -1602,14 +1530,14 @@ class _TagPill extends StatelessWidget {
       child: AnimatedContainer(
         duration: BDMotion.durationFast,
         curve: BDMotion.curveFluid,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: selected
               ? const Color(0xFF2E7CF6)
               : (isDark
-                    ? AppTheme.darkSurfaceElevated
-                    : const Color(0xFFF3F5F9)),
-          borderRadius: BorderRadius.circular(18),
+                  ? AppTheme.darkSurfaceElevated
+                  : const Color(0xFFF3F5F9)),
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: selected
                 ? const Color(0xFF2E7CF6)
@@ -1622,7 +1550,7 @@ class _TagPill extends StatelessWidget {
           label,
           style: TextStyle(
             color: textColor,
-            fontSize: 12.5,
+            fontSize: 11.5,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -1691,6 +1619,197 @@ class _ExploreEmptyHint extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ============================================================
+// 投稿表单中的位置选择区
+// ============================================================
+
+class _SubmitLocationSection extends StatefulWidget {
+  final TextEditingController placeController;
+  final TextEditingController latController;
+  final TextEditingController lngController;
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+
+  const _SubmitLocationSection({
+    required this.placeController,
+    required this.latController,
+    required this.lngController,
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+  });
+
+  @override
+  State<_SubmitLocationSection> createState() =>
+      _SubmitLocationSectionState();
+}
+
+class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
+  bool _locating = false;
+
+  double? get _lat => double.tryParse(widget.latController.text.trim());
+  double? get _lng => double.tryParse(widget.lngController.text.trim());
+
+  Future<void> _pickOnMap() async {
+    final lat = _lat;
+    final lng = _lng;
+    final initial = (lat != null && lng != null) ? LatLng(lat, lng) : null;
+    final result = await Navigator.of(context).push<LocationPickResult>(
+      MaterialPageRoute(
+        builder: (_) => LocationPickerPage(initialCenter: initial),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      widget.latController.text = result.latitude.toStringAsFixed(6);
+      widget.lngController.text = result.longitude.toStringAsFixed(6);
+      if (result.placeName.isNotEmpty) {
+        widget.placeController.text = result.placeName;
+      }
+    });
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_locating) return;
+    setState(() => _locating = true);
+    try {
+      final p = await LocationService.instance.getCurrentGcj02();
+      if (!mounted) return;
+      setState(() {
+        widget.latController.text = p.latitude.toStringAsFixed(6);
+        widget.lngController.text = p.longitude.toStringAsFixed(6);
+      });
+      // 调高德逆地理编码把坐标转成可读地点名；失败则回退到坐标占位。
+      String placeName = '';
+      try {
+        final regeo = await AmapSearchService.instance.regeoSearch(p);
+        placeName = regeo.placeName.isNotEmpty
+            ? regeo.placeName
+            : regeo.formattedAddress;
+      } on AmapSearchException catch (_) {
+        // 静默降级
+      } catch (_) {
+        // 同上
+      }
+      if (!mounted) return;
+      if (placeName.isNotEmpty) {
+        setState(() => widget.placeController.text = placeName);
+      } else if (widget.placeController.text.trim().isEmpty) {
+        setState(() => widget.placeController.text =
+            '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}');
+      }
+      showAppToast(context, '已获取当前位置');
+    } on LocationException catch (e) {
+      if (!mounted) return;
+      showAppToast(context, e.message);
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '定位失败：$e');
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  void _reset() {
+    setState(() {
+      widget.latController.clear();
+      widget.lngController.clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lat = _lat;
+    final lng = _lng;
+    final hasPicked = lat != null && lng != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _pickOnMap,
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: Text(textLocalize('community_pick_on_map')),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BDDesign.radiusLarge,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _locating ? null : _useCurrentLocation,
+                icon: _locating
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location_rounded, size: 18),
+                label: Text(textLocalize('community_use_current_location')),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BDDesign.radiusLarge,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (hasPicked) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+            decoration: BoxDecoration(
+              color: BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+              borderRadius: BDDesign.radiusNormal,
+              border: Border.all(
+                color: BDDesign.colorMutedBlue.withValues(alpha: 0.25),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.place_rounded,
+                    size: 18, color: BDDesign.colorMutedBlue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}',
+                    style: TextStyle(
+                      color: widget.textColor,
+                      fontSize: 12.5,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '清除',
+                  splashRadius: 18,
+                  onPressed: _reset,
+                  icon: Icon(Icons.close_rounded,
+                      size: 18, color: widget.hintColor),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

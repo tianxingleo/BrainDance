@@ -51,6 +51,12 @@ final overviewStatsProvider = StateProvider<Map<String, int>>(
 );
 final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 
+// 社区帖子刷新信号 — 发布/删除/切换可见性后自增，设置页和社区页双向同步
+final myPostsRefreshSignal = StateProvider<int>((ref) => 0);
+
+// 收藏/点赞刷新信号 — 仅设置页监听，避免社区页不必要的全量刷新
+final myCollectionRefreshSignal = StateProvider<int>((ref) => 0);
+
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -206,14 +212,14 @@ class Home extends ConsumerWidget {
             reverseTransitionDuration: BDMotion.durationNormal,
             opaque: true,
             pageBuilder: (ctx, _, _) => builder(ctx),
-            transitionsBuilder: (_, animation, _a, child) {
+            transitionsBuilder: (ctx, animation, _a, child) {
               final curved = animation.drive(
                 CurveTween(curve: Curves.easeInOutCubic),
               );
+              final screenHeight = MediaQuery.sizeOf(ctx).height;
               return AnimatedBuilder(
                 animation: curved,
-                builder: (ctx, child) {
-                  final screenHeight = MediaQuery.of(ctx).size.height;
+                builder: (_, child) {
                   return Transform.translate(
                     offset: Offset(0, -(1.0 - curved.value) * screenHeight),
                     child: child,
@@ -553,7 +559,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) {
       final createIdx = 2;
-      if ((newIndex == 1 || newIndex == createIdx) && _lastTabIndex != oldIndex) {
+      if (newIndex == createIdx && _lastTabIndex != oldIndex) {
         _switchToPage(_lastTabIndex);
       } else if (newIndex == 0) {
         ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
@@ -561,6 +567,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
       return;
     }
 
+    FocusManager.instance.primaryFocus?.unfocus();
     _lastTabIndex = oldIndex;
     ref.read(pageAnimatingProvider.notifier).state = true;
     setState(() {
@@ -581,6 +588,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     // 外部改 pageIndex 时（如 provider 直接修改），同步方向
     if (pageIndex != _previousIndex && !_isAnimating) {
+      FocusManager.instance.primaryFocus?.unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(pageAnimatingProvider.notifier).state = true;
@@ -632,22 +640,25 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           dx =
                               effectiveDir *
                               (1.0 - t) *
-                              MediaQuery.of(context).size.width;
+                              MediaQuery.sizeOf(context).width;
                         } else if (isLeaving) {
                           dx =
                               -effectiveDir *
                               t *
-                              MediaQuery.of(context).size.width;
+                              MediaQuery.sizeOf(context).width;
                         }
 
                         final bool isVisible = isActive || isLeaving;
-                        return Offstage(
-                          offstage: !isVisible,
-                          child: IgnorePointer(
-                            ignoring: !isActive,
-                            child: Transform.translate(
-                              offset: Offset(dx, 0),
-                              child: child,
+                        return ExcludeFocus(
+                          excluding: !isActive,
+                          child: Offstage(
+                            offstage: !isVisible,
+                            child: IgnorePointer(
+                              ignoring: !isActive,
+                              child: Transform.translate(
+                                offset: Offset(dx, 0),
+                                child: child,
+                              ),
                             ),
                           ),
                         );

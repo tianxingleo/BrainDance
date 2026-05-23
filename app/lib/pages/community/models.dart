@@ -61,6 +61,7 @@ class CommunityPost {
   final double latitude;
   final double longitude;
   final String authorName;
+  final String userId;
   final String modelName;
   final String modelUrl;
   final String? posesUrl;
@@ -84,6 +85,7 @@ class CommunityPost {
     required this.latitude,
     required this.longitude,
     required this.authorName,
+    this.userId = '',
     required this.modelName,
     required this.modelUrl,
     required this.posesUrl,
@@ -111,6 +113,7 @@ class CommunityPost {
     int? viewCount,
     bool? isLikedByCurrentUser,
     bool? isFavoritedByCurrentUser,
+    bool? isPublic,
   }) {
     return CommunityPost(
       id: id,
@@ -120,6 +123,7 @@ class CommunityPost {
       latitude: latitude,
       longitude: longitude,
       authorName: authorName,
+      userId: userId,
       modelName: modelName,
       modelUrl: modelUrl,
       posesUrl: posesUrl,
@@ -127,7 +131,7 @@ class CommunityPost {
       coverFallbackUrl: coverFallbackUrl,
       createdAt: createdAt,
       tags: tags,
-      isPublic: isPublic,
+      isPublic: isPublic ?? this.isPublic,
       likeCount: likeCount ?? this.likeCount,
       favoriteCount: favoriteCount ?? this.favoriteCount,
       commentCount: commentCount ?? this.commentCount,

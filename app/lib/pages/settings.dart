@@ -14,12 +14,13 @@ import 'package:braindance/pages/my/my_page_tabs.dart';
 import 'package:braindance/pages/recall/overview_card.dart';
 import 'package:braindance/pages/task_list.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart'
-    show overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
+    show myCollectionRefreshSignal, myPostsRefreshSignal, overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -69,6 +70,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final bottomContentPadding = bottomInset + 132.0;
 
+    ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != null && prev != next) _loadCommunityAccount();
+    });
+
+    ref.listen(myCollectionRefreshSignal, (prev, next) {
+      if (prev != null && prev != next) _loadCommunityAccount();
+    });
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: BDPageBackdrop(
@@ -92,7 +101,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                         return;
                       }
 
-                      final screenSize = MediaQuery.of(context).size;
+                      final screenSize = MediaQuery.sizeOf(context);
                       final isDarkNow = AppConfig.isNightMode;
                       final mode = isDarkNow
                           ? ThemeTransitionMode.expandHole
@@ -104,7 +113,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final dpr = MediaQuery.of(context).devicePixelRatio;
+                          final dpr = MediaQuery.devicePixelRatioOf(context);
                           final image = await boundary.toImage(pixelRatio: dpr);
                           ref
                               .read(themeAnimationProvider.notifier)
@@ -156,7 +165,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               return AnimatedBuilder(
                                 animation: curved,
                                 builder: (_, child) {
-                                  final screenHeight = MediaQuery.of(ctx).size.height;
+                                  final screenHeight = MediaQuery.sizeOf(ctx).height;
                                   return Transform.translate(
                                     offset: Offset(0, -(1.0 - curved.value) * screenHeight),
                                     child: child,
@@ -286,8 +295,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 
   Future<void> _togglePostVisibility(CommunityPost post) async {
+    showAppToast(context, textLocalize('my_post_updating'));
+    // 乐观更新：立即切换本地状态
+    final toggled = post.copyWith(isPublic: !post.isPublic);
+    setState(() {
+      _myPosts = _myPosts.map((p) => p.id == post.id ? toggled : p).toList();
+    });
     await _communityRepository.togglePostVisibility(post);
-    await _loadCommunityAccount();
+    ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_updated'));
   }
 
   Future<void> _confirmDeletePost(CommunityPost post) async {
@@ -311,8 +328,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       },
     );
     if (confirmed != true) return;
+    showAppToast(context, textLocalize('my_post_deleting'));
+    // 乐观更新：立即从列表中移除
+    setState(() {
+      _myPosts = _myPosts.where((p) => p.id != post.id).toList();
+    });
     await _communityRepository.deletePost(post.id);
-    await _loadCommunityAccount();
+    ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_deleted'));
   }
 }
 
