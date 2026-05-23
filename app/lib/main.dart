@@ -206,14 +206,14 @@ class Home extends ConsumerWidget {
             reverseTransitionDuration: BDMotion.durationNormal,
             opaque: true,
             pageBuilder: (ctx, _, _) => builder(ctx),
-            transitionsBuilder: (_, animation, _a, child) {
+            transitionsBuilder: (ctx, animation, _a, child) {
               final curved = animation.drive(
                 CurveTween(curve: Curves.easeInOutCubic),
               );
+              final screenHeight = MediaQuery.sizeOf(ctx).height;
               return AnimatedBuilder(
                 animation: curved,
-                builder: (ctx, child) {
-                  final screenHeight = MediaQuery.of(ctx).size.height;
+                builder: (_, child) {
                   return Transform.translate(
                     offset: Offset(0, -(1.0 - curved.value) * screenHeight),
                     child: child,
@@ -556,6 +556,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
       return;
     }
 
+    FocusManager.instance.primaryFocus?.unfocus();
     _lastTabIndex = oldIndex;
     ref.read(pageAnimatingProvider.notifier).state = true;
     setState(() {
@@ -576,6 +577,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
     // 外部改 pageIndex 时（如 provider 直接修改），同步方向
     if (pageIndex != _previousIndex && !_isAnimating) {
+      FocusManager.instance.primaryFocus?.unfocus();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ref.read(pageAnimatingProvider.notifier).state = true;
@@ -627,22 +629,25 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           dx =
                               effectiveDir *
                               (1.0 - t) *
-                              MediaQuery.of(context).size.width;
+                              MediaQuery.sizeOf(context).width;
                         } else if (isLeaving) {
                           dx =
                               -effectiveDir *
                               t *
-                              MediaQuery.of(context).size.width;
+                              MediaQuery.sizeOf(context).width;
                         }
 
                         final bool isVisible = isActive || isLeaving;
-                        return Offstage(
-                          offstage: !isVisible,
-                          child: IgnorePointer(
-                            ignoring: !isActive,
-                            child: Transform.translate(
-                              offset: Offset(dx, 0),
-                              child: child,
+                        return ExcludeFocus(
+                          excluding: !isActive,
+                          child: Offstage(
+                            offstage: !isVisible,
+                            child: IgnorePointer(
+                              ignoring: !isActive,
+                              child: Transform.translate(
+                                offset: Offset(dx, 0),
+                                child: child,
+                              ),
                             ),
                           ),
                         );

@@ -572,7 +572,7 @@ class _MarkerLimitSheetState extends State<_MarkerLimitSheet> {
         16,
         20,
         16,
-        20 + MediaQuery.of(context).viewInsets.bottom,
+        20 + MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: BDPanelCard(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),

@@ -24,6 +24,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../configs/supabase_config.dart';
+import '../services/video_preprocessor.dart'; // used by generate_media.dart
 
 part 'generate/generate_media.dart';
 part 'generate/generate_submission.dart';

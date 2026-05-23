@@ -514,7 +514,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
               16,
               10,
               16,
-              10 + MediaQuery.of(context).padding.bottom,
+              10 + MediaQuery.paddingOf(context).bottom,
             ),
             decoration: BoxDecoration(
               color: isDark
@@ -596,7 +596,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
   Widget _buildBackButton() {
     return Positioned(
       left: 16,
-      top: MediaQuery.of(context).padding.top + 8,
+      top: MediaQuery.paddingOf(context).top + 8,
       child: GestureDetector(
         onTap: () => Navigator.pop(context),
         child: Container(

@@ -136,7 +136,7 @@ extension _AgentChatView on _AgentChatPageState {
         alignment: Alignment.centerRight,
         child: Container(
           constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75,
+            maxWidth: MediaQuery.sizeOf(context).width * 0.75,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
@@ -750,7 +750,7 @@ extension _AgentChatView on _AgentChatPageState {
 
     return Container(
       padding: EdgeInsets.fromLTRB(
-        16, 8, 16, MediaQuery.of(context).padding.bottom + 80),
+        16, 8, 16, MediaQuery.paddingOf(context).bottom + 80),
       decoration: BoxDecoration(
         color: bgColor,
         border: Border(top: BorderSide(color: borderColor)),

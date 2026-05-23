@@ -87,7 +87,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final mediaQuery = MediaQuery.of(context);
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final textColor = isDark
         ? BDDesign.colorPaperWhite
         : BDDesign.colorInkBlack;
@@ -96,7 +96,7 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
 
     return Padding(
-      padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+      padding: EdgeInsets.only(bottom: bottomInset),
       child: DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.82,

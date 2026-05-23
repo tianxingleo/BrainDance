@@ -89,7 +89,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         return StatefulBuilder(
           builder: (builderContext, setSheetState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.75,
+              height: MediaQuery.sizeOf(context).height * 0.75,
               decoration: BoxDecoration(
                 color: panelColor,
                 borderRadius: const BorderRadius.vertical(

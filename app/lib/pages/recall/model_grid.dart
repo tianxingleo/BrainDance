@@ -324,6 +324,29 @@ class _AdaptiveFrameThumbnail extends StatefulWidget {
 /// Shared image resolution logic for widgets that load a network image by URL.
 mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   static final Map<String, ui.Image> _imageCache = <String, ui.Image>{};
+  static final List<String> _cacheOrder = <String>[];
+  static const int _maxCacheSize = 30;
+
+  static ui.Image? _lookupCache(String url) {
+    final img = _imageCache[url];
+    if (img != null) {
+      _cacheOrder.remove(url);
+      _cacheOrder.add(url);
+    }
+    return img;
+  }
+
+  static void _addToCache(String url, ui.Image image) {
+    final existing = _imageCache[url];
+    if (existing != null) {
+      _cacheOrder.remove(url);
+    } else if (_cacheOrder.length >= _maxCacheSize) {
+      final oldest = _cacheOrder.removeAt(0);
+      _imageCache.remove(oldest)?.dispose();
+    }
+    _cacheOrder.add(url);
+    _imageCache[url] = image;
+  }
 
   ui.Image? resolvedImage;
   Object? lastError;
@@ -354,7 +377,7 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   }
 
   void _resolveImage() {
-    final cached = _imageCache[imageUrl];
+    final cached = _lookupCache(imageUrl);
     if (cached != null) {
       resolvedImage = cached;
       return;
@@ -381,7 +404,7 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
     _imageStream = stream;
     _imageStreamListener = ImageStreamListener(
       (ImageInfo info, bool synchronousCall) {
-        _imageCache[imageUrl] = info.image;
+        _addToCache(imageUrl, info.image);
         if (!mounted) {
           return;
         }

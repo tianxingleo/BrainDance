@@ -92,7 +92,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                         return;
                       }
 
-                      final screenSize = MediaQuery.of(context).size;
+                      final screenSize = MediaQuery.sizeOf(context);
                       final isDarkNow = AppConfig.isNightMode;
                       final mode = isDarkNow
                           ? ThemeTransitionMode.expandHole
@@ -104,7 +104,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               as RenderRepaintBoundary?;
                       if (boundary != null) {
                         try {
-                          final dpr = MediaQuery.of(context).devicePixelRatio;
+                          final dpr = MediaQuery.devicePixelRatioOf(context);
                           final image = await boundary.toImage(pixelRatio: dpr);
                           ref
                               .read(themeAnimationProvider.notifier)
@@ -156,7 +156,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               return AnimatedBuilder(
                                 animation: curved,
                                 builder: (_, child) {
-                                  final screenHeight = MediaQuery.of(ctx).size.height;
+                                  final screenHeight = MediaQuery.sizeOf(ctx).height;
                                   return Transform.translate(
                                     offset: Offset(0, -(1.0 - curved.value) * screenHeight),
                                     child: child,
