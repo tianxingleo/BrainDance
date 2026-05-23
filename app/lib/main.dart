@@ -51,6 +51,9 @@ final overviewStatsProvider = StateProvider<Map<String, int>>(
 );
 final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 
+// 社区帖子刷新信号 — 发布新帖后自增，通知设置页刷新"我的帖子"
+final myPostsRefreshSignal = StateProvider<int>((ref) => 0);
+
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 

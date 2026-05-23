@@ -19,7 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart'
-    show overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
+    show myPostsRefreshSignal, overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -68,6 +68,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         : BDDesign.colorInkBlack;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final bottomContentPadding = bottomInset + 132.0;
+
+    ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != next) _loadCommunityAccount();
+    });
 
     return Scaffold(
       backgroundColor: Colors.transparent,
