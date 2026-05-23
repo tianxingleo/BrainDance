@@ -213,6 +213,7 @@ extension _RecallPageDataSync on _RecallPageState {
         if (raw.isNotEmpty) {
           m['preview_img_path'] = _normalizeStorageUrl(raw);
         }
+        materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
       }
 
       if (models.isEmpty) {

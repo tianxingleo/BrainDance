@@ -217,10 +217,14 @@ class AgentRecallResponse {
       if (enrichment != null) {
         _fillIfMissing(map, 'display_name', enrichment['display_name']);
         _fillIfMissing(map, 'tags', enrichment['tags']);
+        _fillIfMissing(map, 'preview_img_path', enrichment['preview_img_path']);
         _fillIfMissing(
           map,
-          'preview_img_path',
-          enrichment['preview_img_path'],
+          'preview_webp_path',
+          enrichment['preview_webp_path'] ??
+              (enrichment['meta_info'] is Map
+                  ? (enrichment['meta_info'] as Map)['preview_webp_path']
+                  : null),
         );
         _fillIfMissing(map, 'created_at', enrichment['created_at']);
         _fillIfMissing(map, 'ply_path', enrichment['ply_path']);
@@ -236,9 +240,8 @@ class AgentRecallResponse {
       final evidenceSimilarity =
           (evidenceMap?['similarity'] as num?)?.toDouble() ?? 0.0;
       final evidenceDesc = evidenceMap?['description']?.toString() ?? '';
-      final evidenceTags = (evidenceMap?['tags'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
+      final evidenceTags =
+          (evidenceMap?['tags'] as List?)?.map((e) => e.toString()).toList() ??
           const <String>[];
 
       final actions = ((json['actions'] as List?) ?? [])
@@ -333,11 +336,7 @@ class AgentRecallResponse {
   }
 }
 
-void _fillIfMissing(
-  Map<String, dynamic> target,
-  String key,
-  dynamic value,
-) {
+void _fillIfMissing(Map<String, dynamic> target, String key, dynamic value) {
   final current = target[key];
   final hasCurrent = switch (current) {
     null => false,
@@ -508,6 +507,7 @@ class AgentCandidate {
   final String? displayName;
   final List<String> tags;
   final String? previewImgPath;
+  final String? previewWebpPath;
   final String? createdAt;
   final String? plyPath;
 
@@ -520,6 +520,7 @@ class AgentCandidate {
     this.displayName,
     this.tags = const [],
     this.previewImgPath,
+    this.previewWebpPath,
     this.createdAt,
     this.plyPath,
   });
@@ -532,11 +533,15 @@ class AgentCandidate {
       description: json['description']?.toString() ?? '',
       poseImageId: json['pose_image_id']?.toString(),
       displayName: json['display_name']?.toString(),
-      tags: (json['tags'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
+      tags:
+          (json['tags'] as List?)?.map((e) => e.toString()).toList() ??
           const [],
       previewImgPath: json['preview_img_path']?.toString(),
+      previewWebpPath:
+          json['preview_webp_path']?.toString() ??
+          (json['meta_info'] is Map
+              ? (json['meta_info'] as Map)['preview_webp_path']?.toString()
+              : null),
       createdAt: json['created_at']?.toString(),
       plyPath: json['ply_path']?.toString(),
     );
@@ -913,6 +918,7 @@ class AgentRecallService {
               'pose_image_id': candidate.poseImageId,
               'tags': candidate.tags,
               'preview_img_path': candidate.previewImgPath,
+              'preview_webp_path': candidate.previewWebpPath,
               'created_at': candidate.createdAt,
               'ply_path': candidate.plyPath,
             },

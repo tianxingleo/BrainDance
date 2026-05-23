@@ -216,10 +216,7 @@ extension _RecallPageSearch on _RecallPageState {
     }
 
     try {
-      _updateAgentLiveStatus(
-        '已发起 Agent 请求',
-        detail: '正在等待服务端建立流式返回通道',
-      );
+      _updateAgentLiveStatus('已发起 Agent 请求', detail: '正在等待服务端建立流式返回通道');
       final stream = AgentRecallService().queryStream(
         trimmedQuery,
         executionMode: executionMode,
@@ -340,7 +337,8 @@ extension _RecallPageSearch on _RecallPageState {
     final sceneId = model['scene_id']?.toString() ?? '';
     if (plyPath.isEmpty || sceneId.isEmpty) return null;
     return () {
-      final modelUrl = plyPath.startsWith('http://') || plyPath.startsWith('https://')
+      final modelUrl =
+          plyPath.startsWith('http://') || plyPath.startsWith('https://')
           ? plyPath
           : _toPublicUrl(plyPath);
       final posesUrl = _toPosesUrl(plyPath);
@@ -368,8 +366,8 @@ extension _RecallPageSearch on _RecallPageState {
     return () {
       final modelUrl =
           plyPath.startsWith('http://') || plyPath.startsWith('https://')
-              ? plyPath
-              : _toPublicUrl(plyPath);
+          ? plyPath
+          : _toPublicUrl(plyPath);
       final posesUrl = _toPosesUrl(plyPath);
       unawaited(
         openViewer(
@@ -605,11 +603,7 @@ extension _RecallPageSearch on _RecallPageState {
         ),
         child: Text(
           query,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 14,
-            height: 1.4,
-          ),
+          style: TextStyle(color: textColor, fontSize: 14, height: 1.4),
         ),
       ),
     );
@@ -645,6 +639,7 @@ extension _RecallPageSearch on _RecallPageState {
             if (rawImg.isNotEmpty) {
               m['preview_img_path'] = _normalizeStorageUrl(rawImg);
             }
+            materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
             assetModels.add(m);
           }
         }
@@ -700,11 +695,13 @@ extension _RecallPageSearch on _RecallPageState {
                 child: AgentAssetCard(
                   displayName: model['display_name']?.toString(),
                   description: model['description']?.toString() ?? '',
-                  tags: (model['tags'] as List?)
+                  tags:
+                      (model['tags'] as List?)
                           ?.map((e) => e.toString())
                           .toList() ??
                       const [],
                   previewImgPath: model['preview_img_path']?.toString(),
+                  previewWebpPath: readPreviewWebpPath(model),
                   isDark: isDark,
                   onOpen: _buildAssetCardOnOpen(model),
                 ),
@@ -715,7 +712,8 @@ extension _RecallPageSearch on _RecallPageState {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: AgentAssetCard(
-                  displayName: topCandidates[i].displayName ??
+                  displayName:
+                      topCandidates[i].displayName ??
                       (topCandidates[i].description.isNotEmpty
                           ? topCandidates[i].description
                           : topCandidates[i].sceneId),
@@ -724,10 +722,15 @@ extension _RecallPageSearch on _RecallPageState {
                       : '场景 ${topCandidates[i].sceneId}',
                   tags: topCandidates[i].tags,
                   previewImgPath: topCandidates[i].previewImgPath,
+                  previewWebpPath: topCandidates[i].previewWebpPath,
                   score: topCandidates[i].score,
                   isDark: isDark,
                   actionLabel: i == 0 ? '飞到视角' : '打开场景',
-                  onOpen: _buildCandidateCardOnOpen(topCandidates[i], i, result),
+                  onOpen: _buildCandidateCardOnOpen(
+                    topCandidates[i],
+                    i,
+                    result,
+                  ),
                 ),
               ),
           ],
@@ -796,6 +799,7 @@ extension _RecallPageSearch on _RecallPageState {
             if (rawImg.isNotEmpty) {
               m['preview_img_path'] = _normalizeStorageUrl(rawImg);
             }
+            materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
             activeAssetModels.add(m);
           }
         }
@@ -840,11 +844,13 @@ extension _RecallPageSearch on _RecallPageState {
                   child: AgentAssetCard(
                     displayName: model['display_name']?.toString(),
                     description: model['description']?.toString() ?? '',
-                    tags: (model['tags'] as List?)
+                    tags:
+                        (model['tags'] as List?)
                             ?.map((e) => e.toString())
                             .toList() ??
                         const [],
                     previewImgPath: model['preview_img_path']?.toString(),
+                    previewWebpPath: readPreviewWebpPath(model),
                     isDark: isDark,
                     onOpen: _buildAssetCardOnOpen(model),
                   ),
@@ -855,7 +861,8 @@ extension _RecallPageSearch on _RecallPageState {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: AgentAssetCard(
-                    displayName: topCandidates[i].displayName ??
+                    displayName:
+                        topCandidates[i].displayName ??
                         (topCandidates[i].description.isNotEmpty
                             ? topCandidates[i].description
                             : topCandidates[i].sceneId),
@@ -864,11 +871,15 @@ extension _RecallPageSearch on _RecallPageState {
                         : '场景 ${topCandidates[i].sceneId}',
                     tags: topCandidates[i].tags,
                     previewImgPath: topCandidates[i].previewImgPath,
+                    previewWebpPath: topCandidates[i].previewWebpPath,
                     score: topCandidates[i].score,
                     isDark: isDark,
                     actionLabel: i == 0 ? '飞到视角' : '打开场景',
                     onOpen: _buildCandidateCardOnOpen(
-                        topCandidates[i], i, _agentResult),
+                      topCandidates[i],
+                      i,
+                      _agentResult,
+                    ),
                   ),
                 ),
             ],
@@ -1211,30 +1222,34 @@ extension _RecallPageSearch on _RecallPageState {
               ],
 
               if (!isActiveAssetMode || activeAssetModels.isEmpty) ...[
-              if (_agentResult?.mode != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '模式：${_formatAgentModeLabel(_agentResult!.mode)}',
-                  style: TextStyle(color: hintColor, fontSize: 12),
-                ),
-              ],
+                if (_agentResult?.mode != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '模式：${_formatAgentModeLabel(_agentResult!.mode)}',
+                    style: TextStyle(color: hintColor, fontSize: 12),
+                  ),
+                ],
 
-              if (_agentResult?.selectedCandidateReason != null &&
-                  _agentResult!.selectedCandidateReason!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '选择理由：${_agentResult!.selectedCandidateReason!}',
-                  style: TextStyle(color: hintColor, fontSize: 12, height: 1.4),
-                ),
-              ],
+                if (_agentResult?.selectedCandidateReason != null &&
+                    _agentResult!.selectedCandidateReason!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '选择理由：${_agentResult!.selectedCandidateReason!}',
+                    style: TextStyle(
+                      color: hintColor,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
 
-              if (_agentResult?.evidence != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
-                  style: TextStyle(color: hintColor, fontSize: 12),
-                ),
-              ],
+                if (_agentResult?.evidence != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '场景：${_agentResult!.evidence!.sceneId}  ·  相似度：${(_agentResult!.evidence!.similarity * 100).toStringAsFixed(1)}%',
+                    style: TextStyle(color: hintColor, fontSize: 12),
+                  ),
+                ],
               ],
 
               if (isActiveAssetMode && activeAssetModels.isNotEmpty) ...[
@@ -1245,11 +1260,13 @@ extension _RecallPageSearch on _RecallPageState {
                     child: AgentAssetCard(
                       displayName: model['display_name']?.toString(),
                       description: model['description']?.toString() ?? '',
-                      tags: (model['tags'] as List?)
+                      tags:
+                          (model['tags'] as List?)
                               ?.map((e) => e.toString())
                               .toList() ??
                           const [],
                       previewImgPath: model['preview_img_path']?.toString(),
+                      previewWebpPath: readPreviewWebpPath(model),
                       isDark: isDark,
                       onOpen: _buildAssetCardOnOpen(model),
                     ),
@@ -1260,7 +1277,8 @@ extension _RecallPageSearch on _RecallPageState {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: AgentAssetCard(
-                      displayName: topCandidates[i].displayName ??
+                      displayName:
+                          topCandidates[i].displayName ??
                           (topCandidates[i].description.isNotEmpty
                               ? topCandidates[i].description
                               : topCandidates[i].sceneId),
@@ -1269,11 +1287,15 @@ extension _RecallPageSearch on _RecallPageState {
                           : '场景 ${topCandidates[i].sceneId}',
                       tags: topCandidates[i].tags,
                       previewImgPath: topCandidates[i].previewImgPath,
+                      previewWebpPath: topCandidates[i].previewWebpPath,
                       score: topCandidates[i].score,
                       isDark: isDark,
                       actionLabel: i == 0 ? '飞到视角' : '打开场景',
                       onOpen: _buildCandidateCardOnOpen(
-                          topCandidates[i], i, _agentResult),
+                        topCandidates[i],
+                        i,
+                        _agentResult,
+                      ),
                     ),
                   ),
               ],
