@@ -380,7 +380,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
       } catch (_) {
         _resetRecordingState(updateUi: true);
         _isToggling = false;
-        rethrow;
+        return;
       }
       try {
         await RecoConfig.trySwitchCameraDescription(RecoConfig.camNum);
@@ -529,6 +529,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     _queueLocked = false;
+    if (_uploadQueue.isNotEmpty) {
+      _processUploadQueue();
+    }
   }
 
   void _handleStreamingAbort() {
@@ -548,7 +551,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     print('[abort] userId=$userId sceneId=$sceneId');
     if (userId != null && sceneId != null) {
       print('[abort] firing delete for $userId/$sceneId');
-      _deleteStreamingAssets(userId, sceneId);
+      unawaited(_deleteStreamingAssets(userId, sceneId));
     }
     _resetStreamingState();
 
@@ -579,14 +582,23 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _streamingTimer = null;
     _setGlobalRecording(false);
 
-    if (!mounted) return;
-
-    // Wait for queue to drain
+    if (!mounted) {
+      _resetStreamingState();
+      return;
+    }
+    final _drainStart = DateTime.now();
     while (_uploadQueue.isNotEmpty || _queueLocked) {
+      if (DateTime.now().difference(_drainStart).inSeconds > 30) {
+        debugPrint('[_stopStreaming] queue drain timeout');
+        break;
+      }
       await Future.delayed(const Duration(milliseconds: 100));
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      _resetStreamingState();
+      return;
+    }
 
     final finalCount = _streamingSuccessCount;
 

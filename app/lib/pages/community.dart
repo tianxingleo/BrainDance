@@ -14,19 +14,22 @@ import 'package:braindance/services/network_service.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/widgets/app_toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class CommunityPage extends StatefulWidget {
+import '../main.dart' show myPostsRefreshSignal;
+
+class CommunityPage extends ConsumerStatefulWidget {
   const CommunityPage({super.key});
 
   @override
-  State<CommunityPage> createState() => _CommunityPageState();
+  ConsumerState<CommunityPage> createState() => _CommunityPageState();
 }
 
 enum _CommunitySubPage { recommend, search, submit }
 
-class _CommunityPageState extends State<CommunityPage> {
+class _CommunityPageState extends ConsumerState<CommunityPage> {
   final CommunityRepository _repository = CommunityRepository();
   _CommunitySubPage? _currentPage;
   int _searchFocusTrigger = 0;
@@ -461,6 +464,7 @@ class _CommunityPageState extends State<CommunityPage> {
     });
 
     await _repository.clearDraft();
+    ref.read(myPostsRefreshSignal.notifier).state++;
     showAppToast(context, textLocalize('community_joined'));
     return true;
   }
@@ -720,6 +724,10 @@ class _CommunityPageState extends State<CommunityPage> {
     final isDark = context.isDarkMode;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final topSafe = MediaQuery.paddingOf(context).top;
+
+    ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != null && prev != next) _loadCommunity();
+    });
 
     return PopScope(
       canPop: _currentPage == null,

@@ -49,7 +49,7 @@ dependencies:
   cross_file: ^0.3.5+2
   dio: ^5.9.2
   connectivity_plus: ^6.1.2
-  ffmpeg_kit_extended_flutter: ^0.4.6
+  ffmpeg_kit_extended_flutter: ^0.5.0
   sqflite: ^2.2.5
   image: ^4.8.0
   llamadart: ^0.6.6

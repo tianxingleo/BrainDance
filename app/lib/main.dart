@@ -51,6 +51,12 @@ final overviewStatsProvider = StateProvider<Map<String, int>>(
 );
 final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
 
+// 社区帖子刷新信号 — 发布/删除/切换可见性后自增，设置页和社区页双向同步
+final myPostsRefreshSignal = StateProvider<int>((ref) => 0);
+
+// 收藏/点赞刷新信号 — 仅设置页监听，避免社区页不必要的全量刷新
+final myCollectionRefreshSignal = StateProvider<int>((ref) => 0);
+
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
