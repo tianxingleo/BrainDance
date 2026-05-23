@@ -1630,8 +1630,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
                 final s = ref.read(streamingUploadSuccessProvider);
                 final f = ref.read(streamingFailCountProvider);
                 return (s > 0 && f == 0)
-                    ? Colors.green.withAlpha(200)
+                    ? Colors.white
                     : Colors.redAccent.withAlpha(200);
+              },
+              bgColorBuilder: () {
+                final s = ref.read(streamingUploadSuccessProvider);
+                final f = ref.read(streamingFailCountProvider);
+                return (s > 0 && f == 0)
+                    ? const Color(0xE62E7D32)
+                    : null;
               },
             ),
             _TipBubble(
@@ -1669,9 +1676,8 @@ class _StreamingStatusCardState extends ConsumerState<_StreamingStatusCard> {
     final captured = ref.watch(streamingFrameCountProvider);
     final uploaded = ref.watch(streamingUploadSuccessProvider);
     final failed = ref.watch(streamingFailCountProvider);
-    final doneMessage = ref.watch(streamingDoneBubbleProvider);
 
-    if (captured == 0 || doneMessage != null) return const SizedBox.shrink();
+    if (captured == 0) return const SizedBox.shrink();
 
     final cardWidth = (MediaQuery.sizeOf(context).width * 0.44).clamp(
       170.0,

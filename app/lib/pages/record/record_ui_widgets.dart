@@ -247,6 +247,7 @@ class _TipBubble extends ConsumerStatefulWidget {
   final Alignment alignment;
   final IconData Function() iconBuilder;
   final Color Function() iconColorBuilder;
+  final Color? Function()? bgColorBuilder;
   final bool withSlide;
 
   const _TipBubble({
@@ -254,6 +255,7 @@ class _TipBubble extends ConsumerStatefulWidget {
     required this.alignment,
     required this.iconBuilder,
     required this.iconColorBuilder,
+    this.bgColorBuilder,
     this.withSlide = true,
   });
 
@@ -327,7 +329,7 @@ class _TipBubbleState extends ConsumerState<_TipBubble>
               margin: const EdgeInsets.symmetric(horizontal: 32),
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color(0xE6282828),
+                color: widget.bgColorBuilder?.call() ?? const Color(0xE6282828),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: Colors.white.withAlpha(18)),
               ),
