@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -34,6 +36,7 @@ class _CommunityPageState extends State<CommunityPage> {
   List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
   bool _isOffline = false;
+  Timer? _retryTimer;
   CommunityMapViewport _mapViewport = const CommunityMapViewport(
     latitude: 30.243,
     longitude: 120.150,
@@ -83,6 +86,7 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   void dispose() {
     networkService.removeListener(_onNetworkChanged);
+    _retryTimer?.cancel();
     _submitTitleController.dispose();
     _submitCaptionController.dispose();
     _submitPlaceController.dispose();
@@ -134,12 +138,21 @@ class _CommunityPageState extends State<CommunityPage> {
   }
 
   Future<void> _loadCommunity() async {
+    if (!networkService.isConnected) {
+      setState(() {
+        _isOffline = true;
+        _isLoading = false;
+      });
+      _startRetry();
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final posts = await _repository.fetchPosts();
       final models = await _repository.fetchShareableModels();
       final markers = await _repository.fetchMapMarkers();
       if (!mounted) return;
+      _retryTimer?.cancel();
       setState(() {
         _posts = posts;
         _shareableModels = models;
@@ -154,7 +167,20 @@ class _CommunityPageState extends State<CommunityPage> {
         _isOffline = true;
         _isLoading = false;
       });
+      _startRetry();
     }
+  }
+
+  void _startRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !_isOffline) {
+        _retryTimer?.cancel();
+        return;
+      }
+      if (_isLoading) return;
+      _loadCommunity();
+    });
   }
 
   Future<void> _loadDraft() async {
