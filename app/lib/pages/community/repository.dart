@@ -463,7 +463,8 @@ class CommunityRepository {
     }).toList();
 
     try {
-      await _client.from('community_posts').insert({
+      // Insert and get back the server-assigned id
+      final insertResult = await _client.from('community_posts').insert({
         'user_id': _client.auth.currentUser?.id ?? 'local-user',
         'model_asset_id': model.id,
         'model_name': model.sceneId,
@@ -480,7 +481,14 @@ class CommunityRepository {
           'comments': <Map<String, dynamic>>[],
           'images': extraImagesMeta,
         },
-      });
+      }).select('id');
+
+      if (insertResult is List && insertResult.isNotEmpty) {
+        final realId = insertResult[0]['id']?.toString();
+        if (realId != null && realId.isNotEmpty) {
+          return optimistic.copyWithRealId(realId);
+        }
+      }
       return optimistic;
     } catch (_) {
       _localDrafts.insert(0, optimistic);

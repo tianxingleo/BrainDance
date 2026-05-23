@@ -135,6 +135,32 @@ class CommunityPost {
     );
   }
 
+  /// Returns a copy with a real server-assigned id, replacing the local
+  /// optimistic id so that like/comment/view operations hit the real record.
+  CommunityPost copyWithRealId(String realId) {
+    return CommunityPost(
+      id: realId,
+      title: title,
+      caption: caption,
+      placeName: placeName,
+      latitude: latitude,
+      longitude: longitude,
+      authorName: authorName,
+      modelName: modelName,
+      modelUrl: modelUrl,
+      posesUrl: posesUrl,
+      coverUrl: coverUrl,
+      createdAt: createdAt,
+      tags: tags,
+      isPublic: isPublic,
+      likeCount: likeCount,
+      favoriteCount: favoriteCount,
+      commentCount: commentCount,
+      viewCount: viewCount,
+      extraImages: extraImages,
+    );
+  }
+
   String get relativeTimeLabel => formatRelativeTime(createdAt);
 }
 
