@@ -127,7 +127,7 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
             borderRadius: _searchFieldRadius,
             variant: BDGlassVariant.floating,
             blurSigma: 20,
-            enableBlur: false,
+            noBlur: true,
             borderColor: panelBorderColor,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: TextField(
