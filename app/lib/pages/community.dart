@@ -521,11 +521,14 @@ class _CommunityPageState extends State<CommunityPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _lastSearchQuery ??
-                                textLocalize('community_search_placeholder'),
+                            (_lastSearchQuery != null &&
+                                    _lastSearchQuery!.isNotEmpty)
+                                ? _lastSearchQuery!
+                                : textLocalize('community_search_placeholder'),
                             maxLines: 1,
                             style: TextStyle(
-                              color: _lastSearchQuery != null
+                              color: (_lastSearchQuery != null &&
+                                      _lastSearchQuery!.isNotEmpty)
                                   ? textColor
                                   : hintColor,
                               fontSize: 13,
@@ -587,6 +590,7 @@ class _CommunityPageState extends State<CommunityPage> {
                 _goBack();
                 _openDetail(post);
               },
+              onSearchChanged: (v) => _lastSearchQuery = v,
               focusOnMount: true,
               focusTrigger: _searchFocusTrigger,
               searchFieldLeftInset: 52,
@@ -700,7 +704,10 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: _buildSearchOverlay(),
+                      child: ExcludeFocus(
+                        excluding: _currentPage != _CommunitySubPage.search,
+                        child: _buildSearchOverlay(),
+                      ),
                     ),
                     AnimatedPositioned(
                       duration: BDMotion.durationNormal,
@@ -711,7 +718,10 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: _buildSubmitOverlay(),
+                      child: ExcludeFocus(
+                        excluding: _currentPage != _CommunitySubPage.submit,
+                        child: _buildSubmitOverlay(),
+                      ),
                     ),
                   ],
                 ),

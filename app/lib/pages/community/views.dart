@@ -310,6 +310,7 @@ class CommunityExploreView extends StatefulWidget {
   final bool focusOnMount;
   final int focusTrigger;
   final double searchFieldLeftInset;
+  final ValueChanged<String>? onSearchChanged;
 
   const CommunityExploreView({
     super.key,
@@ -322,6 +323,7 @@ class CommunityExploreView extends StatefulWidget {
     this.focusOnMount = false,
     this.focusTrigger = 0,
     this.searchFieldLeftInset = 16,
+    this.onSearchChanged,
   });
 
   @override
@@ -409,6 +411,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
               if (v.trim().isEmpty && _query.isNotEmpty) {
                 setState(() => _query = '');
               }
+              widget.onSearchChanged?.call(v);
             },
             decoration: InputDecoration(
               hintText: textLocalize('community_search_placeholder'),
