@@ -13,6 +13,7 @@ import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CommunityPage extends StatefulWidget {
   const CommunityPage({super.key});
@@ -37,11 +38,23 @@ class _CommunityPageState extends State<CommunityPage>
     zoom: 10,
   );
 
-  // Discover tab
-  final Set<String> _selectedTags = {};
-
   // Explore tab — viewport + tag filter
   String? _exploreTag;
+
+  // Search tab (探索)
+  List<String> _searchHistory = const [];
+  List<String> _recommendedKeywords = const [
+    '街景',
+    '建筑',
+    '自然',
+    '室内',
+    '夜景',
+    '人物',
+    '旅行',
+    '城市',
+  ];
+  static const _searchHistoryPrefKey = 'community_search_history';
+  static const _maxSearchHistory = 10;
 
   // Submit tab — multi-model
   final List<CommunityModelOption> _selectedSubmitModels = [];
@@ -63,6 +76,7 @@ class _CommunityPageState extends State<CommunityPage>
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
     _loadCommunity();
+    _loadSearchHistory();
   }
 
   void _onTabChanged() {
@@ -83,6 +97,37 @@ class _CommunityPageState extends State<CommunityPage>
     super.dispose();
   }
 
+  Future<void> _loadSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList(_searchHistoryPrefKey) ?? const [];
+    if (!mounted) return;
+    setState(() => _searchHistory = history);
+  }
+
+  Future<void> _persistSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_searchHistoryPrefKey, _searchHistory);
+  }
+
+  void _addToSearchHistory(String query) {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    setState(() {
+      _searchHistory.remove(q);
+      _searchHistory.insert(0, q);
+      if (_searchHistory.length > _maxSearchHistory) {
+        _searchHistory =
+            _searchHistory.sublist(0, _maxSearchHistory);
+      }
+    });
+    _persistSearchHistory();
+  }
+
+  void _clearSearchHistory() {
+    setState(() => _searchHistory = []);
+    _persistSearchHistory();
+  }
+
   Future<void> _loadCommunity() async {
     setState(() => _isLoading = true);
     final posts = await _repository.fetchPosts();
@@ -95,7 +140,7 @@ class _CommunityPageState extends State<CommunityPage>
       _mapMarkers = markers;
       _isLoading = false;
     });
-    _loadDraft(); // safe: _shareableModels is now populated
+    _loadDraft();
   }
 
   Future<void> _loadDraft() async {
@@ -197,7 +242,7 @@ class _CommunityPageState extends State<CommunityPage>
     }
     _openPostFromMarker(marker);
   }
-  
+
   void _openViewer(CommunityPost post) {
     openViewer(
       context,
@@ -256,8 +301,7 @@ class _CommunityPageState extends State<CommunityPage>
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: Icon(Icons.close_rounded,
-                            color: textColor),
+                        icon: Icon(Icons.close_rounded, color: textColor),
                       ),
                     ],
                   ),
@@ -276,8 +320,7 @@ class _CommunityPageState extends State<CommunityPage>
                             Navigator.pop(ctx);
                             _openViewer(post);
                           },
-                          child:
-                              CommunityLocationHubRow(post: post),
+                          child: CommunityLocationHubRow(post: post),
                         );
                       },
                     ),
@@ -290,6 +333,7 @@ class _CommunityPageState extends State<CommunityPage>
       },
     );
   }
+
   void _toggleSubmitModel(CommunityModelOption model) {
     setState(() {
       if (_selectedSubmitModels.any((m) => m.id == model.id)) {
@@ -301,13 +345,10 @@ class _CommunityPageState extends State<CommunityPage>
   }
 
   Future<void> _saveDraft() async {
-    final lat =
-        double.tryParse(_submitLatController.text.trim()) ?? 0;
-    final lng =
-        double.tryParse(_submitLngController.text.trim()) ?? 0;
+    final lat = double.tryParse(_submitLatController.text.trim()) ?? 0;
+    final lng = double.tryParse(_submitLngController.text.trim()) ?? 0;
     final draft = CommunityDraft(
-      modelIds:
-          _selectedSubmitModels.map((m) => m.id).toList(),
+      modelIds: _selectedSubmitModels.map((m) => m.id).toList(),
       title: _submitTitleController.text.trim(),
       caption: _submitCaptionController.text.trim(),
       placeName: _submitPlaceController.text.trim(),
@@ -316,8 +357,7 @@ class _CommunityPageState extends State<CommunityPage>
     );
     await _repository.saveDraft(draft);
     if (!mounted) return;
-    showAppToast(context, '草稿已保存');
-    _tabController.animateTo(2); // stay on submit tab
+    showAppToast(context, textLocalize('community_draft_saved'));
   }
 
   Future<void> _submitPost() async {
@@ -325,10 +365,8 @@ class _CommunityPageState extends State<CommunityPage>
       showAppToast(context, textLocalize('community_fill_all'));
       return;
     }
-    final lat =
-        double.tryParse(_submitLatController.text.trim());
-    final lng =
-        double.tryParse(_submitLngController.text.trim());
+    final lat = double.tryParse(_submitLatController.text.trim());
+    final lng = double.tryParse(_submitLngController.text.trim());
     final title = _submitTitleController.text.trim();
     final caption = _submitCaptionController.text.trim();
     final place = _submitPlaceController.text.trim();
@@ -376,29 +414,11 @@ class _CommunityPageState extends State<CommunityPage>
     showAppToast(context, textLocalize('community_joined'));
   }
 
-  List<CommunityPost> get _filteredPosts {
-    if (_selectedTags.isEmpty) return _posts;
-    final filtered = _posts
-        .where((p) => p.tags.any((t) => _selectedTags.contains(t)))
-        .toList();
-    filtered.sort(
-      (a, b) => b.tags
-          .where((t) => _selectedTags.contains(t))
-          .length
-          .compareTo(
-            a.tags.where((t) => _selectedTags.contains(t)).length,
-          ),
-    );
-    return filtered;
-  }
-
-  /// Posts visible in the current map viewport. Used as the base set for
-  /// the explore tab list, and as the source for the tag chip suggestions.
+  /// Posts visible in the current map viewport.
   List<CommunityPost> get _viewportPosts =>
       filterPostsByBounds(_posts, _mapViewport.bounds);
 
-  /// Final explore-tab list: viewport posts, then optionally narrowed by
-  /// the selected tag and the zoom-derived radius around the viewport center.
+  /// Final explore-tab list: viewport posts, narrowed by tag and radius.
   List<CommunityPost> get _exploreFilteredPosts {
     final base = _viewportPosts;
     final tag = _exploreTag;
@@ -454,8 +474,7 @@ class _CommunityPageState extends State<CommunityPage>
               ),
               const SizedBox(height: 12),
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: BDPanelCard(
                   padding: const EdgeInsets.all(6),
                   child: TabBar(
@@ -476,15 +495,9 @@ class _CommunityPageState extends State<CommunityPage>
                         ? Colors.white.withValues(alpha: 0.56)
                         : BDDesign.colorMutedBlue,
                     tabs: [
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_explore')),
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_discover')),
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_submit')),
+                      Tab(text: textLocalize('community_tab_explore')),
+                      Tab(text: textLocalize('community_tab_discover')),
+                      Tab(text: textLocalize('community_tab_submit')),
                     ],
                   ),
                 ),
@@ -492,12 +505,12 @@ class _CommunityPageState extends State<CommunityPage>
               const SizedBox(height: 10),
               Expanded(
                 child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator())
+                    ? const Center(child: CircularProgressIndicator())
                     : BDTabSwitcher(
                         index: _tabIndex,
                         children: [
-                          CommunityExploreView(
+                          // Tab 0: 推荐 — map + model list
+                          CommunityRecommendView(
                             posts: _exploreFilteredPosts,
                             totalPosts: _posts.length,
                             viewportPosts: _viewportPosts.length,
@@ -512,36 +525,25 @@ class _CommunityPageState extends State<CommunityPage>
                             tagRadiusKm:
                                 tagRadiusKmForZoom(_mapViewport.zoom),
                           ),
-                          CommunityDiscoverView(
-                            posts: _filteredPosts,
-                            selectedTags: _selectedTags,
-                            onToggleTag: (tag) {
-                              setState(() {
-                                _selectedTags.contains(tag)
-                                    ? _selectedTags
-                                        .remove(tag)
-                                    : _selectedTags.add(tag);
-                              });
-                            },
+                          // Tab 1: 探索 — search with history + recommendations
+                          CommunityExploreView(
+                            posts: _posts,
+                            searchHistory: _searchHistory,
+                            recommendedKeywords: _recommendedKeywords,
+                            onSearch: _addToSearchHistory,
+                            onClearHistory: _clearSearchHistory,
                             onTapPost: _openDetail,
                           ),
+                          // Tab 2: 投稿 — compact model selector + form
                           CommunitySubmitView(
-                            shareableModels:
-                                _shareableModels,
-                            selectedModels:
-                                _selectedSubmitModels,
-                            onToggleModel:
-                                _toggleSubmitModel,
-                            titleController:
-                                _submitTitleController,
-                            captionController:
-                                _submitCaptionController,
-                            placeController:
-                                _submitPlaceController,
-                            latController:
-                                _submitLatController,
-                            lngController:
-                                _submitLngController,
+                            shareableModels: _shareableModels,
+                            selectedModels: _selectedSubmitModels,
+                            onToggleModel: _toggleSubmitModel,
+                            titleController: _submitTitleController,
+                            captionController: _submitCaptionController,
+                            placeController: _submitPlaceController,
+                            latController: _submitLatController,
+                            lngController: _submitLngController,
                             isSubmitting: _isSubmitting,
                             onSubmit: _submitPost,
                             onSaveDraft: _saveDraft,

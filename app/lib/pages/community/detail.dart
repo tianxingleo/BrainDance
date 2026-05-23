@@ -250,15 +250,67 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                             },
                             itemBuilder: (context, index) {
                               final entry = _imageEntries[index];
-                              return _CachedThumbnail(
-                                url: entry['coverUrl']
-                                        ?.toString() ??
-                                    '',
-                                height: 320,
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _CachedThumbnail(
+                                    url: entry['coverUrl']
+                                            ?.toString() ??
+                                        '',
+                                    height: 320,
+                                  ),
+                                  // 模型名称标签
+                                  Positioned(
+                                    left: 16,
+                                    bottom: _imageEntries.length > 1 ? 40 : 16,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.55),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        entry['modelName']?.toString() ?? '',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               );
                             },
                           ),
-                          if (_imageEntries.length > 1)
+                          if (_imageEntries.length > 1) ...[
+                            // 模型计数指示器
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${_currentImageIndex + 1} / ${_imageEntries.length}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 底部圆点
                             Positioned(
                               bottom: 12,
                               left: 0,
@@ -286,6 +338,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                                 ),
                               ),
                             ),
+                          ],
                         ],
                       ),
                     ),
@@ -298,11 +351,11 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                         width: double.infinity,
                         child: FilledButton.icon(
                           onPressed: _enterViewer,
-                          icon: const Icon(
-                            Icons.view_in_ar_rounded,
-                          ),
+                          icon: const Icon(Icons.view_in_ar_rounded),
                           label: Text(
-                            textLocalize('community_enter_memory'),
+                            _imageEntries.length > 1
+                                ? '${textLocalize('community_enter_memory')} — $_currentModelName'
+                                : textLocalize('community_enter_memory'),
                           ),
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
