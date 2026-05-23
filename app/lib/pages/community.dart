@@ -10,7 +10,6 @@ import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
-import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,7 +30,6 @@ class _CommunityPageState extends State<CommunityPage>
   List<CommunityModelOption> _shareableModels = const [];
   List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
-  int _tabIndex = 0;
   CommunityMapViewport _mapViewport = const CommunityMapViewport(
     latitude: 30.243,
     longitude: 120.150,
@@ -69,7 +67,6 @@ class _CommunityPageState extends State<CommunityPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(_onTabChanged);
     _submitTitleController = TextEditingController();
     _submitCaptionController = TextEditingController();
     _submitPlaceController = TextEditingController();
@@ -79,15 +76,8 @@ class _CommunityPageState extends State<CommunityPage>
     _loadSearchHistory();
   }
 
-  void _onTabChanged() {
-    if (_tabController.indexIsChanging) {
-      setState(() => _tabIndex = _tabController.index);
-    }
-  }
-
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _submitTitleController.dispose();
     _submitCaptionController.dispose();
@@ -448,6 +438,46 @@ class _CommunityPageState extends State<CommunityPage>
     setState(() => _exploreTag = null);
   }
 
+  List<Widget> _buildTabChildren() {
+    return [
+      CommunityRecommendView(
+        posts: _exploreFilteredPosts,
+        totalPosts: _posts.length,
+        viewportPosts: _viewportPosts.length,
+        mapViewport: _mapViewport,
+        mapMarkers: _mapMarkers,
+        onOpenMap: _openMapPage,
+        onTapPost: _openDetail,
+        availableTags: rankTagsFromPosts(_viewportPosts),
+        selectedTag: _exploreTag,
+        onToggleTag: _onExploreToggleTag,
+        onClearFilters: _onExploreClearFilters,
+        tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+      ),
+      CommunityExploreView(
+        posts: _posts,
+        searchHistory: _searchHistory,
+        recommendedKeywords: _recommendedKeywords,
+        onSearch: _addToSearchHistory,
+        onClearHistory: _clearSearchHistory,
+        onTapPost: _openDetail,
+      ),
+      CommunitySubmitView(
+        shareableModels: _shareableModels,
+        selectedModels: _selectedSubmitModels,
+        onToggleModel: _toggleSubmitModel,
+        titleController: _submitTitleController,
+        captionController: _submitCaptionController,
+        placeController: _submitPlaceController,
+        latController: _submitLatController,
+        lngController: _submitLngController,
+        isSubmitting: _isSubmitting,
+        onSubmit: _submitPost,
+        onSaveDraft: _saveDraft,
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
@@ -506,49 +536,9 @@ class _CommunityPageState extends State<CommunityPage>
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
-                    : BDTabSwitcher(
-                        index: _tabIndex,
-                        children: [
-                          // Tab 0: 推荐 — map + model list
-                          CommunityRecommendView(
-                            posts: _exploreFilteredPosts,
-                            totalPosts: _posts.length,
-                            viewportPosts: _viewportPosts.length,
-                            mapViewport: _mapViewport,
-                            mapMarkers: _mapMarkers,
-                            onOpenMap: _openMapPage,
-                            onTapPost: _openDetail,
-                            availableTags: rankTagsFromPosts(_viewportPosts),
-                            selectedTag: _exploreTag,
-                            onToggleTag: _onExploreToggleTag,
-                            onClearFilters: _onExploreClearFilters,
-                            tagRadiusKm:
-                                tagRadiusKmForZoom(_mapViewport.zoom),
-                          ),
-                          // Tab 1: 探索 — search with history + recommendations
-                          CommunityExploreView(
-                            posts: _posts,
-                            searchHistory: _searchHistory,
-                            recommendedKeywords: _recommendedKeywords,
-                            onSearch: _addToSearchHistory,
-                            onClearHistory: _clearSearchHistory,
-                            onTapPost: _openDetail,
-                          ),
-                          // Tab 2: 投稿 — compact model selector + form
-                          CommunitySubmitView(
-                            shareableModels: _shareableModels,
-                            selectedModels: _selectedSubmitModels,
-                            onToggleModel: _toggleSubmitModel,
-                            titleController: _submitTitleController,
-                            captionController: _submitCaptionController,
-                            placeController: _submitPlaceController,
-                            latController: _submitLatController,
-                            lngController: _submitLngController,
-                            isSubmitting: _isSubmitting,
-                            onSubmit: _submitPost,
-                            onSaveDraft: _saveDraft,
-                          ),
-                        ],
+                    : TabBarView(
+                        controller: _tabController,
+                        children: _buildTabChildren(),
                       ),
               ),
             ],
