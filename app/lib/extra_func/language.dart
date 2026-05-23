@@ -488,6 +488,15 @@ enum Language {
       "stream_fail_task": "任务创建失败",
       "stream_uploading": "已上传 %d 张",
       "stream_upload_fail": "上传中断，数据已清除",
+
+      // Streaming stop dialog
+      "stream_stop_title": "停止流式拍摄",
+      "stream_stop_capturing": "已拍摄 %d 帧，已上传 %d 帧。确定停止？",
+      "stream_stop_uploading": "还有 %d 帧上传中，停止将丢弃。已上传 %d 帧可保留或删除。",
+      "stream_stop_delete": "删除已上传的帧数据",
+      "stream_stop_btn_cancel": "继续拍摄",
+      "stream_stop_btn_confirm": "确认停止",
+      "stream_frame_fail": "帧上传失败，继续重试",
     },
   ),
   en(
@@ -1034,6 +1043,15 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "stream_fail_task": "Task creation failed",
       "stream_uploading": "%d frames uploaded",
       "stream_upload_fail": "Upload interrupted, data cleared",
+
+      // Streaming stop dialog
+      "stream_stop_title": "Stop Streaming",
+      "stream_stop_capturing": "%d frames captured, %d uploaded. Stop?",
+      "stream_stop_uploading": "%d frames pending. Stopping discards them. %d uploaded frames can be kept or deleted.",
+      "stream_stop_delete": "Delete uploaded frames",
+      "stream_stop_btn_cancel": "Continue",
+      "stream_stop_btn_confirm": "Stop",
+      "stream_frame_fail": "Frame upload failed, retrying",
     },
   );
 

@@ -378,13 +378,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
     }
 
     _cancelToken = CancelToken();
+    final sceneId = _GeneratePageState._generateSceneId();
 
     _refresh(() {
       _isUploading = true;
     });
 
     try {
-      final sceneId = _GeneratePageState._generateSceneId();
       await _uploadAssetToStorage(
         userId: user.id,
         sceneId: sceneId,
@@ -408,6 +408,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
+        unawaited(
+          _deleteStorageAsset(
+            userId: user.id,
+            sceneId: sceneId,
+            fileName: 'image.png',
+          ),
+        );
         return;
       }
       if (mounted) {
@@ -496,13 +503,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
     }
 
     _cancelToken = CancelToken();
+    final sceneId = _GeneratePageState._generateSceneId();
 
     _refresh(() {
       _isUploading = true;
     });
 
     try {
-      final sceneId = _GeneratePageState._generateSceneId();
       final taskType = _selectedVideoTaskType;
       final taskParams = _videoTaskParamsFor(taskType);
       await _uploadAssetToStorage(
@@ -530,6 +537,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
       }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
+        unawaited(
+          _deleteStorageAsset(
+            userId: user.id,
+            sceneId: sceneId,
+            fileName: 'video.mp4',
+          ),
+        );
         return;
       }
       if (mounted) {
@@ -584,6 +598,20 @@ extension _GenerateSubmissionX on _GeneratePageState {
       showAppToast(context, textLocalize('login_success_upload'));
     }
     return user;
+  }
+
+  Future<void> _deleteStorageAsset({
+    required String userId,
+    required String sceneId,
+    required String fileName,
+  }) async {
+    try {
+      await Supabase.instance.client.storage.from('braindance-assets').remove([
+        '$userId/$sceneId/raw/$fileName',
+      ]);
+    } catch (_) {
+      // Best-effort cleanup; file may not exist yet on the server.
+    }
   }
 
   Future<void> _uploadAssetToStorage({
