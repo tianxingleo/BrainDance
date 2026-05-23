@@ -87,6 +87,7 @@ const INTRO_SPLAT_REVEAL_START = 0.24;
 const INTRO_SPLAT_REVEAL_END = 0.9;
 const INTRO_PARTICLE_FADE_OUT_START = 0.22;
 const INTRO_PARTICLE_FADE_OUT_END = 0.88;
+const INTRO_SPLAT_FINAL_RADIUS_MULTIPLIER = 1.35;
 const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
 const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.14;
 const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
@@ -509,6 +510,12 @@ const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 const getSceneRadius = () => {
   const radius = Number(globalUniforms.uMaxRadius.value || 0);
   return radius > 0 ? radius : 1;
+};
+
+const getIntroFinalRevealRadius = () => {
+  const baseRadius = Number(globalUniforms.uMaxRadius.value || 0);
+  if (!Number.isFinite(baseRadius) || baseRadius <= 0) return 1;
+  return baseRadius * INTRO_SPLAT_FINAL_RADIUS_MULTIPLIER;
 };
 
 const getIntroParticleCameraScale = () => {
@@ -1501,11 +1508,16 @@ const createParticleSystem = (splatMesh) => {
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const centerZ = (minZ + maxZ) / 2;
-  const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+  const sizeX = maxX - minX;
+  const sizeY = maxY - minY;
+  const sizeZ = maxZ - minZ;
+  const maxDim = Math.max(sizeX, sizeY, sizeZ);
+  const halfDiagonal = Math.sqrt(sizeX * sizeX + sizeY * sizeY + sizeZ * sizeZ) * 0.5;
 
   // 更新全局 Uniforms (供 Shader 和 相机使用)
   globalUniforms.uCenter.value.set(centerX, centerY, centerZ);
-  globalUniforms.uMaxRadius.value = maxDim * 0.7; // 扩散半径覆盖大部分模型
+  // reveal shader 按中心球形半径裁切，必须覆盖包围盒半对角线；否则动画结束时 finalize 的超大半径会让剩余椭球突然跳出。
+  globalUniforms.uMaxRadius.value = Math.max(halfDiagonal * 1.08, maxDim * 0.5, 0.001);
 
   // === B. 自适应参数计算 ===
 
@@ -1734,11 +1746,12 @@ const finalizeIntroAnimation = () => {
   const splatMesh = viewer?.getSplatMesh?.();
   if (splatMesh) splatMesh.visible = true;
   if (particleSystem) particleSystem.visible = false;
+  const finalRevealRadius = getIntroFinalRevealRadius();
   globalUniforms.uParticleProgress.value = 1;
   globalUniforms.uRevealProgress.value = 1.5;
   globalUniforms.uIntroSplatAlpha.value = 1;
-  globalUniforms.uGeoRadius.value = 99999;
-  globalUniforms.uColorRadius.value = 99999;
+  globalUniforms.uGeoRadius.value = finalRevealRadius;
+  globalUniforms.uColorRadius.value = finalRevealRadius;
   animationState.phase = PHASE.FINISHED;
   animationState.isLoaded = false;
   animationState.introCamera = null;
@@ -2856,7 +2869,12 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = morphT;
         globalUniforms.uIntroSplatAlpha.value = morphT;
-        globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        const baseRevealRadius = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        const finalRevealRadius = getIntroFinalRevealRadius();
+        const tailT = smoothstep01(
+          (rawT - INTRO_SPLAT_REVEAL_END) / Math.max(1 - INTRO_SPLAT_REVEAL_END, 0.001)
+        );
+        globalUniforms.uGeoRadius.value = THREE.MathUtils.lerp(baseRevealRadius, finalRevealRadius, tailT);
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
@@ -3180,8 +3198,8 @@ const adjustControlsToModel = () => {
 
   // createParticleSystem 已经计算了最准确的 uCenter 和 uMaxRadius，直接用
   const worldCenter = globalUniforms.uCenter.value;
-  const maxDim = globalUniforms.uMaxRadius.value / 0.7; // 还原回实际尺寸估计
-  const distance = maxDim * 2.0;
+  const sceneRadius = getSceneRadius();
+  const distance = sceneRadius * 2.8;
 
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
   viewer.camera.up.copy(centerModeUp);
