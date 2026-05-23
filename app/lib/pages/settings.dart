@@ -20,7 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart'
-    show myPostsRefreshSignal, overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
+    show myCollectionRefreshSignal, myPostsRefreshSignal, overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -71,6 +71,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final bottomContentPadding = bottomInset + 132.0;
 
     ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != null && prev != next) _loadCommunityAccount();
+    });
+
+    ref.listen(myCollectionRefreshSignal, (prev, next) {
       if (prev != null && prev != next) _loadCommunityAccount();
     });
 

@@ -7,21 +7,23 @@ import 'package:braindance/services/thumbnail_cache.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../main.dart' show myCollectionRefreshSignal;
 import 'models.dart';
 import 'repository.dart';
 
-class CommunityDetailPage extends StatefulWidget {
+class CommunityDetailPage extends ConsumerStatefulWidget {
   final CommunityPost post;
 
   const CommunityDetailPage({super.key, required this.post});
 
   @override
-  State<CommunityDetailPage> createState() => _CommunityDetailPageState();
+  ConsumerState<CommunityDetailPage> createState() => _CommunityDetailPageState();
 }
 
-class _CommunityDetailPageState extends State<CommunityDetailPage> {
+class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
   final CommunityRepository _repository = CommunityRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _commentController = TextEditingController();
@@ -140,6 +142,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
 
     // Async persist in background
     _repository.setMetadata(_post.id, optimisticMeta);
+    ref.read(myCollectionRefreshSignal.notifier).state++;
   }
 
   void _toggleFavorite() {
@@ -166,6 +169,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
 
     // Async persist in background
     _repository.setMetadata(_post.id, optimisticMeta);
+    ref.read(myCollectionRefreshSignal.notifier).state++;
   }
 
   void _submitComment() {
