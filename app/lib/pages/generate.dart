@@ -650,7 +650,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                               Row(
                                 children: [
                                   Icon(
-                                    Icons.cloud_upload_outlined,
+                                    _tabController.index != 1 &&
+                                            _uploadProgress >= 1.0
+                                        ? Icons.sync_rounded
+                                        : Icons.cloud_upload_outlined,
                                     size: 14,
                                     color: isDark
                                         ? const Color(0xFFFFB74D)
@@ -660,7 +663,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                                   Text(
                                     _tabController.index == 1
                                         ? textLocalize('gen_text_generating')
-                                        : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                                        : _tabController.index != 1 &&
+                                                _uploadProgress >= 1.0
+                                            ? textLocalize('gen_uploading')
+                                            : '${textLocalize('gen_uploading')} ${(_uploadProgress * 100).toStringAsFixed(1)}%',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
@@ -669,7 +675,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                                           : const Color(0xFFF57C00),
                                     ),
                                   ),
-                                  if (_tabController.index != 1) ...[
+                                  if (_tabController.index != 1 &&
+                                      _uploadProgress < 1.0) ...[
                                     const Spacer(),
                                     Text(
                                       '${_formatBytes(_uploadedBytes)} / ${_formatBytes(_totalFileSize)}',
@@ -689,7 +696,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(3),
                                 child: LinearProgressIndicator(
-                                  value: _tabController.index == 1
+                                  value: (_tabController.index == 1 ||
+                                          _uploadProgress >= 1.0)
                                       ? null
                                       : _uploadProgress,
                                   minHeight: 5,
