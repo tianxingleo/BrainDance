@@ -90,7 +90,7 @@ const INTRO_PARTICLE_FADE_OUT_END = 0.88;
 const INTRO_SPLAT_FINAL_RADIUS_MULTIPLIER = 1.35;
 const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
 const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.14;
-const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
+const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.65;
 const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 1.08;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
@@ -1454,6 +1454,7 @@ const globalUniforms = {
   uRevealProgress: { value: 0 },
   uRevealFeather: { value: 0.085 },
   uIntroSplatAlpha: { value: 0 },
+  uIntroRevealStrength: { value: 1 },
 };
 
 const normalizeColorChannel = (value) => {
@@ -1535,7 +1536,7 @@ const createParticleSystem = (splatMesh) => {
   // 限制最小值，防止极小模型看不见
   const minParticleSize = isMobileDevice() ? 0.9 : 1.2;
   if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
-  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.8 : 6.4);
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 6.0 : 8.2);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
@@ -1621,11 +1622,11 @@ const createParticleSystem = (splatMesh) => {
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛，避免入场粒子显得过粗。
-        float pointScale = clamp(uCameraScale, 0.14, 1.12);
+        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛；远景/长焦场景则提高上限，避免点云过细。
+        float pointScale = clamp(uCameraScale, 0.14, 1.65);
         gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
         float minPointSize = mix(0.35, 0.85, smoothstep(0.14, 0.6, pointScale));
-        float maxPointSize = max(minPointSize, 22.0 * min(pointScale, 1.0));
+        float maxPointSize = max(minPointSize, 24.0 * min(pointScale, 1.35));
         gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
     `,
@@ -1661,6 +1662,7 @@ const applyAdvancedShader = (mesh) => {
   material.uniforms.uRevealProgress = globalUniforms.uRevealProgress;
   material.uniforms.uRevealFeather = globalUniforms.uRevealFeather;
   material.uniforms.uIntroSplatAlpha = globalUniforms.uIntroSplatAlpha;
+  material.uniforms.uIntroRevealStrength = globalUniforms.uIntroRevealStrength;
 
   material.vertexShader = `varying vec3 vWorldPosition;
 ` + material.vertexShader;
@@ -1678,6 +1680,7 @@ const applyAdvancedShader = (mesh) => {
     uniform float uRevealProgress;
     uniform float uRevealFeather;
     uniform float uIntroSplatAlpha;
+    uniform float uIntroRevealStrength;
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
 
@@ -1695,14 +1698,14 @@ const applyAdvancedShader = (mesh) => {
       float innerRadius = max(radius - feather, 0.0);
       float innerSq = innerRadius * innerRadius;
       float outerSq = radius * radius;
-      if (distSq > outerSq) discard;
-      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
-      if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
+      float originalAlpha = gl_FragColor.a;
+      float revealT = distSq > outerSq ? 0.0 : 1.0 - smoothstep(innerSq, outerSq, distSq);
 
-      // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
+      // 入场时保持波前裁切；末段逐步退回原始 alpha，避免最终密度低于真实 3DGS。
       float alphaClip = mix(0.90, 0.02, revealT);
-      if (gl_FragColor.a < alphaClip) discard;
-      gl_FragColor.a *= revealT * uIntroSplatAlpha;
+      float clippedRevealAlpha = originalAlpha < alphaClip ? 0.0 : originalAlpha * revealT * uIntroSplatAlpha;
+      gl_FragColor.a = mix(originalAlpha, clippedRevealAlpha, clamp(uIntroRevealStrength, 0.0, 1.0));
+      if (gl_FragColor.a <= 0.001) discard;
     `;
     material.fragmentShader = originalContent + visualLogic + '}';
   }
@@ -1718,6 +1721,7 @@ const resetIntroUniforms = () => {
   globalUniforms.uParticleProgress.value = 0;
   globalUniforms.uRevealProgress.value = 0;
   globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uIntroRevealStrength.value = 1;
   globalUniforms.uGeoRadius.value = 0;
   globalUniforms.uColorRadius.value = 0;
   if (particleSystem) {
@@ -1733,6 +1737,7 @@ const resetIntroAnimationVisuals = () => {
   globalUniforms.uParticleProgress.value = 0;
   globalUniforms.uRevealProgress.value = 0;
   globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uIntroRevealStrength.value = 1;
   globalUniforms.uGeoRadius.value = 0;
   globalUniforms.uColorRadius.value = 0;
   if (particleSystem) {
@@ -1750,6 +1755,7 @@ const finalizeIntroAnimation = () => {
   globalUniforms.uParticleProgress.value = 1;
   globalUniforms.uRevealProgress.value = 1.5;
   globalUniforms.uIntroSplatAlpha.value = 1;
+  globalUniforms.uIntroRevealStrength.value = 0;
   globalUniforms.uGeoRadius.value = finalRevealRadius;
   globalUniforms.uColorRadius.value = finalRevealRadius;
   animationState.phase = PHASE.FINISHED;
@@ -2874,6 +2880,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         const tailT = smoothstep01(
           (rawT - INTRO_SPLAT_REVEAL_END) / Math.max(1 - INTRO_SPLAT_REVEAL_END, 0.001)
         );
+        globalUniforms.uIntroRevealStrength.value = 1 - tailT;
         globalUniforms.uGeoRadius.value = THREE.MathUtils.lerp(baseRevealRadius, finalRevealRadius, tailT);
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
