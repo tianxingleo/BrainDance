@@ -13,21 +13,10 @@ const supabaseUrl = resolveSupabaseUrl([
 const supabaseAnonKey = import.meta.env.VITE_BD_SUPABASE_ANON_KEY?.trim()
   || import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
   || ''
-const configuredProxyTarget = import.meta.env.VITE_BD_SUPABASE_PROXY_TARGET?.trim() || ''
-const currentHost = typeof window !== 'undefined' ? window.location.host : ''
-const supabaseHost = getUrlHost(supabaseUrl)
-const useProxy = typeof window !== 'undefined'
-  && window.location.protocol === 'https:'
-  && supabaseUrl.startsWith('http://')
-  && (configuredProxyTarget || import.meta.env.DEV)
-  && currentHost !== supabaseHost
-const proxiedSupabaseUrl = useProxy
-  ? `${window.location.origin}/supabase-proxy`
-  : supabaseUrl
 
 export const viewerSupabaseClient: SupabaseClient | null =
-  proxiedSupabaseUrl && supabaseAnonKey
-    ? createClient(proxiedSupabaseUrl, supabaseAnonKey, {
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey, {
         auth: {
           persistSession: true,
           autoRefreshToken: true,
@@ -37,13 +26,11 @@ export const viewerSupabaseClient: SupabaseClient | null =
     : null
 
 export const viewerSupabaseEnabled = Boolean(viewerSupabaseClient)
-export const viewerSupabaseProxyEnabled = useProxy
+export const viewerSupabaseProxyEnabled = false
 export const viewerSupabaseTargetUrl = supabaseUrl
 export const viewerSupabaseConfiguredUrl = configuredSupabaseUrl
 export const viewerSupabaseUrlFallbacks = supabaseUrlFallbacks
-export const viewerSupabaseConfigError = currentHost && supabaseHost && currentHost === supabaseHost
-  ? `VR Viewer 当前运行在 Supabase 端口 ${currentHost}，请改用 Vite 地址访问，例如 https://<本机IP>:5174。`
-  : ''
+export const viewerSupabaseConfigError = ''
 
 function normalizeSupabaseUrl(rawUrl: string) {
   const trimmed = rawUrl.trim()
@@ -63,6 +50,7 @@ function resolveSupabaseUrl(candidates: string[]) {
   if (typeof window === 'undefined') return deduplicated[0] || ''
   const pageProtocol = window.location.protocol
   const pageHostname = window.location.hostname
+  const pagePort = window.location.port
 
   const sameHostLocal = deduplicated.find((candidate) => {
     try {
@@ -74,7 +62,25 @@ function resolveSupabaseUrl(candidates: string[]) {
       return false
     }
   })
-  return sameHostLocal || deduplicated[0] || ''
+  if (sameHostLocal) return sameHostLocal
+
+  const loopbackLocal = deduplicated.find((candidate) => {
+    try {
+      const url = new URL(candidate)
+      return isLoopbackHost(url.hostname) && url.port
+    } catch {
+      return false
+    }
+  })
+  if (loopbackLocal && isLikelyLanHost(pageHostname)) {
+    const url = new URL(loopbackLocal)
+    url.hostname = pageHostname
+    if (pageProtocol === 'https:') url.protocol = 'https:'
+    if (pagePort && pagePort !== '5174' && pagePort !== '4174') url.port = pagePort
+    return normalizeSupabaseUrl(url.toString())
+  }
+
+  return deduplicated[0] || ''
 }
 
 function getUrlHost(value: string) {
@@ -86,9 +92,18 @@ function getUrlHost(value: string) {
 }
 
 function isLikelyLocalSupabaseUrl(url: URL) {
-  return url.hostname === '127.0.0.1'
-    || url.hostname === 'localhost'
+  return isLoopbackHost(url.hostname)
     || url.hostname.startsWith('192.168.')
     || url.hostname.startsWith('10.')
     || /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname)
+}
+
+function isLoopbackHost(hostname: string) {
+  return hostname === '127.0.0.1' || hostname === 'localhost'
+}
+
+function isLikelyLanHost(hostname: string) {
+  return hostname.startsWith('192.168.')
+    || hostname.startsWith('10.')
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
 }

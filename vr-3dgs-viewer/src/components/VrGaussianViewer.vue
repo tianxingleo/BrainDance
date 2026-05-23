@@ -3165,7 +3165,17 @@ function selectMode(mode: PreviewMode) {
   scheduleClientStateSave()
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tagName = target.tagName.toLowerCase()
+  return target.isContentEditable
+    || tagName === 'input'
+    || tagName === 'textarea'
+    || tagName === 'select'
+}
+
 function onKeydown(event: KeyboardEvent) {
+  if (isEditableKeyboardTarget(event.target)) return
   if (event.key === 'r' || event.key === 'R') resetView()
   if (event.key === '[') adjustScale(-0.1)
   if (event.key === ']') adjustScale(0.1)
