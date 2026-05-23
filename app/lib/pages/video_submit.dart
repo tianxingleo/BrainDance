@@ -56,6 +56,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   bool _preprocessCancelled = false;
   Completer<void>? _cancelPreprocessSignal;
   VideoPreprocessResult? _preprocessResult;
+  String? _preprocessOutputPath;
   String? _uploadedStoragePath;
 
   static final Random _rdg = Random();
@@ -333,17 +334,32 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   }
 
   void _cleanupPreprocess() {
-    if (_preprocessResult == null) return;
-    try {
-      final f = _preprocessResult!.outputFile;
-      if (f.existsSync()) {
-        f.deleteSync();
-        debugPrint('[VideoSubmit] deleted preprocessed temp file');
+    if (_preprocessResult != null) {
+      try {
+        final f = _preprocessResult!.outputFile;
+        if (f.existsSync()) {
+          f.deleteSync();
+          debugPrint('[VideoSubmit] deleted preprocessed temp file');
+        }
+      } catch (e) {
+        debugPrint('[VideoSubmit] error deleting preprocessed file: $e');
       }
-    } catch (e) {
-      debugPrint('[VideoSubmit] error deleting preprocessed file: $e');
+      _preprocessResult = null;
+      _preprocessOutputPath = null;
+      return;
     }
-    _preprocessResult = null;
+    if (_preprocessOutputPath != null) {
+      try {
+        final f = File(_preprocessOutputPath!);
+        if (f.existsSync()) {
+          f.deleteSync();
+          debugPrint('[VideoSubmit] deleted preprocessed temp file by path');
+        }
+      } catch (e) {
+        debugPrint('[VideoSubmit] error deleting preprocessed file by path: $e');
+      }
+      _preprocessOutputPath = null;
+    }
   }
 
   Future<void> _deleteUploadedContent() async {
@@ -406,8 +422,13 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
     if (fileSizeMB > 8) {
       try {
+        final preprocessOutput = File(
+          '${Directory.systemTemp.path}/preprocessed_${DateTime.now().millisecondsSinceEpoch}.mp4',
+        );
+        _preprocessOutputPath = preprocessOutput.path;
         preprocessResult = await VideoPreprocessor.preprocess(
           file,
+          outputFile: preprocessOutput,
           config: _preprocessConfig,
           onProgress: (progress) {
             if (mounted) {
@@ -537,6 +558,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       _cancelToken = null;
       _cancelPreprocessSignal = null;
       _uploadedStoragePath = null;
+      _preprocessOutputPath = null;
       if (mounted) {
         setState(() {
           _isUploading = false;
