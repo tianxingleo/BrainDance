@@ -41,6 +41,8 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
   void initState() {
     super.initState();
     _post = widget.post;
+    _isLiked = _post.isLikedByCurrentUser;
+    _isFavorited = _post.isFavoritedByCurrentUser;
     _buildImageEntries();
     _recordViewAndLoadMetadata();
     _loadComments();
