@@ -35,8 +35,9 @@ class RecallProcessingSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final hintTextColor = isDark ? const Color(0xFF888888) : theme.fontGyColor3;
 
-    return BDPanelCard(
-      glass: true,
+    return BDGlassSurface(
+      noBlur: true,
+      variant: BDGlassVariant.panel,
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
