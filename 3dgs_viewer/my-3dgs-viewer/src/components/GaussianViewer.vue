@@ -4330,6 +4330,8 @@ button.active {
   cursor: pointer;
   box-shadow: 0 12px 24px var(--card-shadow);
   backdrop-filter: blur(16px);
+  transform-origin: top right;
+  will-change: transform, opacity, filter;
 }
 
 .ref-title {
@@ -4340,14 +4342,33 @@ button.active {
 }
 
 /* 浮窗过渡动画 */
-.ref-fade-enter-active,
-.ref-fade-leave-active {
-  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+.ref-fade-enter-active {
+  transition:
+    opacity 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 380ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.ref-fade-enter-from,
+.ref-fade-leave-active {
+  transition:
+    opacity 220ms cubic-bezier(0.4, 0, 1, 1),
+    transform 280ms cubic-bezier(0.4, 0, 1, 1),
+    filter 220ms cubic-bezier(0.4, 0, 1, 1);
+}
+.ref-fade-enter-from {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.92);
+  filter: blur(4px);
+}
 .ref-fade-leave-to {
   opacity: 0;
-  transform: translateY(10px) scale(0.98);
+  transform: translateY(-4px) scale(0.9);
+  filter: blur(6px);
+}
+.ref-fade-enter-to,
+.ref-fade-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
 }
 
 .ref-img {
