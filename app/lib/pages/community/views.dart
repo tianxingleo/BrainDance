@@ -307,6 +307,7 @@ class CommunityExploreView extends StatefulWidget {
   final ValueChanged<String> onSearch;
   final VoidCallback onClearHistory;
   final ValueChanged<CommunityPost> onTapPost;
+  final bool focusOnMount;
 
   const CommunityExploreView({
     super.key,
@@ -316,6 +317,7 @@ class CommunityExploreView extends StatefulWidget {
     required this.onSearch,
     required this.onClearHistory,
     required this.onTapPost,
+    this.focusOnMount = false,
   });
 
   @override
@@ -326,6 +328,16 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   final _searchController = TextEditingController();
   final _focusNode = FocusNode();
   String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.focusOnMount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
+  }
 
   @override
   void dispose() {
