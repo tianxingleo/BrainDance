@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
@@ -28,6 +26,7 @@ enum _CommunitySubPage { recommend, search, submit }
 class _CommunityPageState extends State<CommunityPage> {
   final CommunityRepository _repository = CommunityRepository();
   _CommunitySubPage? _currentPage;
+  int _searchFocusTrigger = 0;
 
   List<CommunityPost> _posts = const [];
   List<CommunityModelOption> _shareableModels = const [];
@@ -100,9 +99,12 @@ class _CommunityPageState extends State<CommunityPage> {
     await prefs.setStringList(_searchHistoryPrefKey, _searchHistory);
   }
 
+  String? _lastSearchQuery;
+
   void _addToSearchHistory(String query) {
     final q = query.trim();
     if (q.isEmpty) return;
+    _lastSearchQuery = q;
     setState(() {
       _searchHistory.remove(q);
       _searchHistory.insert(0, q);
@@ -448,9 +450,15 @@ class _CommunityPageState extends State<CommunityPage> {
     setState(() => _exploreTag = null);
   }
 
-  void _openSearch() => setState(() => _currentPage = _CommunitySubPage.search);
+  void _openSearch() {
+    _searchFocusTrigger++;
+    setState(() => _currentPage = _CommunitySubPage.search);
+  }
   void _openSubmit() => setState(() => _currentPage = _CommunitySubPage.submit);
-  void _goBack() => setState(() => _currentPage = null);
+  void _goBack() {
+    FocusScope.of(context).unfocus();
+    setState(() => _currentPage = null);
+  }
 
   Widget _buildFloatingHeader(bool isDark) {
     final headerBg = isDark ? const Color(0xFF1A1D21) : const Color(0xFFF2F4F8);
@@ -468,155 +476,152 @@ class _CommunityPageState extends State<CommunityPage> {
       top: 0,
       left: 0,
       right: 0,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
-            decoration: BoxDecoration(
-              color: headerBg.withValues(alpha: 0.82),
-              border: Border(
-                bottom: BorderSide(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.06)
-                      : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
-                ),
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          MediaQuery.of(context).padding.top + 12,
+          20,
+          10,
+        ),
+        decoration: BoxDecoration(
+          color: headerBg.withValues(alpha: 0.95),
+          border: Border(
+            bottom: BorderSide(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
               ),
             ),
-            child: Row(
-              children: [
-                Text(
-                  textLocalize('community'),
+          ),
+          child: Row(
+            children: [
+              Text(
+                textLocalize('community'),
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _openSearch,
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: inputFill,
+                      borderRadius: BorderRadius.circular(19),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, color: hintColor, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _lastSearchQuery ??
+                                textLocalize('community_search_placeholder'),
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: _lastSearchQuery != null
+                                  ? textColor
+                                  : hintColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              TextButton.icon(
+                onPressed: _openSubmit,
+                icon: Icon(
+                  Icons.edit_rounded,
+                  size: 17,
+                  color: isDark
+                      ? BDDesign.colorPaperWhite
+                      : BDDesign.colorInkBlack,
+                ),
+                label: Text(
+                  textLocalize('community_tab_submit'),
                   style: TextStyle(
                     color: textColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.4,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: _openSearch,
-                    child: Container(
-                      height: 38,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: inputFill,
-                        borderRadius: BorderRadius.circular(19),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.search_rounded,
-                            color: hintColor,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              textLocalize('community_search_placeholder'),
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: hintColor,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w400,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
                   ),
+                  minimumSize: Size.zero,
+                  visualDensity: VisualDensity.compact,
                 ),
-                const SizedBox(width: 10),
-                TextButton.icon(
-                  onPressed: _openSubmit,
-                  icon: Icon(
-                    Icons.edit_rounded,
-                    size: 17,
-                    color: isDark
-                        ? BDDesign.colorPaperWhite
-                        : BDDesign.colorInkBlack,
-                  ),
-                  label: Text(
-                    textLocalize('community_tab_submit'),
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    minimumSize: Size.zero,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      ),
     );
   }
 
   Widget _buildSearchOverlay() {
-    return Positioned.fill(
-      child: BDPageBackdrop(
-        child: SafeArea(
-          child: Stack(
-            children: [
-              CommunityExploreView(
-                posts: _posts,
-                searchHistory: _searchHistory,
-                recommendedKeywords: _recommendedKeywords,
-                onSearch: _addToSearchHistory,
-                onClearHistory: _clearSearchHistory,
-                onTapPost: (post) {
-                  _goBack();
-                  _openDetail(post);
-                },
-                focusOnMount: true,
-              ),
-              _buildBackButton(),
-            ],
-          ),
+    return BDPageBackdrop(
+      child: SafeArea(
+        child: Stack(
+          children: [
+            CommunityExploreView(
+              posts: _posts,
+              searchHistory: _searchHistory,
+              recommendedKeywords: _recommendedKeywords,
+              onSearch: _addToSearchHistory,
+              onClearHistory: _clearSearchHistory,
+              onTapPost: (post) {
+                _goBack();
+                _openDetail(post);
+              },
+              focusOnMount: true,
+              focusTrigger: _searchFocusTrigger,
+              searchFieldLeftInset: 52,
+            ),
+            _buildBackButton(),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildSubmitOverlay() {
-    return Positioned.fill(
-      child: BDPageBackdrop(
-        child: SafeArea(
-          child: Stack(
-            children: [
-              CommunitySubmitView(
-                shareableModels: _shareableModels,
-                selectedModels: _selectedSubmitModels,
-                onToggleModel: _toggleSubmitModel,
-                titleController: _submitTitleController,
-                captionController: _submitCaptionController,
-                placeController: _submitPlaceController,
-                latController: _submitLatController,
-                lngController: _submitLngController,
-                isSubmitting: _isSubmitting,
-                onSubmit: () async {
-                  final ok = await _submitPost();
-                  if (ok && mounted) _goBack();
-                },
-                onSaveDraft: _saveDraft,
-              ),
-              _buildBackButton(),
-            ],
-          ),
+    return BDPageBackdrop(
+      child: SafeArea(
+        child: Stack(
+          children: [
+            CommunitySubmitView(
+              shareableModels: _shareableModels,
+              selectedModels: _selectedSubmitModels,
+              onToggleModel: _toggleSubmitModel,
+              titleController: _submitTitleController,
+              captionController: _submitCaptionController,
+              placeController: _submitPlaceController,
+              latController: _submitLatController,
+              lngController: _submitLngController,
+              isSubmitting: _isSubmitting,
+              onSubmit: () async {
+                final ok = await _submitPost();
+                if (ok && mounted) _goBack();
+              },
+              onSaveDraft: _saveDraft,
+              searchFieldLeftInset: 52,
+            ),
+            _buildBackButton(),
+          ],
         ),
       ),
     );
@@ -648,6 +653,8 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final topSafe = MediaQuery.of(context).padding.top;
 
     return PopScope(
       canPop: _currentPage == null,
@@ -657,38 +664,61 @@ class _CommunityPageState extends State<CommunityPage> {
       child: Scaffold(
         resizeToAvoidBottomInset: false,
         backgroundColor: Colors.transparent,
-        body: BDPageBackdrop(
-          child: SafeArea(
-            child: Stack(
-              children: [
-                if (_isLoading)
-                  const Center(child: CircularProgressIndicator())
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(top: 60),
-                    child: CommunityRecommendView(
-                      posts: _exploreFilteredPosts,
-                      totalPosts: _posts.length,
-                      viewportPosts: _viewportPosts.length,
-                      mapViewport: _mapViewport,
-                      mapMarkers: _mapMarkers,
-                      onOpenMap: _openMapPage,
-                      onTapPost: _openDetail,
-                      availableTags: rankTagsFromPosts(_viewportPosts),
-                      selectedTag: _exploreTag,
-                      onToggleTag: _onExploreToggleTag,
-                      onClearFilters: _onExploreClearFilters,
-                      tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+        body: Stack(
+          children: [
+            BDPageBackdrop(
+              child: SafeArea(
+                top: false,
+                child: Stack(
+                  children: [
+                    if (_isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else
+                      Padding(
+                        padding: EdgeInsets.only(top: topSafe + 60),
+                        child: CommunityRecommendView(
+                          posts: _exploreFilteredPosts,
+                          totalPosts: _posts.length,
+                          viewportPosts: _viewportPosts.length,
+                          mapViewport: _mapViewport,
+                          mapMarkers: _mapMarkers,
+                          onOpenMap: _openMapPage,
+                          onTapPost: _openDetail,
+                          availableTags: rankTagsFromPosts(_viewportPosts),
+                          selectedTag: _exploreTag,
+                          onToggleTag: _onExploreToggleTag,
+                          onClearFilters: _onExploreClearFilters,
+                          tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                        ),
+                      ),
+                    AnimatedPositioned(
+                      duration: BDMotion.durationNormal,
+                      curve: BDMotion.curveFluid,
+                      left: _currentPage == _CommunitySubPage.search
+                          ? 0
+                          : screenWidth,
+                      top: 0,
+                      bottom: 0,
+                      width: screenWidth,
+                      child: _buildSearchOverlay(),
                     ),
-                  ),
-                if (_currentPage == null) _buildFloatingHeader(isDark),
-                if (_currentPage == _CommunitySubPage.search)
-                  _buildSearchOverlay(),
-                if (_currentPage == _CommunitySubPage.submit)
-                  _buildSubmitOverlay(),
-              ],
+                    AnimatedPositioned(
+                      duration: BDMotion.durationNormal,
+                      curve: BDMotion.curveFluid,
+                      left: _currentPage == _CommunitySubPage.submit
+                          ? 0
+                          : screenWidth,
+                      top: 0,
+                      bottom: 0,
+                      width: screenWidth,
+                      child: _buildSubmitOverlay(),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
+            if (_currentPage == null) _buildFloatingHeader(isDark),
+          ],
         ),
       ),
     );

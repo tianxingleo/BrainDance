@@ -308,6 +308,8 @@ class CommunityExploreView extends StatefulWidget {
   final VoidCallback onClearHistory;
   final ValueChanged<CommunityPost> onTapPost;
   final bool focusOnMount;
+  final int focusTrigger;
+  final double searchFieldLeftInset;
 
   const CommunityExploreView({
     super.key,
@@ -318,6 +320,8 @@ class CommunityExploreView extends StatefulWidget {
     required this.onClearHistory,
     required this.onTapPost,
     this.focusOnMount = false,
+    this.focusTrigger = 0,
+    this.searchFieldLeftInset = 16,
   });
 
   @override
@@ -333,6 +337,16 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   void initState() {
     super.initState();
     if (widget.focusOnMount) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant CommunityExploreView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusTrigger != oldWidget.focusTrigger) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _focusNode.requestFocus();
       });
@@ -386,7 +400,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
       children: [
         // 搜索框
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+          padding: EdgeInsets.fromLTRB(widget.searchFieldLeftInset, 4, 16, 0),
           child: TextField(
             controller: _searchController,
             focusNode: _focusNode,
@@ -666,6 +680,7 @@ class CommunitySubmitView extends StatefulWidget {
   final bool isSubmitting;
   final VoidCallback onSubmit;
   final VoidCallback onSaveDraft;
+  final double searchFieldLeftInset;
 
   static const _presets = <_LocationPreset>[
     _LocationPreset('西湖', 30.243, 120.150),
@@ -688,6 +703,7 @@ class CommunitySubmitView extends StatefulWidget {
     required this.isSubmitting,
     required this.onSubmit,
     required this.onSaveDraft,
+    this.searchFieldLeftInset = 16,
   });
 
   @override
@@ -773,8 +789,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 1. 模型搜索框
-          TextField(
-            controller: _modelSearchController,
+          Padding(
+            padding: EdgeInsets.only(left: widget.searchFieldLeftInset - 16),
+            child: TextField(
+              controller: _modelSearchController,
             onChanged: (v) => setState(() => _modelQuery = v.trim()),
             decoration: InputDecoration(
               hintText: textLocalize('community_search_model'),
@@ -800,6 +818,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
               ),
             ),
           ),
+            ),
           if (_hasAttemptedSubmit && !_isModelValid)
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 4),
