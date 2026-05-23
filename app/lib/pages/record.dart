@@ -371,7 +371,14 @@ class _RecordPageState extends ConsumerState<RecordPage>
         }
       } finally {
         _isToggling = false;
+        if (mounted) setState(() {});
       }
+      return;
+    }
+
+    // 流式拍摄进行中，阻止新一轮
+    if (_streamingActive) {
+      _isToggling = false;
       return;
     }
 
@@ -421,7 +428,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final hasPending = _hasPendingUpload;
     final captured = _streamingFrameIndex;
     final uploaded = _streamingSuccessCount;
-    final pending = _uploadQueue.length;
+    final pending = _uploadQueue.length + (_queueLocked ? 1 : 0);
 
     bool deleteUploaded = true;
 
@@ -535,6 +542,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
         if (DateTime.now().difference(drainStart).inSeconds > 30) break;
         await Future.delayed(const Duration(milliseconds: 100));
       }
+      while (_queueLocked) {
+        if (DateTime.now().difference(drainStart).inSeconds > 40) break;
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
     } else {
       final drainStart = DateTime.now();
       while (_queueLocked) {
@@ -637,19 +648,17 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Future<void> _captureAndQueueFrame(CameraController controller) async {
     if (!_streamingActive) return;
 
-    final frameIndex = ++_streamingFrameIndex;
-    final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
-
     XFile? photo;
     try {
       photo = await controller.takePicture();
     } catch (e) {
       debugPrint('[_captureAndQueue] takePicture failed: $e');
-      _streamingFailCount++;
       if (mounted) setState(() {});
       return;
     }
 
+    final frameIndex = ++_streamingFrameIndex;
+    final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
     _uploadQueue.add((photo.path, frameLabel));
     debugPrint('[_capture] $frameLabel → queue=${_uploadQueue.length}');
 
@@ -702,7 +711,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
           if (mounted) {
             ref.read(streamingFailCountProvider.notifier).state =
                 _streamingFailCount;
-            showAppToast(context, textLocalize('stream_frame_fail'));
+            if (_streamingFailCount <= 1) {
+              showAppToast(context, textLocalize('stream_frame_fail'));
+            }
           }
         } finally {
           unawaited(File(filePath).delete().catchError((_) {}));
@@ -793,6 +804,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
       await Future.delayed(const Duration(milliseconds: 100));
     }
+    // 等飞行中的最后一帧上传完成，确保 _streamingSuccessCount 准确
+    while (_queueLocked) {
+      if (DateTime.now().difference(_drainStart).inSeconds > 40) break;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
 
     if (!mounted) {
       _resetStreamingState();
@@ -854,6 +870,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
             textLocalize('stream_fail_task');
       }
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _deleteStreamingAssets(String userId, String sceneId) async {
