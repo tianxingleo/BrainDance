@@ -28,8 +28,9 @@ class MyOverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
@@ -254,10 +255,7 @@ class MySettingsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        setTab1(context, ref),
-        setTab3(context),
-      ],
+      children: [setTab1(context, ref), setTab3(context)],
     );
   }
 }
@@ -276,8 +274,9 @@ class _MetricTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.58)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.78);
@@ -340,8 +339,9 @@ class _PostSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.58)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.78);
@@ -431,8 +431,9 @@ class _PostTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.56)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.76);
@@ -447,7 +448,10 @@ class _PostTile extends StatelessWidget {
           padding: const EdgeInsets.all(8),
           child: Row(
             children: [
-              _PostThumbnail(imageUrl: post.coverUrl),
+              _PostThumbnail(
+                imageUrl: post.coverUrl,
+                fallbackImageUrl: post.coverFallbackUrl,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -561,8 +565,9 @@ class _InlineMetric extends StatelessWidget {
 
 class _PostThumbnail extends StatelessWidget {
   final String? imageUrl;
+  final String? fallbackImageUrl;
 
-  const _PostThumbnail({required this.imageUrl});
+  const _PostThumbnail({required this.imageUrl, this.fallbackImageUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -571,11 +576,7 @@ class _PostThumbnail extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF8BA8C5),
-            Color(0xFF536C8B),
-            Color(0xFF38485F),
-          ],
+          colors: [Color(0xFF8BA8C5), Color(0xFF536C8B), Color(0xFF38485F)],
         ),
         borderRadius: BorderRadius.circular(18),
       ),
@@ -589,6 +590,7 @@ class _PostThumbnail extends StatelessWidget {
           ? fallback
           : BDFadeInNetworkImage(
               imageUrl: url,
+              fallbackImageUrl: fallbackImageUrl,
               placeholder: fallback,
               errorWidget: fallback,
               borderRadius: BorderRadius.circular(18),
@@ -608,8 +610,9 @@ class _DraftCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.58)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.78);
