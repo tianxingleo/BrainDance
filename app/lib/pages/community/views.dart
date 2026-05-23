@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/pages/community/amap_search.dart';
 import 'package:braindance/pages/community/location_picker.dart';
 import 'package:braindance/pages/community/map_marker.dart';
 import 'package:braindance/pages/community/map_page.dart';
@@ -1600,11 +1601,26 @@ class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
       setState(() {
         widget.latController.text = p.latitude.toStringAsFixed(6);
         widget.lngController.text = p.longitude.toStringAsFixed(6);
-        if (widget.placeController.text.trim().isEmpty) {
-          widget.placeController.text =
-              '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
-        }
       });
+      // 调高德逆地理编码把坐标转成可读地点名；失败则回退到坐标占位。
+      String placeName = '';
+      try {
+        final regeo = await AmapSearchService.instance.regeoSearch(p);
+        placeName = regeo.placeName.isNotEmpty
+            ? regeo.placeName
+            : regeo.formattedAddress;
+      } on AmapSearchException catch (_) {
+        // 静默降级
+      } catch (_) {
+        // 同上
+      }
+      if (!mounted) return;
+      if (placeName.isNotEmpty) {
+        setState(() => widget.placeController.text = placeName);
+      } else if (widget.placeController.text.trim().isEmpty) {
+        setState(() => widget.placeController.text =
+            '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}');
+      }
       showAppToast(context, '已获取当前位置');
     } on LocationException catch (e) {
       if (!mounted) return;

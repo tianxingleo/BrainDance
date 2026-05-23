@@ -554,7 +554,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final oldIndex = ref.read(pageIndexProvider);
     if (newIndex == oldIndex) {
       final createIdx = 2;
-      if ((newIndex == 1 || newIndex == createIdx) && _lastTabIndex != oldIndex) {
+      if (newIndex == createIdx && _lastTabIndex != oldIndex) {
         _switchToPage(_lastTabIndex);
       } else if (newIndex == 0) {
         ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
