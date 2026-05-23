@@ -378,12 +378,18 @@ class _CommunityPageState extends State<CommunityPage> {
 
     setState(() => _isSubmitting = true);
 
+    final effectivePlace =
+        place.isEmpty ? textLocalize('community_no_location') : place;
+    final hasBoth = lat != null && lng != null;
+    final effectiveLat = hasBoth ? lat! : 0.0;
+    final effectiveLng = hasBoth ? lng! : 0.0;
+
     final result = CommunityComposerResult(
       title: title,
       caption: caption,
-      placeName: place,
-      latitude: lat ?? 0,
-      longitude: lng ?? 0,
+      placeName: effectivePlace,
+      latitude: effectiveLat,
+      longitude: effectiveLng,
       models: _selectedSubmitModels,
       tags: _selectedSubmitModels
           .expand((m) => m.description.split(RegExp(r'[\s,，]+')))
@@ -411,24 +417,36 @@ class _CommunityPageState extends State<CommunityPage> {
     return true;
   }
 
-  /// Posts visible in the current map viewport.
-  List<CommunityPost> get _viewportPosts =>
-      filterPostsByBounds(_posts, _mapViewport.bounds);
+  /// Posts without location info — always shown at the end.
+  List<CommunityPost> get _noLocationPosts =>
+      _posts.where((p) => p.latitude == 0 && p.longitude == 0).toList();
 
-  /// Final explore-tab list: viewport posts, narrowed by tag and radius.
+  /// Posts with valid coordinates, filtered by viewport.
+  List<CommunityPost> get _viewportPosts {
+    final geoPosts =
+        _posts.where((p) => p.latitude != 0 || p.longitude != 0).toList();
+    return filterPostsByBounds(geoPosts, _mapViewport.bounds);
+  }
+
+  /// Final explore-tab list: viewport posts + tag filter, then no-location posts.
   List<CommunityPost> get _exploreFilteredPosts {
-    final base = _viewportPosts;
+    var base = _viewportPosts;
+    var noLoc = _noLocationPosts;
     final tag = _exploreTag;
-    if (tag == null || tag.isEmpty) return base;
-    final tagged = filterPostsByTag(base, tag);
-    final origin =
-        _mapViewport.bounds?.center ??
-        (latitude: _mapViewport.latitude, longitude: _mapViewport.longitude);
-    return filterPostsByRadius(
-      tagged,
-      origin,
-      tagRadiusKmForZoom(_mapViewport.zoom),
-    );
+    if (tag != null && tag.isNotEmpty) {
+      base = filterPostsByTag(base, tag);
+      final origin =
+          _mapViewport.bounds?.center ??
+          (latitude: _mapViewport.latitude,
+              longitude: _mapViewport.longitude);
+      base = filterPostsByRadius(
+        base,
+        origin,
+        tagRadiusKmForZoom(_mapViewport.zoom),
+      );
+      noLoc = filterPostsByTag(noLoc, tag);
+    }
+    return [...base, ...noLoc];
   }
 
   void _onExploreToggleTag(String tag) {
