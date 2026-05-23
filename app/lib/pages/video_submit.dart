@@ -469,6 +469,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
 
       if (mounted) {
         showAppToast(context, textLocalize('gen_submit_success'));
+        _nameFocusNode.unfocus();
         if (_dialogShowing) {
           _shouldClosePage = true;
           Navigator.of(context).pop();
@@ -577,9 +578,11 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
               _isPreprocessing = false;
             });
             _deleteRecordedVideo();
+            FocusManager.instance.primaryFocus?.unfocus();
             navigator.pop();
           } else if (_shouldClosePage) {
             _shouldClosePage = false;
+            FocusManager.instance.primaryFocus?.unfocus();
             navigator.pop();
           }
         } else if (_isUploading) {
@@ -598,9 +601,11 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
             setState(() {
               _isUploading = false;
             });
+            FocusManager.instance.primaryFocus?.unfocus();
             navigator.pop();
           } else if (_shouldClosePage) {
             _shouldClosePage = false;
+            FocusManager.instance.primaryFocus?.unfocus();
             navigator.pop();
           }
         } else {
@@ -611,6 +616,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
           if (!mounted) return;
           if (shouldExit) {
             _deleteRecordedVideo();
+            FocusManager.instance.primaryFocus?.unfocus();
             navigator.pop();
           }
         }

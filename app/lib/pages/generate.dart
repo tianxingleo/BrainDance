@@ -591,12 +591,9 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     );
 
     return PopScope(
-      canPop: !_isUploading && !_isGenerating,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) {
-          FocusManager.instance.primaryFocus?.unfocus();
-          return;
-        }
+        if (didPop) return;
         if (_isUploading || _isGenerating) {
           final shouldExit = await _showCancelDialog();
           if (shouldExit && mounted) {
@@ -606,9 +603,13 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               _isGenerating = false;
             });
             if (mounted) {
+              FocusManager.instance.primaryFocus?.unfocus();
               Navigator.of(context).pop();
             }
           }
+        } else {
+          FocusManager.instance.primaryFocus?.unfocus();
+          if (mounted) Navigator.of(context).pop();
         }
       },
       child: Scaffold(
