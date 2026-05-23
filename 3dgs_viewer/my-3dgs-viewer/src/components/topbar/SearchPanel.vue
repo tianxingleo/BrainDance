@@ -26,9 +26,15 @@ const onSubmit = () => emit('search');
     <button
       type="button"
       class="search-btn"
+      aria-label="检索视角"
+      title="检索视角"
       @click="onSubmit"
     >
-      检索视角
+      <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <path
+          d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+        />
+      </svg>
     </button>
   </div>
 </template>
@@ -41,9 +47,9 @@ const onSubmit = () => emit('search');
   min-width: 0;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  padding: 6px;
-  border-radius: 24px;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 22px;
   background: var(--card-bg, rgba(249, 249, 248, 0.84));
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   box-shadow: 0 10px 26px var(--card-shadow, rgba(0, 0, 0, 0.06));
@@ -76,18 +82,28 @@ const onSubmit = () => emit('search');
 
 .search-btn {
   flex: 0 0 auto;
-  padding: 10px 14px;
-  border-radius: 14px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 12px;
   border: 1px solid var(--btn-solid-bg, #6b7a8f);
   background: var(--btn-solid-bg, #6b7a8f);
   color: var(--btn-solid-text, #f9f9f8);
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   white-space: nowrap;
   transition: background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
   font-family: inherit;
   -webkit-tap-highlight-color: transparent;
+}
+
+.search-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  fill: currentColor;
 }
 
 .search-btn:hover {

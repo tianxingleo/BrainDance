@@ -3009,11 +3009,21 @@ async function executeUnifiedAgentLoop(input: {
     const toolCalls = Array.isArray(lastAiMsg?.tool_calls) ? lastAiMsg.tool_calls : [];
 
     let executedAny = false;
+    const duplicatedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     for (const toolCall of toolCalls) {
       const toolArgs = toolCall.args ?? {};
       const sig = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
       if (seen.has(sig)) {
-        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}`);
+        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}，提示模型换思路`);
+        duplicatedToolCalls.push({ name: toolCall.name, args: toolArgs });
+        msgs.push(new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: JSON.stringify({
+            skipped: true,
+            reason: "duplicate_call",
+            message: `已跳过：${toolCall.name} 用相同参数已经在前面的轮次执行过，结果不会变化。`,
+          }),
+        }));
         continue;
       }
       seen.add(sig);
@@ -3087,6 +3097,30 @@ async function executeUnifiedAgentLoop(input: {
     }
 
     if (!executedAny) {
+      if (duplicatedToolCalls.length > 0) {
+        const duplicatedSummary = duplicatedToolCalls
+          .map((tc) => `${tc.name}(${stringifyToolArgs(tc.args)})`)
+          .join("; ");
+        msgs.push(new SystemMessage(
+          [
+            `本轮你请求的所有工具调用都已经在之前用相同参数执行过：${duplicatedSummary}。`,
+            "重复调用不会带来新信息，请改变策略：",
+            "1) 换工具（pose_semantic_search / scene_metadata_search / recent_scene_search 之间切换）；",
+            "2) 或显著修改参数（改写 query、放宽/收紧时间窗口、调整 sceneId/limit）；",
+            "3) 如果当前候选已经足够回答问题，调用 stop_search；",
+            "4) 如果确认无法找到匹配，也请调用 stop_search 并在 reason 中说明，不要再重复同一调用。",
+          ].join("\n"),
+        ));
+        await emitProgress(callbacks, {
+          event: "status",
+          data: {
+            phase: "duplicate_tool_calls_detected",
+            summary: `检测到 ${duplicatedToolCalls.length} 个重复工具调用，已注入策略切换提示`,
+            detail: duplicatedSummary,
+          },
+        });
+        return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: false };
+      }
       return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
     }
     return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen };

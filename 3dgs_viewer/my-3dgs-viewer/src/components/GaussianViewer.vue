@@ -4441,8 +4441,8 @@ button.active {
 /* FPS 计数器 */
 .fps-counter {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px + 56px);
-  left: var(--flutter-safe-left);
+  top: 64px;
+  left: 8px;
   z-index: 90;
   color: var(--text-primary);
   background: var(--fps-bg);
