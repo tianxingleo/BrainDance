@@ -586,12 +586,8 @@ class _CommunityPageState extends State<CommunityPage> {
               recommendedKeywords: _recommendedKeywords,
               onSearch: _addToSearchHistory,
               onClearHistory: _clearSearchHistory,
-              onTapPost: (post) {
-                _goBack();
-                _openDetail(post);
-              },
+              onTapPost: _openDetail,
               onSearchChanged: (v) => _lastSearchQuery = v,
-              focusOnMount: true,
               focusTrigger: _searchFocusTrigger,
               searchFieldLeftInset: 52,
             ),
