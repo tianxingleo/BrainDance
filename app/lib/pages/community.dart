@@ -456,6 +456,7 @@ class _CommunityPageState extends State<CommunityPage> {
   }
   void _openSubmit() => setState(() => _currentPage = _CommunitySubPage.submit);
   void _goBack() {
+    FocusManager.instance.primaryFocus?.unfocus();
     FocusScope.of(context).unfocus();
     setState(() => _currentPage = null);
   }
@@ -586,8 +587,10 @@ class _CommunityPageState extends State<CommunityPage> {
               recommendedKeywords: _recommendedKeywords,
               onSearch: _addToSearchHistory,
               onClearHistory: _clearSearchHistory,
-              onTapPost: _openDetail,
-              onSearchChanged: (v) => _lastSearchQuery = v,
+              onTapPost: (post) {
+                FocusManager.instance.primaryFocus?.unfocus();
+                _openDetail(post);
+              },
               focusTrigger: _searchFocusTrigger,
               searchFieldLeftInset: 52,
             ),
