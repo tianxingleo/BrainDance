@@ -25,19 +25,24 @@ extension _RecallPageView on _RecallPageState {
             child: SafeArea(
               child: Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: RawScrollbar(
-                  controller: _recallScrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  thickness: 5,
-                  radius: const Radius.circular(2.5),
-                  thumbColor: isDark
-                      ? Colors.white.withValues(alpha: 0.28)
-                      : Colors.black.withValues(alpha: 0.18),
-                  trackColor: isDark
-                      ? Colors.white.withValues(alpha: 0.06)
-                      : Colors.black.withValues(alpha: 0.04),
-                  child: CustomScrollView(
+                child: ScrollbarTheme(
+                  data: ScrollbarThemeData(
+                    thumbColor: WidgetStateProperty.all(
+                      isDark
+                          ? Colors.white.withValues(alpha: 0.28)
+                          : Colors.black.withValues(alpha: 0.18),
+                    ),
+                    trackColor: WidgetStateProperty.all(
+                      isDark
+                          ? Colors.white.withValues(alpha: 0.06)
+                          : Colors.black.withValues(alpha: 0.04),
+                    ),
+                    thickness: const WidgetStatePropertyAll(5),
+                    radius: const Radius.circular(2.5),
+                  ),
+                  child: Scrollbar(
+                    controller: _recallScrollController,
+                    child: CustomScrollView(
                     controller: _recallScrollController,
                     cacheExtent: 1200,
                     slivers: [
@@ -156,7 +161,10 @@ extension _RecallPageView on _RecallPageState {
                                   20,
                                   8,
                                 ),
-                                child: _buildAgentConversationList(isDark, textColor),
+                                child: _buildAgentConversationList(
+                                  isDark,
+                                  textColor,
+                                ),
                               ),
                             if (_processingTasks.isNotEmpty)
                               RepaintBoundary(
@@ -231,9 +239,10 @@ extension _RecallPageView on _RecallPageState {
                           isSameModel: _isSameModel,
                           onNavigateToViewer: _navigateToViewer,
                           toPublicUrl: _toPublicUrl,
-                          onShowModelActions: (model, {bool imageOnly = false}) {
-                            _showModelActions(model, imageOnly: imageOnly);
-                          },
+                          onShowModelActions:
+                              (model, {bool imageOnly = false}) {
+                                _showModelActions(model, imageOnly: imageOnly);
+                              },
                         )
                       else
                         TimePeelingList(
@@ -246,11 +255,15 @@ extension _RecallPageView on _RecallPageState {
                           modelCardKeyFor: _modelCardKeyFor,
                           isSameModel: _isSameModel,
                           onNavigateToViewer: _navigateToViewer,
-                          onShowModelActions: (model, {bool imageOnly = false}) {
-                            _showModelActions(model, imageOnly: imageOnly);
-                          },
+                          onShowModelActions:
+                              (model, {bool imageOnly = false}) {
+                                _showModelActions(model, imageOnly: imageOnly);
+                              },
                           onAddNewTask: (name) {
-                            ref.read(pendingSubmitTitleProvider.notifier).state = name;
+                            ref
+                                    .read(pendingSubmitTitleProvider.notifier)
+                                    .state =
+                                name;
                             ref.read(pageIndexProvider.notifier).state = 1;
                           },
                         ),
@@ -259,6 +272,7 @@ extension _RecallPageView on _RecallPageState {
                   ),
                 ),
               ),
+            ),
             ),
           ),
           if (_activeModelAction != null && _activeModelActionRect != null)
