@@ -134,8 +134,6 @@ class _RecallSearchHeaderSectionState extends State<RecallSearchHeaderSection> {
               focusNode: _searchFocusNode,
               controller: widget.searchController,
               style: TextStyle(color: widget.textColor, fontSize: 15),
-              minLines: 1,
-              maxLines: 5,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 isDense: true,
