@@ -668,6 +668,12 @@ class _SuggestionChip extends StatelessWidget {
 // ============================================================
 
 class CommunitySubmitView extends StatefulWidget {
+  static const List<_LocationPreset> _presets = [
+    _LocationPreset(name: '杭州西湖', latitude: 30.258, longitude: 120.140),
+    _LocationPreset(name: '上海外滩', latitude: 31.240, longitude: 121.490),
+    _LocationPreset(name: '东京塔', latitude: 35.659, longitude: 139.745),
+  ];
+
   final List<CommunityModelOption> shareableModels;
   final List<CommunityModelOption> selectedModels;
   final ValueChanged<CommunityModelOption> onToggleModel;
@@ -699,6 +705,18 @@ class CommunitySubmitView extends StatefulWidget {
 
   @override
   State<CommunitySubmitView> createState() => _CommunitySubmitViewState();
+}
+
+class _LocationPreset {
+  final String name;
+  final double latitude;
+  final double longitude;
+
+  const _LocationPreset({
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+  });
 }
 
 class _CommunitySubmitViewState extends State<CommunitySubmitView> {
