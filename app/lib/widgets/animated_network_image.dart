@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 class BDFadeInNetworkImage extends StatefulWidget {
   final String imageUrl;
+  final String? fallbackImageUrl;
   final Widget placeholder;
   final Widget errorWidget;
   final BoxFit fit;
@@ -17,6 +18,7 @@ class BDFadeInNetworkImage extends StatefulWidget {
   const BDFadeInNetworkImage({
     super.key,
     required this.imageUrl,
+    this.fallbackImageUrl,
     required this.placeholder,
     required this.errorWidget,
     this.fit = BoxFit.cover,
@@ -39,6 +41,7 @@ class _BDFadeInNetworkImageState extends State<BDFadeInNetworkImage>
   late final Animation<double> _opacity;
   late final Animation<double> _scale;
   late ImageProvider _provider;
+  late String _activeImageUrl;
   ImageStream? _imageStream;
   ImageStreamListener? _listener;
   bool _hasImage = false;
@@ -49,19 +52,23 @@ class _BDFadeInNetworkImageState extends State<BDFadeInNetworkImage>
     super.initState();
     _controller = AnimationController(vsync: this, duration: widget.duration);
     _opacity = CurvedAnimation(parent: _controller, curve: widget.curve);
-    _scale = Tween<double>(begin: 0.985, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: widget.curve),
-    );
-    _provider = NetworkImage(widget.imageUrl);
+    _scale = Tween<double>(
+      begin: 0.985,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: widget.curve));
+    _activeImageUrl = widget.imageUrl;
+    _provider = NetworkImage(_activeImageUrl);
     _resolveImage();
   }
 
   @override
   void didUpdateWidget(covariant BDFadeInNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.fallbackImageUrl != widget.fallbackImageUrl) {
       _detachStream();
-      _provider = NetworkImage(widget.imageUrl);
+      _activeImageUrl = widget.imageUrl;
+      _provider = NetworkImage(_activeImageUrl);
       _controller.reset();
       _hasImage = false;
       _hasError = false;
@@ -96,6 +103,16 @@ class _BDFadeInNetworkImageState extends State<BDFadeInNetworkImage>
         }
       },
       onError: (Object error, StackTrace? stackTrace) {
+        final fallback = widget.fallbackImageUrl?.trim();
+        if (fallback != null &&
+            fallback.isNotEmpty &&
+            fallback != _activeImageUrl) {
+          _detachStream();
+          _activeImageUrl = fallback;
+          _provider = NetworkImage(_activeImageUrl);
+          _resolveImage();
+          return;
+        }
         if (!mounted) return;
         setState(() {
           _hasError = true;
