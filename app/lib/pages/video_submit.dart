@@ -613,6 +613,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
               _cancelToken?.cancel();
               _deleteUploadedContent();
               _cleanupPreprocess();
+              _deleteRecordedVideo();
               setState(() {
                 _isUploading = false;
               });
@@ -859,6 +860,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                                     _cancelToken?.cancel();
                                     _deleteUploadedContent();
                                     _cleanupPreprocess();
+                                    _deleteRecordedVideo();
                                     setState(() {
                                       _isUploading = false;
                                     });
