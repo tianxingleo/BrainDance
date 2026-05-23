@@ -56,8 +56,10 @@ class CommunityRecommendView extends StatelessWidget {
 
     if (totalPosts == 0) return const _CommunityEmptyState();
 
+    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 4, 16, bottomPad),
       child: Column(
         children: [
           // 地图面板
@@ -417,8 +419,9 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   }
 
   Widget _buildSuggestions(bool isDark, Color textColor, Color hintColor) {
+    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -499,9 +502,10 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
     Color hintColor,
     List<CommunityPost> results,
   ) {
+    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
     if (results.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
         child: BDPanelCard(
           padding: const EdgeInsets.all(24),
           child: Center(
@@ -531,7 +535,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
       itemCount: results.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -749,8 +753,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
       return inputBorder;
     }
 
+    final bottomPad = MediaQuery.of(context).padding.bottom + 80.0;
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 4, 16, bottomPad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
