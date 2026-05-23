@@ -114,9 +114,11 @@ class CommunityRepository {
 
       final merged = [..._localDrafts, ...visible];
       if (merged.isNotEmpty) return merged;
-    } catch (_) {}
+    } catch (_) {
+      rethrow;
+    }
 
-    return [..._localDrafts, ..._demoPosts];
+    return [];
   }
 
   // ---- Map markers ----
@@ -187,21 +189,7 @@ class CommunityRepository {
         ));
       }
     } catch (_) {
-      // Fall back to demo posts so the map isn't empty during offline dev.
-      for (final p in _demoPosts) {
-        if (p.latitude == 0 && p.longitude == 0) continue;
-        markers.add(CommunityMapMarker(
-          id: p.id,
-          title: p.title,
-          placeName: p.placeName,
-          latitude: p.latitude,
-          longitude: p.longitude,
-          coverUrl: p.coverUrl,
-          createdAt: p.createdAt,
-          likeCount: p.likeCount,
-          viewCount: p.viewCount,
-        ));
-      }
+      rethrow;
     }
 
     // De-dup by id, keeping first occurrence (local drafts win).

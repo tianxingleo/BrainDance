@@ -8,6 +8,7 @@ import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
+import 'package:braindance/services/network_service.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,7 @@ class _CommunityPageState extends State<CommunityPage> {
   List<CommunityModelOption> _shareableModels = const [];
   List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
+  bool _isOffline = false;
   CommunityMapViewport _mapViewport = const CommunityMapViewport(
     latitude: 30.243,
     longitude: 120.150,
@@ -73,12 +75,14 @@ class _CommunityPageState extends State<CommunityPage> {
     _submitPlaceController = TextEditingController();
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
+    networkService.addListener(_onNetworkChanged);
     _loadCommunity();
     _loadSearchHistory();
   }
 
   @override
   void dispose() {
+    networkService.removeListener(_onNetworkChanged);
     _submitTitleController.dispose();
     _submitCaptionController.dispose();
     _submitPlaceController.dispose();
@@ -120,19 +124,37 @@ class _CommunityPageState extends State<CommunityPage> {
     _persistSearchHistory();
   }
 
+  void _onNetworkChanged() {
+    if (!mounted) return;
+    if (networkService.isConnected && _isOffline) {
+      _loadCommunity();
+    } else if (!networkService.isConnected && !_isOffline) {
+      setState(() => _isOffline = true);
+    }
+  }
+
   Future<void> _loadCommunity() async {
     setState(() => _isLoading = true);
-    final posts = await _repository.fetchPosts();
-    final models = await _repository.fetchShareableModels();
-    final markers = await _repository.fetchMapMarkers();
-    if (!mounted) return;
-    setState(() {
-      _posts = posts;
-      _shareableModels = models;
-      _mapMarkers = markers;
-      _isLoading = false;
-    });
-    _loadDraft();
+    try {
+      final posts = await _repository.fetchPosts();
+      final models = await _repository.fetchShareableModels();
+      final markers = await _repository.fetchMapMarkers();
+      if (!mounted) return;
+      setState(() {
+        _posts = posts;
+        _shareableModels = models;
+        _mapMarkers = markers;
+        _isOffline = false;
+        _isLoading = false;
+      });
+      _loadDraft();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isOffline = true;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _loadDraft() async {
@@ -690,6 +712,8 @@ class _CommunityPageState extends State<CommunityPage> {
                   children: [
                     if (_isLoading)
                       const Center(child: CircularProgressIndicator())
+                    else if (_isOffline)
+                      const _CommunityOfflineState()
                     else
                       RepaintBoundary(
                         child: Padding(
@@ -748,6 +772,47 @@ class _CommunityPageState extends State<CommunityPage> {
             ),
             if (_currentPage == null)
               RepaintBoundary(child: _buildFloatingHeader(isDark)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommunityOfflineState extends StatelessWidget {
+  const _CommunityOfflineState();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final topSafe = MediaQuery.paddingOf(context).top;
+    final textColor =
+        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.48)
+        : BDDesign.colorMutedBlue;
+
+    return Padding(
+      padding: EdgeInsets.only(top: topSafe + 100),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 48, color: hintColor),
+            const SizedBox(height: 16),
+            Text(
+              textLocalize('community_offline_title'),
+              style: TextStyle(
+                color: textColor,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              textLocalize('community_offline_hint'),
+              style: TextStyle(color: hintColor, fontSize: 14, height: 1.4),
+            ),
           ],
         ),
       ),
