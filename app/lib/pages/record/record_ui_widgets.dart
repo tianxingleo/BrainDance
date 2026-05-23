@@ -245,15 +245,15 @@ class _AccelWarningBannerState extends ConsumerState<_AccelWarningBanner>
 class _TipBubble extends ConsumerStatefulWidget {
   final StateProvider<String?> provider;
   final Alignment alignment;
-  final IconData icon;
-  final Color iconColor;
+  final IconData Function() iconBuilder;
+  final Color Function() iconColorBuilder;
   final bool withSlide;
 
   const _TipBubble({
     required this.provider,
     required this.alignment,
-    required this.icon,
-    required this.iconColor,
+    required this.iconBuilder,
+    required this.iconColorBuilder,
     this.withSlide = true,
   });
 
@@ -334,7 +334,7 @@ class _TipBubbleState extends ConsumerState<_TipBubble>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(widget.icon, color: widget.iconColor, size: 20),
+                  Icon(widget.iconBuilder(), color: widget.iconColorBuilder(), size: 20),
                   const SizedBox(width: 10),
                   Flexible(
                     child: Text(

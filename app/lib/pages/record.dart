@@ -1613,21 +1613,32 @@ class _RecordPageState extends ConsumerState<RecordPage>
             _TipBubble(
               provider: saveFailBubbleProvider,
               alignment: const Alignment(0, 0.30),
-              icon: Icons.error_outline_rounded,
-              iconColor: Colors.orange.withAlpha(200),
+              iconBuilder: () => Icons.error_outline_rounded,
+              iconColorBuilder: () => Colors.orange.withAlpha(200),
             ),
             _TipBubble(
               provider: streamingDoneBubbleProvider,
-              alignment: const Alignment(0, 0.30),
-              icon: Icons.info_outline_rounded,
-              iconColor: Colors.white.withAlpha(180),
-              withSlide: false,
+              alignment: const Alignment(0, 0.72),
+              iconBuilder: () {
+                final s = ref.read(streamingUploadSuccessProvider);
+                final f = ref.read(streamingFailCountProvider);
+                return (s > 0 && f == 0)
+                    ? Icons.check_circle_outline
+                    : Icons.error_outline;
+              },
+              iconColorBuilder: () {
+                final s = ref.read(streamingUploadSuccessProvider);
+                final f = ref.read(streamingFailCountProvider);
+                return (s > 0 && f == 0)
+                    ? Colors.green.withAlpha(200)
+                    : Colors.redAccent.withAlpha(200);
+              },
             ),
             _TipBubble(
               provider: recordModeBubbleProvider,
               alignment: const Alignment(0, 0.72),
-              icon: Icons.info_outline_rounded,
-              iconColor: Colors.white.withAlpha(180),
+              iconBuilder: () => Icons.info_outline_rounded,
+              iconColorBuilder: () => Colors.white.withAlpha(180),
             ),
             _CenterBubble(
               provider: showTooShortBubbleProvider,
@@ -1660,53 +1671,12 @@ class _StreamingStatusCardState extends ConsumerState<_StreamingStatusCard> {
     final failed = ref.watch(streamingFailCountProvider);
     final doneMessage = ref.watch(streamingDoneBubbleProvider);
 
-    if (captured == 0 && doneMessage == null) return const SizedBox.shrink();
+    if (captured == 0 || doneMessage != null) return const SizedBox.shrink();
 
     final cardWidth = (MediaQuery.sizeOf(context).width * 0.44).clamp(
       170.0,
       240.0,
     );
-
-    // Result mode: streaming has finished
-    if (doneMessage != null) {
-      final isSuccess = uploaded > 0 && failed == 0;
-      return Container(
-        width: cardWidth,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: BDDesign.colorInkBlack.withAlpha(216),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: (isSuccess ? BDDesign.colorFadedOlive : Colors.redAccent)
-                .withAlpha(160),
-          ),
-          boxShadow: [BDDesign.shadowElevated],
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isSuccess ? Icons.check_circle_outline : Icons.error_outline,
-              color: isSuccess ? BDDesign.colorFadedOlive : Colors.redAccent,
-              size: 16,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                doneMessage,
-                style: TextStyle(
-                  color: Colors.white.withAlpha(220),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  height: 1.35,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
 
     // Live mode: streaming is active
     final rawProportion = captured > 0 ? uploaded / captured : 0.0;
