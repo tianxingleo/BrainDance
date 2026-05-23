@@ -45,6 +45,7 @@ import {
 import { runTimeCompareAgent } from "../../time-compare-agent/agent.ts";
 import {
   type LongTermMemory,
+  buildLongTermMemorySignal,
   loadLongTermMemory,
   shouldPersistLongTermMemory,
   persistLongTermMemory,
@@ -153,6 +154,7 @@ const candidateSchema = z.object({
   display_name: z.string().nullable().optional(),
   ply_path: z.string().nullable().optional(),
   preview_img_path: z.string().nullable().optional(),
+  objects: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   created_at: z.string().optional(),
 });
@@ -2380,6 +2382,7 @@ function serializeSceneCandidate(c: SceneCandidate & { score: number }) {
     pose_image_id: c.bestPose?.image_name ?? null,
     ply_path: c.plyPath ?? null,
     preview_img_path: c.previewImgPath ?? null,
+    objects: c.objects,
     tags: c.tags,
     created_at: c.createdAt,
   };
@@ -3646,28 +3649,14 @@ function finalizeResponseWithLongTermMemory(
   const result = finalizeResponse(response, options);
 
   if (options.userId) {
-    const turnCount = result.short_term_memory?.turnCount ?? 0;
-    const shortTermPrefs = result.short_term_memory?.preferences ?? {};
-    if (shouldPersistLongTermMemory(turnCount, options.longTermMemory ?? null, shortTermPrefs)) {
-      const intentObjects: string[] = [];
-      const intentRegions: string[] = [];
-      if (result.intent) {
-        if (result.intent.objectHint) intentObjects.push(result.intent.objectHint);
-        if (result.intent.sceneHint) intentObjects.push(result.intent.sceneHint);
-        if (result.intent.locationHint) intentRegions.push(result.intent.locationHint);
-      }
-      const topSummary = result.top_candidates?.length > 0
-        ? `${result.top_candidates[0].description ?? result.top_candidates[0].scene_id} (score: ${result.top_candidates[0].score.toFixed(2)})`
-        : result.answer.slice(0, 100);
-
+    const signal = buildLongTermMemorySignal(query, result);
+    if (shouldPersistLongTermMemory(options.longTermMemory ?? null, signal)) {
       persistLongTermMemory(supabase, {
         userId: options.userId,
-        currentShortTermPreferences: shortTermPrefs,
         currentQuery: query,
         responseMode: result.mode,
-        topResultSummary: topSummary,
-        intentObjects,
-        intentRegions,
+        topResultSummary: signal.topResultSummary,
+        signal,
       }, options.longTermMemory ?? null).catch((err) => {
         console.error("[LongTermMemory] async persist error:", err);
       });
