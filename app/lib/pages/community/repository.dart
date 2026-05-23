@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/services/preview_image_resolver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -32,7 +33,8 @@ class CommunityRepository {
               display_name,
               description,
               ply_path,
-              preview_img_path
+              preview_img_path,
+              meta_info
             )
           ''';
 
@@ -51,13 +53,10 @@ class CommunityRepository {
         final model = map['model_assets'] is Map
             ? Map<String, dynamic>.from(map['model_assets'] as Map)
             : <String, dynamic>{};
-        final modelUrl =
-            _normalizeStorageUrl(model['ply_path']?.toString() ?? '');
-        final previewUrl = _normalizeStorageUrl(
-          map['cover_image_url']?.toString().isNotEmpty == true
-              ? map['cover_image_url']!.toString()
-              : (model['preview_img_path']?.toString() ?? ''),
+        final modelUrl = _normalizeStorageUrl(
+          model['ply_path']?.toString() ?? '',
         );
+        final cover = _resolvePostCover(map, model);
         final metadata = _parseMetadata(map['metadata']);
 
         return CommunityPost(
@@ -74,8 +73,8 @@ class CommunityRepository {
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName: map['user_id']?.toString() ??
-              textLocalize('community_anonymous'),
+          authorName:
+              map['user_id']?.toString() ?? textLocalize('community_anonymous'),
           modelName:
               map['model_name']?.toString() ??
               model['display_name']?.toString() ??
@@ -83,10 +82,11 @@ class CommunityRepository {
               '3D 模型',
           modelUrl: modelUrl,
           posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-          coverUrl: previewUrl,
+          coverUrl: cover.primary,
+          coverFallbackUrl: cover.fallback,
           createdAt:
               DateTime.tryParse(map['created_at']?.toString() ?? '') ??
-                  DateTime.now(),
+              DateTime.now(),
           tags: _extractTags(
             model['description']?.toString(),
             map['place_name']?.toString(),
@@ -95,12 +95,14 @@ class CommunityRepository {
           likeCount: (metadata['likes'] as List?)?.length ?? 0,
           favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
           viewCount: _readViewCount(metadata),
-          isLikedByCurrentUser:
-              _containsUser(metadata['likes'], currentUserId),
-          isFavoritedByCurrentUser:
-              _containsUser(metadata['favorites'], currentUserId),
+          isLikedByCurrentUser: _containsUser(metadata['likes'], currentUserId),
+          isFavoritedByCurrentUser: _containsUser(
+            metadata['favorites'],
+            currentUserId,
+          ),
           extraImages: List<Map<String, dynamic>>.from(
-              metadata['images'] ?? []),
+            metadata['images'] ?? [],
+          ),
           commentCount: (metadata['comments'] as List?)?.length ?? 0,
         );
       }).toList();
@@ -132,17 +134,19 @@ class CommunityRepository {
     // Local optimistic drafts first — they have no metadata payload.
     for (final p in _localDrafts) {
       if (p.latitude == 0 && p.longitude == 0) continue;
-      markers.add(CommunityMapMarker(
-        id: p.id,
-        title: p.title,
-        placeName: p.placeName,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        coverUrl: p.coverUrl,
-        createdAt: p.createdAt,
-        likeCount: p.likeCount,
-        viewCount: p.viewCount,
-      ));
+      markers.add(
+        CommunityMapMarker(
+          id: p.id,
+          title: p.title,
+          placeName: p.placeName,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          coverUrl: p.coverUrl,
+          createdAt: p.createdAt,
+          likeCount: p.likeCount,
+          viewCount: p.viewCount,
+        ),
+      );
     }
 
     try {
@@ -169,38 +173,45 @@ class CommunityRepository {
           if (uid.isEmpty || ownerId != uid) continue;
         }
 
-        markers.add(CommunityMapMarker(
-          id: map['id'].toString(),
-          title: map['title']?.toString() ??
-              textLocalize('community_unnamed_memory'),
-          placeName: map['place_name']?.toString() ??
-              textLocalize('community_no_location'),
-          latitude: lat,
-          longitude: lng,
-          coverUrl: _normalizeStorageUrl(
-            map['cover_image_url']?.toString() ?? '',
+        markers.add(
+          CommunityMapMarker(
+            id: map['id'].toString(),
+            title:
+                map['title']?.toString() ??
+                textLocalize('community_unnamed_memory'),
+            placeName:
+                map['place_name']?.toString() ??
+                textLocalize('community_no_location'),
+            latitude: lat,
+            longitude: lng,
+            coverUrl: _normalizeStorageUrl(
+              map['cover_image_url']?.toString() ?? '',
+            ),
+            createdAt:
+                DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+                DateTime.now(),
+            likeCount: (metadata['likes'] as List?)?.length ?? 0,
+            viewCount: _readViewCount(metadata),
           ),
-          createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
-              DateTime.now(),
-          likeCount: (metadata['likes'] as List?)?.length ?? 0,
-          viewCount: _readViewCount(metadata),
-        ));
+        );
       }
     } catch (_) {
       // Fall back to demo posts so the map isn't empty during offline dev.
       for (final p in _demoPosts) {
         if (p.latitude == 0 && p.longitude == 0) continue;
-        markers.add(CommunityMapMarker(
-          id: p.id,
-          title: p.title,
-          placeName: p.placeName,
-          latitude: p.latitude,
-          longitude: p.longitude,
-          coverUrl: p.coverUrl,
-          createdAt: p.createdAt,
-          likeCount: p.likeCount,
-          viewCount: p.viewCount,
-        ));
+        markers.add(
+          CommunityMapMarker(
+            id: p.id,
+            title: p.title,
+            placeName: p.placeName,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            coverUrl: p.coverUrl,
+            createdAt: p.createdAt,
+            likeCount: p.likeCount,
+            viewCount: p.viewCount,
+          ),
+        );
       }
     }
 
@@ -227,32 +238,38 @@ class CommunityRepository {
       final model = map['model_assets'] is Map
           ? Map<String, dynamic>.from(map['model_assets'] as Map)
           : <String, dynamic>{};
-      final modelUrl = _normalizeStorageUrl(model['ply_path']?.toString() ?? '');
-      final previewUrl = _normalizeStorageUrl(
-        map['cover_image_url']?.toString().isNotEmpty == true
-            ? map['cover_image_url']!.toString()
-            : (model['preview_img_path']?.toString() ?? ''),
+      final modelUrl = _normalizeStorageUrl(
+        model['ply_path']?.toString() ?? '',
       );
+      final cover = _resolvePostCover(map, model);
       final metadata = _parseMetadata(map['metadata']);
       return CommunityPost(
         id: map['id'].toString(),
-        title: map['title']?.toString() ??
+        title:
+            map['title']?.toString() ??
             textLocalize('community_unnamed_memory'),
-        caption: map['caption']?.toString() ??
-            model['description']?.toString() ?? '',
-        placeName: map['place_name']?.toString() ??
+        caption:
+            map['caption']?.toString() ??
+            model['description']?.toString() ??
+            '',
+        placeName:
+            map['place_name']?.toString() ??
             textLocalize('community_no_location'),
         latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
         longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-        authorName: map['user_id']?.toString() ??
-            textLocalize('community_anonymous'),
-        modelName: map['model_name']?.toString() ??
+        authorName:
+            map['user_id']?.toString() ?? textLocalize('community_anonymous'),
+        modelName:
+            map['model_name']?.toString() ??
             model['display_name']?.toString() ??
-            model['scene_id']?.toString() ?? '3D 模型',
+            model['scene_id']?.toString() ??
+            '3D 模型',
         modelUrl: modelUrl,
         posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-        coverUrl: previewUrl,
-        createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+        coverUrl: cover.primary,
+        coverFallbackUrl: cover.fallback,
+        createdAt:
+            DateTime.tryParse(map['created_at']?.toString() ?? '') ??
             DateTime.now(),
         tags: _extractTags(
           model['description']?.toString(),
@@ -263,12 +280,12 @@ class CommunityRepository {
         favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
         commentCount: (metadata['comments'] as List?)?.length ?? 0,
         viewCount: _readViewCount(metadata),
-        isLikedByCurrentUser:
-            _containsUser(metadata['likes'], currentUserId),
-        isFavoritedByCurrentUser:
-            _containsUser(metadata['favorites'], currentUserId),
-        extraImages:
-            List<Map<String, dynamic>>.from(metadata['images'] ?? []),
+        isLikedByCurrentUser: _containsUser(metadata['likes'], currentUserId),
+        isFavoritedByCurrentUser: _containsUser(
+          metadata['favorites'],
+          currentUserId,
+        ),
+        extraImages: List<Map<String, dynamic>>.from(metadata['images'] ?? []),
       );
     } catch (_) {
       return null;
@@ -294,35 +311,35 @@ class CommunityRepository {
         final modelUrl = _normalizeStorageUrl(
           model['ply_path']?.toString() ?? '',
         );
-        final previewUrl = _normalizeStorageUrl(
-          map['cover_image_url']?.toString().isNotEmpty == true
-              ? map['cover_image_url']!.toString()
-              : (model['preview_img_path']?.toString() ?? ''),
-        );
+        final cover = _resolvePostCover(map, model);
 
         return CommunityPost(
           id: map['id'].toString(),
-          title: map['title']?.toString() ??
+          title:
+              map['title']?.toString() ??
               textLocalize('community_unnamed_memory'),
-          caption: map['caption']?.toString() ??
+          caption:
+              map['caption']?.toString() ??
               model['description']?.toString() ??
               '',
-          placeName: map['place_name']?.toString() ??
+          placeName:
+              map['place_name']?.toString() ??
               textLocalize('community_no_location'),
           latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
           longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          authorName: map['user_id']?.toString() ??
-              textLocalize('community_anonymous'),
-          modelName: map['model_name']?.toString() ??
+          authorName:
+              map['user_id']?.toString() ?? textLocalize('community_anonymous'),
+          modelName:
+              map['model_name']?.toString() ??
               model['display_name']?.toString() ??
               model['scene_id']?.toString() ??
               '3D 模型',
           modelUrl: modelUrl,
           posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-          coverUrl: previewUrl,
-          createdAt: DateTime.tryParse(
-                map['created_at']?.toString() ?? '',
-              ) ??
+          coverUrl: cover.primary,
+          coverFallbackUrl: cover.fallback,
+          createdAt:
+              DateTime.tryParse(map['created_at']?.toString() ?? '') ??
               DateTime.now(),
           tags: _extractTags(
             model['description']?.toString(),
@@ -334,8 +351,7 @@ class CommunityRepository {
           commentCount: (metadata['comments'] as List?)?.length ?? 0,
           viewCount: _readViewCount(metadata),
           isLikedByCurrentUser: _containsUser(metadata['likes'], uid),
-          isFavoritedByCurrentUser:
-              _containsUser(metadata['favorites'], uid),
+          isFavoritedByCurrentUser: _containsUser(metadata['favorites'], uid),
           extraImages: List<Map<String, dynamic>>.from(
             metadata['images'] ?? [],
           ),
@@ -348,7 +364,9 @@ class CommunityRepository {
       ];
     } catch (_) {}
 
-    return _localDrafts.where((post) => post.id.startsWith('local-$uid-')).toList();
+    return _localDrafts
+        .where((post) => post.id.startsWith('local-$uid-'))
+        .toList();
   }
 
   Future<List<CommunityPost>> fetchFavoritePosts() async {
@@ -372,8 +390,7 @@ class CommunityRepository {
       postCount: posts.length,
       viewCount: posts.fold(0, (sum, post) => sum + post.viewCount),
       likeCount: posts.fold(0, (sum, post) => sum + post.likeCount),
-      favoriteCount:
-          posts.fold(0, (sum, post) => sum + post.favoriteCount),
+      favoriteCount: posts.fold(0, (sum, post) => sum + post.favoriteCount),
       commentCount: posts.fold(0, (sum, post) => sum + post.commentCount),
       draftCount: draft.isEmpty ? 0 : 1,
       shareableModelCount: shareableModels.length,
@@ -389,7 +406,7 @@ class CommunityRepository {
       final response = await _client
           .from('model_assets')
           .select(
-            'id, scene_id, display_name, description, tags, ply_path, preview_img_path, user_id',
+            'id, scene_id, display_name, description, tags, ply_path, preview_img_path, meta_info, user_id',
           )
           .order('created_at', ascending: false)
           .limit(50);
@@ -406,16 +423,21 @@ class CommunityRepository {
         final path = map['ply_path']?.toString() ?? '';
         final publicUrl = _normalizeStorageUrl(path);
         final displayName = _modelDisplayName(map);
-        models.add(CommunityModelOption(
-          id: map['id'].toString(),
-          sceneId: displayName,
-          description: map['description']?.toString() ?? '',
-          modelUrl: publicUrl,
-          posesUrl: _posesUrlFromPath(path),
-          coverUrl: _normalizeStorageUrl(
-            map['preview_img_path']?.toString() ?? '',
+        final cover = resolvePreviewImagePaths(
+          map,
+          normalize: _normalizeStorageUrl,
+        );
+        models.add(
+          CommunityModelOption(
+            id: map['id'].toString(),
+            sceneId: displayName,
+            description: map['description']?.toString() ?? '',
+            modelUrl: publicUrl,
+            posesUrl: _posesUrlFromPath(path),
+            coverUrl: cover.primary,
+            coverFallbackUrl: cover.fallback,
           ),
-        ));
+        );
       }
       return models;
     } catch (_) {}
@@ -441,47 +463,63 @@ class CommunityRepository {
       modelUrl: model.modelUrl,
       posesUrl: model.posesUrl,
       coverUrl: model.coverUrl,
+      coverFallbackUrl: model.coverFallbackUrl,
       createdAt: DateTime.now(),
       tags: draft.tags,
       isPublic: draft.isPublic,
-      extraImages: draft.models.skip(1).map((m) => {
-        'coverUrl': m.coverUrl ?? '',
-        'modelName': m.sceneId,
-        'modelUrl': m.modelUrl,
-        'posesUrl': m.posesUrl ?? '',
-        'tags': _extractTags(m.description, draft.placeName),
-      }).toList(),
+      extraImages: draft.models
+          .skip(1)
+          .map(
+            (m) => {
+              'coverUrl': m.coverUrl ?? '',
+              'coverFallbackUrl': m.coverFallbackUrl ?? '',
+              'modelName': m.sceneId,
+              'modelUrl': m.modelUrl,
+              'posesUrl': m.posesUrl ?? '',
+              'tags': _extractTags(m.description, draft.placeName),
+            },
+          )
+          .toList(),
     );
 
     // Build extra images metadata for multi-model posts
-    final extraImagesMeta = draft.models.skip(1).map((m) => {
-      'coverUrl': m.coverUrl ?? '',
-      'modelName': m.sceneId,
-      'modelUrl': m.modelUrl,
-      'posesUrl': m.posesUrl ?? '',
-      'tags': _extractTags(m.description, draft.placeName),
-    }).toList();
+    final extraImagesMeta = draft.models
+        .skip(1)
+        .map(
+          (m) => {
+            'coverUrl': m.coverUrl ?? '',
+            'coverFallbackUrl': m.coverFallbackUrl ?? '',
+            'modelName': m.sceneId,
+            'modelUrl': m.modelUrl,
+            'posesUrl': m.posesUrl ?? '',
+            'tags': _extractTags(m.description, draft.placeName),
+          },
+        )
+        .toList();
 
     try {
       // Insert and get back the server-assigned id
-      final insertResult = await _client.from('community_posts').insert({
-        'user_id': _client.auth.currentUser?.id ?? 'local-user',
-        'model_asset_id': model.id,
-        'model_name': model.sceneId,
-        'title': draft.title,
-        'caption': draft.caption,
-        'place_name': draft.placeName,
-        'latitude': draft.latitude,
-        'longitude': draft.longitude,
-        'cover_image_url': model.coverUrl,
-        'metadata': {
-          'is_public': draft.isPublic,
-          'likes': <String>[],
-          'favorites': <String>[],
-          'comments': <Map<String, dynamic>>[],
-          'images': extraImagesMeta,
-        },
-      }).select('id');
+      final insertResult = await _client
+          .from('community_posts')
+          .insert({
+            'user_id': _client.auth.currentUser?.id ?? 'local-user',
+            'model_asset_id': model.id,
+            'model_name': model.sceneId,
+            'title': draft.title,
+            'caption': draft.caption,
+            'place_name': draft.placeName,
+            'latitude': draft.latitude,
+            'longitude': draft.longitude,
+            'cover_image_url': model.coverUrl,
+            'metadata': {
+              'is_public': draft.isPublic,
+              'likes': <String>[],
+              'favorites': <String>[],
+              'comments': <Map<String, dynamic>>[],
+              'images': extraImagesMeta,
+            },
+          })
+          .select('id');
 
       if (insertResult is List && insertResult.isNotEmpty) {
         final realId = insertResult[0]['id']?.toString();
@@ -555,8 +593,7 @@ class CommunityRepository {
           .maybeSingle();
       if (response == null) return [];
       final metadata = _parseMetadata(response['metadata']);
-      final raw = List<Map<String, dynamic>>.from(
-          metadata['comments'] ?? []);
+      final raw = List<Map<String, dynamic>>.from(metadata['comments'] ?? []);
       return _parseComments(raw, postId);
     } catch (_) {}
     return [];
@@ -569,8 +606,9 @@ class CommunityRepository {
   ) async {
     final uid = currentUserId;
     final userName = _client.auth.currentUser?.email ?? '匿名用户';
-    final comments =
-        List<Map<String, dynamic>>.from(currentMetadata['comments'] ?? []);
+    final comments = List<Map<String, dynamic>>.from(
+      currentMetadata['comments'] ?? [],
+    );
     final newComment = {
       'id': 'c-$uid-${DateTime.now().microsecondsSinceEpoch}',
       'user_id': uid,
@@ -597,19 +635,17 @@ class CommunityRepository {
         text: c['text']?.toString() ?? '',
         createdAt:
             DateTime.tryParse(c['created_at']?.toString() ?? '') ??
-                DateTime.now(),
+            DateTime.now(),
       );
     }).toList();
   }
 
-  Future<void> setMetadata(
-    String postId,
-    Map<String, dynamic> metadata,
-  ) async {
+  Future<void> setMetadata(String postId, Map<String, dynamic> metadata) async {
     try {
       await _client
           .from('community_posts')
-          .update({'metadata': metadata}).eq('id', postId);
+          .update({'metadata': metadata})
+          .eq('id', postId);
     } catch (_) {}
   }
 
@@ -682,7 +718,8 @@ class CommunityRepository {
     try {
       await _client
           .from('community_posts')
-          .update({'metadata': metadata}).eq('id', postId);
+          .update({'metadata': metadata})
+          .eq('id', postId);
     } catch (_) {}
   }
 
@@ -748,6 +785,24 @@ class CommunityRepository {
     return 0;
   }
 
+  PreviewImagePaths _resolvePostCover(
+    Map<String, dynamic> post,
+    Map<String, dynamic> model,
+  ) {
+    final modelCover = resolvePreviewImagePaths(
+      model,
+      normalize: _normalizeStorageUrl,
+    );
+    final explicitCover = post['cover_image_url']?.toString().trim() ?? '';
+    if (explicitCover.isEmpty) return modelCover;
+
+    final primary = _normalizeStorageUrl(explicitCover);
+    final fallback = modelCover.fallback != primary
+        ? modelCover.fallback
+        : null;
+    return PreviewImagePaths(primary: primary, fallback: fallback);
+  }
+
   String _normalizeStorageUrl(String raw) {
     if (raw.isEmpty) return '';
     const marker = '/storage/v1/object/public/braindance-assets/';
@@ -769,9 +824,7 @@ class CommunityRepository {
     );
     if (posesPath == storagePath) return null;
     try {
-      return _client.storage
-          .from('braindance-assets')
-          .getPublicUrl(posesPath);
+      return _client.storage.from('braindance-assets').getPublicUrl(posesPath);
     } catch (_) {
       return null;
     }

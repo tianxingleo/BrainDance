@@ -40,6 +40,7 @@ class CommunityModelOption {
   final String modelUrl;
   final String? posesUrl;
   final String? coverUrl;
+  final String? coverFallbackUrl;
 
   const CommunityModelOption({
     required this.id,
@@ -48,6 +49,7 @@ class CommunityModelOption {
     required this.modelUrl,
     required this.posesUrl,
     required this.coverUrl,
+    this.coverFallbackUrl,
   });
 }
 
@@ -63,6 +65,7 @@ class CommunityPost {
   final String modelUrl;
   final String? posesUrl;
   final String? coverUrl;
+  final String? coverFallbackUrl;
   final DateTime createdAt;
   final List<String> tags;
   final bool isPublic;
@@ -85,6 +88,7 @@ class CommunityPost {
     required this.modelUrl,
     required this.posesUrl,
     required this.coverUrl,
+    this.coverFallbackUrl,
     required this.createdAt,
     required this.tags,
     this.isPublic = true,
@@ -120,6 +124,7 @@ class CommunityPost {
       modelUrl: modelUrl,
       posesUrl: posesUrl,
       coverUrl: coverUrl,
+      coverFallbackUrl: coverFallbackUrl,
       createdAt: createdAt,
       tags: tags,
       isPublic: isPublic,
@@ -127,8 +132,7 @@ class CommunityPost {
       favoriteCount: favoriteCount ?? this.favoriteCount,
       commentCount: commentCount ?? this.commentCount,
       viewCount: viewCount ?? this.viewCount,
-      isLikedByCurrentUser:
-          isLikedByCurrentUser ?? this.isLikedByCurrentUser,
+      isLikedByCurrentUser: isLikedByCurrentUser ?? this.isLikedByCurrentUser,
       isFavoritedByCurrentUser:
           isFavoritedByCurrentUser ?? this.isFavoritedByCurrentUser,
       extraImages: extraImages,
@@ -150,6 +154,7 @@ class CommunityPost {
       modelUrl: modelUrl,
       posesUrl: posesUrl,
       coverUrl: coverUrl,
+      coverFallbackUrl: coverFallbackUrl,
       createdAt: createdAt,
       tags: tags,
       isPublic: isPublic,
@@ -226,21 +231,18 @@ class CommunityDraft {
   });
 
   bool get isEmpty =>
-      modelIds.isEmpty &&
-      title.isEmpty &&
-      caption.isEmpty &&
-      placeName.isEmpty;
+      modelIds.isEmpty && title.isEmpty && caption.isEmpty && placeName.isEmpty;
 
   Map<String, dynamic> toJson() => {
-        'modelIds': modelIds,
-        'title': title,
-        'caption': caption,
-        'placeName': placeName,
-        'latitude': latitude,
-        'longitude': longitude,
-        'tags': tags,
-        'isPublic': isPublic,
-      };
+    'modelIds': modelIds,
+    'title': title,
+    'caption': caption,
+    'placeName': placeName,
+    'latitude': latitude,
+    'longitude': longitude,
+    'tags': tags,
+    'isPublic': isPublic,
+  };
 
   factory CommunityDraft.fromJson(Map<String, dynamic> json) {
     return CommunityDraft(

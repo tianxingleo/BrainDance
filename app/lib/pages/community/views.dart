@@ -48,8 +48,9 @@ class CommunityRecommendView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
@@ -122,16 +123,16 @@ class CommunityRecommendView extends StatelessWidget {
                                 top: 12,
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    color: (isDark
-                                            ? Colors.black
-                                            : Colors.white)
-                                        .withValues(alpha: 0.82),
+                                    color:
+                                        (isDark ? Colors.black : Colors.white)
+                                            .withValues(alpha: 0.82),
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
                                       color: isDark
                                           ? Colors.white.withValues(alpha: 0.08)
-                                          : BDDesign.colorMutedBlue
-                                              .withValues(alpha: 0.10),
+                                          : BDDesign.colorMutedBlue.withValues(
+                                              alpha: 0.10,
+                                            ),
                                     ),
                                   ),
                                   child: Padding(
@@ -247,6 +248,7 @@ class _RecommendPostCard extends StatelessWidget {
           children: [
             _CommunityThumbnail(
               imageUrl: post.coverUrl,
+              fallbackImageUrl: post.coverFallbackUrl,
               height: 100,
               width: 88,
               icon: Icons.terrain_rounded,
@@ -376,24 +378,28 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.55)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.72);
-    final inputFill =
-        isDark ? AppTheme.darkSurfaceElevated : const Color(0xFFF3F5F9);
+    final inputFill = isDark
+        ? AppTheme.darkSurfaceElevated
+        : const Color(0xFFF3F5F9);
 
     final hasQuery = _query.isNotEmpty;
     final posts = hasQuery
         ? widget.posts
-            .where((p) =>
-                p.title.contains(_query) ||
-                p.modelName.contains(_query) ||
-                p.caption.contains(_query) ||
-                p.placeName.contains(_query) ||
-                p.tags.any((t) => t.contains(_query)))
-            .toList()
+              .where(
+                (p) =>
+                    p.title.contains(_query) ||
+                    p.modelName.contains(_query) ||
+                    p.caption.contains(_query) ||
+                    p.placeName.contains(_query) ||
+                    p.tags.any((t) => t.contains(_query)),
+              )
+              .toList()
         : widget.posts;
 
     return Column(
@@ -413,11 +419,18 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
             decoration: InputDecoration(
               hintText: textLocalize('community_search_placeholder'),
               hintStyle: TextStyle(color: hintColor, fontSize: 14),
-              prefixIcon:
-                  Icon(Icons.search_rounded, color: hintColor, size: 20),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                color: hintColor,
+                size: 20,
+              ),
               suffixIcon: _query.isNotEmpty
                   ? IconButton(
-                      icon: Icon(Icons.close_rounded, color: hintColor, size: 18),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: hintColor,
+                        size: 18,
+                      ),
                       onPressed: _clear,
                     )
                   : null,
@@ -575,6 +588,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
               children: [
                 _CommunityThumbnail(
                   imageUrl: post.coverUrl,
+                  fallbackImageUrl: post.coverFallbackUrl,
                   height: 80,
                   width: 72,
                   icon: Icons.terrain_rounded,
@@ -647,12 +661,18 @@ class _SuggestionChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: isDark ? Colors.white70 : BDDesign.colorMutedBlue),
+            Icon(
+              icon,
+              size: 14,
+              color: isDark ? Colors.white70 : BDDesign.colorMutedBlue,
+            ),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack,
+                color: isDark
+                    ? BDDesign.colorPaperWhite
+                    : BDDesign.colorInkBlack,
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
@@ -725,9 +745,11 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
     if (_modelQuery.isEmpty) return widget.shareableModels;
     final q = _modelQuery.toLowerCase();
     return widget.shareableModels
-        .where((m) =>
-            m.sceneId.toLowerCase().contains(q) ||
-            m.description.toLowerCase().contains(q))
+        .where(
+          (m) =>
+              m.sceneId.toLowerCase().contains(q) ||
+              m.description.toLowerCase().contains(q),
+        )
         .toList();
   }
 
@@ -759,13 +781,15 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
-    final inputFill =
-        isDark ? AppTheme.darkSurfaceElevated : const Color(0xFFF7FAFD);
+    final inputFill = isDark
+        ? AppTheme.darkSurfaceElevated
+        : const Color(0xFFF7FAFD);
 
     final inputBorder = OutlineInputBorder(
       borderRadius: BDDesign.radiusLarge,
@@ -793,41 +817,44 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
             padding: EdgeInsets.only(left: widget.searchFieldLeftInset - 16),
             child: TextField(
               controller: _modelSearchController,
-            onChanged: (v) => setState(() => _modelQuery = v.trim()),
-            decoration: InputDecoration(
-              hintText: textLocalize('community_search_model'),
-              hintStyle: TextStyle(color: hintColor, fontSize: 14),
-              prefixIcon:
-                  Icon(Icons.search_rounded, color: hintColor, size: 20),
-              suffixIcon: _modelQuery.isNotEmpty
-                  ? IconButton(
-                      icon:
-                          Icon(Icons.close_rounded, color: hintColor, size: 18),
-                      onPressed: () {
-                        _modelSearchController.clear();
-                        setState(() => _modelQuery = '');
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: inputFill,
-              border: inputBorder,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
+              onChanged: (v) => setState(() => _modelQuery = v.trim()),
+              decoration: InputDecoration(
+                hintText: textLocalize('community_search_model'),
+                hintStyle: TextStyle(color: hintColor, fontSize: 14),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: hintColor,
+                  size: 20,
+                ),
+                suffixIcon: _modelQuery.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: hintColor,
+                          size: 18,
+                        ),
+                        onPressed: () {
+                          _modelSearchController.clear();
+                          setState(() => _modelQuery = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: inputFill,
+                border: inputBorder,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
             ),
           ),
-            ),
           if (_hasAttemptedSubmit && !_isModelValid)
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 4),
               child: Text(
                 textLocalize('community_fill_all'),
-                style: const TextStyle(
-                  color: Color(0xFFD34C4C),
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Color(0xFFD34C4C), fontSize: 12),
               ),
             ),
           const SizedBox(height: 12),
@@ -873,8 +900,9 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                         const Divider(height: 1, indent: 48),
                     itemBuilder: (context, index) {
                       final model = _filteredModels[index];
-                      final isSelected =
-                          widget.selectedModels.any((m) => m.id == model.id);
+                      final isSelected = widget.selectedModels.any(
+                        (m) => m.id == model.id,
+                      );
                       return GestureDetector(
                         onTap: () => widget.onToggleModel(model),
                         child: Container(
@@ -884,7 +912,9 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? const Color(0xFF2E7CF6).withValues(alpha: 0.08)
+                                ? const Color(
+                                    0xFF2E7CF6,
+                                  ).withValues(alpha: 0.08)
                                 : Colors.transparent,
                             borderRadius: BDDesign.radiusLarge,
                           ),
@@ -892,6 +922,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                             children: [
                               _CommunityThumbnail(
                                 imageUrl: model.coverUrl,
+                                fallbackImageUrl: model.coverFallbackUrl,
                                 height: 32,
                                 width: 32,
                                 icon: Icons.view_in_ar_rounded,
@@ -930,7 +961,9 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
           // 3. 已选模型小卡片（横向排列）
           if (widget.selectedModels.isNotEmpty) ...[
             Text(
-              textLocalize('community_submit_selected_count').replaceFirst('%d', widget.selectedModels.length.toString()),
+              textLocalize(
+                'community_submit_selected_count',
+              ).replaceFirst('%d', widget.selectedModels.length.toString()),
               style: TextStyle(
                 color: hintColor,
                 fontSize: 12,
@@ -958,14 +991,16 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                         color: const Color(0xFF2E7CF6).withValues(alpha: 0.10),
                         borderRadius: BDDesign.radiusLarge,
                         border: Border.all(
-                          color:
-                              const Color(0xFF2E7CF6).withValues(alpha: 0.28),
+                          color: const Color(
+                            0xFF2E7CF6,
+                          ).withValues(alpha: 0.28),
                         ),
                       ),
                       child: Row(
                         children: [
                           _CommunityThumbnail(
                             imageUrl: model.coverUrl,
+                            fallbackImageUrl: model.coverFallbackUrl,
                             height: 36,
                             width: 36,
                             icon: Icons.view_in_ar_rounded,
@@ -985,11 +1020,7 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          Icon(
-                            Icons.close_rounded,
-                            size: 14,
-                            color: hintColor,
-                          ),
+                          Icon(Icons.close_rounded, size: 14, color: hintColor),
                         ],
                       ),
                     ),
@@ -1056,10 +1087,12 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                 visualDensity: VisualDensity.compact,
                 onPressed: () {
                   widget.placeController.text = preset.name;
-                  widget.latController.text =
-                      preset.latitude.toStringAsFixed(3);
-                  widget.lngController.text =
-                      preset.longitude.toStringAsFixed(3);
+                  widget.latController.text = preset.latitude.toStringAsFixed(
+                    3,
+                  );
+                  widget.lngController.text = preset.longitude.toStringAsFixed(
+                    3,
+                  );
                 },
               );
             }).toList(),
@@ -1087,8 +1120,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
               Expanded(
                 child: TextField(
                   controller: widget.latController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
                   onChanged: (_) {
                     if (_hasAttemptedSubmit) setState(() {});
                   },
@@ -1108,8 +1143,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
               Expanded(
                 child: TextField(
                   controller: widget.lngController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
                   onChanged: (_) {
                     if (_hasAttemptedSubmit) setState(() {});
                   },
@@ -1190,8 +1227,9 @@ class CommunityLocationHubRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.62)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
@@ -1213,6 +1251,7 @@ class CommunityLocationHubRow extends StatelessWidget {
         children: [
           _CommunityThumbnail(
             imageUrl: post.coverUrl,
+            fallbackImageUrl: post.coverFallbackUrl,
             height: 72,
             width: 92,
             icon: Icons.landscape_rounded,
@@ -1222,18 +1261,28 @@ class CommunityLocationHubRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(post.title,
-                    style: TextStyle(
-                        color: textColor, fontWeight: FontWeight.w700)),
+                Text(
+                  post.title,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('${post.authorName} · ${post.modelName}',
-                    style: TextStyle(color: hintColor, fontSize: 12.5)),
+                Text(
+                  '${post.authorName} · ${post.modelName}',
+                  style: TextStyle(color: hintColor, fontSize: 12.5),
+                ),
                 const SizedBox(height: 8),
-                Text(post.caption,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: textColor.withValues(alpha: 0.82), height: 1.3)),
+                Text(
+                  post.caption,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: 0.82),
+                    height: 1.3,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1265,29 +1314,36 @@ class CommunityMetricCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.58)
-                      : BDDesign.colorMutedBlue,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5)),
+          Text(
+            label,
+            style: TextStyle(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.58)
+                  : BDDesign.colorMutedBlue,
+              fontWeight: FontWeight.w700,
+              fontSize: 12.5,
+            ),
+          ),
           const SizedBox(height: 8),
-          Text(value,
-              style: TextStyle(
-                  color: isDark
-                      ? BDDesign.colorPaperWhite
-                      : BDDesign.colorInkBlack,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800)),
+          Text(
+            value,
+            style: TextStyle(
+              color: isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(hint,
-              style: TextStyle(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.54)
-                      : BDDesign.colorMutedBlue.withValues(alpha: 0.86),
-                  height: 1.35,
-                  fontSize: 12.5)),
+          Text(
+            hint,
+            style: TextStyle(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.54)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.86),
+              height: 1.35,
+              fontSize: 12.5,
+            ),
+          ),
         ],
       ),
     );
@@ -1298,12 +1354,14 @@ class CommunityMetricCard extends StatelessWidget {
 
 class _CommunityThumbnail extends StatelessWidget {
   final String? imageUrl;
+  final String? fallbackImageUrl;
   final double height;
   final double width;
   final IconData icon;
 
   const _CommunityThumbnail({
     required this.imageUrl,
+    this.fallbackImageUrl,
     required this.height,
     required this.width,
     required this.icon,
@@ -1316,11 +1374,7 @@ class _CommunityThumbnail extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF8BA8C5),
-            Color(0xFF536C8B),
-            Color(0xFF38485F),
-          ],
+          colors: [Color(0xFF8BA8C5), Color(0xFF536C8B), Color(0xFF38485F)],
         ),
         borderRadius: BorderRadius.circular(16),
       ),
@@ -1338,12 +1392,10 @@ class _CommunityThumbnail extends StatelessWidget {
       height: height,
       width: width,
       child: url == null || url.isEmpty
-          ? ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: fallback,
-            )
+          ? ClipRRect(borderRadius: BorderRadius.circular(16), child: fallback)
           : BDFadeInNetworkImage(
               imageUrl: url,
+              fallbackImageUrl: fallbackImageUrl,
               placeholder: fallback,
               errorWidget: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
@@ -1465,8 +1517,8 @@ class _ExploreFilterBar extends StatelessWidget {
     final hasTag = selectedTag != null && selectedTag!.isNotEmpty;
     final summary = boundsReady
         ? (hasTag
-            ? '当前区域 · 含 "$selectedTag" · ${_radiusLabel()} 内 $filteredCount 条'
-            : '当前区域 $visibleCount/$totalCount 条 · ZOOM $zoom')
+              ? '当前区域 · 含 "$selectedTag" · ${_radiusLabel()} 内 $filteredCount 条'
+              : '当前区域 $visibleCount/$totalCount 条 · ZOOM $zoom')
         : '调整地图后将按可视区域筛选 · 共 $totalCount 条';
     return BDPanelCard(
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
@@ -1494,8 +1546,10 @@ class _ExploreFilterBar extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded, size: 16),
                   label: const Text('清除'),
                   style: TextButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     minimumSize: const Size(0, 32),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -1553,15 +1607,15 @@ class _TagPill extends StatelessWidget {
           color: selected
               ? const Color(0xFF2E7CF6)
               : (isDark
-                  ? AppTheme.darkSurfaceElevated
-                  : const Color(0xFFF3F5F9)),
+                    ? AppTheme.darkSurfaceElevated
+                    : const Color(0xFFF3F5F9)),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: selected
                 ? const Color(0xFF2E7CF6)
                 : (isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : BDDesign.colorMutedBlue.withValues(alpha: 0.12)),
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : BDDesign.colorMutedBlue.withValues(alpha: 0.12)),
           ),
         ),
         child: Text(
@@ -1602,7 +1656,9 @@ class _ExploreEmptyHint extends StatelessWidget {
           Row(
             children: [
               Icon(
-                hasTag ? Icons.filter_alt_off_rounded : Icons.public_off_rounded,
+                hasTag
+                    ? Icons.filter_alt_off_rounded
+                    : Icons.public_off_rounded,
                 color: hintColor,
               ),
               const SizedBox(width: 8),
