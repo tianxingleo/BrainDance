@@ -58,6 +58,9 @@ final streamingFrameCountProvider = StateProvider<int>((ref) => 0);
 /// 流式上传成功帧数（进度条分子）
 final streamingUploadSuccessProvider = StateProvider<int>((ref) => 0);
 
+/// 流式上传失败帧数
+final streamingFailCountProvider = StateProvider<int>((ref) => 0);
+
 enum _MotionState { steady, ideal, caution, danger }
 
 class RecordPage extends ConsumerStatefulWidget {
@@ -96,6 +99,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
   static const _streamingMaxDurationSec = 600; // 10 min
   bool _streamingActive = false;
   bool _streamingAborted = false;
+
+  bool get _hasPendingUpload => _uploadQueue.isNotEmpty || _queueLocked;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -412,6 +417,178 @@ class _RecordPageState extends ConsumerState<RecordPage>
         '${r.nextInt(1000000).toString().padLeft(6, '0')}';
   }
 
+  Future<bool> _showStopStreamingDialog() async {
+    final hasPending = _hasPendingUpload;
+    final captured = _streamingFrameIndex;
+    final uploaded = _streamingSuccessCount;
+    final pending = _uploadQueue.length;
+
+    bool deleteUploaded = true;
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = AppConfig.isNightMode;
+        return StatefulBuilder(
+          builder: (builderContext, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                textLocalize('stream_stop_title'),
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hasPending
+                        ? textLocalize('stream_stop_uploading')
+                            .replaceFirst('%d', pending.toString())
+                            .replaceFirst('%d', uploaded.toString())
+                        : textLocalize('stream_stop_capturing')
+                            .replaceFirst('%d', captured.toString())
+                            .replaceFirst('%d', uploaded.toString()),
+                    style: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: deleteUploaded,
+                          onChanged: (v) {
+                            deleteUploaded = v ?? true;
+                            setDialogState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        textLocalize('stream_stop_delete'),
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text(textLocalize('stream_stop_btn_cancel')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
+                  child: Text(textLocalize('stream_stop_btn_confirm')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == true) {
+      await _performStopFromDialog(
+        hasPendingUploads: hasPending,
+        deleteUploaded: deleteUploaded,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _performStopFromDialog({
+    required bool hasPendingUploads,
+    required bool deleteUploaded,
+  }) async {
+    if (deleteUploaded) {
+      _handleStreamingAbort();
+      return;
+    }
+
+    _streamingActive = false;
+    _streamingTimer?.cancel();
+    _streamingTimer = null;
+    _setGlobalRecording(false);
+    if (mounted) {
+      ref.read(streamingDoneBubbleProvider.notifier).state =
+          textLocalize('stream_stop_title');
+    }
+
+    if (hasPendingUploads) {
+      final drainStart = DateTime.now();
+      while (_uploadQueue.isNotEmpty || _queueLocked) {
+        if (DateTime.now().difference(drainStart).inSeconds > 30) break;
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    } else {
+      final drainStart = DateTime.now();
+      while (_queueLocked) {
+        if (DateTime.now().difference(drainStart).inSeconds > 5) break;
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    final finalCount = _streamingSuccessCount;
+
+    if (finalCount < 3) {
+      // 用户选择保留已上传帧 → 尊重用户选择，不删除
+      _resetStreamingState();
+      if (mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            '${textLocalize('stream_upload_fail')}（至少需要 3 帧，当前 $finalCount 帧）';
+      }
+      return;
+    }
+
+    final user = Supabase.instance.client.auth.currentUser;
+    final sceneId = _streamingSceneId;
+    if (user == null || sceneId == null) {
+      _resetStreamingState();
+      return;
+    }
+
+    try {
+      await Supabase.instance.client.from('processing_tasks').insert({
+        'scene_id': sceneId,
+        'user_id': user.id,
+        'task_type': 'video_dual_chain',
+        'task_params': {'image_count': finalCount},
+        'status': 'pending',
+      });
+      debugPrint(
+        '[streaming] task created via dialog: $sceneId ($finalCount frames)',
+      );
+      _resetStreamingState();
+      if (mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            '${textLocalize('stream_success')}（$finalCount 帧）';
+      }
+    } catch (e) {
+      debugPrint('[streaming] dialog task creation error: $e');
+      await _deleteStreamingAssets(user.id, sceneId);
+      _resetStreamingState();
+      if (mounted) {
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            textLocalize('stream_fail_task');
+      }
+    }
+  }
+
   Future<void> _startStreaming(CameraController controller) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
@@ -433,6 +610,8 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (mounted) {
       ref.read(streamingFrameCountProvider.notifier).state = 0;
       ref.read(streamingUploadSuccessProvider.notifier).state = 0;
+      ref.read(streamingFailCountProvider.notifier).state = 0;
+      ref.read(streamingDoneBubbleProvider.notifier).state = null;
     }
 
     // Capture first frame immediately, then every 1s
@@ -472,6 +651,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     _uploadQueue.add((photo.path, frameLabel));
+    debugPrint('[_capture] $frameLabel → queue=${_uploadQueue.length}');
 
     if (mounted) {
       ref.read(streamingFrameCountProvider.notifier).state =
@@ -482,12 +662,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 
   Future<void> _processUploadQueue() async {
-    if (_queueLocked) return;
+    if (_queueLocked) {
+      debugPrint('[_uploadQueue] skipped (locked)');
+      return;
+    }
+    debugPrint('[_uploadQueue] start, queue=${_uploadQueue.length}');
     _queueLocked = true;
 
     final userId = Supabase.instance.client.auth.currentUser?.id;
     final sceneId = _streamingSceneId;
     if (userId == null || sceneId == null) {
+      debugPrint(
+        '[_uploadQueue] abort: userId=$userId sceneId=$sceneId',
+      );
       _queueLocked = false;
       return;
     }
@@ -506,10 +693,17 @@ class _RecordPageState extends ConsumerState<RecordPage>
               .upload(storagePath, File(compressedPath));
 
           _streamingSuccessCount++;
-          debugPrint('[_uploadQueue] uploaded $frameLabel');
+          debugPrint(
+            '[_uploadQueue] ok $frameLabel ($_streamingSuccessCount total)',
+          );
         } catch (e) {
           _streamingFailCount++;
-          debugPrint('[_uploadQueue] failed $frameLabel: $e');
+          debugPrint('[_uploadQueue] fail $frameLabel: $e');
+          if (mounted) {
+            ref.read(streamingFailCountProvider.notifier).state =
+                _streamingFailCount;
+            showAppToast(context, textLocalize('stream_frame_fail'));
+          }
         } finally {
           unawaited(File(filePath).delete().catchError((_) {}));
           if (compressedPath != null) {
@@ -529,6 +723,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     _queueLocked = false;
+    debugPrint('[_uploadQueue] done, success=$_streamingSuccessCount fail=$_streamingFailCount');
     if (_uploadQueue.isNotEmpty) {
       _processUploadQueue();
     }
@@ -581,6 +776,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _streamingTimer?.cancel();
     _streamingTimer = null;
     _setGlobalRecording(false);
+    if (mounted && finalize) {
+      ref.read(streamingDoneBubbleProvider.notifier).state =
+          textLocalize('stream_stop_title');
+    }
 
     if (!mounted) {
       _resetStreamingState();
@@ -603,17 +802,18 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final finalCount = _streamingSuccessCount;
 
     if (finalCount < 3) {
-      final msg = finalize
-          ? '至少需要拍摄 3 张照片，当前仅 $finalCount 张'
-          : '帧数不足，已自动暂停（当前 $finalCount 张）';
-      print('[streaming] too few frames: $finalCount, cleaning up');
-      final u = Supabase.instance.client.auth.currentUser;
-      final sid = _streamingSceneId;
-      if (u != null && sid != null) {
-        await _deleteStreamingAssets(u.id, sid);
+      if (finalize) {
+        final u = Supabase.instance.client.auth.currentUser;
+        final sid = _streamingSceneId;
+        if (u != null && sid != null) {
+          await _deleteStreamingAssets(u.id, sid);
+        }
       }
+      debugPrint('[streaming] too few frames: $finalCount, finalize=$finalize');
       _resetStreamingState();
-      ref.read(streamingDoneBubbleProvider.notifier).state = msg;
+      ref.read(streamingDoneBubbleProvider.notifier).state = finalize
+          ? textLocalize('stream_upload_fail')
+          : textLocalize('stream_stop_title');
       if (mounted) setState(() {});
       return;
     }
@@ -643,14 +843,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
       _resetStreamingState();
       if (mounted) {
         ref.read(streamingDoneBubbleProvider.notifier).state =
-            '流式拍摄完成，任务已创建（$finalCount 帧）';
+            '${textLocalize('stream_success')}（$finalCount 帧）';
       }
     } catch (e) {
       print('[_stopStreaming] task creation error: $e');
       await _deleteStreamingAssets(user.id, sceneId);
       _resetStreamingState();
       if (mounted) {
-        ref.read(streamingDoneBubbleProvider.notifier).state = '任务创建失败，请重试';
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            textLocalize('stream_fail_task');
       }
     }
   }
@@ -680,6 +881,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 
   void _resetStreamingState() {
+    for (final (filePath, _) in _uploadQueue) {
+      unawaited(File(filePath).delete().catchError((_) {}));
+    }
     _uploadQueue.clear();
     _queueLocked = false;
     _streamingAborted = false;
@@ -691,6 +895,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (mounted) {
       ref.read(streamingFrameCountProvider.notifier).state = 0;
       ref.read(streamingUploadSuccessProvider.notifier).state = 0;
+      ref.read(streamingFailCountProvider.notifier).state = 0;
     }
   }
 
@@ -1025,14 +1230,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
         (isAnyRecording ? 36 : _kFloatingNavReservedHeight + 18);
 
     return PopScope(
-      canPop: !_streamingActive,
-      onPopInvokedWithResult: (didPop, _) {
+      canPop: !_streamingActive && !_hasPendingUpload,
+      onPopInvokedWithResult: (didPop, _) async {
         if (didPop) {
           FocusManager.instance.primaryFocus?.unfocus();
         } else {
-          // Back blocked by active streaming → abort and let user retry
-          _handleStreamingAbort();
-          if (mounted) setState(() {});
+          final shouldStop = await _showStopStreamingDialog();
+          if (shouldStop && mounted) setState(() {});
         }
       },
       child: Scaffold(
@@ -1074,7 +1278,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
               top: MediaQuery.paddingOf(context).top + 90,
               left: 0,
               right: 0,
-              child: const Center(child: _StreamingUploadProgressCard()),
+              child: const Center(child: _StreamingStatusCard()),
             ),
             Positioned(
               left: 0,
@@ -1095,26 +1299,6 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         color: Colors.redAccent,
                         backgroundColor: darkInput,
                         isSquareDot: true,
-                        compact: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (isVideoRecording && ref.watch(streamingModeProvider)) ...[
-                    AnimatedSwitcher(
-                      duration: BDMotion.durationFast,
-                      switchInCurve: BDMotion.curveEnter,
-                      switchOutCurve: BDMotion.curveExit,
-                      child: _StatusPill(
-                        key: ValueKey<int>(
-                          ref.watch(streamingFrameCountProvider),
-                        ),
-                        label: textLocalize('stream_progress').replaceFirst(
-                          '%d',
-                          ref.watch(streamingFrameCountProvider).toString(),
-                        ),
-                        color: BDDesign.colorFadedOlive,
-                        backgroundColor: darkInput,
                         compact: true,
                       ),
                     ),
@@ -1418,26 +1602,89 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 }
 
-class _StreamingUploadProgressCard extends ConsumerWidget {
-  const _StreamingUploadProgressCard();
+class _StreamingStatusCard extends ConsumerStatefulWidget {
+  const _StreamingStatusCard();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final successCount = ref.watch(streamingUploadSuccessProvider);
-    if (successCount == 0) return const SizedBox.shrink();
+  ConsumerState<_StreamingStatusCard> createState() =>
+      _StreamingStatusCardState();
+}
+
+class _StreamingStatusCardState extends ConsumerState<_StreamingStatusCard> {
+  double _prevProportion = 0.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final captured = ref.watch(streamingFrameCountProvider);
+    final uploaded = ref.watch(streamingUploadSuccessProvider);
+    final failed = ref.watch(streamingFailCountProvider);
+    final doneMessage = ref.watch(streamingDoneBubbleProvider);
+
+    if (captured == 0 && doneMessage == null) return const SizedBox.shrink();
 
     final cardWidth = (MediaQuery.sizeOf(context).width * 0.44).clamp(
       170.0,
       240.0,
     );
 
-    return Container(
+    // Result mode: streaming has finished
+    if (doneMessage != null) {
+      final isSuccess = uploaded > 0 && failed == 0;
+      return Container(
+        width: cardWidth,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: BDDesign.colorInkBlack.withAlpha(216),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: (isSuccess ? BDDesign.colorFadedOlive : Colors.redAccent)
+                .withAlpha(160),
+          ),
+          boxShadow: [BDDesign.shadowElevated],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSuccess ? Icons.check_circle_outline : Icons.error_outline,
+              color: isSuccess ? BDDesign.colorFadedOlive : Colors.redAccent,
+              size: 16,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                doneMessage,
+                style: TextStyle(
+                  color: Colors.white.withAlpha(220),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Live mode: streaming is active
+    final rawProportion = captured > 0 ? uploaded / captured : 0.0;
+    final proportion = rawProportion > _prevProportion
+        ? rawProportion
+        : _prevProportion;
+    final hasFailures = failed > 0;
+
+    final result = Container(
       width: cardWidth,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: BDDesign.colorInkBlack.withAlpha(216),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: BDDesign.colorFadedOlive.withAlpha(160)),
+        border: Border.all(
+          color: (hasFailures ? Colors.orangeAccent : BDDesign.colorFadedOlive)
+              .withAlpha(160),
+        ),
         boxShadow: [BDDesign.shadowElevated],
       ),
       child: Column(
@@ -1445,46 +1692,78 @@ class _StreamingUploadProgressCard extends ConsumerWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.cloud_upload_outlined,
                 color: BDDesign.colorFadedOlive,
                 size: 14,
               ),
               const SizedBox(width: 8),
               Text(
-                textLocalize(
-                  'stream_uploading',
-                ).replaceFirst('%d', successCount.toString()),
+                textLocalize('stream_uploading').replaceFirst(
+                  '%d',
+                  uploaded.toString(),
+                ),
                 style: const TextStyle(
                   color: BDDesign.colorPaperWhite,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
               ),
+              if (hasFailures) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.close, color: Colors.redAccent, size: 12),
+                const SizedBox(width: 2),
+                Text(
+                  failed.toString(),
+                  style: const TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(
+                Icons.photo_camera_outlined,
+                color: BDDesign.colorAshGray,
+                size: 12,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                textLocalize('stream_progress').replaceFirst(
+                  '%d',
+                  captured.toString(),
+                ),
+                style: const TextStyle(
+                  color: BDDesign.colorAshGray,
+                  fontSize: 11,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          TweenAnimationBuilder<double>(
-            key: ValueKey(successCount),
-            tween: Tween<double>(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, _) {
-              return ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  minHeight: 7,
-                  value: value,
-                  backgroundColor: Colors.white.withAlpha(28),
-                  valueColor: const AlwaysStoppedAnimation<Color>(
-                    BDDesign.colorFadedOlive,
-                  ),
-                ),
-              );
-            },
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 6,
+              value: proportion,
+              backgroundColor: Colors.white.withAlpha(28),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                hasFailures
+                    ? Colors.orangeAccent
+                    : BDDesign.colorFadedOlive,
+              ),
+            ),
           ),
         ],
       ),
     );
+
+    _prevProportion = proportion;
+    return result;
   }
 }
