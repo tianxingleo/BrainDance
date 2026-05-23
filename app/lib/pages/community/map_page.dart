@@ -1,10 +1,13 @@
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'amap_search.dart';
 import 'filtering.dart';
 import 'map_marker.dart';
 import 'repository.dart';
@@ -98,12 +101,24 @@ class CommunityMapPage extends StatefulWidget {
 class _CommunityMapPageState extends State<CommunityMapPage> {
   final MapController _controller = MapController();
   final CommunityRepository _repository = CommunityRepository();
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   late CommunityMapViewport _viewport;
   bool _returningViewport = false;
   List<CommunityMapMarker> _allMarkers = const [];
   List<CommunityMapMarker> _visibleMarkers = const [];
   int _markerLimit = MarkerLimitPreference.defaultLimit;
   bool _markersLoading = true;
+
+  // 搜索状态
+  String _searchKeyword = '';
+  List<AmapPoi> _searchResults = const [];
+  bool _searchLoading = false;
+  String? _searchError;
+  AmapPoi? _selectedSearchPoi;
+  bool _searchResultsOpen = false;
+  CancelToken? _searchCancelToken;
+  int _searchSeq = 0;
 
   @override
   void initState() {
@@ -146,6 +161,9 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
 
   @override
   void dispose() {
+    _searchCancelToken?.cancel('disposed');
+    _searchController.dispose();
+    _searchFocus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -203,6 +221,75 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
       builder: (ctx) => _MarkerLimitSheet(current: _markerLimit),
     );
     if (picked != null) _applyMarkerLimit(picked);
+  }
+
+  Future<void> _runSearch(String raw) async {
+    final keyword = raw.trim();
+    if (keyword.isEmpty) {
+      _clearSearch();
+      return;
+    }
+    _searchCancelToken?.cancel('superseded');
+    final token = CancelToken();
+    final seq = ++_searchSeq;
+    setState(() {
+      _searchKeyword = keyword;
+      _searchLoading = true;
+      _searchError = null;
+      _searchResultsOpen = true;
+      _searchCancelToken = token;
+    });
+    try {
+      final results = await AmapSearchService.instance.searchByText(
+        keyword,
+        cancelToken: token,
+      );
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = results;
+        _searchLoading = false;
+      });
+    } on AmapSearchException catch (e) {
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = const [];
+        _searchLoading = false;
+        _searchError = e.message;
+      });
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) return;
+      if (!mounted || seq != _searchSeq) return;
+      setState(() {
+        _searchResults = const [];
+        _searchLoading = false;
+        _searchError = '网络异常，请稍后重试';
+      });
+    }
+  }
+
+  void _clearSearch() {
+    _searchCancelToken?.cancel('cleared');
+    _searchController.clear();
+    setState(() {
+      _searchKeyword = '';
+      _searchResults = const [];
+      _searchLoading = false;
+      _searchError = null;
+      _searchResultsOpen = false;
+      _selectedSearchPoi = null;
+      _searchCancelToken = null;
+    });
+  }
+
+  void _handlePoiTap(AmapPoi poi) {
+    final currentZoom = _controller.camera.zoom;
+    final targetZoom = currentZoom < 15 ? 15.0 : currentZoom;
+    _controller.move(poi.location, targetZoom);
+    setState(() {
+      _selectedSearchPoi = poi;
+      _searchResultsOpen = false;
+    });
+    _searchFocus.unfocus();
   }
 
   @override
@@ -270,6 +357,24 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                     ],
                   ),
                   const SizedBox(height: 14),
+                  _MapSearchBar(
+                    controller: _searchController,
+                    focusNode: _searchFocus,
+                    isDark: isDark,
+                    textColor: textColor,
+                    hintColor: hintColor,
+                    loading: _searchLoading,
+                    hasKeyword: _searchKeyword.isNotEmpty,
+                    onSubmitted: _runSearch,
+                    onClear: _clearSearch,
+                    onFocusResults: () {
+                      if (_searchKeyword.isNotEmpty &&
+                          (!_searchResultsOpen || _searchResults.isNotEmpty)) {
+                        setState(() => _searchResultsOpen = true);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 14),
                   Expanded(
                     child: BDPanelCard(
                       padding: EdgeInsets.zero,
@@ -308,6 +413,8 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                                   onTap: _handleMarkerTap,
                                   onLongPress: _handleMarkerLongPress,
                                 ),
+                                if (_selectedSearchPoi != null)
+                                  _SearchPinLayer(poi: _selectedSearchPoi!),
                               ],
                             ),
                             _MapHintPill(
@@ -324,6 +431,23 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                                 onZoomOut: () => _stepZoom(-1),
                               ),
                             ),
+                            if (_searchResultsOpen && _searchKeyword.isNotEmpty)
+                              Positioned(
+                                left: 8,
+                                right: 8,
+                                top: 8,
+                                child: _SearchResultsOverlay(
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  hintColor: hintColor,
+                                  loading: _searchLoading,
+                                  error: _searchError,
+                                  results: _searchResults,
+                                  onTap: _handlePoiTap,
+                                  onClose: () => setState(
+                                      () => _searchResultsOpen = false),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -662,3 +786,331 @@ class _MarkerLimitSheetState extends State<_MarkerLimitSheet> {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// 搜索栏
+// ---------------------------------------------------------------------------
+
+class _MapSearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+  final bool loading;
+  final bool hasKeyword;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onClear;
+  final VoidCallback onFocusResults;
+
+  const _MapSearchBar({
+    required this.controller,
+    required this.focusNode,
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+    required this.loading,
+    required this.hasKeyword,
+    required this.onSubmitted,
+    required this.onClear,
+    required this.onFocusResults,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BDPanelCard(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, color: hintColor, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              style: TextStyle(color: textColor, fontSize: 15),
+              cursorColor: BDDesign.colorMutedBlue,
+              textInputAction: TextInputAction.search,
+              maxLength: 60,
+              maxLengthEnforcement: MaxLengthEnforcement.enforced,
+              onSubmitted: onSubmitted,
+              onTap: onFocusResults,
+              decoration: InputDecoration(
+                isDense: true,
+                counterText: '',
+                border: InputBorder.none,
+                hintText: '搜索地点（回车确认）',
+                hintStyle: TextStyle(color: hintColor, fontSize: 14.5),
+              ),
+            ),
+          ),
+          if (loading)
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(BDDesign.colorMutedBlue),
+              ),
+            )
+          else if (hasKeyword)
+            IconButton(
+              tooltip: '清空搜索',
+              splashRadius: 18,
+              onPressed: onClear,
+              icon: Icon(Icons.close_rounded, color: hintColor, size: 20),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 搜索结果浮层
+// ---------------------------------------------------------------------------
+
+class _SearchResultsOverlay extends StatelessWidget {
+  final bool isDark;
+  final Color textColor;
+  final Color hintColor;
+  final bool loading;
+  final String? error;
+  final List<AmapPoi> results;
+  final ValueChanged<AmapPoi> onTap;
+  final VoidCallback onClose;
+
+  const _SearchResultsOverlay({
+    required this.isDark,
+    required this.textColor,
+    required this.hintColor,
+    required this.loading,
+    required this.error,
+    required this.results,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxH = MediaQuery.of(context).size.height * 0.5;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxH),
+      child: BDPanelCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
+              child: Row(
+                children: [
+                  Icon(Icons.place_rounded, color: hintColor, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _headerText(),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    splashRadius: 18,
+                    onPressed: onClose,
+                    icon: Icon(Icons.close_rounded,
+                        color: hintColor, size: 18),
+                  ),
+                ],
+              ),
+            ),
+            Divider(
+              height: 1,
+              color: hintColor.withValues(alpha: 0.18),
+            ),
+            Flexible(child: _buildBody()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _headerText() {
+    if (loading) return '正在搜索…';
+    if (error != null) return '搜索失败';
+    if (results.isEmpty) return '没有匹配结果';
+    return '共 ${results.length} 条结果';
+  }
+
+  Widget _buildBody() {
+    if (loading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 30),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(BDDesign.colorMutedBlue),
+            ),
+          ),
+        ),
+      );
+    }
+    if (error != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 22),
+        child: Text(
+          error!,
+          style: TextStyle(color: hintColor, fontSize: 13.5, height: 1.45),
+        ),
+      );
+    }
+    if (results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 22),
+        child: Text(
+          '试试更具体的地名，或换一个关键词。',
+          style: TextStyle(color: hintColor, fontSize: 13.5, height: 1.45),
+        ),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      padding: EdgeInsets.zero,
+      itemCount: results.length,
+      separatorBuilder: (ctx, idx) => Divider(
+        height: 1,
+        indent: 16,
+        endIndent: 16,
+        color: hintColor.withValues(alpha: 0.12),
+      ),
+      itemBuilder: (ctx, i) {
+        final poi = results[i];
+        final region = poi.regionLabel;
+        final subParts = <String>[];
+        if (region.isNotEmpty) subParts.add(region);
+        if (poi.address.isNotEmpty) subParts.add(poi.address);
+        return InkWell(
+          onTap: () => onTap(poi),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on_outlined,
+                    color: BDDesign.colorMutedBlue, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        poi.name.isEmpty ? '(未命名地点)' : poi.name,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (subParts.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          subParts.join(' · '),
+                          style: TextStyle(
+                            color: hintColor,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    color: hintColor, size: 20),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 高亮的搜索结果定位 pin
+// ---------------------------------------------------------------------------
+
+class _SearchPinLayer extends StatelessWidget {
+  final AmapPoi poi;
+  const _SearchPinLayer({required this.poi});
+
+  @override
+  Widget build(BuildContext context) {
+    return MarkerLayer(
+      markers: [
+        Marker(
+          point: poi.location,
+          width: 220,
+          height: 78,
+          alignment: Alignment.topCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                constraints: const BoxConstraints(maxWidth: 220),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: BDDesign.colorMutedBlue,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x33000000),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  poi.name.isEmpty ? '搜索结果' : poi.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Icon(
+                Icons.location_on_rounded,
+                color: BDDesign.colorMutedBlue,
+                size: 38,
+                shadows: const [
+                  Shadow(
+                    color: Color(0x55000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+

@@ -4,6 +4,10 @@ import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
 import BottomSelector from './BottomSelector.vue';
+import TopBar from './topbar/TopBar.vue';
+import ExitButton from './topbar/ExitButton.vue';
+import SearchPanel from './topbar/SearchPanel.vue';
+import SettingsDropdown from './topbar/SettingsDropdown.vue';
 import {
   buildCenterModeBounds,
   clampCenterModePitch,
@@ -3543,6 +3547,42 @@ onMounted(() => {
   }
 });
 
+const sendFlutterMessage = (payload) => {
+  try {
+    if (window.BrainDanceChannel && typeof window.BrainDanceChannel.postMessage === 'function') {
+      window.BrainDanceChannel.postMessage(JSON.stringify(payload));
+      return true;
+    }
+  } catch (err) {
+    console.warn('[Vue->Flutter] postMessage 失败', err);
+  }
+  return false;
+};
+
+const onExitFromVue = () => {
+  const ok = sendFlutterMessage({ action: 'exit' });
+  if (!ok && typeof window !== 'undefined') {
+    if (window.history && window.history.length > 1) {
+      window.history.back();
+    } else {
+      console.info('[exit] 非 Flutter 环境，已忽略退出请求');
+    }
+  }
+};
+
+const onEnterMarkerArFromVue = () => {
+  const ok = sendFlutterMessage({
+    action: 'switchViewer',
+    useSpark: true,
+    markerAr: true,
+  });
+  if (!ok) {
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert('AR 模式仅在移动端 App 内可用');
+    }
+  }
+};
+
 onBeforeUnmount(async () => {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mousemove', onMouseMove);
@@ -3593,92 +3633,49 @@ onBeforeUnmount(async () => {
       @selectPose="flyToImage"
     />
 
-    <div class="top-hud">
-      <div class="search-panel archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-        <input type="text" v-model="searchQuery" @keyup.enter="searchAndFly" placeholder="例如：门口、桌面左侧、正面特写"
-          class="search-input" />
-        <button @click="searchAndFly" class="archive-btn archive-btn--solid search-btn">检索视角</button>
-      </div>
+    <TopBar>
+      <template #left>
+        <ExitButton @exit="onExitFromVue" />
+      </template>
+      <template #center>
+        <SearchPanel v-model:query="searchQuery" @search="searchAndFly" />
+      </template>
+      <template #right>
+        <SettingsDropdown
+          :view-mode="currentViewMode"
+          :cinematic-speed="cinematicSpeed"
+          :cinematic-progress="cinematicProgress"
+          :cinematic-loop="cinematicLoop"
+          :cinematic-smoothness="cinematicSmoothness"
+          :cinematic-subject-lock="cinematicSubjectLock"
+          :is-cinematic-playing="isCinematicPlaying"
+          :is-cinematic-paused="isCinematicPaused"
+          :can-play-cinematic="canPlayCinematic"
+          :cinematic-button-label="cinematicButtonLabel"
+          :manual-focal-px="manualFocalPx"
+          :focal-min="focalMin"
+          :focal-max="focalMax"
+          :current-view-fov="currentViewFov"
+          :current-view-focal-px="currentViewFocalPx"
+          @enter-ar="onEnterMarkerArFromVue"
+          @update:viewMode="switchViewMode"
+          @update:cinematicSpeed="(v) => (cinematicSpeed = v)"
+          @update:cinematicLoop="(v) => (cinematicLoop = v)"
+          @update:cinematicSmoothness="(v) => (cinematicSmoothness = v)"
+          @update:cinematicSubjectLock="(v) => (cinematicSubjectLock = v)"
+          @cinematic-speed-change="onCinematicSpeedChange"
+          @cinematic-style-change="onCinematicStyleChange"
+          @cinematic-play-toggle="toggleCinematicPlayback"
+          @cinematic-stop="stopCinematicPlayback()"
+          @update:manualFocalPx="(v) => (manualFocalPx = v)"
+          @focal-input="onManualFocalChange"
+          @focal-change="onManualFocalChange"
+          @focal-reset="resetFocalToCapture"
+        />
+      </template>
+    </TopBar>
 
-      <div class="top-actions">
-        <div class="view-mode-switch archive-card" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.FREE }"
-            @click="switchViewMode(VIEW_MODE.FREE)">
-            自由模式
-          </button>
-          <button class="mode-chip" :class="{ active: currentViewMode === VIEW_MODE.ORBIT }"
-            @click="switchViewMode(VIEW_MODE.ORBIT)">
-            中心模式
-          </button>
-        </div>
-        <button class="archive-btn archive-btn--ghost focal-settings-toggle" @click="toggleFocalSettings"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          {{ showFocalSettings ? '收起焦距' : '焦距设置' }}
-        </button>
-        <button v-if="canPlayCinematic" class="cinematic-trigger archive-btn archive-btn--ghost"
-          :class="{ active: showCinematicPanel }" @click="toggleCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchend.stop>
-          <span class="cinematic-trigger-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path
-                d="M4 7.5a1.5 1.5 0 0 1 1.5-1.5h7A1.5 1.5 0 0 1 14 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4 16.5v-9Zm11 2.1 4.83-2.76A.75.75 0 0 1 21 7.5v9a.75.75 0 0 1-1.17.66L15 14.4V9.6Z" />
-            </svg>
-          </span>
-          <span>运镜</span>
-        </button>
-        <div class="cinematic-panel archive-card" v-if="canPlayCinematic && showCinematicPanel"
-          @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-          <div class="cinematic-head">
-            <div>
-              <div class="eyebrow">Camera Move</div>
-              <div class="cinematic-title">自动运镜</div>
-            </div>
-            <div class="cinematic-head-actions">
-              <label class="cinematic-loop-toggle">
-                <input type="checkbox" v-model="cinematicLoop" />
-                <span>循环</span>
-              </label>
-              <button class="cinematic-close" @click="showCinematicPanel = false" aria-label="收起运镜面板">
-                ×
-              </button>
-            </div>
-          </div>
-          <div class="cinematic-actions">
-            <button class="archive-btn archive-btn--solid cinematic-primary" @click="toggleCinematicPlayback">
-              {{ cinematicButtonLabel }}
-            </button>
-            <button class="archive-btn archive-btn--ghost cinematic-secondary"
-              @click="stopCinematicPlayback()"
-              :disabled="!isCinematicPlaying && !isCinematicPaused && cinematicProgress === 0">
-              停止
-            </button>
-          </div>
-          <div class="cinematic-progress-row">
-            <span>进度</span>
-            <span>{{ Math.round(cinematicProgress * 100) }}%</span>
-          </div>
-          <input class="cinematic-progress" type="range" :value="cinematicProgress * 100" min="0" max="100"
-            step="1" disabled />
-          <div class="cinematic-progress-row">
-            <span>速度</span>
-            <span>{{ cinematicSpeed.toFixed(2) }}x</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSpeed" min="0.25" max="3" step="0.05"
-            @input="onCinematicSpeedChange" />
-          <div class="cinematic-progress-row">
-            <span>平滑</span>
-            <span>{{ Math.round(cinematicSmoothness * 100) }}%</span>
-          </div>
-          <input class="cinematic-speed" type="range" v-model.number="cinematicSmoothness" min="0" max="1"
-            step="0.05" @input="onCinematicStyleChange" />
-          <label class="cinematic-focus-toggle">
-            <input type="checkbox" v-model="cinematicSubjectLock" @change="onCinematicStyleChange" />
-            <span>主体锁定</span>
-          </label>
-        </div>
-        <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
-      </div>
-    </div>
+    <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
 
     <div v-if="isLoading" class="loading-overlay">
       <div class="loading-card">
@@ -3710,26 +3707,6 @@ onBeforeUnmount(async () => {
       <button @click="toggleAutoRotate" :class="{ active: isAutoRotate }">
         {{ isAutoRotate ? '停止旋转' : '自动旋转' }}
       </button>
-    </div>
-
-    <div class="focal-settings-panel" v-if="showFocalSettings"
-      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
-      <div class="eyebrow">Lens Control</div>
-      <div class="focal-title">镜头焦距</div>
-      <input type="range" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax" step="1"
-        @input="onManualFocalChange" />
-      <div class="focal-row">
-        <input class="focal-number-input" type="number" v-model.number="manualFocalPx" :min="focalMin" :max="focalMax"
-          step="1" @change="onManualFocalChange" />
-        <span>px</span>
-      </div>
-      <div class="focal-row">
-        <span>当前 FOV: {{ currentViewFov.toFixed(1) }}°</span>
-      </div>
-      <div class="focal-row">
-        <span>当前焦距: {{ currentViewFocalPx.toFixed(1) }} px</span>
-      </div>
-      <button class="archive-btn archive-btn--solid focal-reset-btn" @click="resetFocalToCapture">恢复拍摄焦距</button>
     </div>
 
     <!-- 调试面板 - 已注释 -->
@@ -4463,14 +4440,19 @@ button.active {
 
 /* FPS 计数器 */
 .fps-counter {
+  position: absolute;
+  bottom: 116px;
+  right: 14px;
+  z-index: 90;
   color: var(--text-primary);
   background: var(--fps-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 11px;
   pointer-events: none;
+  opacity: 0.85;
 }
 
 input[type='range'] {
