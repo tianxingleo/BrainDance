@@ -12,6 +12,7 @@ import '../configs/motion_tokens.dart';
 import '../models/agent_conversation_model.dart';
 import '../services/agent_conversation_db.dart';
 import '../services/agent_recall_service.dart';
+import '../services/preview_image_resolver.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/agent_widgets.dart';
 import '../widgets/app_toast.dart';
@@ -121,7 +122,8 @@ class _AgentChatPageState extends ConsumerState<AgentChatPage> {
 
   Future<void> _createNewConversation() async {
     await _saveCurrentConversationState();
-    final id = '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
+    final id =
+        '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(99999)}';
     final conv = await _db.createConversation(id: id);
     if (!mounted) return;
     setState(() {
@@ -195,13 +197,15 @@ class _AgentChatPageState extends ConsumerState<AgentChatPage> {
     );
     final msgId = await _db.insertMessage(userMsg);
     setState(() {
-      _messages.add(AgentMessageRecord(
-        id: msgId,
-        conversationId: userMsg.conversationId,
-        isUser: true,
-        content: trimmed,
-        timestamp: userMsg.timestamp,
-      ));
+      _messages.add(
+        AgentMessageRecord(
+          id: msgId,
+          conversationId: userMsg.conversationId,
+          isUser: true,
+          content: trimmed,
+          timestamp: userMsg.timestamp,
+        ),
+      );
     });
     _scrollToBottom();
 
