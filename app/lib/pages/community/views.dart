@@ -57,7 +57,7 @@ class CommunityRecommendView extends StatelessWidget {
     if (totalPosts == 0) return const _CommunityEmptyState();
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       child: Column(
         children: [
           // 地图面板
@@ -373,38 +373,35 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
         // 搜索框
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: BDPanelCard(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _focusNode,
-              onSubmitted: _submit,
-              onChanged: (v) {
-                if (v.trim().isEmpty && _query.isNotEmpty) {
-                  setState(() => _query = '');
-                }
-              },
-              decoration: InputDecoration(
-                hintText: textLocalize('community_search_placeholder'),
-                hintStyle: TextStyle(color: hintColor, fontSize: 14),
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: hintColor, size: 20),
-                suffixIcon: _query.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.close_rounded, color: hintColor, size: 18),
-                        onPressed: _clear,
-                      )
-                    : null,
-                filled: true,
-                fillColor: inputFill,
-                border: OutlineInputBorder(
-                  borderRadius: BDDesign.radiusLarge,
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
+          child: TextField(
+            controller: _searchController,
+            focusNode: _focusNode,
+            onSubmitted: _submit,
+            onChanged: (v) {
+              if (v.trim().isEmpty && _query.isNotEmpty) {
+                setState(() => _query = '');
+              }
+            },
+            decoration: InputDecoration(
+              hintText: textLocalize('community_search_placeholder'),
+              hintStyle: TextStyle(color: hintColor, fontSize: 14),
+              prefixIcon:
+                  Icon(Icons.search_rounded, color: hintColor, size: 20),
+              suffixIcon: _query.isNotEmpty
+                  ? IconButton(
+                      icon: Icon(Icons.close_rounded, color: hintColor, size: 18),
+                      onPressed: _clear,
+                    )
+                  : null,
+              filled: true,
+              fillColor: inputFill,
+              border: OutlineInputBorder(
+                borderRadius: BDDesign.radiusLarge,
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
               ),
             ),
           ),
@@ -421,7 +418,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
 
   Widget _buildSuggestions(bool isDark, Color textColor, Color hintColor) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -504,7 +501,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
   ) {
     if (results.isEmpty) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         child: BDPanelCard(
           padding: const EdgeInsets.all(24),
           child: Center(
@@ -534,7 +531,7 @@ class _CommunityExploreViewState extends State<CommunityExploreView> {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       itemCount: results.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -753,38 +750,35 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
     }
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 104),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 1. 模型搜索框
-          BDPanelCard(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: TextField(
-              controller: _modelSearchController,
-              onChanged: (v) => setState(() => _modelQuery = v.trim()),
-              decoration: InputDecoration(
-                hintText: textLocalize('community_search_model'),
-                hintStyle: TextStyle(color: hintColor, fontSize: 14),
-                prefixIcon:
-                    Icon(Icons.search_rounded, color: hintColor, size: 20),
-                suffixIcon: _modelQuery.isNotEmpty
-                    ? IconButton(
-                        icon:
-                            Icon(Icons.close_rounded, color: hintColor, size: 18),
-                        onPressed: () {
-                          _modelSearchController.clear();
-                          setState(() => _modelQuery = '');
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: inputFill,
-                border: inputBorder,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
+          TextField(
+            controller: _modelSearchController,
+            onChanged: (v) => setState(() => _modelQuery = v.trim()),
+            decoration: InputDecoration(
+              hintText: textLocalize('community_search_model'),
+              hintStyle: TextStyle(color: hintColor, fontSize: 14),
+              prefixIcon:
+                  Icon(Icons.search_rounded, color: hintColor, size: 20),
+              suffixIcon: _modelQuery.isNotEmpty
+                  ? IconButton(
+                      icon:
+                          Icon(Icons.close_rounded, color: hintColor, size: 18),
+                      onPressed: () {
+                        _modelSearchController.clear();
+                        setState(() => _modelQuery = '');
+                      },
+                    )
+                  : null,
+              filled: true,
+              fillColor: inputFill,
+              border: inputBorder,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 10,
               ),
             ),
           ),
@@ -1335,7 +1329,7 @@ class _CommunityEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 104),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
       child: BDPanelCard(
         padding: const EdgeInsets.all(24),
         child: Center(
