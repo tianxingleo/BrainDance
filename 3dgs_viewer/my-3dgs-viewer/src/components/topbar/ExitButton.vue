@@ -35,8 +35,12 @@ const onClick = () => emit('exit');
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: transform 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   -webkit-tap-highlight-color: transparent;
+  will-change: transform;
 }
 
 .exit-btn:hover {
@@ -45,7 +49,15 @@ const onClick = () => emit('exit');
 }
 
 .exit-btn:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.94);
+  box-shadow: 0 2px 6px var(--card-shadow, rgba(0, 0, 0, 0.12));
+  transition-duration: 90ms;
+}
+
+.exit-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--input-focus-ring, rgba(107, 122, 143, 0.18)),
+    0 8px 18px var(--card-shadow, rgba(0, 0, 0, 0.08));
 }
 
 .exit-btn svg {

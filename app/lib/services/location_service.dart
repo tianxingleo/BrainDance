@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -26,8 +28,15 @@ class LocationService {
   static final LocationService instance = LocationService._();
 
   /// 失败时抛 [LocationException]。
+  ///
+  /// 策略：
+  /// 1. 校验定位服务与权限。
+  /// 2. 在 Dart 端用 `.timeout` 包裹 `getCurrentPosition`，避免 geolocator
+  ///    内部 `timeLimit` 在冷启动 GPS 时直接抛 `TimeoutException: Future not
+  ///    completed` 且不释放底层订阅的问题。
+  /// 3. 超时或失败时回落到 `getLastKnownPosition`，仅在两者都拿不到时抛错。
   Future<LatLng> getCurrentGcj02({
-    Duration timeout = const Duration(seconds: 10),
+    Duration timeout = const Duration(seconds: 15),
   }) async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -54,19 +63,41 @@ class LocationService {
       );
     }
 
+    Position? pos;
+    Object? lastError;
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
+      pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: timeout,
         ),
-      );
-      return wgs84ToGcj02(LatLng(pos.latitude, pos.longitude));
+      ).timeout(timeout);
+    } on TimeoutException catch (e) {
+      lastError = e;
     } catch (e) {
-      throw LocationException(
+      lastError = e;
+    }
+
+    if (pos == null) {
+      try {
+        pos = await Geolocator.getLastKnownPosition();
+      } catch (_) {
+        // ignore，继续按下面的逻辑抛错
+      }
+    }
+
+    if (pos != null) {
+      return wgs84ToGcj02(LatLng(pos.latitude, pos.longitude));
+    }
+
+    if (lastError is TimeoutException) {
+      throw const LocationException(
         LocationFailureReason.timeout,
-        '获取定位失败：$e',
+        '获取定位超时，请到空旷处或开启 GPS 后重试。',
       );
     }
+    throw LocationException(
+      LocationFailureReason.unknown,
+      '获取定位失败：${lastError ?? '未知错误'}',
+    );
   }
 }

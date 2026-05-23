@@ -184,13 +184,29 @@ const onEnterAr = () => {
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: transform 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
   -webkit-tap-highlight-color: transparent;
+  will-change: transform;
 }
 
 .dd-trigger:hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 22px var(--card-shadow, rgba(0, 0, 0, 0.12));
+}
+
+.dd-trigger:active {
+  transform: translateY(0) scale(0.94);
+  box-shadow: 0 2px 6px var(--card-shadow, rgba(0, 0, 0, 0.12));
+  transition-duration: 90ms;
+}
+
+.dd-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--input-focus-ring, rgba(107, 122, 143, 0.18)),
+    0 8px 18px var(--card-shadow, rgba(0, 0, 0, 0.08));
 }
 
 .dd-trigger--open {
@@ -222,6 +238,8 @@ const onEnterAr = () => {
   max-height: calc(100vh - var(--flutter-safe-top, 92px) - 80px);
   overflow-y: auto;
   overflow-x: hidden;
+  transform-origin: top right;
+  will-change: transform, opacity;
 }
 
 .dd-section {
@@ -238,14 +256,31 @@ const onEnterAr = () => {
   margin: 4px 8px;
 }
 
-.dd-panel-enter-active,
+.dd-panel-enter-active {
+  transition:
+    opacity 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .dd-panel-leave-active {
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity 160ms cubic-bezier(0.4, 0, 1, 1),
+    transform 200ms cubic-bezier(0.4, 0, 1, 1),
+    filter 160ms cubic-bezier(0.4, 0, 1, 1);
 }
 
 .dd-panel-enter-from,
 .dd-panel-leave-to {
   opacity: 0;
-  transform: translateY(-6px) scale(0.98);
+  transform: translateY(-8px) scale(0.92);
+  filter: blur(2px);
+}
+
+.dd-panel-enter-to,
+.dd-panel-leave-from {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
 }
 </style>

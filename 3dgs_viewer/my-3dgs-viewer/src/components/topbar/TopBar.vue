@@ -26,14 +26,14 @@
 <style scoped>
 .topbar {
   position: absolute;
-  top: 2px;
+  top: 30px;
   left: 8px;
   right: 8px;
   z-index: 130;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   pointer-events: none;
 }
 
