@@ -14,6 +14,7 @@ import 'package:braindance/pages/my/my_page_tabs.dart';
 import 'package:braindance/pages/recall/overview_card.dart';
 import 'package:braindance/pages/task_list.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -70,7 +71,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final bottomContentPadding = bottomInset + 132.0;
 
     ref.listen(myPostsRefreshSignal, (prev, next) {
-      if (prev != next) _loadCommunityAccount();
+      if (prev != null && prev != next) _loadCommunityAccount();
     });
 
     return Scaffold(
@@ -290,8 +291,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   }
 
   Future<void> _togglePostVisibility(CommunityPost post) async {
+    showAppToast(context, textLocalize('my_post_updating'));
     await _communityRepository.togglePostVisibility(post);
     ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_updated'));
   }
 
   Future<void> _confirmDeletePost(CommunityPost post) async {
@@ -315,8 +319,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       },
     );
     if (confirmed != true) return;
+    showAppToast(context, textLocalize('my_post_deleting'));
     await _communityRepository.deletePost(post.id);
     ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_deleted'));
   }
 }
 

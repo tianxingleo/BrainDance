@@ -726,7 +726,7 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
     final topSafe = MediaQuery.paddingOf(context).top;
 
     ref.listen(myPostsRefreshSignal, (prev, next) {
-      if (prev != next) _loadCommunity();
+      if (prev != null && prev != next) _loadCommunity();
     });
 
     return PopScope(
