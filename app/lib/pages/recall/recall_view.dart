@@ -17,6 +17,7 @@ extension _RecallPageView on _RecallPageState {
     });
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.transparent,
       body: Stack(
         key: _actionOverlayStackKey,

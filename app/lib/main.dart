@@ -589,6 +589,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     }
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       extendBody: true,
       body: BDPageBackdrop(
         child: isLoading
