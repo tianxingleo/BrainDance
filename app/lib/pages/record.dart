@@ -52,6 +52,9 @@ final streamingDoneBubbleProvider = StateProvider<String?>((ref) => null);
 /// 流式传输模式开关
 final streamingModeProvider = StateProvider<bool>((ref) => false);
 
+/// 拍摄键上方模式切换气泡（null = 隐藏）
+final recordModeBubbleProvider = StateProvider<String?>((ref) => null);
+
 /// 流式拍摄实时帧计数
 final streamingFrameCountProvider = StateProvider<int>((ref) => 0);
 
@@ -1438,6 +1441,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         onPressed: () async {
                           final next = !ref.read(streamingModeProvider);
                           ref.read(streamingModeProvider.notifier).state = next;
+                          ref.read(recordModeBubbleProvider.notifier).state = next
+                              ? '已切换为流式传输模式'
+                              : '已切换为普通录制模式';
                         },
                       ),
                     ),
@@ -1604,8 +1610,25 @@ class _RecordPageState extends ConsumerState<RecordPage>
                 ),
               ),
             const _AccelWarningBanner(),
-            const _SaveFailBubble(),
-            const _StreamingDoneBubble(),
+            _TipBubble(
+              provider: saveFailBubbleProvider,
+              alignment: const Alignment(0, 0.30),
+              icon: Icons.error_outline_rounded,
+              iconColor: Colors.orange.withAlpha(200),
+            ),
+            _TipBubble(
+              provider: streamingDoneBubbleProvider,
+              alignment: const Alignment(0, 0.30),
+              icon: Icons.info_outline_rounded,
+              iconColor: Colors.white.withAlpha(180),
+              withSlide: false,
+            ),
+            _TipBubble(
+              provider: recordModeBubbleProvider,
+              alignment: const Alignment(0, 0.72),
+              icon: Icons.info_outline_rounded,
+              iconColor: Colors.white.withAlpha(180),
+            ),
             _CenterBubble(
               provider: showTooShortBubbleProvider,
               message: textLocalize('reco_record_too_short'),

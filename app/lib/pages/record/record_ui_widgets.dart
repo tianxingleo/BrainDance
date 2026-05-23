@@ -241,14 +241,27 @@ class _AccelWarningBannerState extends ConsumerState<_AccelWarningBanner>
 }
 
 // ===== Save Fail Bubble (middle-lower floating) =====
-class _SaveFailBubble extends ConsumerStatefulWidget {
-  const _SaveFailBubble();
+// ===== Reusable Tip Bubble =====
+class _TipBubble extends ConsumerStatefulWidget {
+  final StateProvider<String?> provider;
+  final Alignment alignment;
+  final IconData icon;
+  final Color iconColor;
+  final bool withSlide;
+
+  const _TipBubble({
+    required this.provider,
+    required this.alignment,
+    required this.icon,
+    required this.iconColor,
+    this.withSlide = true,
+  });
 
   @override
-  ConsumerState<_SaveFailBubble> createState() => _SaveFailBubbleState();
+  ConsumerState<_TipBubble> createState() => _TipBubbleState();
 }
 
-class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
+class _TipBubbleState extends ConsumerState<_TipBubble>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _fade;
@@ -272,7 +285,7 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.addStatusListener((s) {
       if (s == AnimationStatus.dismissed && mounted) {
-        ref.read(saveFailBubbleProvider.notifier).state = null;
+        ref.read(widget.provider.notifier).state = null;
       }
     });
   }
@@ -286,9 +299,9 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
 
   @override
   Widget build(BuildContext context) {
-    final message = ref.watch(saveFailBubbleProvider);
+    final message = ref.watch(widget.provider);
 
-    ref.listen(saveFailBubbleProvider, (prev, next) {
+    ref.listen(widget.provider, (prev, next) {
       if (next != null) {
         _dismissTimer?.cancel();
         _ctrl.forward();
@@ -305,166 +318,47 @@ class _SaveFailBubbleState extends ConsumerState<_SaveFailBubble>
           if (_ctrl.isDismissed) return const SizedBox.shrink();
           if (message == null) return const SizedBox.shrink();
 
-          return Align(
-            alignment: const Alignment(0, 0.30),
-            child: FadeTransition(
-              opacity: _fade,
-              child: SlideTransition(
-                position: _slide,
-                child: GestureDetector(
-                  onTap: () {
-                    _dismissTimer?.cancel();
-                    _ctrl.reverse();
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 32),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xE6282828),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withAlpha(18)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.error_outline_rounded,
-                          color: Colors.orange.withAlpha(200),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 10),
-                        Flexible(
-                          child: Text(
-                            message,
-                            style: TextStyle(
-                              color: Colors.white.withAlpha(220),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ],
+          final bubble = GestureDetector(
+            onTap: () {
+              _dismissTimer?.cancel();
+              _ctrl.reverse();
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xE6282828),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withAlpha(18)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, color: widget.iconColor, size: 20),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      message,
+                      style: TextStyle(
+                        color: Colors.white.withAlpha(220),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           );
-        },
-      ),
-    );
-  }
-}
-
-// ===== Streaming Done Bubble =====
-class _StreamingDoneBubble extends ConsumerStatefulWidget {
-  const _StreamingDoneBubble();
-
-  @override
-  ConsumerState<_StreamingDoneBubble> createState() =>
-      _StreamingDoneBubbleState();
-}
-
-class _StreamingDoneBubbleState extends ConsumerState<_StreamingDoneBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _fade;
-  Timer? _dismissTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      duration: const Duration(milliseconds: 280),
-      vsync: this,
-    );
-    _fade = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
-    _ctrl.addStatusListener((s) {
-      if (s == AnimationStatus.dismissed && mounted) {
-        ref.read(streamingDoneBubbleProvider.notifier).state = null;
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _dismissTimer?.cancel();
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final message = ref.watch(streamingDoneBubbleProvider);
-
-    ref.listen(streamingDoneBubbleProvider, (prev, next) {
-      if (next != null) {
-        _dismissTimer?.cancel();
-        _ctrl.forward();
-        _dismissTimer = Timer(const Duration(seconds: 4), () {
-          if (mounted) _ctrl.reverse();
-        });
-      }
-    });
-
-    return Positioned.fill(
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (context, child) {
-          if (_ctrl.isDismissed) return const SizedBox.shrink();
-          if (message == null) return const SizedBox.shrink();
 
           return Align(
-            alignment: const Alignment(0, 0.30),
+            alignment: widget.alignment,
             child: FadeTransition(
               opacity: _fade,
-              child: GestureDetector(
-                onTap: () {
-                  _dismissTimer?.cancel();
-                  _ctrl.reverse();
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE6282828),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withAlpha(18)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        color: Colors.white.withAlpha(180),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Text(
-                          message,
-                          style: TextStyle(
-                            color: Colors.white.withAlpha(220),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: widget.withSlide
+                  ? SlideTransition(position: _slide, child: bubble)
+                  : bubble,
             ),
           );
         },
