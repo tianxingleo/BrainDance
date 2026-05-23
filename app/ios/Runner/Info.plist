@@ -53,6 +53,8 @@
 		<string>Enables users to record video audio and upload it.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>Makes it easy for users to save videos/photos to their phones.</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>用于在投稿时获取你的当前位置。</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

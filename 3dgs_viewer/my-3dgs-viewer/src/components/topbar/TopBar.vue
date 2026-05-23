@@ -26,13 +26,13 @@
 <style scoped>
 .topbar {
   position: absolute;
-  top: calc(var(--flutter-safe-top, 92px) + 8px);
+  top: calc(var(--flutter-safe-top, 92px) + 56px);
   left: var(--flutter-safe-left, 14px);
-  right: var(--flutter-safe-right, 14px);
+  right: var(--flutter-safe-left, 14px);
   z-index: 130;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: 12px;
   pointer-events: none;
 }

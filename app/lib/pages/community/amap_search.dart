@@ -40,6 +40,25 @@ class AmapSearchException implements Exception {
   String toString() => 'AmapSearchException($code): $message';
 }
 
+/// 高德逆地理编码结果（简化）。
+class AmapRegeo {
+  /// 适合作为 placeName 显示的短文案：优先 AOI/POI 名，其次 township/district。
+  final String placeName;
+
+  /// 高德 formatted_address（包含省市区+街道+门牌）。
+  final String formattedAddress;
+
+  final String cityName;
+  final String district;
+
+  const AmapRegeo({
+    required this.placeName,
+    required this.formattedAddress,
+    required this.cityName,
+    required this.district,
+  });
+}
+
 /// 单例的高德文本搜索服务。
 class AmapSearchService {
   AmapSearchService._internal();
@@ -147,6 +166,77 @@ class AmapSearchService {
       type: _stringField(raw['type']),
       cityName: _stringField(raw['cityname']),
       district: _stringField(raw['adname']),
+    );
+  }
+
+  /// 逆地理编码：把 GCJ-02 坐标解析为可读地址。
+  /// 注意：传入的 [point] 必须是 GCJ-02 坐标，调用方应先做转换。
+  Future<AmapRegeo> regeoSearch(
+    LatLng point, {
+    CancelToken? cancelToken,
+  }) async {
+    final key = _readKey();
+    final params = <String, dynamic>{
+      'key': key,
+      'location':
+          '${point.longitude.toStringAsFixed(6)},${point.latitude.toStringAsFixed(6)}',
+      'extensions': 'base',
+      'output': 'json',
+      'radius': 200,
+    };
+    final Response<dynamic> resp;
+    try {
+      resp = await _client().get<dynamic>(
+        '/v3/geocode/regeo',
+        queryParameters: params,
+        cancelToken: cancelToken,
+      );
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) rethrow;
+      throw AmapSearchException('网络请求失败：${e.message ?? e.type.name}');
+    }
+    final data = resp.data;
+    if (data is! Map) {
+      throw const AmapSearchException('响应格式异常');
+    }
+    final status = data['status']?.toString();
+    if (status != '1') {
+      final info = data['info']?.toString() ?? '未知错误';
+      final code = data['infocode']?.toString();
+      throw AmapSearchException(info, code: code);
+    }
+    final regeocode = data['regeocode'];
+    if (regeocode is! Map) {
+      throw const AmapSearchException('逆地理结果为空');
+    }
+    final formatted = _stringField(regeocode['formatted_address']);
+    final addressComp = regeocode['addressComponent'];
+    String city = '';
+    String district = '';
+    String township = '';
+    String aoiName = '';
+    String poiName = '';
+    if (addressComp is Map) {
+      city = _stringField(addressComp['city']);
+      if (city.isEmpty) city = _stringField(addressComp['province']);
+      district = _stringField(addressComp['district']);
+      township = _stringField(addressComp['township']);
+      final aois = addressComp['aois'];
+      if (aois is List && aois.isNotEmpty && aois.first is Map) {
+        aoiName = _stringField((aois.first as Map)['name']);
+      }
+      final pois = addressComp['pois'];
+      if (pois is List && pois.isNotEmpty && pois.first is Map) {
+        poiName = _stringField((pois.first as Map)['name']);
+      }
+    }
+    final placeName = [aoiName, poiName, township, district, formatted]
+        .firstWhere((v) => v.isNotEmpty, orElse: () => '');
+    return AmapRegeo(
+      placeName: placeName,
+      formattedAddress: formatted,
+      cityName: city,
+      district: district,
     );
   }
 

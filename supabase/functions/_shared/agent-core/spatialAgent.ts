@@ -3109,7 +3109,7 @@ async function executeUnifiedAgentLoop(input: {
     .addEdge("agent", "executeTools")
     .addEdge("executeTools", "checkStop")
     .addConditionalEdges("checkStop", (s: UnifiedState) =>
-      s.shouldStop || s.round >= UNIFIED_MAX_ROUNDS ? "__end__" : "agent"
+      s.shouldStop ? "__end__" : "agent"
     )
     .compile();
 
@@ -3121,7 +3121,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-  }, { recursionLimit: UNIFIED_MAX_ROUNDS * 2 + 10 });
+  }, { recursionLimit: Number.MAX_SAFE_INTEGER });
 
   return {
     candidates: finalState.candidates,
