@@ -89,7 +89,11 @@ class _BDFadeInNetworkImageState extends State<BDFadeInNetworkImage>
           _hasImage = true;
           _hasError = false;
         });
-        _controller.forward(from: 0);
+        if (synchronousCall) {
+          _controller.value = 1.0;
+        } else {
+          _controller.forward(from: 0);
+        }
       },
       onError: (Object error, StackTrace? stackTrace) {
         if (!mounted) return;
