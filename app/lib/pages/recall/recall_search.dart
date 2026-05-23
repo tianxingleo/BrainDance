@@ -355,6 +355,33 @@ extension _RecallPageSearch on _RecallPageState {
     };
   }
 
+  VoidCallback? _buildCandidateCardOnOpen(
+    AgentCandidate candidate,
+    int index,
+    AgentRecallResponse? result,
+  ) {
+    if (index == 0 && result != null) {
+      return () => _openAgentRecallResult(result);
+    }
+    final plyPath = candidate.plyPath ?? '';
+    if (plyPath.isEmpty || candidate.sceneId.isEmpty) return null;
+    return () {
+      final modelUrl =
+          plyPath.startsWith('http://') || plyPath.startsWith('https://')
+              ? plyPath
+              : _toPublicUrl(plyPath);
+      final posesUrl = _toPosesUrl(plyPath);
+      unawaited(
+        openViewer(
+          context,
+          initialModelUrl: modelUrl,
+          posesUrl: posesUrl,
+          sceneId: candidate.sceneId,
+        ),
+      );
+    };
+  }
+
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
     if (_searchMode == RecallSearchMode.localAi) {
@@ -683,22 +710,30 @@ extension _RecallPageSearch on _RecallPageState {
                 ),
               ),
           ] else if (topCandidates.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            for (final candidate in topCandidates)
+            const SizedBox(height: 12),
+            for (int i = 0; i < topCandidates.length; i++)
               Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
-                  style: TextStyle(
-                    color: hintColor,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: AgentAssetCard(
+                  displayName: topCandidates[i].displayName ??
+                      (topCandidates[i].description.isNotEmpty
+                          ? topCandidates[i].description
+                          : topCandidates[i].sceneId),
+                  description: topCandidates[i].description.isNotEmpty
+                      ? topCandidates[i].description
+                      : '场景 ${topCandidates[i].sceneId}',
+                  tags: topCandidates[i].tags,
+                  previewImgPath: topCandidates[i].previewImgPath,
+                  score: topCandidates[i].score,
+                  isDark: isDark,
+                  actionLabel: i == 0 ? '飞到视角' : '打开场景',
+                  onOpen: _buildCandidateCardOnOpen(topCandidates[i], i, result),
                 ),
               ),
           ],
           if (hasActions &&
-              !(isAssetMode && assetModels.isNotEmpty)) ...[
+              !(isAssetMode && assetModels.isNotEmpty) &&
+              topCandidates.isEmpty) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -815,22 +850,31 @@ extension _RecallPageSearch on _RecallPageState {
                   ),
                 ),
             ] else if (topCandidates.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              for (final candidate in topCandidates)
+              const SizedBox(height: 12),
+              for (int i = 0; i < topCandidates.length; i++)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: AgentAssetCard(
+                    displayName: topCandidates[i].displayName ??
+                        (topCandidates[i].description.isNotEmpty
+                            ? topCandidates[i].description
+                            : topCandidates[i].sceneId),
+                    description: topCandidates[i].description.isNotEmpty
+                        ? topCandidates[i].description
+                        : '场景 ${topCandidates[i].sceneId}',
+                    tags: topCandidates[i].tags,
+                    previewImgPath: topCandidates[i].previewImgPath,
+                    score: topCandidates[i].score,
+                    isDark: isDark,
+                    actionLabel: i == 0 ? '飞到视角' : '打开场景',
+                    onOpen: _buildCandidateCardOnOpen(
+                        topCandidates[i], i, _agentResult),
                   ),
                 ),
             ],
             if (hasActions &&
-                !(isActiveAssetMode && activeAssetModels.isNotEmpty)) ...[
+                !(isActiveAssetMode && activeAssetModels.isNotEmpty) &&
+                topCandidates.isEmpty) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -1212,31 +1256,31 @@ extension _RecallPageSearch on _RecallPageState {
                   ),
               ] else if (topCandidates.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Text(
-                  '候选结果',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final candidate in topCandidates)
+                for (int i = 0; i < topCandidates.length; i++)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      '${candidate.sceneId} · ${(candidate.score * 100).toStringAsFixed(1)}% · ${candidate.description}',
-                      style: TextStyle(
-                        color: hintColor,
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: AgentAssetCard(
+                      displayName: topCandidates[i].displayName ??
+                          (topCandidates[i].description.isNotEmpty
+                              ? topCandidates[i].description
+                              : topCandidates[i].sceneId),
+                      description: topCandidates[i].description.isNotEmpty
+                          ? topCandidates[i].description
+                          : '场景 ${topCandidates[i].sceneId}',
+                      tags: topCandidates[i].tags,
+                      previewImgPath: topCandidates[i].previewImgPath,
+                      score: topCandidates[i].score,
+                      isDark: isDark,
+                      actionLabel: i == 0 ? '飞到视角' : '打开场景',
+                      onOpen: _buildCandidateCardOnOpen(
+                          topCandidates[i], i, _agentResult),
                     ),
                   ),
               ],
 
               if (hasActions &&
-                  !(isActiveAssetMode && activeAssetModels.isNotEmpty)) ...[
+                  !(isActiveAssetMode && activeAssetModels.isNotEmpty) &&
+                  topCandidates.isEmpty) ...[
                 const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,

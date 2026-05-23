@@ -18,6 +18,24 @@ export function buildAgentContextBlock(
     );
   }
 
+  if (options.presentation) {
+    const p = options.presentation;
+    const detail = p.source === "user_explicit"
+      ? `用户在本轮明确要求 ${p.requested_model_count} 个`
+      : p.source === "clamped"
+      ? `用户要求 ${p.requested_model_count} 个，已被截断到上限 ${p.max_model_count}`
+      : `未指定数量，使用默认 ${p.default_model_count} 个`;
+    parts.push(
+      `- 模型展示数量 (effective_model_count): ${p.effective_model_count} (${detail}；硬上限 ${p.max_model_count})`,
+    );
+    parts.push(
+      "  调用 read_model_assets / get_model_asset_bundle / list_*_models 等列表型工具时，limit 应对齐 effective_model_count；当无可用结果时仍可低于该数量，但不要主动超出。",
+    );
+    parts.push(
+      "  最终回答中列举的模型数量也以 effective_model_count 为准，避免在文本中给出与 effective_model_count 不一致的总数。",
+    );
+  }
+
   if (options.selectedModelIds && options.selectedModelIds.length > 0) {
     const ids = options.selectedModelIds.map((id) => `"${id}"`).join(", ");
     parts.push(

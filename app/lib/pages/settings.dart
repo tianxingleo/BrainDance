@@ -7,15 +7,19 @@ import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/set_config.dart';
+import 'package:braindance/pages/community/detail.dart';
+import 'package:braindance/pages/community/models.dart';
+import 'package:braindance/pages/community/repository.dart';
+import 'package:braindance/pages/my/my_page_tabs.dart';
 import 'package:braindance/pages/recall/overview_card.dart';
-import 'package:braindance/pages/settabs/settab1.dart';
-import 'package:braindance/pages/settabs/settab3.dart';
 import 'package:braindance/pages/task_list.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../main.dart' show overviewStatsProvider, pageAnimatingProvider;
+import '../main.dart'
+    show overviewStatsProvider, pageAnimatingProvider, pageIndexProvider;
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -29,16 +33,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   late final TabController tabController;
   int _currentTabIndex = 0;
   final GlobalKey _themeSwitchKey = GlobalKey();
+  final CommunityRepository _communityRepository = CommunityRepository();
+  CommunityStats _communityStats = const CommunityStats();
+  List<CommunityPost> _myPosts = const [];
+  List<CommunityPost> _favoritePosts = const [];
+  List<CommunityPost> _likedPosts = const [];
+  CommunityDraft _communityDraft = const CommunityDraft();
+  bool _isCommunityLoading = true;
 
   @override
   void initState() {
     super.initState();
     tabController = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
       animationDuration: const Duration(milliseconds: 200),
     );
     tabController.addListener(_handleTabChange);
+    _loadCommunityAccount();
   }
 
   @override
@@ -67,7 +79,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
             child: Column(
               children: [
                 BDPageHeader(
-                  title: textLocalize('manage'),
+                  title: textLocalize('mine'),
+                  subtitle: textLocalize('my_subtitle'),
                   trailing: GestureDetector(
                     onTap: () async {
                       final currentState = ref.read(themeAnimationProvider);
@@ -187,9 +200,119 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       width: double.infinity,
       child: BDTabSwitcher(
         index: _currentTabIndex,
-        children: [setTab1(context, ref), setTab3(context)],
+        children: [
+          MyOverviewTab(
+            userLabel: _userLabel,
+            stats: _communityStats,
+            isLoading: _isCommunityLoading,
+            onOpenCommunity: _openCommunityTab,
+            onRefresh: _loadCommunityAccount,
+          ),
+          MyCommunityTab(
+            myPosts: _myPosts,
+            favoritePosts: _favoritePosts,
+            likedPosts: _likedPosts,
+            draft: _communityDraft,
+            isLoading: _isCommunityLoading,
+            onOpenPost: _openPost,
+            onDeletePost: _confirmDeletePost,
+            onToggleVisibility: _togglePostVisibility,
+            onContinueDraft: _openCommunityTab,
+            onRefresh: _loadCommunityAccount,
+          ),
+          MySettingsTab(ref: ref),
+        ],
       ),
     );
+  }
+
+  String get _userLabel {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user?.email?.isNotEmpty == true) {
+      return user!.email!;
+    }
+    if (user?.id.isNotEmpty == true) {
+      return user!.id;
+    }
+    return textLocalize('my_guest_user');
+  }
+
+  Future<void> _loadCommunityAccount() async {
+    setState(() => _isCommunityLoading = true);
+    final stats = await _communityRepository.fetchCommunityStats();
+    final myPosts = await _communityRepository.fetchMyPosts();
+    final favoritePosts = await _communityRepository.fetchFavoritePosts();
+    final likedPosts = await _communityRepository.fetchLikedPosts();
+    final draft = await _communityRepository.loadDraft();
+    if (!mounted) return;
+    setState(() {
+      _communityStats = stats;
+      _myPosts = myPosts;
+      _favoritePosts = favoritePosts;
+      _likedPosts = likedPosts;
+      _communityDraft = draft;
+      _isCommunityLoading = false;
+    });
+  }
+
+  void _openCommunityTab() {
+    ref.read(pageIndexProvider.notifier).state = 3;
+  }
+
+  void _openPost(CommunityPost post) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        transitionDuration: BDMotion.durationNormal,
+        reverseTransitionDuration: BDMotion.durationNormal,
+        opaque: true,
+        pageBuilder: (_, __, ___) => CommunityDetailPage(post: post),
+        transitionsBuilder: (_, animation, __, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOutCubic,
+              ),
+            ),
+            child: child,
+          );
+        },
+      ),
+    ).then((_) => _loadCommunityAccount());
+  }
+
+  Future<void> _togglePostVisibility(CommunityPost post) async {
+    await _communityRepository.togglePostVisibility(post);
+    await _loadCommunityAccount();
+  }
+
+  Future<void> _confirmDeletePost(CommunityPost post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(textLocalize('my_delete_post')),
+          content: Text(textLocalize('my_delete_post_confirm')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(textLocalize('recall_delete_confirm_cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(textLocalize('recall_delete_confirm_yes')),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+    await _communityRepository.deletePost(post.id);
+    await _loadCommunityAccount();
   }
 }
 
@@ -240,7 +363,7 @@ class _SettingsTabSwitch extends StatelessWidget {
             ),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final tabWidth = constraints.maxWidth / 2;
+                final tabWidth = constraints.maxWidth / 3;
                 return Stack(
                   children: [
                     AnimatedBuilder(
@@ -266,13 +389,19 @@ class _SettingsTabSwitch extends StatelessWidget {
                       children: [
                         _buildTabItem(
                           0,
-                          textLocalize('set_tab1'),
+                          textLocalize('my_tab_overview'),
                           selectedColor,
                           unselectedColor,
                         ),
                         _buildTabItem(
                           1,
-                          textLocalize('set_tab3'),
+                          textLocalize('my_tab_community'),
+                          selectedColor,
+                          unselectedColor,
+                        ),
+                        _buildTabItem(
+                          2,
+                          textLocalize('my_tab_settings'),
                           selectedColor,
                           unselectedColor,
                         ),

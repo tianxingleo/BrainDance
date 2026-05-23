@@ -60,6 +60,23 @@ class RecoConfig {
     cameraInitialize();
   }
 
+  /// 切换相机分辨率并重新初始化
+  static Future<void> switchResolution(ResolutionPreset preset) async {
+    if (cameraController == null) return;
+    try {
+      await cameraController!.dispose();
+    } catch (_) {}
+    try {
+      cameraController = CameraController(cameras[camNum], preset);
+      await cameraController!.initialize();
+    } catch (_) {
+      // 回退到 max 分辨率
+      cameraController = CameraController(cameras[camNum], ResolutionPreset.max);
+      await cameraController!.initialize();
+    }
+    onUpdate?.call();
+  }
+
   static void disposeCamera() {
     if ((cameraController == null) ||
         (!cameraController!.value.isInitialized)) {

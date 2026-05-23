@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:braindance/configs/app_config.dart';
@@ -16,6 +17,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:image/image.dart' as img;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -83,12 +85,13 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _streamingTimer;
   String? _streamingSceneId;
   int _streamingFrameIndex = 0;
-  final List<Future> _pendingUploads = [];
+  final List<(String, String)> _uploadQueue = []; // (filePath, frameLabel)
+  bool _queueLocked = false;
   int _streamingSuccessCount = 0;
   int _streamingFailCount = 0;
   static const _streamingIntervalSec = 1;
   static const _streamingMaxDurationSec = 600; // 10 min
-  bool _streamingUploading = false;
+  bool _streamingActive = false;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   StreamSubscription<UserAccelerometerEvent>? _userAccelSub;
@@ -210,7 +213,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     } else {
       WakelockPlus.disable();
     }
-    ref.read(isRecordingProvider.notifier).state = value;
+    if (mounted) {
+      ref.read(isRecordingProvider.notifier).state = value;
+    }
   }
 
   void _resetRecordingState({bool updateUi = false}) {
@@ -218,9 +223,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _recordTimer = null;
     _streamingTimer?.cancel();
     _streamingTimer = null;
-    _streamingSceneId = null;
-    _pendingUploads.clear();
-    _streamingUploading = false;
+    _resetStreamingState();
     _recordSeconds = 0;
     _recordingStartTime = null;
     _setGlobalRecording(false);
@@ -410,8 +413,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     _streamingFrameIndex = 0;
     _streamingSuccessCount = 0;
     _streamingFailCount = 0;
-    _pendingUploads.clear();
-    _streamingUploading = false;
+    _uploadQueue.clear();
+    _queueLocked = false;
+    _streamingActive = true;
     _recordSeconds = 0;
     _setGlobalRecording(true);
 
@@ -420,7 +424,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     // Capture first frame immediately, then every 1s
-    _captureAndUploadFrame(controller, user.id);
+    _captureAndQueueFrame(controller);
     _streamingTimer = Timer.periodic(
       const Duration(seconds: _streamingIntervalSec),
       (_) {
@@ -431,7 +435,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
         }
         if (mounted) {
           setState(() {});
-          _captureAndUploadFrame(controller, user.id);
+          _captureAndQueueFrame(controller);
         }
       },
     );
@@ -439,14 +443,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     if (mounted) setState(() {});
   }
 
-  Future<void> _captureAndUploadFrame(
-    CameraController controller,
-    String userId,
-  ) async {
-    if (_streamingUploading) return;
-    _streamingUploading = true;
+  Future<void> _captureAndQueueFrame(CameraController controller) async {
+    if (!_streamingActive) return;
 
-    final sceneId = _streamingSceneId!;
     final frameIndex = ++_streamingFrameIndex;
     final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
 
@@ -454,66 +453,104 @@ class _RecordPageState extends ConsumerState<RecordPage>
     try {
       photo = await controller.takePicture();
     } catch (e) {
-      debugPrint('[_captureAndUpload] takePicture failed: $e');
+      debugPrint('[_captureAndQueue] takePicture failed: $e');
       _streamingFailCount++;
-      _streamingUploading = false;
       if (mounted) setState(() {});
       return;
     }
 
-    final file = File(photo.path);
-    final storagePath = '$userId/$sceneId/raw/$frameLabel.jpg';
-
-    final uploadFuture = Supabase.instance.client.storage
-        .from('braindance-assets')
-        .upload(storagePath, file)
-        .then((result) {
-      _streamingSuccessCount++;
-      debugPrint('[_captureAndUpload] uploaded $frameLabel → $result');
-    }).catchError((e) {
-      _streamingFailCount++;
-      debugPrint('[_captureAndUpload] upload failed: $e');
-    }).whenComplete(() {
-      try {
-        file.deleteSync();
-      } catch (_) {}
-    });
-
-    _pendingUploads.add(uploadFuture);
-
-    // Cleanup old futures (keep last 5)
-    while (_pendingUploads.length > 5) {
-      _pendingUploads.removeAt(0);
-    }
+    _uploadQueue.add((photo.path, frameLabel));
 
     if (mounted) {
       ref.read(streamingFrameCountProvider.notifier).state =
-          _streamingSuccessCount + _streamingFailCount;
+          _streamingFrameIndex;
     }
 
-    _streamingUploading = false;
+    _processUploadQueue();
+  }
+
+  Future<void> _processUploadQueue() async {
+    if (_queueLocked) return;
+    _queueLocked = true;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final sceneId = _streamingSceneId;
+    if (userId == null || sceneId == null) {
+      _queueLocked = false;
+      return;
+    }
+
+    while (_uploadQueue.isNotEmpty) {
+      final (filePath, frameLabel) = _uploadQueue.removeAt(0);
+
+      String? compressedPath;
+      try {
+        compressedPath = await _compressImage(filePath);
+        final storagePath = '$userId/$sceneId/raw/$frameLabel.jpg';
+
+        await Supabase.instance.client.storage
+            .from('braindance-assets')
+            .upload(storagePath, File(compressedPath));
+
+        _streamingSuccessCount++;
+        debugPrint('[_uploadQueue] uploaded $frameLabel');
+      } catch (e) {
+        _streamingFailCount++;
+        debugPrint('[_uploadQueue] failed $frameLabel: $e');
+      } finally {
+        unawaited(File(filePath).delete().catchError((_) {}));
+        if (compressedPath != null) {
+          unawaited(File(compressedPath).delete().catchError((_) {}));
+        }
+      }
+
+      if (mounted) {
+        ref.read(streamingFrameCountProvider.notifier).state =
+            _streamingSuccessCount + _streamingFailCount;
+      }
+    }
+
+    _queueLocked = false;
+  }
+
+  Future<String> _compressImage(String filePath) async {
+    return Isolate.run(() async {
+      final bytes = await File(filePath).readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        throw Exception('Failed to decode image');
+      }
+      final compressed = img.encodeJpg(decoded, quality: 85);
+      final compressedPath = '${filePath}_c.jpg';
+      await File(compressedPath).writeAsBytes(compressed);
+      return compressedPath;
+    });
   }
 
   Future<void> _stopStreaming({bool finalize = true}) async {
+    _streamingActive = false;
     _streamingTimer?.cancel();
     _streamingTimer = null;
     _setGlobalRecording(false);
 
     if (!mounted) return;
 
-    await Future.wait(_pendingUploads);
+    // Wait for queue to drain
+    while (_uploadQueue.isNotEmpty || _queueLocked) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
 
     if (!mounted) return;
 
-    if (!finalize) {
-      debugPrint('[streaming] stopped (background). scene=$_streamingSceneId '
-          'success=$_streamingSuccessCount fail=$_streamingFailCount');
-      final message = _streamingFailCount == 0
-          ? '流式拍摄已暂停：$_streamingSuccessCount 张照片已上传'
-          : '拍摄已暂停：$_streamingSuccessCount 张成功，$_streamingFailCount 张失败';
-      ref.read(streamingDoneBubbleProvider.notifier).state = message;
-      _pendingUploads.clear();
-      _streamingSceneId = null;
+    final finalCount = _streamingSuccessCount;
+
+    if (finalCount < 3) {
+      final msg = finalize
+          ? '至少需要拍摄 3 张照片，当前仅 $finalCount 张'
+          : '帧数不足，已自动暂停（当前 $finalCount 张）';
+      debugPrint('[streaming] too few frames: $finalCount');
+      _resetStreamingState();
+      ref.read(streamingDoneBubbleProvider.notifier).state = msg;
       if (mounted) setState(() {});
       return;
     }
@@ -521,11 +558,11 @@ class _RecordPageState extends ConsumerState<RecordPage>
     final user = Supabase.instance.client.auth.currentUser;
     final sceneId = _streamingSceneId;
     if (user == null || sceneId == null) {
-      _pendingUploads.clear();
-      _streamingSceneId = null;
+      _resetStreamingState();
       if (mounted) {
-        ref.read(streamingDoneBubbleProvider.notifier).state =
-            textLocalize('stream_fail_task');
+        ref.read(streamingDoneBubbleProvider.notifier).state = textLocalize(
+          'stream_fail_task',
+        );
       }
       return;
     }
@@ -534,29 +571,36 @@ class _RecordPageState extends ConsumerState<RecordPage>
       await Supabase.instance.client.from('processing_tasks').insert({
         'scene_id': sceneId,
         'user_id': user.id,
-        'task_type': 'sparse2dgs',
-        'task_params': {
-          'image_count': _streamingSuccessCount,
-        },
+        'task_type': 'video_dual_chain',
+        'task_params': {'image_count': finalCount},
         'status': 'pending',
       });
 
-      _pendingUploads.clear();
-      _streamingSceneId = null;
-      _streamingFrameIndex = 0;
-      _streamingSuccessCount = 0;
-      _streamingFailCount = 0;
+      debugPrint('[streaming] task created: $sceneId ($finalCount frames)');
+      _resetStreamingState();
       if (mounted) {
-        ref.read(streamingFrameCountProvider.notifier).state = 0;
-        showAppToast(context, textLocalize('stream_success'));
-        Navigator.of(context).pop();
+        ref.read(streamingDoneBubbleProvider.notifier).state =
+            '流式拍摄完成，任务已创建（$finalCount 帧）';
       }
     } catch (e) {
       debugPrint('[_stopStreaming] task creation error: $e');
+      _resetStreamingState();
       if (mounted) {
-        ref.read(streamingDoneBubbleProvider.notifier).state =
-            textLocalize('stream_fail_task');
+        ref.read(streamingDoneBubbleProvider.notifier).state = '任务创建失败，请重试';
       }
+    }
+  }
+
+  void _resetStreamingState() {
+    _uploadQueue.clear();
+    _queueLocked = false;
+    _streamingSceneId = null;
+    _streamingFrameIndex = 0;
+    _streamingSuccessCount = 0;
+    _streamingFailCount = 0;
+    _streamingActive = false;
+    if (mounted) {
+      ref.read(streamingFrameCountProvider.notifier).state = 0;
     }
   }
 
@@ -959,12 +1003,12 @@ class _RecordPageState extends ConsumerState<RecordPage>
                       switchOutCurve: BDMotion.curveExit,
                       child: _StatusPill(
                         key: ValueKey<int>(
-                            ref.watch(streamingFrameCountProvider)),
+                          ref.watch(streamingFrameCountProvider),
+                        ),
                         label: textLocalize('stream_progress').replaceFirst(
-                            '%d',
-                            ref
-                                .watch(streamingFrameCountProvider)
-                                .toString()),
+                          '%d',
+                          ref.watch(streamingFrameCountProvider).toString(),
+                        ),
                         color: BDDesign.colorFadedOlive,
                         backgroundColor: darkInput,
                         compact: true,
@@ -1086,11 +1130,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
                               : BDDesign.colorAshGray,
                           size: 24,
                         ),
-                        onPressed: () {
-                          ref
-                              .read(streamingModeProvider.notifier)
-                              .state = !ref.read(streamingModeProvider);
-                          if (mounted) setState(() {});
+                        onPressed: () async {
+                          final next = !ref.read(streamingModeProvider);
+                          ref.read(streamingModeProvider.notifier).state = next;
                         },
                       ),
                     ),

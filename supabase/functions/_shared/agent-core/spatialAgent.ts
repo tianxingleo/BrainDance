@@ -3,6 +3,7 @@ import {
   type SupabaseClient,
 } from "https://esm.sh/@supabase/supabase-js@2";
 import {
+  AIMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
@@ -31,7 +32,6 @@ import {
   buildCreateMemoryCollectionTool,
   buildFindRelatedModelsTool,
   buildGetPoseSummaryTool,
-  buildGroupModelsIntoThreadTool,
   buildListPlaceVersionsTool,
   buildPersonalMemoryGraphSummary,
   buildSummarizeCollectionTool,
@@ -150,6 +150,11 @@ const candidateSchema = z.object({
   score: z.number().min(0).max(1),
   description: z.string(),
   pose_image_id: z.string().nullable(),
+  display_name: z.string().nullable().optional(),
+  ply_path: z.string().nullable().optional(),
+  preview_img_path: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  created_at: z.string().optional(),
 });
 
 const toolTraceEntrySchema = z.object({
@@ -222,13 +227,11 @@ const relatedModelSummarySchema = z.object({
   relation_score: z.number(),
   created_at: z.string(),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   version_label: z.string().nullable(),
 });
 
 const placeVersionsSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   versions: z.array(z.object({
     model_id: z.string(),
     scene_id: z.string(),
@@ -294,7 +297,6 @@ const creativeTaskSchema = z.object({
 
 const recentPlaceTrendSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   related_models: z.array(z.string()),
   trend: z.string(),
   pose_counts: z.array(z.number()),
@@ -312,7 +314,6 @@ const missingObjectPatternSchema = z.object({
 
 const placeTimelineSummarySchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   timeline: z.array(z.object({
     model_id: z.string(),
     created_at: z.string(),
@@ -326,7 +327,6 @@ const memoryGraphSummarySchema = z.object({
   focus_model_id: z.string(),
   related_model_ids: z.array(z.string()),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   summary: z.string(),
   key_relationships: z.array(z.string()),
 });
@@ -514,18 +514,16 @@ const assetContextSchema = z.object({
   related_models: z.array(relatedModelSummarySchema).nullable().optional(),
   place_versions: placeVersionsSchema.nullable().optional(),
   collection_summary: memoryCollectionSummarySchema.nullable().optional(),
-  thread_grouping: z.object({
-    model_ids: z.array(z.string()),
-    place_id: z.string(),
-    memory_thread_id: z.string(),
-  }).nullable().optional(),
 });
 
 const poseSearchRowSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
+  display_name: z.string().nullable().optional(),
   description: z.string().nullable(),
+  tags: z.array(z.string()).nullable().optional(),
   ply_path: z.string().nullable(),
+  preview_img_path: z.string().nullable().optional(),
   created_at: z.string(),
   user_id: z.string().nullable(),
   similarity: z.number(),
@@ -541,6 +539,7 @@ const sceneSearchRowSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   user_id: z.string().nullable(),
+  display_name: z.string().nullable().optional(),
   description: z.string().nullable(),
   objects: z.array(z.string()).nullable(),
   tags: z.array(z.string()).nullable(),
@@ -570,6 +569,14 @@ type AgentMode = z.infer<typeof agentModeSchema>;
 type VisualizationAction = z.infer<typeof visualizationActionSchema>;
 type SelectionResult = z.infer<typeof selectionSchema>;
 
+export type ModelPresentationRequest = {
+  requested_model_count: number | null;
+  effective_model_count: number;
+  default_model_count: number;
+  max_model_count: number;
+  source: "user_explicit" | "default" | "clamped";
+};
+
 export type SpatialSearchAgentOptions = {
   selectedModelIds?: string[];
   executionMode?: "preview" | "execute";
@@ -583,7 +590,36 @@ export type SpatialSearchAgentOptions = {
   sessionState?: z.infer<typeof sessionStateSchema> | null;
   shortTermMemory?: ShortTermMemory | null;
   longTermMemory?: LongTermMemory | null;
+  presentation?: ModelPresentationRequest;
 };
+
+export const ASSET_METADATA_DEFAULT_PRESENTATION = 5;
+export const ASSET_METADATA_MAX_PRESENTATION = 20;
+export const SPATIAL_SEARCH_DEFAULT_PRESENTATION = 3;
+export const SPATIAL_SEARCH_MAX_PRESENTATION = 10;
+
+export const modelPresentationSchema = z.object({
+  requested_model_count: z.number().int().min(1).nullable(),
+  effective_model_count: z.number().int().min(1),
+  default_model_count: z.number().int().min(1),
+  max_model_count: z.number().int().min(1),
+  source: z.enum(["user_explicit", "default", "clamped"]),
+});
+
+export function getPresentationLimitsForMode(
+  mode: "asset_metadata" | "spatial_search",
+): { default_model_count: number; max_model_count: number } {
+  if (mode === "spatial_search") {
+    return {
+      default_model_count: SPATIAL_SEARCH_DEFAULT_PRESENTATION,
+      max_model_count: SPATIAL_SEARCH_MAX_PRESENTATION,
+    };
+  }
+  return {
+    default_model_count: ASSET_METADATA_DEFAULT_PRESENTATION,
+    max_model_count: ASSET_METADATA_MAX_PRESENTATION,
+  };
+}
 
 type RuntimeEnv = {
   dashscopeApiKey: string;
@@ -599,6 +635,7 @@ type SceneRow = {
   id: string;
   scene_id: string;
   user_id: string | null;
+  display_name?: string | null;
   description: string | null;
   objects: string[] | null;
   tags: string[] | null;
@@ -618,8 +655,11 @@ type PoseFrame = {
 type PoseSearchRow = {
   id: string;
   scene_id: string;
+  display_name?: string | null;
   description: string | null;
+  tags?: string[] | null;
   ply_path: string | null;
+  preview_img_path?: string | null;
   created_at: string;
   user_id: string | null;
   similarity: number;
@@ -629,6 +669,7 @@ type PoseSearchRow = {
 type SceneCandidate = {
   modelId: string;
   sceneId: string;
+  displayName?: string | null;
   userId: string | null;
   description: string;
   objects: string[];
@@ -676,6 +717,13 @@ export type AgentProgressEvent =
     };
   }
   | {
+    event: "message";
+    data: {
+      delta: string;
+      done?: boolean;
+    };
+  }
+  | {
     event: "tool_call";
     data: {
       name: string;
@@ -714,6 +762,7 @@ const responseBaseSchema = z.object({
   short_term_memory: shortTermMemorySchema.nullable().optional(),
   conversation_summary: z.string().nullable().optional(),
   follow_up: agentFollowUpSchema.optional(),
+  presentation: modelPresentationSchema.optional(),
 });
 
 const spatialSearchResponseSchema = responseBaseSchema.extend({
@@ -1143,6 +1192,97 @@ function summarizeToolResult(toolName: string, count: number): string {
   return `${toolName} 返回 ${count} 条候选`;
 }
 
+function buildStopSearchSummaryPayload(input: {
+  query: string;
+  stopReason: unknown;
+  stopConfidence: unknown;
+  trace: ToolTraceEntry[];
+  candidates: Map<string, SceneCandidate>;
+  assetState: AssetToolState;
+}): Record<string, unknown> {
+  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
+    candidate,
+  ) => ({
+    scene_id: candidate.sceneId,
+    model_id: candidate.modelId,
+    display_name: candidate.displayName ?? null,
+    description: candidate.description,
+    tags: candidate.tags,
+    best_pose: candidate.bestPose
+      ? {
+        image_name: candidate.bestPose.image_name,
+        similarity: candidate.bestPose.similarity,
+        tag: candidate.bestPose.tag,
+      }
+      : null,
+    source_scores: candidate.sourceScores,
+  }));
+
+  return {
+    user_query: input.query,
+    stop_reason: typeof input.stopReason === "string" ? input.stopReason : "",
+    stop_confidence: typeof input.stopConfidence === "number"
+      ? input.stopConfidence
+      : null,
+    tool_trace: input.trace,
+    spatial_candidates: topCandidates,
+    asset_context: serializeAssetContext(input.assetState),
+  };
+}
+
+async function buildStopSearchUserFacingSummary(input: {
+  model: ChatOpenAI;
+  query: string;
+  stopReason: unknown;
+  stopConfidence: unknown;
+  trace: ToolTraceEntry[];
+  candidates: Map<string, SceneCandidate>;
+  assetState: AssetToolState;
+  callbacks?: AgentRuntimeCallbacks;
+}): Promise<string> {
+  await emitProgress(input.callbacks, {
+    event: "status",
+    data: {
+      phase: "stop_search_summary",
+      summary: "Agent 已停止继续调用工具，正在整理当前结果概述",
+    },
+  });
+
+  const payload = buildStopSearchSummaryPayload(input);
+  const result = await input.model.invoke([
+    new SystemMessage(
+      [
+        "你是 BrainDance 的空间记忆 Agent。",
+        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
+        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
+        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
+        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
+        "不要编造工具结果中不存在的场景、数量或字段。",
+        "控制在 2 到 4 句，语气自然、明确。",
+      ].join("\n"),
+    ),
+    new HumanMessage(
+      `用户问题：${input.query}\n\n当前工具结果摘要：\n${
+        JSON.stringify(payload, null, 2)
+      }\n\n请输出给用户看的最终回答。`,
+    ),
+  ]);
+
+  return extractModelTextContent(result.content).trim();
+}
+
+export function pickSpatialSearchAnswerAfterStop(input: {
+  trace: Array<{ toolName: string }>;
+  stopSummary: string;
+  deterministicAnswer: string;
+}): string {
+  const hasStopSearch = input.trace.some((entry) =>
+    entry.toolName === "stop_search"
+  );
+  const summary = input.stopSummary.trim();
+  return hasStopSearch && summary ? summary : input.deterministicAnswer;
+}
+
 function serializeAssetOperation(state: AssetToolState) {
   return state.operation
     ? {
@@ -1166,7 +1306,6 @@ function serializeAssetContext(state: AssetToolState) {
     related_models: state.relatedModels,
     place_versions: state.placeVersions,
     collection_summary: state.collectionSummary,
-    thread_grouping: state.threadGrouping,
   };
 }
 
@@ -1511,6 +1650,68 @@ function extractLatestModelCount(query: string): number {
   }
 
   return 1;
+}
+
+export function parseModelPresentation(
+  query: string,
+  options: { mode?: "asset_metadata" | "spatial_search" } = {},
+): ModelPresentationRequest {
+  const trimmed = query.trim();
+  const mode = options.mode ?? "asset_metadata";
+  const { default_model_count, max_model_count } = getPresentationLimitsForMode(
+    mode,
+  );
+
+  let requested: number | null = null;
+
+  if (trimmed) {
+    if (/全部|所有/.test(trimmed) && /(模型|资产|候选|结果|项)/.test(trimmed)) {
+      requested = max_model_count + 1;
+    } else {
+      const explicitPatterns = [
+        /(?:展示|显示|列出|给我|输出|要|看|来|推荐|筛选|筛|挑选?)\s*([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项|名|来个)?\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+        /(?:前|最多|至多|不超过|大约|大概|总共|一共)\s*([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项)?\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+        /(?:top|TOP)\s*([0-9]+)/,
+        /([0-9一二三四五六七八九十两俩]+)\s*(?:个|条|款|项)\s*(?:模型|资产|场景|候选|结果|推荐|项)/,
+      ];
+      for (const pattern of explicitPatterns) {
+        const matched = trimmed.match(pattern)?.[1];
+        const parsed = matched ? parseChineseCountToken(matched) : null;
+        if (parsed && parsed > 0) {
+          requested = parsed;
+          break;
+        }
+      }
+    }
+  }
+
+  if (requested == null) {
+    return {
+      requested_model_count: null,
+      effective_model_count: default_model_count,
+      default_model_count,
+      max_model_count,
+      source: "default",
+    };
+  }
+
+  if (requested > max_model_count) {
+    return {
+      requested_model_count: requested,
+      effective_model_count: max_model_count,
+      default_model_count,
+      max_model_count,
+      source: "clamped",
+    };
+  }
+
+  return {
+    requested_model_count: requested,
+    effective_model_count: Math.max(1, requested),
+    default_model_count,
+    max_model_count,
+    source: "user_explicit",
+  };
 }
 
 function isConfirmWriteQuery(query: string): boolean {
@@ -1900,21 +2101,59 @@ async function buildPoseTool(
         }
       }
 
+      const assetMap = new Map<string, SceneRow>();
+      if (modelIds.length > 0) {
+        const { data: assetRows, error: assetError } = await supabase
+          .from("model_assets")
+          .select(
+            "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, display_name",
+          )
+          .in("id", modelIds);
+
+        if (assetError) {
+          throw new Error(`pose_semantic_search 资产补全失败: ${assetError.message}`);
+        }
+
+        for (const assetRow of assetRows ?? []) {
+          if (typeof assetRow.id === "string") {
+            assetMap.set(assetRow.id, assetRow as SceneRow);
+          }
+        }
+      }
+
       for (const row of rows) {
         const modelId = String(row.id ?? "");
+        const asset = assetMap.get(modelId);
         const rawFrames = Array.isArray(row.matched_frames)
           ? row.matched_frames as Array<Record<string, unknown>>
           : [];
 
         enriched.push({
           id: modelId,
-          scene_id: String(row.scene_id ?? ""),
-          description: typeof row.description === "string"
+          scene_id: asset?.scene_id ?? String(row.scene_id ?? ""),
+          display_name: typeof asset?.display_name === "string"
+            ? asset.display_name
+            : null,
+          description: typeof asset?.description === "string"
+            ? asset.description
+            : typeof row.description === "string"
             ? row.description
             : null,
-          ply_path: typeof row.ply_path === "string" ? row.ply_path : null,
-          created_at: String(row.created_at ?? ""),
-          user_id: typeof row.user_id === "string" ? row.user_id : null,
+          tags: safeArray(asset?.tags),
+          ply_path: typeof asset?.ply_path === "string"
+            ? asset.ply_path
+            : typeof row.ply_path === "string"
+            ? row.ply_path
+            : null,
+          preview_img_path: typeof asset?.preview_img_path === "string"
+            ? asset.preview_img_path
+            : null,
+          created_at: asset?.created_at ?? String(row.created_at ?? ""),
+          user_id: typeof asset?.user_id === "string"
+            ? asset.user_id
+            : typeof row.user_id === "string"
+            ? row.user_id
+            : null,
           similarity: Number(row.similarity ?? 0),
           matched_frames: rawFrames.map((frame) => ({
             image_name: String(frame.image_name ?? ""),
@@ -2046,6 +2285,9 @@ function mergeSceneCandidate(
   if (!existing.description && partial.description) {
     existing.description = partial.description;
   }
+  if (!existing.displayName && partial.displayName) {
+    existing.displayName = partial.displayName;
+  }
   if (!existing.plyPath && partial.plyPath) existing.plyPath = partial.plyPath;
   if (!existing.previewImgPath && partial.previewImgPath) {
     existing.previewImgPath = partial.previewImgPath;
@@ -2081,14 +2323,13 @@ function collectSceneCandidates(
       mergeSceneCandidate(candidates, {
         modelId: row.id,
         sceneId: row.scene_id,
+        displayName: row.display_name ?? null,
         userId: row.user_id,
         description: row.description ?? "",
         objects: [],
-        tags: sortedFrames.map((frame) => frame.tag ?? "").filter((value) =>
-          value.length > 0
-        ),
+        tags: safeArray(row.tags),
         plyPath: row.ply_path,
-        previewImgPath: null,
+        previewImgPath: row.preview_img_path ?? null,
         createdAt: row.created_at,
         metaInfo: {},
         sourceScores: {
@@ -2108,6 +2349,7 @@ function collectSceneCandidates(
     mergeSceneCandidate(candidates, {
       modelId: row.id,
       sceneId: row.scene_id,
+      displayName: row.display_name ?? null,
       userId: row.user_id,
       description: row.description ?? "",
       objects: safeArray(row.objects),
@@ -2126,6 +2368,21 @@ function collectSceneCandidates(
   }
 
   return rows.length;
+}
+
+function serializeSceneCandidate(c: SceneCandidate & { score: number }) {
+  return {
+    scene_id: c.sceneId,
+    model_id: c.modelId,
+    score: c.score,
+    display_name: c.displayName ?? null,
+    description: c.description,
+    pose_image_id: c.bestPose?.image_name ?? null,
+    ply_path: c.plyPath ?? null,
+    preview_img_path: c.previewImgPath ?? null,
+    tags: c.tags,
+    created_at: c.createdAt,
+  };
 }
 
 export function scoreSceneCandidate(
@@ -2666,7 +2923,7 @@ function buildTimeCompareTool(): DynamicStructuredTool {
   });
 }
 
-const UNIFIED_MAX_ROUNDS = 4;
+const UNIFIED_MAX_ROUNDS = 10;
 
 async function executeUnifiedAgentLoop(input: {
   model: ChatOpenAI;
@@ -2698,7 +2955,7 @@ async function executeUnifiedAgentLoop(input: {
   await emitPlan(callbacks, "统一 Agent 已启动", [
     `可用工具：${tools.map((t) => t.name).join(", ")}`,
     `执行模式：${options.executionMode ?? "preview"}`,
-    "由 Agent 自主决定调用哪些工具，最多 4 轮",
+    "由 Agent 自主决定调用哪些工具，最多 10 轮",
   ]);
 
   type UnifiedState = {
@@ -2784,6 +3041,26 @@ async function executeUnifiedAgentLoop(input: {
           data: { phase: "llm_stop_decision", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, detail: `置信度: ${toolArgs.confidence ?? "N/A"}` },
         });
         msgs.push(new ToolMessage({ tool_call_id: toolCall.id ?? toolCall.name, content: resultText }));
+        const stopSummary = await buildStopSearchUserFacingSummary({
+          model,
+          query,
+          stopReason: toolArgs.reason,
+          stopConfidence: toolArgs.confidence,
+          trace: tr,
+          candidates: cands,
+          assetState: aState,
+          callbacks,
+        }).catch((error) => {
+          console.warn(
+            `[SpatialAgent] stop_search summary failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return "";
+        });
+        if (stopSummary) {
+          msgs.push(new AIMessage(stopSummary));
+        }
         return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
       }
 
@@ -2841,7 +3118,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-  });
+  }, { recursionLimit: UNIFIED_MAX_ROUNDS * 2 + 10 });
 
   return {
     candidates: finalState.candidates,
@@ -2859,7 +3136,6 @@ function inferResponseMode(trace: ToolTraceEntry[]): AgentMode {
     "batch_patch_model_metadata", "get_model_asset_bundle", "compare_model_assets",
     "get_pose_summary", "find_related_models", "list_place_versions",
     "create_memory_collection", "add_models_to_collection", "summarize_collection",
-    "group_models_into_thread",
   ];
   if (assetToolNames.some((n) => toolNames.has(n))) return "asset_metadata";
   return "spatial_search";
@@ -3056,7 +3332,7 @@ async function executeAgentToolLoop(input: {
     round: 0,
     shouldStop: false,
     forcedToolCalls: null,
-  });
+  }, { recursionLimit: MAX_AGENT_TOOL_ROUNDS * 2 + 10 });
 
   return { candidates: finalState.candidates, trace: finalState.trace };
 }
@@ -3079,10 +3355,10 @@ export function shouldStopAssetToolLoop(input: {
       reason: "已经拿到结构化对比结果，可以直接进入回答整理。",
     };
   }
-  if (state.collectionSummary || state.threadGrouping) {
+  if (state.collectionSummary) {
     return {
       stop: true,
-      reason: "专题或线程整理结果已经生成，当前工具链目标已完成。",
+      reason: "专题整理结果已经生成，当前工具链目标已完成。",
     };
   }
   if (state.poseSummary || state.relatedModels || state.placeVersions) {
@@ -3284,7 +3560,7 @@ async function executeAssetToolLoop(input: {
     seenSignatures: seenToolCallSignatures,
     round: 0,
     shouldStop: false,
-  });
+  }, { recursionLimit: MAX_AGENT_TOOL_ROUNDS * 2 + 10 });
 
   return { trace: finalState.trace, state: finalState.assetState };
 }
@@ -3416,6 +3692,7 @@ function finalizeResponse(
     conversation_summary: response.conversation_summary ??
       buildConversationSummaryFromResponse(response),
     follow_up: response.follow_up ?? buildFollowUpFromResponse(response),
+    presentation: response.presentation ?? options?.presentation,
   };
   return spatialSearchResponseSchemaUnion.parse(normalized);
 }
@@ -3923,6 +4200,13 @@ export async function runSpatialSearchAgent(
   const supabase = createSupabaseAdminClient(env);
   const model = createChatModel(env);
 
+  const assetPresentation = options.presentation ??
+    parseModelPresentation(query, { mode: "asset_metadata" });
+  const spatialPresentation = parseModelPresentation(query, {
+    mode: "spatial_search",
+  });
+  options.presentation = assetPresentation;
+
   if (options.userId && !options.longTermMemory) {
     options.longTermMemory = await loadLongTermMemory(supabase, options.userId);
   }
@@ -3971,6 +4255,7 @@ export async function runSpatialSearchAgent(
       collection_context: null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: spatialPresentation,
     }, options);
   }
 
@@ -4004,7 +4289,6 @@ export async function runSpatialSearchAgent(
     buildCreateMemoryCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildAddModelsToCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildSummarizeCollectionTool(supabase),
-    buildGroupModelsIntoThreadTool(supabase, { selectedModelIds: options.selectedModelIds }),
     buildTimeCompareTool(),
     buildStopSearchTool(),
   ];
@@ -4050,6 +4334,7 @@ export async function runSpatialSearchAgent(
       collection_context: assetState.collectionSummary ? { collection_summary: assetState.collectionSummary } : null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: assetPresentation,
     }, options, query);
   }
 
@@ -4103,6 +4388,7 @@ export async function runSpatialSearchAgent(
       collection_context: null,
       creative_context: null,
       memory_graph_context: null,
+      presentation: spatialPresentation,
     }, options, query);
   }
 
@@ -4111,13 +4397,22 @@ export async function runSpatialSearchAgent(
   const finalScene = rankedCandidates.find((c) => c.sceneId === selection.selectedSceneId) ?? bestCandidate;
   const finalPose = finalScene?.bestPose?.image_name === selection.selectedPoseImageId ? finalScene.bestPose : finalScene?.bestPose ?? null;
   const finalActions = buildVisualizationActions({ scene: finalScene ?? null, selectedPose: finalPose, supabase, bucket: env.storageBucket });
+  const topCandidates = deduplicatedCandidates
+    .slice(0, spatialPresentation.effective_model_count)
+    .map(serializeSceneCandidate);
+  const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
+  const answer = pickSpatialSearchAnswerAfterStop({
+    trace,
+    stopSummary: stopSearchSummary,
+    deterministicAnswer: selection.answer,
+  });
 
   return finalizeResponseWithLongTermMemory(supabase, {
     success: true,
     mode: "spatial_search",
     intent: pseudoIntent,
     selection: { scene_id: selection.selectedSceneId, model_id: selection.selectedModelId, pose_image_id: selection.selectedPoseImageId, confidence: selection.confidence, reason: selection.selectionReason },
-    answer: selection.answer,
+    answer,
     actions: finalActions,
     viewer_payload: {
       ply: finalScene ? publicUrlForPath(supabase, env.storageBucket, finalScene.plyPath) : null,
@@ -4126,8 +4421,8 @@ export async function runSpatialSearchAgent(
       imageId: finalPose?.image_name ?? null,
     },
     evidence: finalScene ? { sceneId: finalScene.sceneId, modelId: finalScene.modelId, similarity: selection.confidence, matchedFrames: finalPose ? [{ imageName: finalPose.image_name, similarity: finalPose.similarity, transformMatrix: finalPose.transform_matrix, tag: finalPose.tag }] : [], description: finalScene.description, tags: finalScene.tags } : null,
-    candidates: deduplicatedCandidates.slice(0, 5).map((c) => ({ scene_id: c.sceneId, model_id: c.modelId, score: c.score, description: c.description, pose_image_id: c.bestPose?.image_name ?? null })),
-    top_candidates: deduplicatedCandidates.slice(0, 5).map((c) => ({ scene_id: c.sceneId, model_id: c.modelId, score: c.score, description: c.description, pose_image_id: c.bestPose?.image_name ?? null })),
+    candidates: topCandidates,
+    top_candidates: topCandidates,
     selected_candidate_reason: selection.selectionReason,
     tool_trace: trace,
     asset_context: serializeAssetContext(assetState),
@@ -4135,5 +4430,6 @@ export async function runSpatialSearchAgent(
     collection_context: null,
     creative_context: null,
     memory_graph_context: null,
+    presentation: spatialPresentation,
   }, options, query);
 }

@@ -589,6 +589,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     }
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       extendBody: true,
       body: BDPageBackdrop(
         child: isLoading
@@ -651,7 +652,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   }),
                   if (!isRecording)
                     FloatingNavBar(
-                      skipBlur: _isAnimating || (pageIndex != _previousIndex),
                       currentIndex: pageIndex,
                       onTap: _switchToPage,
                       items: [
@@ -673,8 +673,8 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("community"),
                         ),
                         NavIslandItem(
-                          icon: Icons.settings_rounded,
-                          label: textLocalize("manage"),
+                          icon: Icons.person_rounded,
+                          label: textLocalize("mine"),
                         ),
                       ],
                     ),

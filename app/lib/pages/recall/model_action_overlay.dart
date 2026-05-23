@@ -122,7 +122,6 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
 
   @override
   Widget build(BuildContext context) {
-    const deleteLabel = '删除云端模型';
     final screenWidth = MediaQuery.of(context).size.width;
     const screenPadding = 16.0;
     const horizontalGap = 12.0;
@@ -239,9 +238,8 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                   color: Colors.transparent,
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: () async {
+                    onTap: () {
                       widget.onDismiss();
-                      await widget.onShareModelToCommunity(widget.model);
                     },
                     child: Ink(
                       width: actionWidth,
@@ -272,7 +270,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                         children: [
                           ActionMenuItem(
                             icon: Icons.info_outline_rounded,
-                            label: '查看详情',
+                            label: textLocalize("recall_info"),
                             isDark: widget.isDark,
                             onTap: () async {
                               widget.onDismiss();
@@ -280,16 +278,17 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                             },
                           ),
                           const SizedBox(height: 6),
-                          ActionMenuItem(
-                            icon: Icons.edit_rounded,
-                            label: '重命名',
-                            isDark: widget.isDark,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onRenameModel(widget.model);
-                            },
-                          ),
-                          const SizedBox(height: 6),
+                          if (widget.isOwnModel)
+                            ActionMenuItem(
+                              icon: Icons.edit_rounded,
+                              label: textLocalize("recall_rename"),
+                              isDark: widget.isDark,
+                              onTap: () async {
+                                widget.onDismiss();
+                                await widget.onRenameModel(widget.model);
+                              },
+                            ),
+                          if (widget.isOwnModel) const SizedBox(height: 6),
                           if (widget.isLocalCached)
                             ActionMenuItem(
                               icon: Icons.delete_outline_rounded,
@@ -312,14 +311,14 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                               isDark: widget.isDark,
                               onTap: () async {
                                 widget.onDismiss();
-                                await widget.onDownloadModel(widget.model);
+                                widget.onNavigateToViewer(widget.model, null);
                               },
                             ),
                           if (widget.isOwnModel) ...[
                             const SizedBox(height: 6),
                             ActionMenuItem(
                               icon: Icons.delete_outline_rounded,
-                              label: deleteLabel,
+                              label: textLocalize('recall_delete_cloud'),
                               isDark: widget.isDark,
                               destructive: true,
                               onTap: () async {
@@ -335,7 +334,7 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                           const SizedBox(height: 6),
                           ActionMenuItem(
                             icon: Icons.public_rounded,
-                            label: '分享到社区',
+                            label: textLocalize('recall_share_community'),
                             isDark: widget.isDark,
                             onTap: () async {
                               widget.onDismiss();

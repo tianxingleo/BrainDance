@@ -564,10 +564,9 @@ extension _RecallPageAgentRuntime on _RecallPageState {
 
     if (event == 'done') {
       if (payload != null && payload is Map) {
+        final payloadMap = _normalizeAgentDonePayload(payload);
         _refreshState(() {
-          _agentResult = AgentRecallResponse.fromJson(
-            Map<String, dynamic>.from(payload),
-          );
+          _agentResult = AgentRecallResponse.fromJson(payloadMap);
         });
         if (_agentResult != null) {
           _rememberAgentResponse(
@@ -593,6 +592,24 @@ extension _RecallPageAgentRuntime on _RecallPageState {
       }
       _completeAgentRun();
     }
+  }
+
+  Map<String, dynamic> _normalizeAgentDonePayload(Map<dynamic, dynamic> payload) {
+    final map = Map<String, dynamic>.from(payload);
+    final nestedResult = map['result'];
+    if (nestedResult is Map) {
+      return Map<String, dynamic>.from(nestedResult);
+    }
+    final nestedData = map['data'];
+    if (nestedData is Map) {
+      final dataMap = Map<String, dynamic>.from(nestedData);
+      if (dataMap.containsKey('answer') ||
+          dataMap.containsKey('top_candidates') ||
+          dataMap.containsKey('candidates')) {
+        return dataMap;
+      }
+    }
+    return map;
   }
 
   Future<void> _fetchAgentGreeting() async {

@@ -149,6 +149,7 @@ class AgentRecallResponse {
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
+  final CompareContext? compareData;
   final Map<String, dynamic>? collectionContext;
   final Map<String, dynamic>? creativeContext;
   final Map<String, dynamic>? memoryGraphContext;
@@ -168,6 +169,7 @@ class AgentRecallResponse {
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
+    this.compareData,
     this.collectionContext,
     this.creativeContext,
     this.memoryGraphContext,
@@ -208,18 +210,70 @@ class AgentRecallResponse {
       }
     }
 
-    final candidates = rawCandidates.map((item) {
+    var candidates = rawCandidates.map((item) {
       final map = Map<String, dynamic>.from(item as Map);
       final modelId = map['model_id']?.toString() ?? '';
       final enrichment = assetLookup[modelId];
       if (enrichment != null) {
-        map['display_name'] ??= enrichment['display_name'];
-        map['tags'] ??= enrichment['tags'];
-        map['preview_img_path'] ??= enrichment['preview_img_path'];
-        map['created_at'] ??= enrichment['created_at'];
+        _fillIfMissing(map, 'display_name', enrichment['display_name']);
+        _fillIfMissing(map, 'tags', enrichment['tags']);
+        _fillIfMissing(
+          map,
+          'preview_img_path',
+          enrichment['preview_img_path'],
+        );
+        _fillIfMissing(map, 'created_at', enrichment['created_at']);
+        _fillIfMissing(map, 'ply_path', enrichment['ply_path']);
       }
       return AgentCandidate.fromJson(map);
     }).toList();
+
+    // Fallback: synthesize candidate from evidence/actions when backend
+    // returns empty candidates but has spatial match data.
+    if (candidates.isEmpty) {
+      final evidenceSceneId = evidenceMap?['sceneId']?.toString() ?? '';
+      final evidenceModelId = evidenceMap?['modelId']?.toString() ?? '';
+      final evidenceSimilarity =
+          (evidenceMap?['similarity'] as num?)?.toDouble() ?? 0.0;
+      final evidenceDesc = evidenceMap?['description']?.toString() ?? '';
+      final evidenceTags = (evidenceMap?['tags'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const <String>[];
+
+      final actions = ((json['actions'] as List?) ?? [])
+          .map((a) => a is Map ? Map<String, dynamic>.from(a) : null)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      final openScene = actions.firstWhere(
+        (a) => a['type'] == 'open_scene',
+        orElse: () => const <String, dynamic>{},
+      );
+      final payload = openScene['payload'] is Map
+          ? Map<String, dynamic>.from(openScene['payload'] as Map)
+          : const <String, dynamic>{};
+
+      final synthSceneId = evidenceSceneId.isNotEmpty
+          ? evidenceSceneId
+          : payload['sceneId']?.toString() ?? '';
+      final synthModelId = evidenceModelId.isNotEmpty
+          ? evidenceModelId
+          : payload['modelId']?.toString() ?? '';
+      final synthPly = payload['ply']?.toString();
+
+      if (synthSceneId.isNotEmpty && evidenceSimilarity > 0) {
+        candidates = [
+          AgentCandidate(
+            sceneId: synthSceneId,
+            modelId: synthModelId,
+            score: evidenceSimilarity,
+            description: evidenceDesc,
+            tags: evidenceTags,
+            plyPath: synthPly,
+          ),
+        ];
+      }
+    }
 
     return AgentRecallResponse(
       mode: json['mode']?.toString() ?? 'spatial_search',
@@ -251,6 +305,7 @@ class AgentRecallResponse {
       compareContext: json['compare_context'] is Map
           ? Map<String, dynamic>.from(json['compare_context'] as Map)
           : null,
+      compareData: CompareContext.fromJson(json['compare_context']),
       collectionContext: json['collection_context'] is Map
           ? Map<String, dynamic>.from(json['collection_context'] as Map)
           : null,
@@ -275,6 +330,23 @@ class AgentRecallResponse {
           ? Map<String, dynamic>.from(json['short_term_memory'] as Map)
           : null,
     );
+  }
+}
+
+void _fillIfMissing(
+  Map<String, dynamic> target,
+  String key,
+  dynamic value,
+) {
+  final current = target[key];
+  final hasCurrent = switch (current) {
+    null => false,
+    String value => value.trim().isNotEmpty,
+    List value => value.isNotEmpty,
+    _ => true,
+  };
+  if (!hasCurrent && value != null) {
+    target[key] = value;
   }
 }
 
@@ -437,6 +509,7 @@ class AgentCandidate {
   final List<String> tags;
   final String? previewImgPath;
   final String? createdAt;
+  final String? plyPath;
 
   AgentCandidate({
     required this.sceneId,
@@ -448,6 +521,7 @@ class AgentCandidate {
     this.tags = const [],
     this.previewImgPath,
     this.createdAt,
+    this.plyPath,
   });
 
   factory AgentCandidate.fromJson(Map<String, dynamic> json) {
@@ -464,6 +538,7 @@ class AgentCandidate {
           const [],
       previewImgPath: json['preview_img_path']?.toString(),
       createdAt: json['created_at']?.toString(),
+      plyPath: json['ply_path']?.toString(),
     );
   }
 }
@@ -544,6 +619,7 @@ class AgentMatchedFrame {
 
 class AgentAction {
   final String type;
+  final String? title;
   final String sceneId;
   final String? modelId;
   final String? ply;
@@ -553,6 +629,7 @@ class AgentAction {
 
   AgentAction({
     required this.type,
+    this.title,
     required this.sceneId,
     this.modelId,
     this.ply,
@@ -561,6 +638,13 @@ class AgentAction {
     this.matrix,
   });
 
+  AgentActionSlot get slot {
+    final t = title ?? '';
+    if (t.contains('旧版')) return AgentActionSlot.baseline;
+    if (t.contains('新版')) return AgentActionSlot.target;
+    return AgentActionSlot.unknown;
+  }
+
   factory AgentAction.fromJson(Map<String, dynamic> json) {
     final payload = json['payload'] is Map
         ? Map<String, dynamic>.from(json['payload'] as Map)
@@ -568,6 +652,7 @@ class AgentAction {
     final rawMatrix = payload['matrix'] ?? json['matrix'];
     return AgentAction(
       type: json['type']?.toString() ?? '',
+      title: json['title']?.toString(),
       sceneId:
           payload['sceneId']?.toString() ?? json['sceneId']?.toString() ?? '',
       modelId: payload['modelId']?.toString() ?? json['modelId']?.toString(),
@@ -823,8 +908,13 @@ class AgentRecallService {
               'scene_id': candidate.sceneId,
               'model_id': candidate.modelId,
               'score': candidate.score,
+              'display_name': candidate.displayName,
               'description': candidate.description,
               'pose_image_id': candidate.poseImageId,
+              'tags': candidate.tags,
+              'preview_img_path': candidate.previewImgPath,
+              'created_at': candidate.createdAt,
+              'ply_path': candidate.plyPath,
             },
           )
           .toList(),

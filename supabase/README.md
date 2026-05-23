@@ -88,7 +88,6 @@ supabase start
 与 Agent 相关的增量字段当前主要集中在 `model_assets`：
 
 - `place_id`
-- `memory_thread_id`
 - `version_label`
 - `summary_title`
 - `event_label`
@@ -227,7 +226,7 @@ supabase functions serve agent-recall --no-verify-jwt
    - `batch_patch_model_metadata`
    - `get_model_asset_bundle`
    - `compare_model_assets`
-   - 以及记忆专题、专题摘要、线程归组等共享工具能力
+   - 以及记忆专题、专题摘要等共享工具能力
 7. 对写工具默认走 `dry_run` 预览，只有请求显式传入
    `executionMode: "execute"` 时才正式写库
 8. 可选接收前端多选传入的 `selectedModelIds`，把 Agent 操作范围限制在已选模型内

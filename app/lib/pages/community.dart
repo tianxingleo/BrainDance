@@ -2,14 +2,17 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/pages/community/detail.dart';
+import 'package:braindance/pages/community/filtering.dart';
+import 'package:braindance/pages/community/map_marker.dart';
+import 'package:braindance/pages/community/map_page.dart';
 import 'package:braindance/pages/community/models.dart';
 import 'package:braindance/pages/community/repository.dart';
 import 'package:braindance/pages/community/views.dart';
 import 'package:braindance/services/viewer_navigation.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
-import 'package:braindance/widgets/bd_tab_switcher.dart';
 import 'package:flutter/material.dart';
 import 'package:braindance/widgets/app_toast.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CommunityPage extends StatefulWidget {
   const CommunityPage({super.key});
@@ -18,19 +21,40 @@ class CommunityPage extends StatefulWidget {
   State<CommunityPage> createState() => _CommunityPageState();
 }
 
-class _CommunityPageState extends State<CommunityPage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabController;
+enum _CommunitySubPage { recommend, search, submit }
+
+class _CommunityPageState extends State<CommunityPage> {
   final CommunityRepository _repository = CommunityRepository();
+  _CommunitySubPage? _currentPage;
+  int _searchFocusTrigger = 0;
 
   List<CommunityPost> _posts = const [];
   List<CommunityModelOption> _shareableModels = const [];
-  String? _selectedPlaceName;
+  List<CommunityMapMarker> _mapMarkers = const [];
   bool _isLoading = true;
-  int _tabIndex = 0;
+  CommunityMapViewport _mapViewport = const CommunityMapViewport(
+    latitude: 30.243,
+    longitude: 120.150,
+    zoom: 10,
+  );
 
-  // Discover tab
-  final Set<String> _selectedTags = {};
+  // Explore tab — viewport + tag filter
+  String? _exploreTag;
+
+  // Search tab (探索)
+  List<String> _searchHistory = const [];
+  List<String> _recommendedKeywords = const [
+    '街景',
+    '建筑',
+    '自然',
+    '室内',
+    '夜景',
+    '人物',
+    '旅行',
+    '城市',
+  ];
+  static const _searchHistoryPrefKey = 'community_search_history';
+  static const _maxSearchHistory = 10;
 
   // Submit tab — multi-model
   final List<CommunityModelOption> _selectedSubmitModels = [];
@@ -44,27 +68,17 @@ class _CommunityPageState extends State<CommunityPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(_onTabChanged);
     _submitTitleController = TextEditingController();
     _submitCaptionController = TextEditingController();
     _submitPlaceController = TextEditingController();
     _submitLatController = TextEditingController();
     _submitLngController = TextEditingController();
     _loadCommunity();
-    _loadDraft();
-  }
-
-  void _onTabChanged() {
-    if (_tabController.indexIsChanging) {
-      setState(() => _tabIndex = _tabController.index);
-    }
+    _loadSearchHistory();
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
     _submitTitleController.dispose();
     _submitCaptionController.dispose();
     _submitPlaceController.dispose();
@@ -73,16 +87,52 @@ class _CommunityPageState extends State<CommunityPage>
     super.dispose();
   }
 
+  Future<void> _loadSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final history = prefs.getStringList(_searchHistoryPrefKey) ?? const [];
+    if (!mounted) return;
+    setState(() => _searchHistory = history);
+  }
+
+  Future<void> _persistSearchHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_searchHistoryPrefKey, _searchHistory);
+  }
+
+  String? _lastSearchQuery;
+
+  void _addToSearchHistory(String query) {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    _lastSearchQuery = q;
+    setState(() {
+      _searchHistory.remove(q);
+      _searchHistory.insert(0, q);
+      if (_searchHistory.length > _maxSearchHistory) {
+        _searchHistory = _searchHistory.sublist(0, _maxSearchHistory);
+      }
+    });
+    _persistSearchHistory();
+  }
+
+  void _clearSearchHistory() {
+    setState(() => _searchHistory = []);
+    _persistSearchHistory();
+  }
+
   Future<void> _loadCommunity() async {
     setState(() => _isLoading = true);
     final posts = await _repository.fetchPosts();
     final models = await _repository.fetchShareableModels();
+    final markers = await _repository.fetchMapMarkers();
     if (!mounted) return;
     setState(() {
       _posts = posts;
       _shareableModels = models;
+      _mapMarkers = markers;
       _isLoading = false;
     });
+    _loadDraft();
   }
 
   Future<void> _loadDraft() async {
@@ -92,10 +142,12 @@ class _CommunityPageState extends State<CommunityPage>
       _submitTitleController.text = draft.title;
       _submitCaptionController.text = draft.caption;
       _submitPlaceController.text = draft.placeName;
-      _submitLatController.text =
-          draft.latitude != 0 ? draft.latitude.toStringAsFixed(3) : '';
-      _submitLngController.text =
-          draft.longitude != 0 ? draft.longitude.toStringAsFixed(3) : '';
+      _submitLatController.text = draft.latitude != 0
+          ? draft.latitude.toStringAsFixed(3)
+          : '';
+      _submitLngController.text = draft.longitude != 0
+          ? draft.longitude.toStringAsFixed(3)
+          : '';
       _selectedSubmitModels.clear();
       for (final mid in draft.modelIds) {
         final model = _shareableModels.where((m) => m.id == mid);
@@ -114,20 +166,80 @@ class _CommunityPageState extends State<CommunityPage>
         pageBuilder: (_, __, ___) => CommunityDetailPage(post: post),
         transitionsBuilder: (_, animation, __, child) {
           return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1.0, 0.0),
-              end: Offset.zero,
-            ).animate(
-              CurvedAnimation(
-                  parent: animation, curve: Curves.easeInOutCubic),
-            ),
+            position:
+                Tween<Offset>(
+                  begin: const Offset(1.0, 0.0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeInOutCubic,
+                  ),
+                ),
             child: child,
           );
         },
       ),
     );
   }
-  
+
+  Future<void> _openMapPage() async {
+    final result = await Navigator.push<CommunityMapViewport>(
+      context,
+      PageRouteBuilder(
+        transitionDuration: BDMotion.durationNormal,
+        reverseTransitionDuration: BDMotion.durationNormal,
+        opaque: true,
+        pageBuilder: (_, __, ___) => CommunityMapPage(
+          initialViewport: _mapViewport,
+          onMarkerTap: _openPostFromMarker,
+          onMarkerLongPress: _openLocationHubFromMarker,
+        ),
+        transitionsBuilder: (_, animation, __, child) {
+          return SlideTransition(
+            position:
+                Tween<Offset>(
+                  begin: const Offset(0.0, 1.0),
+                  end: Offset.zero,
+                ).animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeInOutCubic,
+                  ),
+                ),
+            child: child,
+          );
+        },
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _mapViewport = result);
+  }
+
+  Future<void> _openPostFromMarker(CommunityMapMarker marker) async {
+    final cached = _posts.where((p) => p.id == marker.id);
+    if (cached.isNotEmpty) {
+      _openDetail(cached.first);
+      return;
+    }
+    final post = await _repository.fetchPostById(marker.id);
+    if (!mounted) return;
+    if (post == null) {
+      showAppToast(context, '帖子已不可用');
+      return;
+    }
+    _openDetail(post);
+  }
+
+  void _openLocationHubFromMarker(CommunityMapMarker marker) {
+    final peers = _posts.where((p) => p.placeName == marker.placeName).toList();
+    if (peers.isNotEmpty) {
+      _openLocationHub(peers.first);
+      return;
+    }
+    _openPostFromMarker(marker);
+  }
+
   void _openViewer(CommunityPost post) {
     openViewer(
       context,
@@ -149,8 +261,9 @@ class _CommunityPageState extends State<CommunityPage>
       isScrollControlled: true,
       builder: (ctx) {
         final isDark = ctx.isDarkMode;
-        final textColor =
-            isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+        final textColor = isDark
+            ? BDDesign.colorPaperWhite
+            : BDDesign.colorInkBlack;
         final hintColor = isDark
             ? Colors.white.withValues(alpha: 0.62)
             : BDDesign.colorMutedBlue.withValues(alpha: 0.88);
@@ -171,23 +284,25 @@ class _CommunityPageState extends State<CommunityPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(seedPost.placeName,
-                                style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w700)),
+                            Text(
+                              seedPost.placeName,
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             const SizedBox(height: 6),
                             Text(
-                                '这里收集了 ${peers.length} 个来自不同用户的空间记忆。',
-                                style: TextStyle(
-                                    color: hintColor, height: 1.4)),
+                              '这里收集了 ${peers.length} 个来自不同用户的空间记忆。',
+                              style: TextStyle(color: hintColor, height: 1.4),
+                            ),
                           ],
                         ),
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
-                        icon: Icon(Icons.close_rounded,
-                            color: textColor),
+                        icon: Icon(Icons.close_rounded, color: textColor),
                       ),
                     ],
                   ),
@@ -196,8 +311,7 @@ class _CommunityPageState extends State<CommunityPage>
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: peers.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 10),
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final post = peers[index];
                         return InkWell(
@@ -206,8 +320,7 @@ class _CommunityPageState extends State<CommunityPage>
                             Navigator.pop(ctx);
                             _openViewer(post);
                           },
-                          child:
-                              CommunityLocationHubRow(post: post),
+                          child: CommunityLocationHubRow(post: post),
                         );
                       },
                     ),
@@ -220,6 +333,7 @@ class _CommunityPageState extends State<CommunityPage>
       },
     );
   }
+
   void _toggleSubmitModel(CommunityModelOption model) {
     setState(() {
       if (_selectedSubmitModels.any((m) => m.id == model.id)) {
@@ -231,13 +345,10 @@ class _CommunityPageState extends State<CommunityPage>
   }
 
   Future<void> _saveDraft() async {
-    final lat =
-        double.tryParse(_submitLatController.text.trim()) ?? 0;
-    final lng =
-        double.tryParse(_submitLngController.text.trim()) ?? 0;
+    final lat = double.tryParse(_submitLatController.text.trim()) ?? 0;
+    final lng = double.tryParse(_submitLngController.text.trim()) ?? 0;
     final draft = CommunityDraft(
-      modelIds:
-          _selectedSubmitModels.map((m) => m.id).toList(),
+      modelIds: _selectedSubmitModels.map((m) => m.id).toList(),
       title: _submitTitleController.text.trim(),
       caption: _submitCaptionController.text.trim(),
       placeName: _submitPlaceController.text.trim(),
@@ -246,19 +357,16 @@ class _CommunityPageState extends State<CommunityPage>
     );
     await _repository.saveDraft(draft);
     if (!mounted) return;
-    showAppToast(context, '草稿已保存');
-    _tabController.animateTo(2); // stay on submit tab
+    showAppToast(context, textLocalize('community_draft_saved'));
   }
 
-  Future<void> _submitPost() async {
+  Future<bool> _submitPost() async {
     if (_selectedSubmitModels.isEmpty) {
       showAppToast(context, textLocalize('community_fill_all'));
-      return;
+      return false;
     }
-    final lat =
-        double.tryParse(_submitLatController.text.trim());
-    final lng =
-        double.tryParse(_submitLngController.text.trim());
+    final lat = double.tryParse(_submitLatController.text.trim());
+    final lng = double.tryParse(_submitLngController.text.trim());
     final title = _submitTitleController.text.trim();
     final caption = _submitCaptionController.text.trim();
     final place = _submitPlaceController.text.trim();
@@ -269,7 +377,7 @@ class _CommunityPageState extends State<CommunityPage>
         caption.isEmpty ||
         place.isEmpty) {
       showAppToast(context, textLocalize('community_fill_all'));
-      return;
+      return false;
     }
 
     setState(() => _isSubmitting = true);
@@ -289,7 +397,7 @@ class _CommunityPageState extends State<CommunityPage>
     );
     final created = await _repository.createPost(result);
 
-    if (!mounted) return;
+    if (!mounted) return true;
 
     setState(() {
       _posts = [created, ..._posts];
@@ -304,141 +412,313 @@ class _CommunityPageState extends State<CommunityPage>
 
     await _repository.clearDraft();
     showAppToast(context, textLocalize('community_joined'));
+    return true;
   }
 
-  List<CommunityPost> get _filteredPosts {
-    if (_selectedTags.isEmpty) return _posts;
-    final filtered = _posts
-        .where((p) => p.tags.any((t) => _selectedTags.contains(t)))
-        .toList();
-    filtered.sort(
-      (a, b) => b.tags
-          .where((t) => _selectedTags.contains(t))
-          .length
-          .compareTo(
-            a.tags.where((t) => _selectedTags.contains(t)).length,
-          ),
+  /// Posts visible in the current map viewport.
+  List<CommunityPost> get _viewportPosts =>
+      filterPostsByBounds(_posts, _mapViewport.bounds);
+
+  /// Final explore-tab list: viewport posts, narrowed by tag and radius.
+  List<CommunityPost> get _exploreFilteredPosts {
+    final base = _viewportPosts;
+    final tag = _exploreTag;
+    if (tag == null || tag.isEmpty) return base;
+    final tagged = filterPostsByTag(base, tag);
+    final origin =
+        _mapViewport.bounds?.center ??
+        (latitude: _mapViewport.latitude, longitude: _mapViewport.longitude);
+    return filterPostsByRadius(
+      tagged,
+      origin,
+      tagRadiusKmForZoom(_mapViewport.zoom),
     );
-    return filtered;
+  }
+
+  void _onExploreToggleTag(String tag) {
+    setState(() {
+      if (_exploreTag == tag) {
+        _exploreTag = null;
+      } else {
+        _exploreTag = tag;
+      }
+    });
+  }
+
+  void _onExploreClearFilters() {
+    if (_exploreTag == null) return;
+    setState(() => _exploreTag = null);
+  }
+
+  void _openSearch() {
+    _searchFocusTrigger++;
+    setState(() => _currentPage = _CommunitySubPage.search);
+  }
+  void _openSubmit() => setState(() => _currentPage = _CommunitySubPage.submit);
+  void _goBack() {
+    FocusScope.of(context).unfocus();
+    setState(() => _currentPage = null);
+  }
+
+  Widget _buildFloatingHeader(bool isDark) {
+    final headerBg = isDark ? const Color(0xFF1A1D21) : const Color(0xFFF2F4F8);
+    final inputFill = isDark
+        ? AppTheme.darkSurfaceElevated
+        : const Color(0xFFE8ECF1);
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.48)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.65);
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          MediaQuery.of(context).padding.top + 12,
+          20,
+          10,
+        ),
+        decoration: BoxDecoration(
+          color: headerBg.withValues(alpha: 0.95),
+          border: Border(
+            bottom: BorderSide(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : BDDesign.colorMutedBlue.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Text(
+                textLocalize('community'),
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _openSearch,
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: inputFill,
+                      borderRadius: BorderRadius.circular(19),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, color: hintColor, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _lastSearchQuery ??
+                                textLocalize('community_search_placeholder'),
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: _lastSearchQuery != null
+                                  ? textColor
+                                  : hintColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              TextButton.icon(
+                onPressed: _openSubmit,
+                icon: Icon(
+                  Icons.edit_rounded,
+                  size: 17,
+                  color: isDark
+                      ? BDDesign.colorPaperWhite
+                      : BDDesign.colorInkBlack,
+                ),
+                label: Text(
+                  textLocalize('community_tab_submit'),
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  minimumSize: Size.zero,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+        ),
+    );
+  }
+
+  Widget _buildSearchOverlay() {
+    return BDPageBackdrop(
+      child: SafeArea(
+        child: Stack(
+          children: [
+            CommunityExploreView(
+              posts: _posts,
+              searchHistory: _searchHistory,
+              recommendedKeywords: _recommendedKeywords,
+              onSearch: _addToSearchHistory,
+              onClearHistory: _clearSearchHistory,
+              onTapPost: (post) {
+                _goBack();
+                _openDetail(post);
+              },
+              focusOnMount: true,
+              focusTrigger: _searchFocusTrigger,
+              searchFieldLeftInset: 52,
+            ),
+            _buildBackButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmitOverlay() {
+    return BDPageBackdrop(
+      child: SafeArea(
+        child: Stack(
+          children: [
+            CommunitySubmitView(
+              shareableModels: _shareableModels,
+              selectedModels: _selectedSubmitModels,
+              onToggleModel: _toggleSubmitModel,
+              titleController: _submitTitleController,
+              captionController: _submitCaptionController,
+              placeController: _submitPlaceController,
+              latController: _submitLatController,
+              lngController: _submitLngController,
+              isSubmitting: _isSubmitting,
+              onSubmit: () async {
+                final ok = await _submitPost();
+                if (ok && mounted) _goBack();
+              },
+              onSaveDraft: _saveDraft,
+              searchFieldLeftInset: 52,
+            ),
+            _buildBackButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBackButton() {
+    return Positioned(
+      left: 16,
+      top: 8,
+      child: GestureDetector(
+        onTap: _goBack,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.arrow_back_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final topSafe = MediaQuery.of(context).padding.top;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: BDPageBackdrop(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: Text(
-                  textLocalize('community'),
-                  style: TextStyle(
-                    color: isDark
-                        ? BDDesign.colorPaperWhite
-                        : BDDesign.colorInkBlack,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20),
-                child: BDPanelCard(
-                  padding: const EdgeInsets.all(6),
-                  child: TabBar(
-                    controller: _tabController,
-                    dividerColor: Colors.transparent,
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    indicator: BoxDecoration(
-                      color: isDark
-                          ? AppTheme.darkSurfaceElevated
-                          : BDDesign.colorMutedBlue
-                              .withValues(alpha: 0.12),
-                      borderRadius: BDDesign.radiusLarge,
-                    ),
-                    labelColor: isDark
-                        ? BDDesign.colorPaperWhite
-                        : BDDesign.colorInkBlack,
-                    unselectedLabelColor: isDark
-                        ? Colors.white.withValues(alpha: 0.56)
-                        : BDDesign.colorMutedBlue,
-                    tabs: [
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_explore')),
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_discover')),
-                      Tab(
-                          text: textLocalize(
-                              'community_tab_submit')),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator())
-                    : BDTabSwitcher(
-                        index: _tabIndex,
-                        children: [
-                          CommunityExploreView(
-                            posts: _posts,
-                            selectedPlaceName: _selectedPlaceName,
-                            onSelect: (placeName) => setState(
-                                () => _selectedPlaceName = placeName),
-                            onClearFilter: () => setState(
-                                () => _selectedPlaceName = null),
-                            onTapPost: _openDetail,
-                          ),
-                          CommunityDiscoverView(
-                            posts: _filteredPosts,
-                            selectedTags: _selectedTags,
-                            onToggleTag: (tag) {
-                              setState(() {
-                                _selectedTags.contains(tag)
-                                    ? _selectedTags
-                                        .remove(tag)
-                                    : _selectedTags.add(tag);
-                              });
-                            },
-                            onTapPost: _openDetail,
-                          ),
-                          CommunitySubmitView(
-                            shareableModels:
-                                _shareableModels,
-                            selectedModels:
-                                _selectedSubmitModels,
-                            onToggleModel:
-                                _toggleSubmitModel,
-                            titleController:
-                                _submitTitleController,
-                            captionController:
-                                _submitCaptionController,
-                            placeController:
-                                _submitPlaceController,
-                            latController:
-                                _submitLatController,
-                            lngController:
-                                _submitLngController,
-                            isSubmitting: _isSubmitting,
-                            onSubmit: _submitPost,
-                            onSaveDraft: _saveDraft,
-                          ),
-                        ],
+    return PopScope(
+      canPop: _currentPage == null,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _goBack();
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: false,
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            BDPageBackdrop(
+              child: SafeArea(
+                top: false,
+                child: Stack(
+                  children: [
+                    if (_isLoading)
+                      const Center(child: CircularProgressIndicator())
+                    else
+                      Padding(
+                        padding: EdgeInsets.only(top: topSafe + 60),
+                        child: CommunityRecommendView(
+                          posts: _exploreFilteredPosts,
+                          totalPosts: _posts.length,
+                          viewportPosts: _viewportPosts.length,
+                          mapViewport: _mapViewport,
+                          mapMarkers: _mapMarkers,
+                          onOpenMap: _openMapPage,
+                          onTapPost: _openDetail,
+                          availableTags: rankTagsFromPosts(_viewportPosts),
+                          selectedTag: _exploreTag,
+                          onToggleTag: _onExploreToggleTag,
+                          onClearFilters: _onExploreClearFilters,
+                          tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                        ),
                       ),
+                    AnimatedPositioned(
+                      duration: BDMotion.durationNormal,
+                      curve: BDMotion.curveFluid,
+                      left: _currentPage == _CommunitySubPage.search
+                          ? 0
+                          : screenWidth,
+                      top: 0,
+                      bottom: 0,
+                      width: screenWidth,
+                      child: _buildSearchOverlay(),
+                    ),
+                    AnimatedPositioned(
+                      duration: BDMotion.durationNormal,
+                      curve: BDMotion.curveFluid,
+                      left: _currentPage == _CommunitySubPage.submit
+                          ? 0
+                          : screenWidth,
+                      top: 0,
+                      bottom: 0,
+                      width: screenWidth,
+                      child: _buildSubmitOverlay(),
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+            if (_currentPage == null) _buildFloatingHeader(isDark),
+          ],
         ),
       ),
     );

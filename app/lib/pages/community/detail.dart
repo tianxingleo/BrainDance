@@ -40,7 +40,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
     super.initState();
     _post = widget.post;
     _buildImageEntries();
-    _loadMetadata();
+    _recordViewAndLoadMetadata();
     _loadComments();
   }
 
@@ -103,8 +103,15 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
         likeCount: (meta['likes'] as List?)?.length ?? 0,
         favoriteCount: (meta['favorites'] as List?)?.length ?? 0,
         commentCount: (meta['comments'] as List?)?.length ?? 0,
+        viewCount: _readViewCount(meta),
       );
     });
+  }
+
+  Future<void> _recordViewAndLoadMetadata() async {
+    await _repository.recordPostView(_post.id);
+    if (!mounted) return;
+    await _loadMetadata();
   }
 
   Future<void> _loadComments() async {
@@ -243,15 +250,67 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                             },
                             itemBuilder: (context, index) {
                               final entry = _imageEntries[index];
-                              return _CachedThumbnail(
-                                url: entry['coverUrl']
-                                        ?.toString() ??
-                                    '',
-                                height: 320,
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _CachedThumbnail(
+                                    url: entry['coverUrl']
+                                            ?.toString() ??
+                                        '',
+                                    height: 320,
+                                  ),
+                                  // 模型名称标签
+                                  Positioned(
+                                    left: 16,
+                                    bottom: _imageEntries.length > 1 ? 40 : 16,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.55),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        entry['modelName']?.toString() ?? '',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               );
                             },
                           ),
-                          if (_imageEntries.length > 1)
+                          if (_imageEntries.length > 1) ...[
+                            // 模型计数指示器
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '${_currentImageIndex + 1} / ${_imageEntries.length}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 底部圆点
                             Positioned(
                               bottom: 12,
                               left: 0,
@@ -279,6 +338,7 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                                 ),
                               ),
                             ),
+                          ],
                         ],
                       ),
                     ),
@@ -291,11 +351,11 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                         width: double.infinity,
                         child: FilledButton.icon(
                           onPressed: _enterViewer,
-                          icon: const Icon(
-                            Icons.view_in_ar_rounded,
-                          ),
+                          icon: const Icon(Icons.view_in_ar_rounded),
                           label: Text(
-                            textLocalize('community_enter_memory'),
+                            _imageEntries.length > 1
+                                ? '${textLocalize('community_enter_memory')} — $_currentModelName'
+                                : textLocalize('community_enter_memory'),
                           ),
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
@@ -495,6 +555,11 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
                     ),
                     const SizedBox(width: 8),
                     _ActionButton(
+                      icon: Icons.visibility_outlined,
+                      label: '${_post.viewCount}',
+                      onTap: () {},
+                    ),
+                    _ActionButton(
                       icon: _isLiked
                           ? Icons.favorite_rounded
                           : Icons.favorite_outline_rounded,
@@ -558,6 +623,17 @@ class _CommunityDetailPageState extends State<CommunityDetailPage> {
       posesUrl: _currentPosesUrl,
       sceneId: _currentModelName,
     );
+  }
+
+  int _readViewCount(Map<String, dynamic> metadata) {
+    final views = metadata['views'];
+    if (views is num) return views.toInt();
+    if (views is List) return views.length;
+    final viewCount = metadata['view_count'];
+    if (viewCount is num) return viewCount.toInt();
+    final viewers = metadata['viewers'];
+    if (viewers is List) return viewers.length;
+    return 0;
   }
 }
 

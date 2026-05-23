@@ -220,6 +220,7 @@ class BDGlassSurface extends StatelessWidget {
   final Color? tintColor;
   final Color? borderColor;
   final List<BoxShadow>? shadows;
+  final bool noBlur;
 
   const BDGlassSurface({
     super.key,
@@ -232,6 +233,7 @@ class BDGlassSurface extends StatelessWidget {
     this.tintColor,
     this.borderColor,
     this.shadows,
+    this.noBlur = false,
   });
 
   @override
@@ -271,6 +273,23 @@ class BDGlassSurface extends StatelessWidget {
           ),
         ];
 
+    final decoratedChild = DecoratedBox(
+      decoration: BoxDecoration(
+        color: effectiveTint,
+        borderRadius: borderRadius,
+        border: Border.all(color: effectiveBorder),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: isDark ? 0.08 : 0.28),
+            Colors.white.withValues(alpha: isDark ? 0.02 : 0.08),
+          ],
+        ),
+      ),
+      child: padding == null ? child : Padding(padding: padding!, child: child),
+    );
+
     return RepaintBoundary(
       child: Container(
         margin: margin,
@@ -280,30 +299,15 @@ class BDGlassSurface extends StatelessWidget {
         ),
         child: ClipRRect(
           borderRadius: borderRadius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: effectiveBlur,
-              sigmaY: effectiveBlur,
-            ),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: effectiveTint,
-                borderRadius: borderRadius,
-                border: Border.all(color: effectiveBorder),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: isDark ? 0.08 : 0.28),
-                    Colors.white.withValues(alpha: isDark ? 0.02 : 0.08),
-                  ],
+          child: noBlur
+              ? decoratedChild
+              : BackdropFilter(
+                  filter: ImageFilter.blur(
+                    sigmaX: effectiveBlur,
+                    sigmaY: effectiveBlur,
+                  ),
+                  child: decoratedChild,
                 ),
-              ),
-              child: padding == null
-                  ? child
-                  : Padding(padding: padding!, child: child),
-            ),
-          ),
         ),
       ),
     );

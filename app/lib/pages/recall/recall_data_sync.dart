@@ -27,15 +27,16 @@ extension _RecallPageDataSync on _RecallPageState {
 
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
-    final taskId = (newData['id'] ?? oldData['id'])?.toString();
+    final taskId = (newData?['id'] ?? oldData?['id'])?.toString();
     final String? status =
-        newData['status']?.toString() ?? oldData['status']?.toString();
+        newData?['status']?.toString() ?? oldData?['status']?.toString();
 
     if (taskId == null) return;
 
     if (status == 'processing') {
       // 更新或添加 processing 任务
-      final logsJson = newData['logs'] as List<dynamic>?;
+      final rawLogs = newData?['logs'];
+      final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
       final allLogs = _parseAllLogMsgs(logsJson);
       if (mounted) {
         _refreshState(() {
@@ -245,14 +246,27 @@ extension _RecallPageDataSync on _RecallPageState {
         return false;
       }
 
-      final demoModels = [_buildDemoModel()];
+      // Offline: scan for locally downloaded models
+      List<Map<String, dynamic>> fallbackModels;
+      try {
+        final scanner = const LocalModelScanner();
+        final localModels = await scanner.scanDownloadedModels();
+        if (localModels.isNotEmpty) {
+          fallbackModels = localModels;
+        } else {
+          fallbackModels = [_buildDemoModel()];
+        }
+      } catch (_) {
+        fallbackModels = [_buildDemoModel()];
+      }
+
       if (mounted) {
         final ownModelSignature = _buildModelSignature(
-          _extractOwnModels(demoModels),
+          _extractOwnModels(fallbackModels),
         );
         _refreshState(() {
-          _allModels = demoModels;
-          _models = demoModels;
+          _allModels = fallbackModels;
+          _models = fallbackModels;
           _didFinishInitialModelLoad = true;
           _isLoading = false;
           _lastOwnModelSignature = ownModelSignature;
@@ -265,7 +279,7 @@ extension _RecallPageDataSync on _RecallPageState {
       }
       _searchCache.clear();
       _lastSearchKey = null;
-      await _syncLocalIndex(demoModels);
+      await _syncLocalIndex(fallbackModels);
       return false;
     }
   }

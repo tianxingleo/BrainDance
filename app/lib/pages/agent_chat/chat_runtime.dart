@@ -173,6 +173,54 @@ extension _AgentChatRuntime on _AgentChatPageState {
     return {
       'mode': r.mode,
       'answer': r.answer,
+      'evidence': r.evidence == null
+          ? null
+          : {
+              'sceneId': r.evidence!.sceneId,
+              'similarity': r.evidence!.similarity,
+              'matchedFrames': r.evidence!.matchedFrames
+                  .map(
+                    (frame) => {
+                      'imageName': frame.imageName,
+                      'similarity': frame.similarity,
+                      'transformMatrix': frame.transformMatrix,
+                    },
+                  )
+                  .toList(),
+            },
+      'actions': r.actions
+          .map(
+            (action) => {
+              'type': action.type,
+              if (action.title != null) 'title': action.title,
+              'payload': {
+                'sceneId': action.sceneId,
+                if (action.modelId != null) 'modelId': action.modelId,
+                if (action.ply != null) 'ply': action.ply,
+                if (action.poses != null) 'poses': action.poses,
+                if (action.imageName != null) 'imageId': action.imageName,
+                if (action.matrix != null) 'matrix': action.matrix,
+              },
+            },
+          )
+          .toList(),
+      'top_candidates': r.candidates
+          .map(
+            (candidate) => {
+              'scene_id': candidate.sceneId,
+              'model_id': candidate.modelId,
+              'score': candidate.score,
+              'display_name': candidate.displayName,
+              'description': candidate.description,
+              'pose_image_id': candidate.poseImageId,
+              'tags': candidate.tags,
+              'preview_img_path': candidate.previewImgPath,
+              'created_at': candidate.createdAt,
+              'ply_path': candidate.plyPath,
+            },
+          )
+          .toList(),
+      'selected_candidate_reason': r.selectedCandidateReason,
       if (r.followUp != null) 'follow_up': {
         'status': r.followUp!.status,
         'kind': r.followUp!.kind,
@@ -180,6 +228,13 @@ extension _AgentChatRuntime on _AgentChatPageState {
         'suggested_replies': r.followUp!.suggestedReplies,
       },
       if (r.assetContext != null) 'asset_context': r.assetContext,
+      if (r.compareContext != null) 'compare_context': r.compareContext,
+      if (r.collectionContext != null) 'collection_context': r.collectionContext,
+      if (r.creativeContext != null) 'creative_context': r.creativeContext,
+      if (r.memoryGraphContext != null)
+        'memory_graph_context': r.memoryGraphContext,
+      if (r.responseResolution != null)
+        'response_resolution': r.responseResolution,
       if (_activeChatMessage != null && _activeChatMessage!.steps.isNotEmpty)
         'steps': _activeChatMessage!.steps
             .where((s) => s.type == 'tool_call' || s.type == 'status')
@@ -430,7 +485,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
     if (event == 'done') {
       if (payload != null && payload is Map) {
         _activeResult = AgentRecallResponse.fromJson(
-          Map<String, dynamic>.from(payload),
+          _normalizeAgentDonePayload(payload),
         );
         _rememberResponse(
           _messages.lastWhere((m) => m.isUser, orElse: () => _messages.last).content,
@@ -444,6 +499,24 @@ extension _AgentChatRuntime on _AgentChatPageState {
       }
       _completeRun();
     }
+  }
+
+  Map<String, dynamic> _normalizeAgentDonePayload(Map<dynamic, dynamic> payload) {
+    final map = Map<String, dynamic>.from(payload);
+    final nestedResult = map['result'];
+    if (nestedResult is Map) {
+      return Map<String, dynamic>.from(nestedResult);
+    }
+    final nestedData = map['data'];
+    if (nestedData is Map) {
+      final dataMap = Map<String, dynamic>.from(nestedData);
+      if (dataMap.containsKey('answer') ||
+          dataMap.containsKey('top_candidates') ||
+          dataMap.containsKey('candidates')) {
+        return dataMap;
+      }
+    }
+    return map;
   }
 
   String _mergeAnswerDelta({required String current, required String incoming}) {

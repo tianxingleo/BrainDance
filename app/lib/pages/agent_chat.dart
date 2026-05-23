@@ -20,6 +20,7 @@ import 'recall/agent_asset_card.dart';
 part 'agent_chat/chat_runtime.dart';
 part 'agent_chat/chat_view.dart';
 part 'agent_chat/conversation_list.dart';
+part 'agent_chat/time_compare_card.dart';
 
 class AgentChatPage extends ConsumerStatefulWidget {
   const AgentChatPage({super.key});
