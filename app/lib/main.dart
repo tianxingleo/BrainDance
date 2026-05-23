@@ -651,7 +651,6 @@ class _MainScreenState extends ConsumerState<MainScreen>
                   }),
                   if (!isRecording)
                     FloatingNavBar(
-                      skipBlur: _isAnimating || (pageIndex != _previousIndex),
                       currentIndex: pageIndex,
                       onTap: _switchToPage,
                       items: [
