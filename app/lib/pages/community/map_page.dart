@@ -10,6 +10,7 @@ import 'amap_search.dart';
 import 'filtering.dart';
 import 'map_marker.dart';
 import 'repository.dart';
+import 'widgets/map_overlay_widgets.dart';
 import 'widgets/map_search_widgets.dart';
 
 const String kCommunityMapTileUrl =
@@ -423,15 +424,19 @@ class _CommunityMapPageState extends State<CommunityMapPage> {
                                   SearchPinLayer(poi: _selectedSearchPoi!),
                               ],
                             ),
-                            _MapHintPill(
-                              text: '单指拖拽，双指缩放',
-                              isDark: isDark,
-                              hintColor: hintColor,
+                            Positioned(
+                              left: 14,
+                              top: 14,
+                              child: MapHintPill(
+                                text: '单指拖拽，双指缩放',
+                                isDark: isDark,
+                                hintColor: hintColor,
+                              ),
                             ),
                             Positioned(
                               right: 12,
                               bottom: 12,
-                              child: _ZoomControls(
+                              child: MapZoomControls(
                                 isDark: isDark,
                                 onZoomIn: () => _stepZoom(1),
                                 onZoomOut: () => _stepZoom(-1),
@@ -569,83 +574,6 @@ class _CommunityAmapPreviewState extends State<CommunityAmapPreview> {
           CommunityMarkerLayer(
             markers: _previewMarkers,
             interactive: false,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MapHintPill extends StatelessWidget {
-  final String text;
-  final bool isDark;
-  final Color hintColor;
-
-  const _MapHintPill({
-    required this.text,
-    required this.isDark,
-    required this.hintColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: 14,
-      top: 14,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: (isDark ? Colors.black : Colors.white).withValues(alpha: 0.76),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            text,
-            style: TextStyle(color: hintColor, fontSize: 12),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ZoomControls extends StatelessWidget {
-  final bool isDark;
-  final VoidCallback onZoomIn;
-  final VoidCallback onZoomOut;
-
-  const _ZoomControls({
-    required this.isDark,
-    required this.onZoomIn,
-    required this.onZoomOut,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bgColor =
-        (isDark ? Colors.black : Colors.white).withValues(alpha: 0.82);
-    final iconColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            onPressed: onZoomIn,
-            icon: Icon(Icons.add_rounded, color: iconColor),
-          ),
-          Container(
-            width: 24,
-            height: 1,
-            color: iconColor.withValues(alpha: 0.18),
-          ),
-          IconButton(
-            onPressed: onZoomOut,
-            icon: Icon(Icons.remove_rounded, color: iconColor),
           ),
         ],
       ),

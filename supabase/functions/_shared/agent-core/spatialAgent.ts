@@ -1202,9 +1202,18 @@ function buildStopSearchSummaryPayload(input: {
   candidates: Map<string, SceneCandidate>;
   assetState: AssetToolState;
 }): Record<string, unknown> {
-  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
-    candidate,
-  ) => ({
+  const pseudoIntent: Pick<SpatialIntent, "rewrittenQuery" | "targetType"> = {
+    rewrittenQuery: input.query,
+    targetType: "scene",
+  };
+  const rankedWithScore = [...input.candidates.values()]
+    .map((candidate) => ({
+      candidate,
+      score: scoreSceneCandidate(candidate, pseudoIntent),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  const topCandidates = rankedWithScore.slice(0, 5).map(({ candidate, score }) => ({
     scene_id: candidate.sceneId,
     model_id: candidate.modelId,
     display_name: candidate.displayName ?? null,
@@ -1218,7 +1227,13 @@ function buildStopSearchSummaryPayload(input: {
       }
       : null,
     source_scores: candidate.sourceScores,
+    fused_score: score,
   }));
+
+  const topScore = rankedWithScore[0]?.score ?? 0;
+  const hasMultiSourceEvidence = [...input.candidates.values()].some((c) =>
+    Object.keys(c.sourceScores).length >= 2
+  );
 
   return {
     user_query: input.query,
@@ -1228,6 +1243,9 @@ function buildStopSearchSummaryPayload(input: {
       : null,
     tool_trace: input.trace,
     spatial_candidates: topCandidates,
+    candidate_count: input.candidates.size,
+    top_fused_score: topScore,
+    has_multi_source_evidence: hasMultiSourceEvidence,
     asset_context: serializeAssetContext(input.assetState),
   };
 }
@@ -1255,12 +1273,24 @@ async function buildStopSearchUserFacingSummary(input: {
     new SystemMessage(
       [
         "你是 BrainDance 的空间记忆 Agent。",
-        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
-        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
-        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
-        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
-        "不要编造工具结果中不存在的场景、数量或字段。",
-        "控制在 2 到 4 句，语气自然、明确。",
+        "你刚刚主动调用了 stop_search，现在需要基于已有工具结果生成一段直接反馈给前端用户的中文自然语言回答。",
+        "",
+        "【判断依据按优先级】",
+        "1) top_fused_score（系统融合分，权威信号）",
+        "2) has_multi_source_evidence（是否有交叉证据）",
+        "3) candidate_count（候选数量）",
+        "4) stop_confidence（你刚才的自评，仅作参考，不要单独依赖）",
+        "",
+        "【硬规则 — 必须严格执行】",
+        "- candidate_count = 0 或 top_fused_score < 0.45：必须明确告诉用户没有找到匹配，不要描述任何候选当作答案。建议用户补充时间、地点或物体描述。",
+        "- 0.45 ≤ top_fused_score < 0.62 或 has_multi_source_evidence = false：使用保留语气（如 可能 / 或许 / 相关性不高），并主动询问是否就是用户想找的，不要用肯定句陈述场景。",
+        "- top_fused_score ≥ 0.62 且 has_multi_source_evidence = true：才能用肯定语气描述命中场景。",
+        "- 资产操作预览：说明当前只是预览以及下一步需要确认。",
+        "",
+        "【表述要求】",
+        "- 不要提及 JSON、内部 trace、工具链、stop_search、score、置信度等系统术语。",
+        "- 不要编造工具结果中不存在的场景、数量或字段。",
+        "- 控制在 2 到 4 句，语气自然、明确。否定时也要明确，不要含糊其辞。",
       ].join("\n"),
     ),
     new HumanMessage(
@@ -2969,6 +2999,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Set<string>;
     round: number;
     shouldStop: boolean;
+    implicitStopRetried: boolean;
   };
 
   const UnifiedStateAnnotation = Annotation.Root({
@@ -2979,6 +3010,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Annotation<Set<string>>({ reducer: (_, b) => b, default: () => new Set() }),
     round: Annotation<number>({ reducer: (_, b) => b, default: () => 0 }),
     shouldStop: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
+    implicitStopRetried: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
   });
 
   async function agentNode(state: UnifiedState): Promise<Partial<UnifiedState>> {
@@ -2992,6 +3024,39 @@ async function executeUnifiedAgentLoop(input: {
     msgs.push(response);
     const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
     if (toolCalls.length === 0) {
+      if (!state.implicitStopRetried) {
+        await emitProgress(callbacks, {
+          event: "status",
+          data: {
+            phase: "implicit_stop_nudge",
+            summary: "Agent 未调用任何工具，注入提示要求显式 stop_search 收口",
+          },
+        });
+        await emitThought(
+          callbacks,
+          "本轮没有产生工具调用，但根据 stop_search 协议需要显式收口。先注入提示给模型一次机会。",
+        );
+        msgs.push(new SystemMessage(
+          [
+            "你刚才这一轮没有调用任何工具，也没有调用 stop_search。",
+            "请显式收口：必须调用 stop_search 工具，并在参数中说明：",
+            "- reason：本次为什么停止（例如 已拿到足够候选 / 未找到匹配 / 问题不需要工具）",
+            "- confidence：0-1 之间，根据当前候选可信度真实评估",
+            "  · 已有候选且 score≥0.62 且语义对齐用户问题 → 0.7-1.0",
+            "  · 候选弱、相关性不强、语义偏离 → 0.2-0.5",
+            "  · 完全未找到匹配 → 0-0.2，请在 reason 中明确说明",
+            "如果你之前打算直接给出自然语言回答，请先调用 stop_search，系统会基于你的工具结果生成最终回答。",
+          ].join("\n"),
+        ));
+        return { messages: msgs, round, shouldStop: false, implicitStopRetried: true };
+      }
+      await emitProgress(callbacks, {
+        event: "status",
+        data: {
+          phase: "implicit_stop_after_nudge",
+          summary: "Agent 在被提示后仍未调用 stop_search，按隐式停止处理",
+        },
+      });
       return { messages: msgs, round, shouldStop: true };
     }
     return { messages: msgs, round, shouldStop: false };
@@ -3155,6 +3220,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
+    implicitStopRetried: false,
   }, { recursionLimit: Number.MAX_SAFE_INTEGER });
 
   return {
