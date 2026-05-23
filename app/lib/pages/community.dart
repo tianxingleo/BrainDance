@@ -371,11 +371,7 @@ class _CommunityPageState extends State<CommunityPage> {
     final caption = _submitCaptionController.text.trim();
     final place = _submitPlaceController.text.trim();
 
-    if (lat == null ||
-        lng == null ||
-        title.isEmpty ||
-        caption.isEmpty ||
-        place.isEmpty) {
+    if (title.isEmpty || caption.isEmpty) {
       showAppToast(context, textLocalize('community_fill_all'));
       return false;
     }
@@ -386,8 +382,8 @@ class _CommunityPageState extends State<CommunityPage> {
       title: title,
       caption: caption,
       placeName: place,
-      latitude: lat,
-      longitude: lng,
+      latitude: lat ?? 0,
+      longitude: lng ?? 0,
       models: _selectedSubmitModels,
       tags: _selectedSubmitModels
           .expand((m) => m.description.split(RegExp(r'[\s,，]+')))
@@ -480,7 +476,7 @@ class _CommunityPageState extends State<CommunityPage> {
       child: Container(
         padding: EdgeInsets.fromLTRB(
           20,
-          MediaQuery.of(context).padding.top + 12,
+          MediaQuery.paddingOf(context).top + 12,
           20,
           10,
         ),
@@ -656,8 +652,8 @@ class _CommunityPageState extends State<CommunityPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final topSafe = MediaQuery.of(context).padding.top;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final topSafe = MediaQuery.paddingOf(context).top;
 
     return PopScope(
       canPop: _currentPage == null,
@@ -677,21 +673,23 @@ class _CommunityPageState extends State<CommunityPage> {
                     if (_isLoading)
                       const Center(child: CircularProgressIndicator())
                     else
-                      Padding(
-                        padding: EdgeInsets.only(top: topSafe + 60),
-                        child: CommunityRecommendView(
-                          posts: _exploreFilteredPosts,
-                          totalPosts: _posts.length,
-                          viewportPosts: _viewportPosts.length,
-                          mapViewport: _mapViewport,
-                          mapMarkers: _mapMarkers,
-                          onOpenMap: _openMapPage,
-                          onTapPost: _openDetail,
-                          availableTags: rankTagsFromPosts(_viewportPosts),
-                          selectedTag: _exploreTag,
-                          onToggleTag: _onExploreToggleTag,
-                          onClearFilters: _onExploreClearFilters,
-                          tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                      RepaintBoundary(
+                        child: Padding(
+                          padding: EdgeInsets.only(top: topSafe + 60),
+                          child: CommunityRecommendView(
+                            posts: _exploreFilteredPosts,
+                            totalPosts: _posts.length,
+                            viewportPosts: _viewportPosts.length,
+                            mapViewport: _mapViewport,
+                            mapMarkers: _mapMarkers,
+                            onOpenMap: _openMapPage,
+                            onTapPost: _openDetail,
+                            availableTags: rankTagsFromPosts(_viewportPosts),
+                            selectedTag: _exploreTag,
+                            onToggleTag: _onExploreToggleTag,
+                            onClearFilters: _onExploreClearFilters,
+                            tagRadiusKm: tagRadiusKmForZoom(_mapViewport.zoom),
+                          ),
                         ),
                       ),
                     AnimatedPositioned(
@@ -703,9 +701,11 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: ExcludeFocus(
-                        excluding: _currentPage != _CommunitySubPage.search,
-                        child: _buildSearchOverlay(),
+                      child: RepaintBoundary(
+                        child: ExcludeFocus(
+                          excluding: _currentPage != _CommunitySubPage.search,
+                          child: _buildSearchOverlay(),
+                        ),
                       ),
                     ),
                     AnimatedPositioned(
@@ -717,16 +717,19 @@ class _CommunityPageState extends State<CommunityPage> {
                       top: 0,
                       bottom: 0,
                       width: screenWidth,
-                      child: ExcludeFocus(
-                        excluding: _currentPage != _CommunitySubPage.submit,
-                        child: _buildSubmitOverlay(),
+                      child: RepaintBoundary(
+                        child: ExcludeFocus(
+                          excluding: _currentPage != _CommunitySubPage.submit,
+                          child: _buildSubmitOverlay(),
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            if (_currentPage == null) _buildFloatingHeader(isDark),
+            if (_currentPage == null)
+              RepaintBoundary(child: _buildFloatingHeader(isDark)),
           ],
         ),
       ),
