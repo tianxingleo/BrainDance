@@ -12,8 +12,8 @@
   - 兼容 `VITE_BD_SUPABASE_URL / VITE_BD_SUPABASE_ANON_KEY` 和 dashboard 使用的 `VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY`。
   - 保留 Supabase JS 自带的持久会话和自动刷新能力。
 - `vr-3dgs-viewer/vite.config.ts`
-  - 当 HTTPS dev server 访问 `http://` Supabase 本地地址时，默认把 `/supabase-proxy` 转发到 `VITE_BD_SUPABASE_URL`。
-  - 避免未配置 `VITE_BD_SUPABASE_PROXY_TARGET` 时请求落回 Vite 前端 HTML，导致 Supabase SDK 报 `Unexpected token '<'`。
+  - `/supabase-proxy` 仅作为显式调试代理使用，默认直连 `VITE_BD_SUPABASE_URL`。
+  - 如确需代理，需要设置 `VITE_BD_SUPABASE_USE_PROXY=true` 并从 Vite 端口访问 VR 页面，避免把请求拼到 Supabase API 端口。
 - `vr-3dgs-viewer/src/services/modelRepository.ts`
   - 新增 VR 端 Supabase 数据仓库层。
   - 支持从 `model_assets` 读取模型资产，按“我的模型 / 社区模型”两种来源查询。
