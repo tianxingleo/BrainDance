@@ -725,6 +725,10 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final topSafe = MediaQuery.paddingOf(context).top;
 
+    ref.listen(myPostsRefreshSignal, (prev, next) {
+      if (prev != next) _loadCommunity();
+    });
+
     return PopScope(
       canPop: _currentPage == null,
       onPopInvokedWithResult: (didPop, result) {

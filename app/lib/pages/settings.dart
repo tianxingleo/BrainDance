@@ -291,7 +291,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
 
   Future<void> _togglePostVisibility(CommunityPost post) async {
     await _communityRepository.togglePostVisibility(post);
-    await _loadCommunityAccount();
+    ref.read(myPostsRefreshSignal.notifier).state++;
   }
 
   Future<void> _confirmDeletePost(CommunityPost post) async {
@@ -316,7 +316,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     );
     if (confirmed != true) return;
     await _communityRepository.deletePost(post.id);
-    await _loadCommunityAccount();
+    ref.read(myPostsRefreshSignal.notifier).state++;
   }
 }
 
