@@ -109,6 +109,7 @@ class CommunityPost {
     int? viewCount,
     bool? isLikedByCurrentUser,
     bool? isFavoritedByCurrentUser,
+    bool? isPublic,
   }) {
     return CommunityPost(
       id: id,
@@ -125,7 +126,7 @@ class CommunityPost {
       coverUrl: coverUrl,
       createdAt: createdAt,
       tags: tags,
-      isPublic: isPublic,
+      isPublic: isPublic ?? this.isPublic,
       likeCount: likeCount ?? this.likeCount,
       favoriteCount: favoriteCount ?? this.favoriteCount,
       commentCount: commentCount ?? this.commentCount,

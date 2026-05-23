@@ -292,6 +292,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
 
   Future<void> _togglePostVisibility(CommunityPost post) async {
     showAppToast(context, textLocalize('my_post_updating'));
+    // 乐观更新：立即切换本地状态
+    final toggled = post.copyWith(isPublic: !post.isPublic);
+    setState(() {
+      _myPosts = _myPosts.map((p) => p.id == post.id ? toggled : p).toList();
+    });
     await _communityRepository.togglePostVisibility(post);
     ref.read(myPostsRefreshSignal.notifier).state++;
     if (!mounted) return;
@@ -320,6 +325,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     );
     if (confirmed != true) return;
     showAppToast(context, textLocalize('my_post_deleting'));
+    // 乐观更新：立即从列表中移除
+    setState(() {
+      _myPosts = _myPosts.where((p) => p.id != post.id).toList();
+    });
     await _communityRepository.deletePost(post.id);
     ref.read(myPostsRefreshSignal.notifier).state++;
     if (!mounted) return;
