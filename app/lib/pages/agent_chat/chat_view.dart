@@ -748,9 +748,13 @@ extension _AgentChatView on _AgentChatPageState {
         : BDDesign.colorMutedBlue.withValues(alpha: 0.12);
     final textColor = isDark ? Colors.white : BDDesign.colorInkBlack;
 
+    // 键盘弹出时，底栏被遮挡/移出视野，不再为它预留间距，避免输入框与键盘之间出现空隙。
+    final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final double bottomPadding =
+        keyboardOpen ? 8 : MediaQuery.paddingOf(context).bottom + 80;
+
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        16, 8, 16, MediaQuery.paddingOf(context).bottom + 80),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, bottomPadding),
       decoration: BoxDecoration(
         color: bgColor,
         border: Border(top: BorderSide(color: borderColor)),

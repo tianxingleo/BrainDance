@@ -60,6 +60,7 @@ dependencies:
   markdown: ^7.3.1
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
+  geolocator: ^13.0.0
 
 dev_dependencies:
   flutter_test:

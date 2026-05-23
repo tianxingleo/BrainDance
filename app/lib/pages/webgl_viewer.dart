@@ -1202,7 +1202,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                   )
                 else if (!_isDownloading && !_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
-                if (!_isDownloading)
+                if (!_isDownloading && _useSparkViewer)
                   SafeArea(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),

@@ -45,6 +45,7 @@ import {
 import { runTimeCompareAgent } from "../../time-compare-agent/agent.ts";
 import {
   type LongTermMemory,
+  buildLongTermMemorySignal,
   loadLongTermMemory,
   shouldPersistLongTermMemory,
   persistLongTermMemory,
@@ -153,6 +154,7 @@ const candidateSchema = z.object({
   display_name: z.string().nullable().optional(),
   ply_path: z.string().nullable().optional(),
   preview_img_path: z.string().nullable().optional(),
+  objects: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   created_at: z.string().optional(),
 });
@@ -2380,6 +2382,7 @@ function serializeSceneCandidate(c: SceneCandidate & { score: number }) {
     pose_image_id: c.bestPose?.image_name ?? null,
     ply_path: c.plyPath ?? null,
     preview_img_path: c.previewImgPath ?? null,
+    objects: c.objects,
     tags: c.tags,
     created_at: c.createdAt,
   };
@@ -3006,11 +3009,21 @@ async function executeUnifiedAgentLoop(input: {
     const toolCalls = Array.isArray(lastAiMsg?.tool_calls) ? lastAiMsg.tool_calls : [];
 
     let executedAny = false;
+    const duplicatedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     for (const toolCall of toolCalls) {
       const toolArgs = toolCall.args ?? {};
       const sig = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
       if (seen.has(sig)) {
-        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}`);
+        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}，提示模型换思路`);
+        duplicatedToolCalls.push({ name: toolCall.name, args: toolArgs });
+        msgs.push(new ToolMessage({
+          tool_call_id: toolCall.id ?? toolCall.name,
+          content: JSON.stringify({
+            skipped: true,
+            reason: "duplicate_call",
+            message: `已跳过：${toolCall.name} 用相同参数已经在前面的轮次执行过，结果不会变化。`,
+          }),
+        }));
         continue;
       }
       seen.add(sig);
@@ -3084,6 +3097,30 @@ async function executeUnifiedAgentLoop(input: {
     }
 
     if (!executedAny) {
+      if (duplicatedToolCalls.length > 0) {
+        const duplicatedSummary = duplicatedToolCalls
+          .map((tc) => `${tc.name}(${stringifyToolArgs(tc.args)})`)
+          .join("; ");
+        msgs.push(new SystemMessage(
+          [
+            `本轮你请求的所有工具调用都已经在之前用相同参数执行过：${duplicatedSummary}。`,
+            "重复调用不会带来新信息，请改变策略：",
+            "1) 换工具（pose_semantic_search / scene_metadata_search / recent_scene_search 之间切换）；",
+            "2) 或显著修改参数（改写 query、放宽/收紧时间窗口、调整 sceneId/limit）；",
+            "3) 如果当前候选已经足够回答问题，调用 stop_search；",
+            "4) 如果确认无法找到匹配，也请调用 stop_search 并在 reason 中说明，不要再重复同一调用。",
+          ].join("\n"),
+        ));
+        await emitProgress(callbacks, {
+          event: "status",
+          data: {
+            phase: "duplicate_tool_calls_detected",
+            summary: `检测到 ${duplicatedToolCalls.length} 个重复工具调用，已注入策略切换提示`,
+            detail: duplicatedSummary,
+          },
+        });
+        return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: false };
+      }
       return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
     }
     return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen };
@@ -3106,7 +3143,7 @@ async function executeUnifiedAgentLoop(input: {
     .addEdge("agent", "executeTools")
     .addEdge("executeTools", "checkStop")
     .addConditionalEdges("checkStop", (s: UnifiedState) =>
-      s.shouldStop || s.round >= UNIFIED_MAX_ROUNDS ? "__end__" : "agent"
+      s.shouldStop ? "__end__" : "agent"
     )
     .compile();
 
@@ -3118,7 +3155,7 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-  }, { recursionLimit: UNIFIED_MAX_ROUNDS * 2 + 10 });
+  }, { recursionLimit: Number.MAX_SAFE_INTEGER });
 
   return {
     candidates: finalState.candidates,
@@ -3646,28 +3683,14 @@ function finalizeResponseWithLongTermMemory(
   const result = finalizeResponse(response, options);
 
   if (options.userId) {
-    const turnCount = result.short_term_memory?.turnCount ?? 0;
-    const shortTermPrefs = result.short_term_memory?.preferences ?? {};
-    if (shouldPersistLongTermMemory(turnCount, options.longTermMemory ?? null, shortTermPrefs)) {
-      const intentObjects: string[] = [];
-      const intentRegions: string[] = [];
-      if (result.intent) {
-        if (result.intent.objectHint) intentObjects.push(result.intent.objectHint);
-        if (result.intent.sceneHint) intentObjects.push(result.intent.sceneHint);
-        if (result.intent.locationHint) intentRegions.push(result.intent.locationHint);
-      }
-      const topSummary = result.top_candidates?.length > 0
-        ? `${result.top_candidates[0].description ?? result.top_candidates[0].scene_id} (score: ${result.top_candidates[0].score.toFixed(2)})`
-        : result.answer.slice(0, 100);
-
+    const signal = buildLongTermMemorySignal(query, result);
+    if (shouldPersistLongTermMemory(options.longTermMemory ?? null, signal)) {
       persistLongTermMemory(supabase, {
         userId: options.userId,
-        currentShortTermPreferences: shortTermPrefs,
         currentQuery: query,
         responseMode: result.mode,
-        topResultSummary: topSummary,
-        intentObjects,
-        intentRegions,
+        topResultSummary: signal.topResultSummary,
+        signal,
       }, options.longTermMemory ?? null).catch((err) => {
         console.error("[LongTermMemory] async persist error:", err);
       });

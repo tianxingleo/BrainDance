@@ -30,6 +30,7 @@ import '../main.dart'
         recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
+import '../services/dual_chain_phase.dart';
 import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/local_model_scanner.dart';
@@ -92,6 +93,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   List<Map<String, dynamic>> _processingTasks = [];
   List<LocalModelCatalogItem> _localModelCatalog = const [];
   Map<String, List<String>> _taskAllLogs = {};
+  final Map<String, Set<DualChainMilestone>> _taskMilestones = {};
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;

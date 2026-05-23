@@ -49,8 +49,14 @@ extension _RecallPageDataSync on _RecallPageState {
           }
         });
       }
+      _processDualChainMilestones(taskId, newData, allLogs);
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
+      // 终态前再扫一次最新 logs，避免错过最后一次写入的里程碑
+      final rawLogs = newData?['logs'];
+      final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
+      final finalLogs = _parseAllLogMsgs(logsJson);
+      _processDualChainMilestones(taskId, newData, finalLogs);
       if (mounted) {
         _refreshState(() {
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
@@ -58,6 +64,65 @@ extension _RecallPageDataSync on _RecallPageState {
           _expandedTaskLogs.remove(taskId);
         });
       }
+      _taskMilestones.remove(taskId);
+    }
+  }
+
+  /// 扫描任务的最新 logs，判定新出现的双链里程碑并驱动模型刷新。
+  /// 仅对 task_type == 'video_dual_chain' 生效。
+  void _processDualChainMilestones(
+    String taskId,
+    Map<String, dynamic>? task,
+    List<String> allLogs,
+  ) {
+    if (task == null) return;
+    if (task['task_type']?.toString() != 'video_dual_chain') return;
+    if (allLogs.isEmpty) return;
+
+    final known = _taskMilestones.putIfAbsent(taskId, () => <DualChainMilestone>{});
+    final fresh = detectNewMilestones(
+      allLogs: allLogs,
+      knownMilestones: known,
+    );
+    if (fresh.isEmpty) return;
+    known.addAll(fresh);
+
+    final sceneId = task['scene_id']?.toString();
+
+    if (fresh.contains(DualChainMilestone.fastReady)) {
+      // 快链产物已 upsert 进 model_assets，刷新一次即可看到卡片。
+      unawaited(_fetchModels(
+        preserveExistingDataOnError: true,
+        showErrorToast: false,
+      ));
+    }
+
+    if (fresh.contains(DualChainMilestone.slowReady) && sceneId != null) {
+      // 慢链覆盖了 Storage 上同一个 ply_path，
+      // 需要丢弃 viewer 在 appDocDir 下基于 URL 派生的旧缓存。
+      unawaited(_invalidateViewerCacheForScene(sceneId).then((_) async {
+        if (!mounted) return;
+        await _fetchModels(
+          preserveExistingDataOnError: true,
+          showErrorToast: false,
+        );
+      }));
+    }
+  }
+
+  /// 根据 scene_id 反查 model_assets.ply_path，清掉 webgl_viewer 的本地缓存。
+  Future<void> _invalidateViewerCacheForScene(String sceneId) async {
+    try {
+      final asset = await Supabase.instance.client
+          .from('model_assets')
+          .select('ply_path')
+          .eq('scene_id', sceneId)
+          .maybeSingle();
+      final plyPath = asset?['ply_path']?.toString() ?? '';
+      if (plyPath.isEmpty) return;
+      await invalidateViewerCacheForUrl(_toPublicUrl(plyPath));
+    } catch (_) {
+      // 缓存清理是 best-effort，失败不影响主流程
     }
   }
 
