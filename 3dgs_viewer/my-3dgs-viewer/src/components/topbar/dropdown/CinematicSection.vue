@@ -1,6 +1,4 @@
 <script setup>
-import { ref } from 'vue';
-
 const props = defineProps({
   speed: { type: Number, required: true },
   progress: { type: Number, required: true },
@@ -11,6 +9,7 @@ const props = defineProps({
   isPaused: { type: Boolean, required: true },
   canPlay: { type: Boolean, required: true },
   buttonLabel: { type: String, required: true },
+  expanded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -18,16 +17,16 @@ const emit = defineEmits([
   'update:loop',
   'update:smoothness',
   'update:subjectLock',
+  'update:expanded',
   'speed-change',
   'style-change',
   'play-toggle',
   'stop',
 ]);
 
-const expanded = ref(false);
 const toggle = () => {
   if (!props.canPlay) return;
-  expanded.value = !expanded.value;
+  emit('update:expanded', !props.expanded);
 };
 
 const onSpeedInput = (event) => {
@@ -71,11 +70,11 @@ const stopDisabled = () =>
       </span>
       <span class="cs-head-state">
         <span v-if="!props.canPlay" class="cs-na">该模型暂无足够视角</span>
-        <span v-else class="cs-chevron" :class="{ 'cs-chevron--open': expanded }" aria-hidden="true">▾</span>
+        <span v-else class="cs-chevron" :class="{ 'cs-chevron--open': props.expanded }" aria-hidden="true">▾</span>
       </span>
     </button>
 
-    <div v-if="expanded && props.canPlay" class="cs-body">
+    <div v-if="props.expanded && props.canPlay" class="cs-body">
       <div class="cs-actions">
         <button
           type="button"

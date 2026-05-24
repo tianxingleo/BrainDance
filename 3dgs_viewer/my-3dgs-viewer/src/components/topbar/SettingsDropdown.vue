@@ -51,13 +51,20 @@ const emit = defineEmits([
 
 const open = ref(false);
 const rootRef = ref(null);
+const expandedSection = ref('');
+
+const setExpandedSection = (section, value) => {
+  expandedSection.value = value ? section : '';
+};
 
 const toggle = () => {
   open.value = !open.value;
+  if (!open.value) expandedSection.value = '';
 };
 
 const close = () => {
   open.value = false;
+  expandedSection.value = '';
 };
 
 const onDocumentPointerDown = (event) => {
@@ -65,6 +72,7 @@ const onDocumentPointerDown = (event) => {
   const root = rootRef.value;
   if (root && !root.contains(event.target)) {
     open.value = false;
+    expandedSection.value = '';
   }
 };
 
@@ -144,6 +152,8 @@ const onEnterAr = () => {
             :is-paused="props.isCinematicPaused"
             :can-play="props.canPlayCinematic"
             :button-label="props.cinematicButtonLabel"
+            :expanded="expandedSection === 'cinematic'"
+            @update:expanded="(v) => setExpandedSection('cinematic', v)"
             @update:speed="(v) => emit('update:cinematicSpeed', v)"
             @update:loop="(v) => emit('update:cinematicLoop', v)"
             @update:smoothness="(v) => emit('update:cinematicSmoothness', v)"
@@ -164,6 +174,8 @@ const onEnterAr = () => {
             :focal-max="props.focalMax"
             :current-view-fov="props.currentViewFov"
             :current-view-focal-px="props.currentViewFocalPx"
+            :expanded="expandedSection === 'focal'"
+            @update:expanded="(v) => setExpandedSection('focal', v)"
             @update:manualFocalPx="(v) => emit('update:manualFocalPx', v)"
             @input="emit('focal-input')"
             @change="emit('focal-change')"
@@ -239,7 +251,7 @@ const onEnterAr = () => {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(86vw, 320px);
+  width: min(76vw, 264px);
   background: var(--card-bg, rgba(249, 249, 248, 0.94));
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   border-radius: 22px;
@@ -253,6 +265,33 @@ const onEnterAr = () => {
   overflow-x: hidden;
   transform-origin: top right;
   will-change: transform, opacity;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dd-panel,
+.dd-panel * {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.dd-panel button,
+.dd-panel input,
+.dd-panel label,
+.dd-panel select,
+.dd-panel [role="button"] {
+  outline: none;
+}
+
+.dd-panel button:focus,
+.dd-panel [role="button"]:focus,
+.dd-panel label:focus {
+  outline: none;
+}
+
+.dd-panel button:focus-visible,
+.dd-panel [role="button"]:focus-visible {
+  outline: 2px solid var(--input-focus-border, rgba(107, 122, 143, 0.5));
+  outline-offset: 2px;
 }
 
 .dd-section {
