@@ -364,7 +364,6 @@ extension _RecallPageView on _RecallPageState {
               darkInput: darkInput,
               model: _activeModelAction!,
               rect: _activeModelActionRect!,
-              toPublicUrl: _toPublicUrl,
               isLocalCached:
                   (_activeModelAction!['_local_size_label']?.toString() ?? '')
                       .isNotEmpty,

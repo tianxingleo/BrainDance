@@ -27,7 +27,6 @@ class RecallModelActionOverlay extends StatefulWidget {
   final Future<void> Function(Map<String, dynamic>) onShareModelToCommunity;
   final Future<void> Function(Map<String, dynamic>) onRenameModel;
   final Future<void> Function(Map<String, dynamic>) onDeleteCloudModel;
-  final String Function(String) toPublicUrl;
   final bool isLocalCached;
   final bool isOwnModel;
 
@@ -47,7 +46,6 @@ class RecallModelActionOverlay extends StatefulWidget {
     required this.onShareModelToCommunity,
     required this.onRenameModel,
     required this.onDeleteCloudModel,
-    required this.toPublicUrl,
     required this.isLocalCached,
     required this.isOwnModel,
   });
@@ -181,7 +179,6 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                                 : widget.theme.fontGyColor3,
                             elevated: true,
                             elevationProgress: sValue,
-                            toPublicUrl: widget.toPublicUrl,
                             imageOnly: widget.model['_imageOnly'] == true,
                           ),
                         ),
