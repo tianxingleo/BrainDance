@@ -402,6 +402,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
     }
 
     if (event == 'status' && payload is Map) {
+      if (payload['internal'] == true) return;
       final summary = payload['summary']?.toString() ?? '';
       final key = 'status:$summary';
       if (_consumedEventKeys.contains(key)) return;
@@ -421,6 +422,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
     }
 
     if (event == 'thinking' || event == 'thought') {
+      if (payload is Map && payload['internal'] == true) return;
       final content = payload is Map
           ? payload['content']?.toString() ?? ''
           : payload?.toString() ?? '';

@@ -703,6 +703,7 @@ export type AgentProgressEvent =
       phase: string;
       summary: string;
       detail?: string;
+      internal?: boolean;
     };
   }
   | {
@@ -716,6 +717,7 @@ export type AgentProgressEvent =
     event: "thought" | "thinking";
     data: {
       content: string;
+      internal?: boolean;
     };
   }
   | {
@@ -1326,11 +1328,16 @@ export function pickSpatialSearchAnswerAfterStop(input: {
   trace: Array<{ toolName: string }>;
   stopSummary: string;
   deterministicAnswer: string;
+  directAnswer?: string;
 }): string {
+  const summary = input.stopSummary.trim();
+  const direct = (input.directAnswer ?? "").trim();
+  if (input.trace.length === 0 && direct) {
+    return direct;
+  }
   const hasStopSearch = input.trace.some((entry) =>
     entry.toolName === "stop_search"
   );
-  const summary = input.stopSummary.trim();
   return hasStopSearch && summary ? summary : input.deterministicAnswer;
 }
 
@@ -1374,6 +1381,7 @@ async function emitProgress(
 async function emitThought(
   callbacks: AgentRuntimeCallbacks | undefined,
   content: string,
+  options: { internal?: boolean } = {},
 ): Promise<void> {
   const normalized = content.trim();
   if (!normalized) {
@@ -1383,6 +1391,7 @@ async function emitThought(
     event: "thought",
     data: {
       content: normalized,
+      ...(options.internal ? { internal: true } : {}),
     },
   });
 }
@@ -3003,7 +3012,6 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Set<string>;
     round: number;
     shouldStop: boolean;
-    implicitStopRetried: boolean;
   };
 
   const UnifiedStateAnnotation = Annotation.Root({
@@ -3014,7 +3022,6 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures: Annotation<Set<string>>({ reducer: (_, b) => b, default: () => new Set() }),
     round: Annotation<number>({ reducer: (_, b) => b, default: () => 0 }),
     shouldStop: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
-    implicitStopRetried: Annotation<boolean>({ reducer: (_, b) => b, default: () => false }),
   });
 
   async function agentNode(state: UnifiedState): Promise<Partial<UnifiedState>> {
@@ -3028,37 +3035,11 @@ async function executeUnifiedAgentLoop(input: {
     msgs.push(response);
     const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
     if (toolCalls.length === 0) {
-      if (!state.implicitStopRetried) {
-        await emitProgress(callbacks, {
-          event: "status",
-          data: {
-            phase: "implicit_stop_nudge",
-            summary: "Agent 未调用任何工具，注入提示要求显式 stop_search 收口",
-          },
-        });
-        await emitThought(
-          callbacks,
-          "本轮没有产生工具调用，但根据 stop_search 协议需要显式收口。先注入提示给模型一次机会。",
-        );
-        msgs.push(new SystemMessage(
-          [
-            "你刚才这一轮没有调用任何工具，也没有调用 stop_search。",
-            "请显式收口：必须调用 stop_search 工具，并在参数中说明：",
-            "- reason：本次为什么停止（例如 已拿到足够候选 / 未找到匹配 / 问题不需要工具）",
-            "- confidence：0-1 之间，根据当前候选可信度真实评估",
-            "  · 已有候选且 score≥0.62 且语义对齐用户问题 → 0.7-1.0",
-            "  · 候选弱、相关性不强、语义偏离 → 0.2-0.5",
-            "  · 完全未找到匹配 → 0-0.2，请在 reason 中明确说明",
-            "如果你之前打算直接给出自然语言回答，请先调用 stop_search，系统会基于你的工具结果生成最终回答。",
-          ].join("\n"),
-        ));
-        return { messages: msgs, round, shouldStop: false, implicitStopRetried: true };
-      }
       await emitProgress(callbacks, {
         event: "status",
         data: {
-          phase: "implicit_stop_after_nudge",
-          summary: "Agent 在被提示后仍未调用 stop_search，按隐式停止处理",
+          phase: "direct_reply",
+          summary: "Agent 直接给出回答",
         },
       });
       return { messages: msgs, round, shouldStop: true };
@@ -3224,7 +3205,6 @@ async function executeUnifiedAgentLoop(input: {
     seenSignatures,
     round: 0,
     shouldStop: false,
-    implicitStopRetried: false,
   }, { recursionLimit: Number.MAX_SAFE_INTEGER });
 
   return {
@@ -4490,11 +4470,12 @@ export async function runSpatialSearchAgent(
   const topCandidates = deduplicatedCandidates
     .slice(0, spatialPresentation.effective_model_count)
     .map(serializeSceneCandidate);
-  const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
+  const lastAgentText = extractLastAgentTextFromMessages(finalMessages);
   const answer = pickSpatialSearchAnswerAfterStop({
     trace,
-    stopSummary: stopSearchSummary,
+    stopSummary: lastAgentText,
     deterministicAnswer: selection.answer,
+    directAnswer: lastAgentText,
   });
 
   return finalizeResponseWithLongTermMemory(supabase, {
