@@ -101,7 +101,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;
-  RecallSearchMode _searchMode = RecallSearchMode.local;
+  RecallSearchMode _searchMode = RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   StreamSubscription<String>? _agentStreamSubscription;
