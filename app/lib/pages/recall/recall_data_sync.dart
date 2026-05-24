@@ -281,6 +281,14 @@ extension _RecallPageDataSync on _RecallPageState {
         materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
       }
 
+      try {
+        final scanner = const LocalModelScanner();
+        final localModels = await scanner.scanDownloadedModels();
+        models.addAll(localModels);
+      } catch (_) {
+        // best-effort: local models don't block cloud display
+      }
+
       if (models.isEmpty) {
         models.add(_buildDemoModel());
       }

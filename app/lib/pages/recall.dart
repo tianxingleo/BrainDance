@@ -28,6 +28,7 @@ import '../main.dart'
         pageIndexProvider,
         pendingSubmitTitleProvider,
         recallOfficialExpandedProvider,
+        recallLocalExpandedProvider,
         recallRegularExpandedProvider,
         recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
@@ -37,6 +38,7 @@ import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/local_model_scanner.dart';
 import '../services/preview_image_resolver.dart';
+import '../services/thumbnail_cache.dart';
 import '../services/download_event_bus.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
@@ -151,7 +153,10 @@ class _RecallPageState extends ConsumerState<RecallPage> {
       _models.where((m) => m['is_official'] == true).toList();
 
   List<Map<String, dynamic>> get _regularModels =>
-      _models.where((m) => m['is_official'] != true).toList();
+      _models.where((m) => m['is_official'] != true && m['_is_local_only'] != true).toList();
+
+  List<Map<String, dynamic>> get _localModels =>
+      _models.where((m) => m['_is_local_only'] == true).toList();
   bool _isLocalModelLoading = false;
   bool _isLocalModelReady = false;
   bool _isModelDownloading = false;

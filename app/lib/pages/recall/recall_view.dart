@@ -346,6 +346,56 @@ extension _RecallPageView on _RecallPageState {
                               },
                             ),
                         ],
+                        if (_localModels.isNotEmpty) ...[
+                          SliverToBoxAdapter(
+                            child: Consumer(
+                              builder: (context, watchRef, _) {
+                                final isExpanded = watchRef.watch(
+                                  recallLocalExpandedProvider,
+                                );
+                                return RecallModelSectionHeader(
+                                  icon: Icons.folder_open_rounded,
+                                  color: const Color(0xFFCC9A5C),
+                                  title: textLocalize('recall_local_models'),
+                                  count: _localModels.length,
+                                  isExpanded: isExpanded,
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  onToggle: () {
+                                    ref
+                                        .read(
+                                          recallLocalExpandedProvider.notifier,
+                                        )
+                                        .update((s) => !s);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                          if (ref.watch(recallLocalExpandedProvider))
+                            TimePeelingList(
+                              theme: theme,
+                              isDark: isDark,
+                              darkCard: darkCard,
+                              darkInput: darkInput,
+                              groupedModels: _groupModelsByName(_localModels),
+                              activeModelAction: _activeModelAction,
+                              modelCardKeyFor: _modelCardKeyFor,
+                              isSameModel: _isSameModel,
+                              onNavigateToViewer: _navigateToViewer,
+                              onShowModelActions:
+                                  (model, {bool imageOnly = false}) {
+                                    _showModelActions(model, imageOnly: imageOnly);
+                                  },
+                              onAddNewTask: (name) {
+                                ref
+                                        .read(pendingSubmitTitleProvider.notifier)
+                                        .state =
+                                    name;
+                                ref.read(pageIndexProvider.notifier).state = 1;
+                              },
+                            ),
+                        ],
                       ],
                       const SliverToBoxAdapter(child: SizedBox(height: 96)),
                     ],
