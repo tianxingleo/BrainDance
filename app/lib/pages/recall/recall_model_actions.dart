@@ -101,26 +101,9 @@ extension _RecallPageModelActions on _RecallPageState {
           .toList();
     }
 
-    // Save metadata sidecar so offline scanner can find preview thumbnail
-    if (!isLocalOnly && modelUrl.isNotEmpty) {
-      unawaited(
-        _saveModelMetaSidecar(
-          modelUrl: modelUrl,
-          previewUrl: model['preview_img_path']?.toString(),
-          displayName: sceneId,
-        ),
-      );
-
-      // Cache the preview thumbnail locally so offline scanning can find it
-      unawaited(() async {
-        final previewUrl = model['preview_img_path']?.toString() ?? '';
-        if (previewUrl.isNotEmpty) {
-          try {
-            await ThumbnailCache().getPath(previewUrl);
-          } catch (_) {}
-        }
-      }());
-    }
+    final needsSidecar = !isLocalOnly && modelUrl.isNotEmpty;
+    final previewUrl =
+        needsSidecar ? model['preview_img_path']?.toString() : null;
 
     _setViewerOpeningState(true, label: sceneId);
 
@@ -143,6 +126,25 @@ extension _RecallPageModelActions on _RecallPageState {
         await Future<void>.delayed(const Duration(milliseconds: 220));
         if (mounted) {
           _setViewerOpeningState(false);
+
+          // Write sidecar and cache thumbnail before rescanning
+          if (needsSidecar) {
+            await _saveModelMetaSidecar(
+              modelUrl: modelUrl,
+              previewUrl: previewUrl,
+              displayName: sceneId,
+            );
+            if (previewUrl != null && previewUrl.isNotEmpty) {
+              try {
+                await ThumbnailCache().getPath(previewUrl);
+              } catch (_) {}
+            }
+          }
+
+          unawaited(_fetchModels(
+            preserveExistingDataOnError: true,
+            showErrorToast: false,
+          ));
         }
       }
     }());
@@ -448,6 +450,10 @@ extension _RecallPageModelActions on _RecallPageState {
         await localFile.delete();
         if (mounted) {
           showAppToast(context, textLocalize('recall_delete_local_success'));
+          unawaited(_fetchModels(
+            preserveExistingDataOnError: true,
+            showErrorToast: false,
+          ));
         }
       }
     } catch (e) {
