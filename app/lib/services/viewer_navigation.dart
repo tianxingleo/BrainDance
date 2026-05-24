@@ -131,7 +131,7 @@ Future<void> openViewer(
     final siblings = await _querySiblingModels(sceneId);
     if (!context.mounted) return;
 
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 320),
         reverseTransitionDuration: const Duration(milliseconds: 320),
