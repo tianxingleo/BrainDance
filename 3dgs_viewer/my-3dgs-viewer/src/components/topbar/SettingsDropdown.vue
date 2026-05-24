@@ -4,7 +4,6 @@ import ArEntryItem from './dropdown/ArEntryItem.vue';
 import ViewModeToggle from './dropdown/ViewModeToggle.vue';
 import CinematicSection from './dropdown/CinematicSection.vue';
 import FocalSection from './dropdown/FocalSection.vue';
-import RendererSwitch from './dropdown/RendererSwitch.vue';
 
 const props = defineProps({
   // 视角模式
@@ -27,8 +26,6 @@ const props = defineProps({
   currentViewFocalPx: { type: Number, default: 0 },
   // AR
   arDisabled: { type: Boolean, default: false },
-  // 渲染器
-  useSparkRenderer: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -46,7 +43,6 @@ const emit = defineEmits([
   'focal-input',
   'focal-change',
   'focal-reset',
-  'update:useSparkRenderer',
 ]);
 
 const open = ref(false);
@@ -117,15 +113,6 @@ const onEnterAr = () => {
 
     <transition name="dd-panel">
       <div v-if="open" class="dd-panel" role="menu">
-        <div class="dd-section">
-          <RendererSwitch
-            :use-spark="props.useSparkRenderer"
-            @update:useSpark="(v) => emit('update:useSparkRenderer', v)"
-          />
-        </div>
-
-        <div class="dd-divider" />
-
         <div class="dd-section dd-section--ar">
           <ArEntryItem :disabled="props.arDisabled" @enter-ar="onEnterAr" />
         </div>
@@ -251,7 +238,7 @@ const onEnterAr = () => {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(76vw, 264px);
+  width: min(72vw, 220px);
   background: var(--card-bg, rgba(249, 249, 248, 0.94));
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   border-radius: 22px;

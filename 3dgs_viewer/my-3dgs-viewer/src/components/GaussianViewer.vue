@@ -56,7 +56,6 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
-const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -3695,11 +3694,6 @@ onMounted(() => {
       }
     };
 
-    // 注册供 Flutter 同步当前渲染器选择的桥
-    window.setRendererStateFromFlutter = (useSpark) => {
-      useSparkRenderer.value = !!useSpark;
-    };
-
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -3752,18 +3746,9 @@ const onExitFromVue = () => {
   }
 };
 
-const onSwitchRenderer = (useSpark) => {
-  const next = !!useSpark;
-  if (useSparkRenderer.value === next) return;
-  useSparkRenderer.value = next;
-  sendFlutterMessage({ action: 'switchViewer', useSpark: next });
-};
-
 const onEnterMarkerArFromVue = () => {
   const ok = sendFlutterMessage({
-    action: 'switchViewer',
-    useSpark: true,
-    markerAr: true,
+    action: 'enterMarkerAr',
   });
   if (!ok) {
     if (typeof window !== 'undefined' && typeof window.alert === 'function') {
@@ -3847,10 +3832,8 @@ onBeforeUnmount(async () => {
           :focal-max="focalMax"
           :current-view-fov="currentViewFov"
           :current-view-focal-px="currentViewFocalPx"
-          :use-spark-renderer="useSparkRenderer"
           @enter-ar="onEnterMarkerArFromVue"
           @update:viewMode="switchViewMode"
-          @update:useSparkRenderer="onSwitchRenderer"
           @update:cinematicSpeed="(v) => (cinematicSpeed = v)"
           @update:cinematicLoop="(v) => (cinematicLoop = v)"
           @update:cinematicSmoothness="(v) => (cinematicSmoothness = v)"
@@ -3959,11 +3942,9 @@ onBeforeUnmount(async () => {
     <!-- 参考图对比悬浮窗 -->
     <transition name="ref-fade">
       <div class="reference-overlay" v-if="activeImage" @click="activeImage = ''; activeTag = ''">
-        <div class="eyebrow">Reference Still</div>
-        <div class="ref-title">参考原图</div>
-        <img 
-          :src="activeImage" 
-          class="ref-img" 
+        <img
+          :src="activeImage"
+          class="ref-img"
           :class="{ 'ref-img--loaded': loadedRefImages[activeImage] }"
           @load="loadedRefImages[activeImage] = true"
         />
@@ -4017,7 +3998,6 @@ onBeforeUnmount(async () => {
   --overlay-bg: rgba(30, 30, 32, 0.24);
   --range-accent: #6b7a8f;
   --vignette-color: rgba(30, 30, 32, 0.12);
-  --info-tag-bg: rgba(228, 232, 237, 0.78);
   --fps-bg: rgba(249, 249, 248, 0.84);
   --close-btn-bg: rgba(107, 122, 143, 0.1);
   --cinematic-loop-text: rgba(30, 30, 32, 0.7);
@@ -4068,7 +4048,6 @@ onBeforeUnmount(async () => {
   --overlay-bg: rgba(0, 0, 0, 0.5);
   --range-accent: #aebacc;
   --vignette-color: rgba(0, 0, 0, 0.2);
-  --info-tag-bg: rgba(50, 55, 65, 0.78);
   --fps-bg: rgba(30, 30, 34, 0.84);
   --close-btn-bg: rgba(174, 186, 204, 0.12);
   --cinematic-loop-text: rgba(245, 247, 250, 0.7);
@@ -4630,13 +4609,6 @@ button.active {
   outline: none;
 }
 
-.ref-title {
-  font-size: 12px;
-  color: var(--text-primary);
-  margin: 2px 0 6px;
-  font-weight: 600;
-}
-
 /* 浮窗过渡动画 */
 .ref-fade-enter-active {
   transition:
@@ -4693,9 +4665,13 @@ button.active {
 }
 
 .info-tag {
-  background: var(--info-tag-bg);
-  padding: 3px 6px;
-  border-radius: 999px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 3px 8px;
+  box-shadow: 0 2px 6px var(--card-shadow);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary);
 }
 
 .info-tag--accent {
@@ -4900,7 +4876,6 @@ input[type='range'] {
     --overlay-bg: rgba(0, 0, 0, 0.5);
     --range-accent: #aebacc;
     --vignette-color: rgba(0, 0, 0, 0.2);
-    --info-tag-bg: rgba(50, 55, 65, 0.78);
     --fps-bg: rgba(30, 30, 34, 0.84);
     --close-btn-bg: rgba(174, 186, 204, 0.12);
     --cinematic-loop-text: rgba(245, 247, 250, 0.7);

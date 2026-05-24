@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../pages/webgl_viewer.dart';
+import 'preview_image_resolver.dart';
 
 // ── URL helpers ──────────────────────────────────────────────
 
@@ -16,6 +17,20 @@ String toPublicUrl(String storagePath) {
   } catch (_) {
     return storagePath;
   }
+}
+
+/// 把数据库中可能存为旧服务器完整 URL 的 storage 路径，归一为当前
+/// Supabase 配置下的公开 URL。规则与 recall_data_sync 保持一致。
+String _normalizeStorageUrl(String raw) {
+  const marker = '/storage/v1/object/public/braindance-assets/';
+  final idx = raw.indexOf(marker);
+  if (idx >= 0) {
+    return toPublicUrl(raw.substring(idx + marker.length));
+  }
+  if (!raw.startsWith('http')) {
+    return toPublicUrl(raw);
+  }
+  return raw;
 }
 
 /// 根据模型 ply_path 推导同场景的 webgl_poses.json 公开 URL。
@@ -97,6 +112,12 @@ Future<List<Map<String, dynamic>>> _querySiblingModels(String sceneId) async {
       if (displayNameMap.containsKey(sid)) {
         m['display_name'] = displayNameMap[sid];
       }
+
+      final raw = m['preview_img_path']?.toString() ?? '';
+      if (raw.isNotEmpty) {
+        m['preview_img_path'] = _normalizeStorageUrl(raw);
+      }
+      materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
     }
 
     return assets;

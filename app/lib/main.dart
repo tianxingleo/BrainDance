@@ -589,6 +589,13 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
 
+    // 离开创作页时清掉待预填的模型名，避免下次再进显示残留标题
+    ref.listen<int>(pageIndexProvider, (prev, next) {
+      if (prev == 2 && next != 2) {
+        ref.read(pendingSubmitTitleProvider.notifier).state = null;
+      }
+    });
+
     // 外部改 pageIndex 时（如 provider 直接修改），同步方向
     if (pageIndex != _previousIndex && !_isAnimating) {
       FocusManager.instance.primaryFocus?.unfocus();

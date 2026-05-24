@@ -467,11 +467,19 @@ extension _AgentChatRuntime on _AgentChatPageState {
 
     if (event == 'message' && payload is Map) {
       final delta = payload['delta']?.toString() ?? '';
-      if (delta.isEmpty) return;
-      _activeChatMessage!.finalAnswer = _mergeAnswerDelta(
-        current: _activeChatMessage!.finalAnswer,
-        incoming: delta,
-      );
+      final streamed = payload['streamed'] == true;
+      if (delta.isEmpty) {
+        if (streamed && payload['done'] == true) {
+          _activeChatMessage!.liveStatus = '回答完成';
+        }
+        return;
+      }
+      _activeChatMessage!.finalAnswer = streamed
+          ? '${_activeChatMessage!.finalAnswer}$delta'
+          : _mergeAnswerDelta(
+              current: _activeChatMessage!.finalAnswer,
+              incoming: delta,
+            );
       _activeChatMessage!.liveStatus = '正在生成回答...';
       return;
     }
