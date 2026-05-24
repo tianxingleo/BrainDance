@@ -165,6 +165,7 @@ extension _RecallPageModelActions on _RecallPageState {
     if (!mounted) {
       return;
     }
+    ref.read(myPostsRefreshSignal.notifier).state++;
     showAppToast(context, textLocalize('recall_published'));
   }
 
