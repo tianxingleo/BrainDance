@@ -64,7 +64,7 @@ extension _RecallPageLocalAi on _RecallPageState {
     if (!mounted) {
       return;
     }
-    setState(() {
+    _refreshState(() {
       _selectedLocalModelUrl = nextSelectedUrl.isEmpty ? null : nextSelectedUrl;
       if (downloadedPath != null) {
         _localModelPathController.text = downloadedPath;
@@ -330,12 +330,20 @@ extension _RecallPageLocalAi on _RecallPageState {
     }
 
     final modelPath = await _getPrivateModelPathForUrl(modelUrl);
-    setState(() {
+    final partialPath = '$modelPath.part';
+    final targetFile = File(modelPath);
+    final partialFile = File(partialPath);
+    final partialBytes = await partialFile.exists()
+        ? await partialFile.length()
+        : 0;
+    _refreshState(() {
       _isModelDownloading = true;
-      _modelDownloadProgress = 0;
-      _modelDownloadedBytes = 0;
+      _modelDownloadProgress = null;
+      _modelDownloadedBytes = partialBytes;
       _modelDownloadTotalBytes = null;
-      _localAnswerStatus = '正在下载模型到应用私有目录...';
+      _localAnswerStatus = partialBytes > 0
+          ? '正在继续下载模型，已保留 ${(partialBytes / 1024 / 1024).toStringAsFixed(1)} MB...'
+          : '正在下载模型到应用私有目录...';
       _localModelPathController.text = modelPath;
     });
 
@@ -343,29 +351,32 @@ extension _RecallPageLocalAi on _RecallPageState {
       await _persistLocalModelUrl(modelUrl);
       await _persistLocalModelPath(modelPath);
 
-      await Dio().download(
-        modelUrl,
-        modelPath,
-        deleteOnError: true,
-        options: Options(
-          responseType: ResponseType.stream,
-          followRedirects: true,
-          receiveTimeout: const Duration(minutes: 30),
-          sendTimeout: const Duration(minutes: 2),
-        ),
-        onReceiveProgress: (received, total) {
+      if (await targetFile.exists()) {
+        final fileSize = await targetFile.length();
+        if (fileSize >= 100 * 1024 * 1024) {
           if (!mounted) return;
-          setState(() {
-            _modelDownloadedBytes = received;
-            _modelDownloadTotalBytes = total > 0 ? total : null;
-            _modelDownloadProgress = total > 0 ? received / total : null;
+          _refreshState(() {
+            _isModelDownloading = false;
+            _modelDownloadProgress = 1;
+            _modelDownloadedBytes = fileSize;
+            _modelDownloadTotalBytes = fileSize;
+            _selectedLocalModelUrl = modelUrl;
+            _downloadedLocalModelPathsByUrl[modelUrl] = modelPath;
+            _localAnswerStatus =
+                '模型已在应用私有目录：${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB';
           });
-        },
-      );
+          showAppToast(context, textLocalize('local_model_download_success'));
+          return;
+        }
+      }
 
-      final fileSize = await File(modelPath).length();
+      final fileSize = await _downloadModelWithResume(
+        modelUrl: modelUrl,
+        targetFile: targetFile,
+        partialFile: partialFile,
+      );
       if (!mounted) return;
-      setState(() {
+      _refreshState(() {
         _isModelDownloading = false;
         _modelDownloadProgress = 1;
         _modelDownloadedBytes = fileSize;
@@ -379,14 +390,98 @@ extension _RecallPageLocalAi on _RecallPageState {
     } catch (e) {
       if (!mounted) return;
       debugPrint('[RecallLocalAI] model download error: $e');
-      setState(() {
+      final keptBytes = await partialFile.exists()
+          ? await partialFile.length()
+          : 0;
+      if (!mounted) return;
+      _refreshState(() {
         _isModelDownloading = false;
-        _modelDownloadProgress = null;
-        _modelDownloadedBytes = 0;
+        _modelDownloadedBytes = keptBytes;
         _modelDownloadTotalBytes = null;
-        _localAnswerStatus = textLocalize('local_model_download_fail');
+        _modelDownloadProgress = null;
+        _localAnswerStatus = keptBytes > 0
+            ? '${textLocalize('local_model_download_fail')}，已保留 ${(keptBytes / 1024 / 1024).toStringAsFixed(1)} MB，下次会继续下载'
+            : textLocalize('local_model_download_fail');
       });
       showAppToast(context, textLocalize('local_model_download_fail'));
+    }
+  }
+
+  Future<int> _downloadModelWithResume({
+    required String modelUrl,
+    required File targetFile,
+    required File partialFile,
+  }) async {
+    final encodedUrl = Uri.encodeFull(Uri.decodeFull(modelUrl));
+    final uri = Uri.parse(encodedUrl);
+    var existingBytes = await partialFile.exists()
+        ? await partialFile.length()
+        : 0;
+
+    final client = HttpClient()
+      ..badCertificateCallback = (cert, host, port) => true;
+    IOSink? sink;
+    try {
+      final request = await client.getUrl(uri);
+      request.headers.set('User-Agent', 'BrainDance/1.0 Flutter');
+      if (existingBytes > 0) {
+        request.headers.set('Range', 'bytes=$existingBytes-');
+      }
+
+      final response = await request.close();
+      if (response.statusCode == HttpStatus.ok && existingBytes > 0) {
+        // 服务端不支持 Range 时必须丢弃旧分片，否则会拼出损坏文件。
+        await partialFile.delete();
+        existingBytes = 0;
+      } else if (response.statusCode != HttpStatus.ok &&
+          response.statusCode != HttpStatus.partialContent) {
+        final errorBody = await response.transform(utf8.decoder).join();
+        throw Exception('HTTP ${response.statusCode}: $errorBody');
+      }
+
+      final totalBytes = response.contentLength > 0
+          ? response.contentLength + existingBytes
+          : -1;
+      var receivedBytes = existingBytes;
+
+      if (mounted) {
+        _refreshState(() {
+          _modelDownloadedBytes = receivedBytes;
+          _modelDownloadTotalBytes = totalBytes > 0 ? totalBytes : null;
+          _modelDownloadProgress = totalBytes > 0
+              ? receivedBytes / totalBytes
+              : null;
+        });
+      }
+
+      sink = partialFile.openWrite(
+        mode: existingBytes > 0 ? FileMode.append : FileMode.write,
+      );
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        if (!mounted) {
+          continue;
+        }
+        _refreshState(() {
+          _modelDownloadedBytes = receivedBytes;
+          _modelDownloadTotalBytes = totalBytes > 0 ? totalBytes : null;
+          _modelDownloadProgress = totalBytes > 0
+              ? receivedBytes / totalBytes
+              : null;
+        });
+      }
+      await sink.close();
+      sink = null;
+
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+      await partialFile.rename(targetFile.path);
+      return targetFile.length();
+    } finally {
+      await sink?.close();
+      client.close(force: true);
     }
   }
 
@@ -447,20 +542,33 @@ extension _RecallPageLocalAi on _RecallPageState {
 
       final llama = LlamaEngine(LlamaBackend());
       var backendSummary = 'CPU';
-      late final ModelParams mobileProfile;
-      mobileProfile = const ModelParams(
-        contextSize: 1024,
-        gpuLayers: 12,
-        preferredBackend: GpuBackend.vulkan,
-        numberOfThreads: 4,
-        numberOfThreadsBatch: 4,
-        batchSize: 64,
-        microBatchSize: 32,
-      );
+      // 一加 15 / Adreno 当前系统上的 Vulkan 后端会在 llama_decode 阶段
+      // 触发驱动级 SIGSEGV。Android 端改走 OpenCL GPU，绕开 Vulkan pipeline。
+      final mobileProfile = Platform.isAndroid
+          ? const ModelParams(
+              contextSize: 1024,
+              gpuLayers: 8,
+              preferredBackend: GpuBackend.opencl,
+              numberOfThreads: 2,
+              numberOfThreadsBatch: 2,
+              batchSize: 32,
+              microBatchSize: 1,
+            )
+          : const ModelParams(
+              contextSize: 1024,
+              gpuLayers: 12,
+              preferredBackend: GpuBackend.vulkan,
+              numberOfThreads: 4,
+              numberOfThreadsBatch: 4,
+              batchSize: 64,
+              microBatchSize: 32,
+            );
       try {
         await llama.loadModel(modelPath, modelParams: mobileProfile);
         final backendName = await llama.getBackendName();
-        backendSummary = '$backendName (GPU 优先)';
+        backendSummary = Platform.isAndroid
+            ? '$backendName (Android OpenCL GPU)'
+            : '$backendName (GPU 优先)';
       } catch (_) {
         await llama.dispose();
         final fallbackLlama = LlamaEngine(LlamaBackend());
@@ -530,9 +638,11 @@ extension _RecallPageLocalAi on _RecallPageState {
       '1. hit_count > 0 时，必须回答具体内容，不能只说有记录。'
       '2. hit_count == 0 时，只能回答‘暂无相关记录’。'
       '3. 部分命中时，只能回答证据覆盖到的部分，对未命中部分明确说‘暂无相关记录’或‘未见相关记录’。'
-      '4. 输出必须是自然语言短句，最多两句。不要输出 JSON、代码块、列表或键值对。'
-      '5. 不复述问题，不解释规则，不说‘根据给定证据’。'
-      '6. 不要输出<think>或任何思考链。';
+      '4. 用户询问最近模型、有哪些模型、模型列表或盘点时，按证据列出 2 到 4 条模型摘要，并给出简短结论。'
+      '5. 其他单点问题可以简短回答，但不要只输出一个模型名。'
+      '6. 输出必须是自然语言或简短列表，不要输出 JSON、代码块或键值对。'
+      '7. 不复述问题，不解释规则，不说‘根据给定证据’。'
+      '8. 如需说明过程，只能用极短的摘要，不要输出完整推理链。';
 
   Future<void> _askLocalQuestion({String? question}) async {
     final userQuestion = (question ?? '').trim();
@@ -541,8 +651,14 @@ extension _RecallPageLocalAi on _RecallPageState {
       return;
     }
     if (_localQnaModel == null || !_isLocalModelReady) {
-      showAppToast(context, textLocalize('local_model_load_first'));
-      return;
+      await _loadLocalQnaModel();
+      if (!mounted) {
+        return;
+      }
+      if (_localQnaModel == null || !_isLocalModelReady) {
+        showAppToast(context, textLocalize('local_model_load_first'));
+        return;
+      }
     }
 
     // 1. 构建紧凑的 retrieval payload，尽量减少端侧上下文占用
@@ -557,7 +673,7 @@ extension _RecallPageLocalAi on _RecallPageState {
         '<|im_start|>system\n$_kSystemPrompt<|im_end|>\n'
         '<|im_start|>user\n$userPayload<|im_end|>\n'
         '<|im_start|>assistant\n'
-        '请直接给出最终回答，且只输出一句到两句。';
+        '请直接给出最终回答；如果问题在问模型列表或最近模型，请列出多条证据。';
 
     setState(() {
       _localAnswer = '';
@@ -570,14 +686,13 @@ extension _RecallPageLocalAi on _RecallPageState {
 
     try {
       var streamedAnswer = '';
-      var lockedAnswer = false;
       _localQnaModel!.cancelGeneration();
       await _llamaStreamSubscription?.cancel();
       _llamaStreamSubscription = _localQnaModel!
           .generate(
             prompt,
             params: const GenerationParams(
-              maxTokens: 96,
+              maxTokens: 160,
               temp: 0.0,
               topK: 1,
               topP: 1.0,
@@ -597,23 +712,11 @@ extension _RecallPageLocalAi on _RecallPageState {
               final parsedOutput = _parseLocalModelOutput(nextRaw);
               final nextReasoning = parsedOutput.reasoning;
               final nextAnswer = _truncateLocalAnswer(parsedOutput.answer);
-              if (lockedAnswer) {
-                if (nextAnswer != _localAnswer ||
-                    nextReasoning != _localReasoning) {
-                  _localQnaModel!.cancelGeneration();
-                }
-                return;
-              }
               streamedAnswer = nextRaw;
-              lockedAnswer =
-                  nextAnswer.trim().isNotEmpty && _shouldLockAnswer(nextAnswer);
               setState(() {
                 _localReasoning = nextReasoning;
                 _localAnswer = nextAnswer;
               });
-              if (lockedAnswer) {
-                _localQnaModel!.cancelGeneration();
-              }
             },
             onError: (Object error) {
               if (!mounted) {
@@ -655,7 +758,7 @@ extension _RecallPageLocalAi on _RecallPageState {
       final expandedQuery = _expandQuery(question);
       matches = await _localRagIndex.search(
         expandedQuery,
-        limit: 3,
+        limit: 4,
         minScore: 0.08,
       );
     } catch (_) {
@@ -674,20 +777,17 @@ extension _RecallPageLocalAi on _RecallPageState {
     final evidence = matches
         .map((item) {
           final metaInfo = _toMap(item['meta_info']);
-          final tags = _joinList(item['tags']);
-          final objects = _joinList(item['objects']);
+          final tags = _limitText(_joinList(item['tags']), 36);
+          final objects = _limitText(_joinList(item['objects']), 36);
           final summary = _summarizeEvidence(metaInfo);
 
           return {
-            'id': item['id']?.toString() ?? '',
-            'score': (item['similarity'] as num?)?.toDouble() ?? 0.0,
-            'object': objects,
-            'tags': tags,
-            'summary': summary,
-            'scene_id': item['scene_id']?.toString() ?? '',
+            'object': objects.isEmpty ? '未命名模型' : objects,
+            if (tags.isNotEmpty) 'tags': tags,
+            if (summary.isNotEmpty) 'summary': summary,
           };
         })
-        .take(3)
+        .take(4)
         .toList();
 
     return {
@@ -819,49 +919,18 @@ extension _RecallPageLocalAi on _RecallPageState {
     return cleaned.replaceAll('</think>', '');
   }
 
-  bool _shouldLockAnswer(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return false;
-    }
-    if (trimmed.length >= 8 &&
-        (trimmed.endsWith('。') ||
-            trimmed.endsWith('！') ||
-            trimmed.endsWith('？') ||
-            trimmed.endsWith('.') ||
-            trimmed.endsWith('!') ||
-            trimmed.endsWith('?'))) {
-      return true;
-    }
-    return false;
-  }
-
   String _truncateLocalAnswer(String value) {
     var cleaned = _sanitizeLocalAnswer(_stripDanglingThinkTag(value));
-    final newlineIndex = cleaned.indexOf('\n');
-    if (newlineIndex >= 0) {
-      cleaned = cleaned.substring(0, newlineIndex);
-    }
-    final sentenceParts = cleaned.split(RegExp(r'[。！？!?]'));
-    if (sentenceParts.isEmpty) {
-      return cleaned.trim();
-    }
-    final first = sentenceParts.first.trim();
-    if (first.isNotEmpty) {
-      return first.endsWith('。') ||
-              first.endsWith('！') ||
-              first.endsWith('？') ||
-              first.endsWith('!') ||
-              first.endsWith('?')
-          ? first
-          : '$first。';
+    const maxLength = 420;
+    if (cleaned.length > maxLength) {
+      cleaned = cleaned.substring(0, maxLength).trimRight();
     }
     return cleaned.trim();
   }
 
   String _summarizeEvidence(Map<String, dynamic> metaInfo) {
     final parts = _collectStrings(metaInfo)
-        .take(4)
+        .take(2)
         .map((item) => item.trim())
         .where((item) => item.isNotEmpty)
         .toList();
@@ -869,7 +938,15 @@ extension _RecallPageLocalAi on _RecallPageState {
       return '';
     }
     final summary = parts.join('；');
-    return summary.length > 120 ? summary.substring(0, 120) : summary;
+    return _limitText(summary, 72);
+  }
+
+  String _limitText(String value, int maxLength) {
+    final trimmed = value.trim();
+    if (trimmed.length <= maxLength) {
+      return trimmed;
+    }
+    return trimmed.substring(0, maxLength).trimRight();
   }
 
   String _joinList(dynamic rawList) {

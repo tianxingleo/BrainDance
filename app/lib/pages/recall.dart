@@ -34,6 +34,7 @@ import '../services/dual_chain_phase.dart';
 import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/local_model_scanner.dart';
+import '../services/preview_image_resolver.dart';
 import '../services/download_event_bus.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
@@ -117,7 +118,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _agentConversationSummary;
   String? _agentLatestSubmittedQuery;
   AgentSessionState? _agentSessionState;
-  Map<String, dynamic>? _agentShortTermMemory;
   final List<AgentConversationEntry> _agentConversationHistory = [];
 
   ChatMessage? get _agentChatMessage => _agentConversationHistory.isNotEmpty

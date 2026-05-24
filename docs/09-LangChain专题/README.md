@@ -4,6 +4,9 @@
 
 ## 当前文档
 
+- [VR端Supabase接入闭环-2026-05-15.md](./VR端Supabase接入闭环-2026-05-15.md)
+  - 记录 VR WebXR 客户端接入 Supabase Auth、`model_assets`、Storage signed URL 与 `memory_poses` 的闭环实现。
+  - 说明当前尚未接入 `agent-recall` 流式 Recall 搜索，以及后续映射到 HUD 结果和空间跳转的建议。
 - [LangChain实现现状-2026-03-27.md](./LangChain实现现状-2026-03-27.md)
   - 新增电脑端 `agent-recall` 调试 CLI 说明。
   - 重点记录 Flutter 流式协议复现入口、事件打印和候选/工具轨迹调试方式。

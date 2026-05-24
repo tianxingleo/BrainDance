@@ -38,7 +38,9 @@ extension _RecallPageModelActions on _RecallPageState {
           'display_name': displayName,
       };
       if (meta.isNotEmpty) {
-        await metaFile.writeAsString(JsonEncoder.withIndent(null).convert(meta));
+        await metaFile.writeAsString(
+          JsonEncoder.withIndent(null).convert(meta),
+        );
       }
     } catch (_) {}
   }
@@ -72,7 +74,9 @@ extension _RecallPageModelActions on _RecallPageState {
     final modelUrl = plyPath.isNotEmpty
         ? (isLocalOnly ? plyPath : _toPublicUrl(plyPath))
         : '';
-    final posesUrl = (plyPath.isNotEmpty && !isLocalOnly) ? _toPosesUrl(plyPath) : null;
+    final posesUrl = (plyPath.isNotEmpty && !isLocalOnly)
+        ? _toPosesUrl(plyPath)
+        : null;
     final sceneId = _modelDisplayName(model);
     String? initialPoseId;
 
@@ -678,7 +682,9 @@ extension _RecallPageModelActions on _RecallPageState {
                 .remove(storageFiles);
           }
         } catch (_) {
-          debugPrint('[RecallModelActions] storage cleanup failed for: $targetSceneFolder');
+          debugPrint(
+            '[RecallModelActions] storage cleanup failed for: $targetSceneFolder',
+          );
         }
       }
 
@@ -745,7 +751,10 @@ extension _RecallPageModelActions on _RecallPageState {
 
   CommunityModelOption _modelToCommunityOption(Map<String, dynamic> model) {
     final plyPath = model['ply_path']?.toString() ?? '';
-    final preview = model['preview_img_path']?.toString();
+    final preview = resolvePreviewImagePaths(
+      model,
+      normalize: _normalizeStorageUrl,
+    );
     return CommunityModelOption(
       id: model['id']?.toString() ?? model['scene_id']?.toString() ?? 'model',
       sceneId: _modelDisplayName(
@@ -755,7 +764,8 @@ extension _RecallPageModelActions on _RecallPageState {
       description: model['description']?.toString() ?? '',
       modelUrl: plyPath.isEmpty ? '' : _toPublicUrl(plyPath),
       posesUrl: _toPosesUrl(plyPath),
-      coverUrl: preview,
+      coverUrl: preview.primary,
+      coverFallbackUrl: preview.fallback,
     );
   }
 }

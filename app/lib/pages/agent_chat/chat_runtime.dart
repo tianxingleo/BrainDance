@@ -2,8 +2,7 @@ part of '../agent_chat.dart';
 
 extension _AgentChatRuntime on _AgentChatPageState {
   void _ensureSessionId() {
-    _agentSessionId ??=
-        'agent-chat-${DateTime.now().millisecondsSinceEpoch}';
+    _agentSessionId ??= 'agent-chat-${DateTime.now().millisecondsSinceEpoch}';
   }
 
   String _resolveExecutionMode(String query) {
@@ -133,7 +132,8 @@ extension _AgentChatRuntime on _AgentChatPageState {
   Future<void> _persistAgentResponse(String query) async {
     final conv = _currentConversation;
     if (conv == null) return;
-    final answer = _activeChatMessage?.finalAnswer ?? _activeResult?.answer ?? '';
+    final answer =
+        _activeChatMessage?.finalAnswer ?? _activeResult?.answer ?? '';
     final elapsed = _runStartedAt != null && _runFinishedAt != null
         ? _runFinishedAt!.difference(_runStartedAt!).inMilliseconds
         : null;
@@ -144,22 +144,25 @@ extension _AgentChatRuntime on _AgentChatPageState {
       content: answer,
       finalAnswer: answer,
       timestamp: DateTime.now(),
-      agentResultJson:
-          _activeResult != null ? jsonEncode(_activeResultToJson()) : null,
+      agentResultJson: _activeResult != null
+          ? jsonEncode(_activeResultToJson())
+          : null,
       elapsedMs: elapsed,
     );
     final msgId = await _db.insertMessage(agentMsg);
     setState(() {
-      _messages.add(AgentMessageRecord(
-        id: msgId,
-        conversationId: agentMsg.conversationId,
-        isUser: false,
-        content: answer,
-        finalAnswer: answer,
-        timestamp: agentMsg.timestamp,
-        agentResultJson: agentMsg.agentResultJson,
-        elapsedMs: elapsed,
-      ));
+      _messages.add(
+        AgentMessageRecord(
+          id: msgId,
+          conversationId: agentMsg.conversationId,
+          isUser: false,
+          content: answer,
+          finalAnswer: answer,
+          timestamp: agentMsg.timestamp,
+          agentResultJson: agentMsg.agentResultJson,
+          elapsedMs: elapsed,
+        ),
+      );
       _activeChatMessage = null;
       _activeResult = null;
     });
@@ -215,21 +218,24 @@ extension _AgentChatRuntime on _AgentChatPageState {
               'pose_image_id': candidate.poseImageId,
               'tags': candidate.tags,
               'preview_img_path': candidate.previewImgPath,
+              'preview_webp_path': candidate.previewWebpPath,
               'created_at': candidate.createdAt,
               'ply_path': candidate.plyPath,
             },
           )
           .toList(),
       'selected_candidate_reason': r.selectedCandidateReason,
-      if (r.followUp != null) 'follow_up': {
-        'status': r.followUp!.status,
-        'kind': r.followUp!.kind,
-        'message': r.followUp!.message,
-        'suggested_replies': r.followUp!.suggestedReplies,
-      },
+      if (r.followUp != null)
+        'follow_up': {
+          'status': r.followUp!.status,
+          'kind': r.followUp!.kind,
+          'message': r.followUp!.message,
+          'suggested_replies': r.followUp!.suggestedReplies,
+        },
       if (r.assetContext != null) 'asset_context': r.assetContext,
       if (r.compareContext != null) 'compare_context': r.compareContext,
-      if (r.collectionContext != null) 'collection_context': r.collectionContext,
+      if (r.collectionContext != null)
+        'collection_context': r.collectionContext,
       if (r.creativeContext != null) 'creative_context': r.creativeContext,
       if (r.memoryGraphContext != null)
         'memory_graph_context': r.memoryGraphContext,
@@ -238,12 +244,14 @@ extension _AgentChatRuntime on _AgentChatPageState {
       if (_activeChatMessage != null && _activeChatMessage!.steps.isNotEmpty)
         'steps': _activeChatMessage!.steps
             .where((s) => s.type == 'tool_call' || s.type == 'status')
-            .map((s) => {
-              'type': s.type,
-              'content': s.content,
-              if (s.toolName != null) 'tool_name': s.toolName,
-              'is_completed': s.isCompleted,
-            })
+            .map(
+              (s) => {
+                'type': s.type,
+                'content': s.content,
+                if (s.toolName != null) 'tool_name': s.toolName,
+                'is_completed': s.isCompleted,
+              },
+            )
             .toList(),
     };
   }
@@ -330,15 +338,8 @@ extension _AgentChatRuntime on _AgentChatPageState {
   void _startBootstrapStatusUpdates() {
     _bootstrapTimer?.cancel();
     _firstRemoteEventAt = null;
-    _upsertBootstrapStatus(
-      '已提交请求，正在连接 Agent 服务',
-      isCompleted: false,
-    );
-    const stages = [
-      '已建立请求，等待首个流式事件',
-      '正在等待 Agent 返回编排进度',
-      'Agent 仍在处理中',
-    ];
+    _upsertBootstrapStatus('已提交请求，正在连接 Agent 服务', isCompleted: false);
+    const stages = ['已建立请求，等待首个流式事件', '正在等待 Agent 返回编排进度', 'Agent 仍在处理中'];
     var idx = 0;
     _bootstrapTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted || !_isSearching || _firstRemoteEventAt != null) {
@@ -439,11 +440,13 @@ extension _AgentChatRuntime on _AgentChatPageState {
       if (_consumedEventKeys.contains(key)) return;
       _consumedEventKeys.add(key);
       _activeChatMessage!.liveStatus = '调用工具: $toolName';
-      _activeChatMessage!.addStep(AgentStep(
-        type: 'tool_call',
-        toolName: toolName,
-        content: const JsonEncoder.withIndent('  ').convert(args),
-      ));
+      _activeChatMessage!.addStep(
+        AgentStep(
+          type: 'tool_call',
+          toolName: toolName,
+          content: const JsonEncoder.withIndent('  ').convert(args),
+        ),
+      );
       return;
     }
 
@@ -488,7 +491,9 @@ extension _AgentChatRuntime on _AgentChatPageState {
           _normalizeAgentDonePayload(payload),
         );
         _rememberResponse(
-          _messages.lastWhere((m) => m.isUser, orElse: () => _messages.last).content,
+          _messages
+              .lastWhere((m) => m.isUser, orElse: () => _messages.last)
+              .content,
           _activeResult!,
         );
         final answer = _activeResult?.answer ?? '';
@@ -501,7 +506,9 @@ extension _AgentChatRuntime on _AgentChatPageState {
     }
   }
 
-  Map<String, dynamic> _normalizeAgentDonePayload(Map<dynamic, dynamic> payload) {
+  Map<String, dynamic> _normalizeAgentDonePayload(
+    Map<dynamic, dynamic> payload,
+  ) {
     final map = Map<String, dynamic>.from(payload);
     final nestedResult = map['result'];
     if (nestedResult is Map) {
@@ -519,7 +526,10 @@ extension _AgentChatRuntime on _AgentChatPageState {
     return map;
   }
 
-  String _mergeAnswerDelta({required String current, required String incoming}) {
+  String _mergeAnswerDelta({
+    required String current,
+    required String incoming,
+  }) {
     final normalized = incoming.trimRight();
     if (normalized.isEmpty) return current;
     if (current.isEmpty) return normalized;
@@ -548,10 +558,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
     }
     _ensureSessionId();
     setState(() {
-      _activeChatMessage = ChatMessage(
-        isUser: false,
-        liveStatus: '正在加载...',
-      );
+      _activeChatMessage = ChatMessage(isUser: false, liveStatus: '正在加载...');
     });
 
     try {
@@ -568,8 +575,7 @@ extension _AgentChatRuntime on _AgentChatPageState {
       await _persistAgentResponse('你好');
     } catch (_) {
       if (!mounted) return;
-      final fallback =
-          '你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。';
+      final fallback = '你好，我在。你可以直接告诉我想找的场景/物体、要比较的时间段，或者要整理的模型。';
       setState(() {
         _activeChatMessage!.finalAnswer = fallback;
       });

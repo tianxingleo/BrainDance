@@ -10,7 +10,13 @@ import { loadVrConfig } from '../engine/vrConfig'
 import { getVrModelCandidates } from '../engine/modelUrl'
 import { mergeStandaloneCatalog } from '../engine/catalog'
 import { loadViewerClientState, saveViewerClientState } from '../engine/clientState'
-import { viewerSupabaseClient, viewerSupabaseEnabled } from '../engine/supabaseClient'
+import { viewerSupabaseClient, viewerSupabaseConfigError, viewerSupabaseEnabled } from '../engine/supabaseClient'
+import {
+  fetchModelMarkers,
+  fetchRemoteModels,
+  markersToSearchResults,
+  type RemoteModelSource,
+} from '../services/modelRepository'
 import {
   decomposeMatrix,
   normalizeMatrixForViewer,
@@ -138,6 +144,9 @@ const authEmail = ref(persistedClientState.authSession?.email || '')
 const authPassword = ref('')
 const authMessage = ref('')
 const authBusy = ref(false)
+const remoteModelsLoading = ref(false)
+const remoteModelsError = ref('')
+const remoteModelSource = ref<RemoteModelSource>('mine')
 let viewer: GaussianSplats3D.Viewer | null = null
 let frameCount = 0
 let lastFpsTime = performance.now()
@@ -620,7 +629,81 @@ function setAuthSession(session: BrainDanceAuthSession | null, message = '') {
   drawHud()
 }
 
+function mergeRemoteModels(remoteModels: BrainDanceRecallModel[], options: { replace?: boolean } = {}) {
+  const localModels = modelList.value.filter((item) => String(item.modelUrl || item.ply).startsWith('blob:'))
+  modelList.value = options.replace ? [...localModels, ...remoteModels] : [...localModels, ...remoteModels]
+}
+
+async function refreshRemoteModels(options: { autoLoadFirst?: boolean; replace?: boolean } = {}) {
+  if (viewerSupabaseConfigError) {
+    remoteModelsError.value = viewerSupabaseConfigError
+    authMessage.value = viewerSupabaseConfigError
+    drawHud()
+    return
+  }
+  if (!viewerSupabaseClient) {
+    authMessage.value = '未配置 Supabase，无法同步云端模型'
+    drawHud()
+    return
+  }
+
+  remoteModelsLoading.value = true
+  remoteModelsError.value = ''
+  authMessage.value = '正在同步 Supabase 模型列表...'
+  drawHud()
+  try {
+    const remoteModels = await fetchRemoteModels({
+      source: remoteModelSource.value,
+      query: activeSearchQuery.value,
+      limit: 100,
+    })
+    mergeRemoteModels(remoteModels, { replace: options.replace ?? true })
+    const preferred = modelList.value.find((item) => item.id === activeModelId.value)
+      || modelList.value.find((item) => !String(item.modelUrl || item.ply).startsWith('blob:'))
+      || modelList.value[0]
+    authMessage.value = `已同步 ${remoteModels.length} 个云端模型`
+    if (options.autoLoadFirst && preferred) {
+      activeModelId.value = preferred.id
+      await loadModel(preferred)
+    }
+    scheduleClientStateSave()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    remoteModelsError.value = message
+    authMessage.value = `模型同步失败：${message}`
+  } finally {
+    remoteModelsLoading.value = false
+    drawHud()
+  }
+}
+
+async function refreshMarkersForModel(model: BrainDanceRecallModel) {
+  if (viewerSupabaseConfigError
+    || !viewerSupabaseClient
+    || model.id === 'current'
+    || model.id.startsWith('local-')
+    || String(model.modelUrl || model.ply).startsWith('blob:')
+    || String(model.modelUrl || model.ply).startsWith('./')
+    || String(model.modelUrl || model.ply).startsWith('/')
+  ) return
+  try {
+    const remoteMarkers = await fetchModelMarkers(model.id)
+    if (remoteMarkers.length === 0) return
+    markers.value = remoteMarkers
+    searchResults.value = markersToSearchResults(remoteMarkers)
+    selectedMarkerId.value = remoteMarkers[0]?.id || ''
+    selectedSearchResultId.value = ''
+  } catch (error) {
+    console.warn('[BrainDance VR] memory_poses 同步失败:', error)
+  }
+}
+
 async function refreshSupabaseSession() {
+  if (viewerSupabaseConfigError) {
+    authMessage.value = viewerSupabaseConfigError
+    remoteModelsError.value = viewerSupabaseConfigError
+    return
+  }
   if (!viewerSupabaseClient) return
   const { data, error } = await viewerSupabaseClient.auth.getSession()
   if (error) {
@@ -633,14 +716,18 @@ async function refreshSupabaseSession() {
     userId: session.user.id,
     email: session.user.email || undefined,
     displayName: session.user.user_metadata?.display_name || session.user.email || session.user.id,
-    accessToken: session.access_token,
-    refreshToken: session.refresh_token,
     expiresAt: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
     status: 'signed-in',
   }, '已同步当前登录态')
+  await refreshRemoteModels({ autoLoadFirst: modelList.value.length === 0, replace: true })
 }
 
 async function signInToViewer() {
+  if (viewerSupabaseConfigError) {
+    authMessage.value = viewerSupabaseConfigError
+    remoteModelsError.value = viewerSupabaseConfigError
+    return
+  }
   if (!viewerSupabaseClient) {
     setAuthSession({
       email: authEmail.value.trim() || 'local@viewer',
@@ -668,11 +755,10 @@ async function signInToViewer() {
         userId: user.id,
         email: user.email || undefined,
         displayName: user.user_metadata?.display_name || user.email || user.id,
-        accessToken: session?.access_token,
-        refreshToken: session?.refresh_token,
         expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : undefined,
         status: 'signed-in',
       }, '登录成功')
+      await refreshRemoteModels({ autoLoadFirst: true, replace: true })
     }
   } catch (error) {
     authMessage.value = error instanceof Error ? error.message : String(error)
@@ -683,6 +769,11 @@ async function signInToViewer() {
 }
 
 async function signOutOfViewer() {
+  if (viewerSupabaseConfigError) {
+    setAuthSession(null, viewerSupabaseConfigError)
+    remoteModelsError.value = viewerSupabaseConfigError
+    return
+  }
   if (!viewerSupabaseClient) {
     setAuthSession({
       status: 'local-only',
@@ -695,6 +786,7 @@ async function signOutOfViewer() {
     const { error } = await viewerSupabaseClient.auth.signOut()
     if (error) throw error
     setAuthSession(null, '已退出登录')
+    remoteModelsError.value = ''
   } catch (error) {
     authMessage.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -1378,6 +1470,32 @@ function drawHudCollection(ctx: CanvasRenderingContext2D) {
   const rowHeight = 68
   const maxRows = 5
   if (hudView.value === 'models') {
+    drawHudButton(ctx, {
+      id: 'models:refresh',
+      label: remoteModelsLoading.value ? '同步中' : '刷新云端',
+      x: 44,
+      y: 214,
+      width: 188,
+      height: 46,
+      kind: 'button',
+      disabled: remoteModelsLoading.value || !viewerSupabaseEnabled,
+      onActivate: () => { void refreshRemoteModels({ autoLoadFirst: false, replace: true }) },
+      accent: '#87a5ff',
+    })
+    drawHudButton(ctx, {
+      id: 'models:source',
+      label: remoteModelSource.value === 'mine' ? '我的模型' : '社区模型',
+      x: 252,
+      y: 214,
+      width: 188,
+      height: 46,
+      kind: 'button',
+      onActivate: () => {
+        remoteModelSource.value = remoteModelSource.value === 'mine' ? 'community' : 'mine'
+        void refreshRemoteModels({ autoLoadFirst: false, replace: true })
+      },
+      accent: '#9ed0c6',
+    }, true)
     modelList.value.slice(0, maxRows).forEach((model, index) => {
       drawHudListItem(ctx, {
         id: `model:${model.id}`,
@@ -2731,6 +2849,7 @@ function normalizeModelPayloadList(payload: BrainDanceViewerPayload) {
 async function loadModel(model: BrainDanceRecallModel, options: { preserveState?: boolean } = {}) {
   if (!containerRef.value) return
   resetLocalLabelsIfRemoteModel(model)
+  await refreshMarkersForModel(model)
   const payload = activePayload.value || getInitialPayload()
   const config = activeConfig.value || (await loadVrConfig(deriveVrConfigUrl(payload)))
   const nextPayload = {
@@ -2825,7 +2944,7 @@ async function bootstrap(input?: unknown) {
     else if (previewMode.value === 'desktop' && (payload.ply || payload.modelUrl || (payload.modelList?.length ?? 0) <= 1)) {
       previewMode.value = 'webxr'
     }
-    authMessage.value = viewerSupabaseEnabled ? 'Supabase 已启用，等待登录' : '未配置 Supabase，使用本地会话'
+    authMessage.value = viewerSupabaseConfigError || (viewerSupabaseEnabled ? 'Supabase 已启用，等待登录' : '未配置 Supabase，使用本地会话')
     if (payload.authSession) {
       setAuthSession(payload.authSession, '已加载 payload 会话')
     } else if (!authSession.value && !viewerSupabaseEnabled) {
@@ -2847,7 +2966,7 @@ async function bootstrap(input?: unknown) {
       activeModelId.value = initialModel.id
       await loadModel(initialModel)
     }
-    void refreshSupabaseSession()
+    await refreshSupabaseSession()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     errorMessage.value = message
@@ -3046,7 +3165,17 @@ function selectMode(mode: PreviewMode) {
   scheduleClientStateSave()
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tagName = target.tagName.toLowerCase()
+  return target.isContentEditable
+    || tagName === 'input'
+    || tagName === 'textarea'
+    || tagName === 'select'
+}
+
 function onKeydown(event: KeyboardEvent) {
+  if (isEditableKeyboardTarget(event.target)) return
   if (event.key === 'r' || event.key === 'R') resetView()
   if (event.key === '[') adjustScale(-0.1)
   if (event.key === ']') adjustScale(0.1)
@@ -3266,17 +3395,21 @@ onBeforeUnmount(() => {
         </div>
         <label>
           <span>邮箱</span>
-          <input v-model="authEmail" type="email" placeholder="name@example.com" @input="scheduleClientStateSave()" />
+          <input v-model="authEmail" type="email" placeholder="name@example.com" autocomplete="username" />
         </label>
         <label>
           <span>密码</span>
-          <input v-model="authPassword" type="password" placeholder="Password" @keydown.enter="void signInToViewer()" />
+          <input v-model="authPassword" type="password" placeholder="Password" autocomplete="current-password" @keydown.enter="void signInToViewer()" />
         </label>
         <div class="button-row">
           <button type="button" :disabled="authBusy || !authEmail.trim()" @click="void signInToViewer()">登录</button>
           <button type="button" :disabled="authBusy" @click="void signOutOfViewer()">退出</button>
+          <button type="button" :disabled="remoteModelsLoading || !viewerSupabaseEnabled" @click="void refreshRemoteModels({ autoLoadFirst: false, replace: true })">
+            {{ remoteModelsLoading ? '同步中' : '刷新模型' }}
+          </button>
         </div>
         <p class="hint">{{ authMessage || (viewerSupabaseEnabled ? 'VR 独立客户端已连接 Supabase' : '未配置 Supabase，当前为本地会话模式') }}</p>
+        <p v-if="remoteModelsError" class="hint error">{{ remoteModelsError }}</p>
       </div>
 
       <div class="mode-row">
@@ -3352,6 +3485,11 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="search-panel">
+        <div class="button-row">
+          <button type="button" :class="{ active: remoteModelSource === 'mine' }" @click="remoteModelSource = 'mine'; void refreshRemoteModels({ autoLoadFirst: false, replace: true })">我的模型</button>
+          <button type="button" :class="{ active: remoteModelSource === 'community' }" @click="remoteModelSource = 'community'; void refreshRemoteModels({ autoLoadFirst: false, replace: true })">社区模型</button>
+          <button type="button" :disabled="remoteModelsLoading || !viewerSupabaseEnabled" @click="void refreshRemoteModels({ autoLoadFirst: false, replace: true })">云端刷新</button>
+        </div>
         <input v-model="activeSearchQuery" type="text" placeholder="搜索模型、标签、描述" @input="scheduleClientStateSave()" />
         <div class="search-results">
           <button

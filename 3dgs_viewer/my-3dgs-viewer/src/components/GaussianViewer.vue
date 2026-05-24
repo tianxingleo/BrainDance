@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import gsap from 'gsap';
 import BottomSelector from './BottomSelector.vue';
+import { AirGestureController } from '../lib/gesture/AirGestureController';
 import TopBar from './topbar/TopBar.vue';
 import ExitButton from './topbar/ExitButton.vue';
 import SearchPanel from './topbar/SearchPanel.vue';
@@ -16,10 +17,15 @@ import {
 } from '../lib/interaction/centerModeBounds';
 
 const containerRef = ref(null);
+const gestureVideoRef = ref(null);
 const isVRMode = ref(false);
 const isAutoRotate = ref(false);
 const isLoading = ref(false);
 const isSecureContext = ref(false);
+const gestureEnabled = ref(false);
+const gestureStatus = ref('未开启');
+const gestureStatusLevel = ref('idle');
+const gestureLastAction = ref('');
 const VIEW_MODE = {
   FREE: 'free',
   ORBIT: 'orbit'
@@ -81,9 +87,10 @@ const INTRO_SPLAT_REVEAL_START = 0.24;
 const INTRO_SPLAT_REVEAL_END = 0.9;
 const INTRO_PARTICLE_FADE_OUT_START = 0.22;
 const INTRO_PARTICLE_FADE_OUT_END = 0.88;
+const INTRO_SPLAT_FINAL_RADIUS_MULTIPLIER = 1.35;
 const INTRO_PARTICLE_SCREEN_COVERAGE_TARGET = 0.33;
 const INTRO_PARTICLE_SCREEN_SCALE_MIN = 0.14;
-const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.08;
+const INTRO_PARTICLE_SCREEN_SCALE_MAX = 1.65;
 const INTRO_PARTICLE_SCREEN_SCALE_EXPONENT = 1.08;
 const OPTIMIZED_MODEL_EXTENSIONS = ['.ksplat', '.splat'];
 const SAME_ORIGIN_MODEL_HEAD_TIMEOUT_MS = 1200;
@@ -177,6 +184,7 @@ let xrSessionEndHandler = null;
 let vrHud = null;
 let vrLastFrameTime = 0;
 let vrLastHudUpdateMs = 0;
+let airGestureController = null;
 
 const cinematicState = {
   trajectory: null,
@@ -502,6 +510,12 @@ const getModelWorldCenter = () => globalUniforms.uCenter.value.clone();
 const getSceneRadius = () => {
   const radius = Number(globalUniforms.uMaxRadius.value || 0);
   return radius > 0 ? radius : 1;
+};
+
+const getIntroFinalRevealRadius = () => {
+  const baseRadius = Number(globalUniforms.uMaxRadius.value || 0);
+  if (!Number.isFinite(baseRadius) || baseRadius <= 0) return 1;
+  return baseRadius * INTRO_SPLAT_FINAL_RADIUS_MULTIPLIER;
 };
 
 const getIntroParticleCameraScale = () => {
@@ -1440,6 +1454,7 @@ const globalUniforms = {
   uRevealProgress: { value: 0 },
   uRevealFeather: { value: 0.085 },
   uIntroSplatAlpha: { value: 0 },
+  uIntroRevealStrength: { value: 1 },
 };
 
 const normalizeColorChannel = (value) => {
@@ -1494,11 +1509,16 @@ const createParticleSystem = (splatMesh) => {
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const centerZ = (minZ + maxZ) / 2;
-  const maxDim = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+  const sizeX = maxX - minX;
+  const sizeY = maxY - minY;
+  const sizeZ = maxZ - minZ;
+  const maxDim = Math.max(sizeX, sizeY, sizeZ);
+  const halfDiagonal = Math.sqrt(sizeX * sizeX + sizeY * sizeY + sizeZ * sizeZ) * 0.5;
 
   // 更新全局 Uniforms (供 Shader 和 相机使用)
   globalUniforms.uCenter.value.set(centerX, centerY, centerZ);
-  globalUniforms.uMaxRadius.value = maxDim * 0.7; // 扩散半径覆盖大部分模型
+  // reveal shader 按中心球形半径裁切，必须覆盖包围盒半对角线；否则动画结束时 finalize 的超大半径会让剩余椭球突然跳出。
+  globalUniforms.uMaxRadius.value = Math.max(halfDiagonal * 1.08, maxDim * 0.5, 0.001);
 
   // === B. 自适应参数计算 ===
 
@@ -1516,7 +1536,7 @@ const createParticleSystem = (splatMesh) => {
   // 限制最小值，防止极小模型看不见
   const minParticleSize = isMobileDevice() ? 0.9 : 1.2;
   if (adaptiveSize < minParticleSize) adaptiveSize = minParticleSize;
-  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 4.8 : 6.4);
+  adaptiveSize = Math.min(adaptiveSize, isMobileDevice() ? 6.0 : 8.2);
 
   // 3. 自适应飞行距离
   // 粒子应该从包围盒外面飞进来
@@ -1602,11 +1622,11 @@ const createParticleSystem = (splatMesh) => {
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         
-        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛，避免入场粒子显得过粗。
-        float pointScale = clamp(uCameraScale, 0.14, 1.12);
+        // 近景广角素材会让包围球铺满屏幕，这里允许点尺寸继续收敛；远景/长焦场景则提高上限，避免点云过细。
+        float pointScale = clamp(uCameraScale, 0.14, 1.65);
         gl_PointSize = uSize * pointScale * (34.0 / max(-mvPosition.z, 0.001));
         float minPointSize = mix(0.35, 0.85, smoothstep(0.14, 0.6, pointScale));
-        float maxPointSize = max(minPointSize, 22.0 * min(pointScale, 1.0));
+        float maxPointSize = max(minPointSize, 24.0 * min(pointScale, 1.35));
         gl_PointSize = clamp(gl_PointSize, minPointSize, maxPointSize);
       }
     `,
@@ -1642,6 +1662,7 @@ const applyAdvancedShader = (mesh) => {
   material.uniforms.uRevealProgress = globalUniforms.uRevealProgress;
   material.uniforms.uRevealFeather = globalUniforms.uRevealFeather;
   material.uniforms.uIntroSplatAlpha = globalUniforms.uIntroSplatAlpha;
+  material.uniforms.uIntroRevealStrength = globalUniforms.uIntroRevealStrength;
 
   material.vertexShader = `varying vec3 vWorldPosition;
 ` + material.vertexShader;
@@ -1659,6 +1680,7 @@ const applyAdvancedShader = (mesh) => {
     uniform float uRevealProgress;
     uniform float uRevealFeather;
     uniform float uIntroSplatAlpha;
+    uniform float uIntroRevealStrength;
     uniform vec3 uCenter;
     varying vec3 vWorldPosition;
 
@@ -1676,14 +1698,14 @@ const applyAdvancedShader = (mesh) => {
       float innerRadius = max(radius - feather, 0.0);
       float innerSq = innerRadius * innerRadius;
       float outerSq = radius * radius;
-      if (distSq > outerSq) discard;
-      float revealT = 1.0 - smoothstep(innerSq, outerSq, distSq);
-      if (revealT <= 0.001 || uIntroSplatAlpha <= 0.001) discard;
+      float originalAlpha = gl_FragColor.a;
+      float revealT = distSq > outerSq ? 0.0 : 1.0 - smoothstep(innerSq, outerSq, distSq);
 
-      // 以平方距离驱动的波前只保留窄带过渡，中心到外圈会更明确。
+      // 入场时保持波前裁切；末段逐步退回原始 alpha，避免最终密度低于真实 3DGS。
       float alphaClip = mix(0.90, 0.02, revealT);
-      if (gl_FragColor.a < alphaClip) discard;
-      gl_FragColor.a *= revealT * uIntroSplatAlpha;
+      float clippedRevealAlpha = originalAlpha < alphaClip ? 0.0 : originalAlpha * revealT * uIntroSplatAlpha;
+      gl_FragColor.a = mix(originalAlpha, clippedRevealAlpha, clamp(uIntroRevealStrength, 0.0, 1.0));
+      if (gl_FragColor.a <= 0.001) discard;
     `;
     material.fragmentShader = originalContent + visualLogic + '}';
   }
@@ -1699,6 +1721,7 @@ const resetIntroUniforms = () => {
   globalUniforms.uParticleProgress.value = 0;
   globalUniforms.uRevealProgress.value = 0;
   globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uIntroRevealStrength.value = 1;
   globalUniforms.uGeoRadius.value = 0;
   globalUniforms.uColorRadius.value = 0;
   if (particleSystem) {
@@ -1714,6 +1737,7 @@ const resetIntroAnimationVisuals = () => {
   globalUniforms.uParticleProgress.value = 0;
   globalUniforms.uRevealProgress.value = 0;
   globalUniforms.uIntroSplatAlpha.value = 0;
+  globalUniforms.uIntroRevealStrength.value = 1;
   globalUniforms.uGeoRadius.value = 0;
   globalUniforms.uColorRadius.value = 0;
   if (particleSystem) {
@@ -1727,11 +1751,13 @@ const finalizeIntroAnimation = () => {
   const splatMesh = viewer?.getSplatMesh?.();
   if (splatMesh) splatMesh.visible = true;
   if (particleSystem) particleSystem.visible = false;
+  const finalRevealRadius = getIntroFinalRevealRadius();
   globalUniforms.uParticleProgress.value = 1;
   globalUniforms.uRevealProgress.value = 1.5;
   globalUniforms.uIntroSplatAlpha.value = 1;
-  globalUniforms.uGeoRadius.value = 99999;
-  globalUniforms.uColorRadius.value = 99999;
+  globalUniforms.uIntroRevealStrength.value = 0;
+  globalUniforms.uGeoRadius.value = finalRevealRadius;
+  globalUniforms.uColorRadius.value = finalRevealRadius;
   animationState.phase = PHASE.FINISHED;
   animationState.isLoaded = false;
   animationState.introCamera = null;
@@ -2428,6 +2454,150 @@ const flyToImage = (poseData, options = {}) => {
   });
 };
 
+const getCurrentPoseIndex = (list) => {
+  if (!Array.isArray(list) || list.length === 0) return -1;
+  return list.findIndex((pose) => getPosePresentationId(pose) === activePoseId.value);
+};
+
+const flyToRelativePose = (step) => {
+  const list = filteredPoses.value.length > 0 ? filteredPoses.value : cameraPoses.value;
+  if (!Array.isArray(list) || list.length === 0) return;
+
+  const currentIndex = getCurrentPoseIndex(list);
+  const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (baseIndex + step + list.length) % list.length;
+  if (nextIndex === currentIndex) return;
+
+  flyToImage(list[nextIndex]);
+};
+
+const applyAirGestureInOrbitMode = (action) => {
+  if (!viewer || !viewer.camera || isOrbitRecenterFlightActive) return;
+  interruptCinematicPlayback();
+  interruptCameraFlightFromUserInput();
+
+  if (action.type === 'swipe_left' || action.type === 'swipe_right') {
+    const direction = action.type === 'swipe_left' ? -1 : 1;
+    const strength = THREE.MathUtils.clamp(action.strength || 1, 0.7, 2.2);
+    orbitState.targetYaw = clampOrbitYaw(orbitState.targetYaw + direction * 0.22 * strength);
+    interactionState.orbitInertiaActive = false;
+    scheduleInteractionFrame();
+    gestureLastAction.value = action.type === 'swipe_left' ? '左挥：旋转视角' : '右挥：旋转视角';
+    return;
+  }
+
+  if (action.type === 'open' || action.type === 'close') {
+    const amount = THREE.MathUtils.clamp(action.amount || 1, 0.7, 1.8);
+    const scale = action.type === 'open'
+      ? Math.pow(0.94, amount)
+      : Math.pow(1.06, amount);
+    orbitState.targetRadius = clampOrbitRadius(orbitState.targetRadius * scale);
+    interactionState.zoomInertiaActive = false;
+    scheduleInteractionFrame();
+    gestureLastAction.value = action.type === 'open' ? '张开：拉近' : '闭合：拉远';
+  }
+};
+
+const applyAirGestureInFreeMode = (action) => {
+  if (!viewer || !viewer.camera) return;
+
+  if (action.type === 'swipe_left') {
+    gestureLastAction.value = '左挥：上一个位姿';
+    flyToRelativePose(-1);
+    return;
+  }
+
+  if (action.type === 'swipe_right') {
+    gestureLastAction.value = '右挥：下一个位姿';
+    flyToRelativePose(1);
+    return;
+  }
+
+  if (action.type === 'open' || action.type === 'close') {
+    interruptCinematicPlayback();
+    interruptCameraFlightFromUserInput();
+    const amount = THREE.MathUtils.clamp(action.amount || 1, 0.7, 1.8);
+    const scale = action.type === 'open'
+      ? Math.pow(1.06, amount)
+      : Math.pow(0.94, amount);
+    zoomByFocalScale(scale);
+    gestureLastAction.value = action.type === 'open' ? '张开：拉近焦距' : '闭合：拉广焦距';
+  }
+};
+
+const applyAirGestureAction = (action) => {
+  if (!action || action.type === 'ready' || action.type === 'hand_present') return;
+  if (action.type === 'lost_hand') {
+    gestureLastAction.value = '等待手掌进入画面';
+    return;
+  }
+  if (action.type === 'error') {
+    gestureLastAction.value = action.message || '手势识别异常';
+    return;
+  }
+
+  if (isOrbitMode.value) {
+    applyAirGestureInOrbitMode(action);
+  } else {
+    applyAirGestureInFreeMode(action);
+  }
+};
+
+const updateGestureStatus = (status, message = '') => {
+  gestureStatusLevel.value = status;
+  gestureStatus.value = message || {
+    idle: '未开启',
+    requesting_camera: '请求摄像头权限中',
+    loading_model: '加载识别模型中',
+    running: '识别中',
+    hand_present: '已识别手掌',
+    lost_hand: '未检测到手',
+    error: '手势识别异常',
+  }[status] || '识别中';
+};
+
+const startAirGesture = async () => {
+  if (gestureEnabled.value || !gestureVideoRef.value) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    updateGestureStatus('error', '当前环境不支持摄像头');
+    return;
+  }
+
+  gestureEnabled.value = true;
+  gestureLastAction.value = '';
+  airGestureController = new AirGestureController({
+    video: gestureVideoRef.value,
+    onStatus: updateGestureStatus,
+    onAction: applyAirGestureAction,
+  });
+
+  try {
+    await airGestureController.start();
+  } catch (_) {
+    gestureEnabled.value = false;
+    airGestureController = null;
+  }
+};
+
+const stopAirGesture = () => {
+  if (airGestureController) {
+    airGestureController.stop();
+    airGestureController = null;
+  } else {
+    updateGestureStatus('idle', '未开启');
+  }
+  gestureEnabled.value = false;
+  gestureLastAction.value = '';
+};
+
+const toggleAirGesture = async () => {
+  if (gestureEnabled.value) {
+    stopAirGesture();
+  } else {
+    await startAirGesture();
+  }
+};
+
 const getViewerConfig = () => {
   const isMobile = isMobileDevice();
   const canUseSharedMemory = window.crossOriginIsolated === true;
@@ -2705,7 +2875,13 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
         globalUniforms.uParticleProgress.value = pointT;
         globalUniforms.uRevealProgress.value = morphT;
         globalUniforms.uIntroSplatAlpha.value = morphT;
-        globalUniforms.uGeoRadius.value = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        const baseRevealRadius = globalUniforms.uRevealProgress.value * globalUniforms.uMaxRadius.value;
+        const finalRevealRadius = getIntroFinalRevealRadius();
+        const tailT = smoothstep01(
+          (rawT - INTRO_SPLAT_REVEAL_END) / Math.max(1 - INTRO_SPLAT_REVEAL_END, 0.001)
+        );
+        globalUniforms.uIntroRevealStrength.value = 1 - tailT;
+        globalUniforms.uGeoRadius.value = THREE.MathUtils.lerp(baseRevealRadius, finalRevealRadius, tailT);
         globalUniforms.uColorRadius.value = globalUniforms.uGeoRadius.value;
 
         const splatMesh = viewer.getSplatMesh();
@@ -3029,8 +3205,8 @@ const adjustControlsToModel = () => {
 
   // createParticleSystem 已经计算了最准确的 uCenter 和 uMaxRadius，直接用
   const worldCenter = globalUniforms.uCenter.value;
-  const maxDim = globalUniforms.uMaxRadius.value / 0.7; // 还原回实际尺寸估计
-  const distance = maxDim * 2.0;
+  const sceneRadius = getSceneRadius();
+  const distance = sceneRadius * 2.8;
 
   viewer.camera.position.set(worldCenter.x, worldCenter.y, worldCenter.z + distance);
   viewer.camera.up.copy(centerModeUp);
@@ -3592,6 +3768,7 @@ onBeforeUnmount(async () => {
   window.removeEventListener('touchstart', onCapturedUserCameraInput, true);
   window.removeEventListener('touchmove', onCapturedUserCameraInput, true);
   window.removeEventListener('wheel', onCapturedUserCameraInput, true);
+  stopAirGesture();
   stopInteractionInertia();
   stopCinematicPlayback();
 
@@ -3676,6 +3853,22 @@ onBeforeUnmount(async () => {
     </TopBar>
 
     <div class="fps-counter" v-if="currentFps > 0">FPS {{ currentFps }}</div>
+
+
+    <div class="gesture-panel" v-show="gestureEnabled || gestureStatusLevel === 'error'"
+      @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @touchcancel.stop>
+      <video
+        ref="gestureVideoRef"
+        class="gesture-video"
+        muted
+        autoplay
+        playsinline
+      ></video>
+      <div class="gesture-meta">
+        <div class="gesture-state" :class="gestureStatusLevel">{{ gestureStatus }}</div>
+        <div class="gesture-action">{{ gestureLastAction || '中心模式旋转/缩放，自由模式切位姿/焦距' }}</div>
+      </div>
+    </div>
 
     <div v-if="isLoading" class="loading-overlay">
       <div class="loading-card">
@@ -3924,6 +4117,80 @@ onBeforeUnmount(async () => {
   align-self: flex-start;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.gesture-toggle {
+  min-width: 72px;
+}
+
+.gesture-toggle.active {
+  background: rgba(47, 184, 122, 0.2);
+  border-color: rgba(47, 184, 122, 0.55);
+}
+
+.gesture-toggle.warn {
+  background: rgba(224, 168, 54, 0.18);
+  border-color: rgba(224, 168, 54, 0.55);
+}
+
+.gesture-toggle.error {
+  background: rgba(232, 86, 86, 0.18);
+  border-color: rgba(232, 86, 86, 0.55);
+}
+
+.gesture-panel {
+  position: absolute;
+  top: calc(var(--flutter-safe-top) + 56px);
+  right: calc(var(--flutter-safe-right) + 16px);
+  width: 172px;
+  z-index: 130;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 16px 36px var(--card-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.gesture-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.42);
+  transform: scaleX(-1);
+}
+
+.gesture-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 2px 1px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.gesture-state {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.gesture-state.hand_present,
+.gesture-state.running {
+  color: #2fb87a;
+}
+
+.gesture-state.lost_hand {
+  color: #e0a836;
+}
+
+.gesture-state.error {
+  color: #e85656;
+}
+
+.gesture-action {
+  color: var(--text-secondary);
 }
 
 .view-mode-switch {
@@ -4558,6 +4825,18 @@ input[type='range'] {
 
   .focal-settings-panel {
     top: calc(var(--flutter-safe-top) + 122px);
+  }
+
+  .gesture-panel {
+    top: calc(var(--flutter-safe-top) + 46px);
+    right: 12px;
+    width: 116px;
+    padding: 6px;
+    border-radius: 14px;
+  }
+
+  .gesture-meta {
+    font-size: 10px;
   }
 }
 

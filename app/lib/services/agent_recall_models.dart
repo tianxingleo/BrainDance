@@ -189,7 +189,7 @@ class AgentRecallResponse {
       final evidenceDesc = evidenceMap?['description']?.toString() ?? '';
       final evidenceTags =
           (evidenceMap?['tags'] as List?)?.map((e) => e.toString()).toList() ??
-              const <String>[];
+          const <String>[];
 
       final actions = ((json['actions'] as List?) ?? [])
           .map((a) => a is Map ? Map<String, dynamic>.from(a) : null)
@@ -440,6 +440,7 @@ class AgentCandidate {
   final String? displayName;
   final List<String> tags;
   final String? previewImgPath;
+  final String? previewWebpPath;
   final String? createdAt;
   final String? plyPath;
 
@@ -452,6 +453,7 @@ class AgentCandidate {
     this.displayName,
     this.tags = const [],
     this.previewImgPath,
+    this.previewWebpPath,
     this.createdAt,
     this.plyPath,
   });
@@ -464,11 +466,15 @@ class AgentCandidate {
       description: json['description']?.toString() ?? '',
       poseImageId: json['pose_image_id']?.toString(),
       displayName: json['display_name']?.toString(),
-      tags: (json['tags'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
+      tags:
+          (json['tags'] as List?)?.map((e) => e.toString()).toList() ??
           const [],
       previewImgPath: json['preview_img_path']?.toString(),
+      previewWebpPath:
+          json['preview_webp_path']?.toString() ??
+          (json['meta_info'] is Map
+              ? (json['meta_info'] as Map)['preview_webp_path']?.toString()
+              : null),
       createdAt: json['created_at']?.toString(),
       plyPath: json['ply_path']?.toString(),
     );
@@ -679,14 +685,14 @@ class CompareDiff {
       (raw as List? ?? const []).map((e) => e.toString()).toList();
 
   factory CompareDiff.fromJson(Map<String, dynamic> json) => CompareDiff(
-        commonObjects: _strList(json['commonObjects']),
-        addedObjects: _strList(json['addedObjects']),
-        removedObjects: _strList(json['removedObjects']),
-        commonTags: _strList(json['commonTags']),
-        addedTags: _strList(json['addedTags']),
-        removedTags: _strList(json['removedTags']),
-        limitations: _strList(json['limitations']),
-      );
+    commonObjects: _strList(json['commonObjects']),
+    addedObjects: _strList(json['addedObjects']),
+    removedObjects: _strList(json['removedObjects']),
+    commonTags: _strList(json['commonTags']),
+    addedTags: _strList(json['addedTags']),
+    removedTags: _strList(json['removedTags']),
+    limitations: _strList(json['limitations']),
+  );
 
   bool get hasObjectChanges =>
       addedObjects.isNotEmpty || removedObjects.isNotEmpty;

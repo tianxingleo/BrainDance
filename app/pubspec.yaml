@@ -62,6 +62,15 @@ dependencies:
   latlong2: ^0.9.1
   geolocator: ^13.0.0
 
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_backends:
+        platforms:
+          android-arm64:
+            backends: [vulkan, opencl]
+            cpu_profile: full
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

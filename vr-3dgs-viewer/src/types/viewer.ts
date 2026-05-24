@@ -60,8 +60,6 @@ export interface BrainDanceAuthSession {
   userId?: string
   email?: string
   displayName?: string
-  accessToken?: string
-  refreshToken?: string
   expiresAt?: string
   code?: string
   status?: string

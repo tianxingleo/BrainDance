@@ -185,12 +185,14 @@ extension _AgentChatView on _AgentChatPageState {
           isProcessCollapsed: true,
           steps: stepsJson
               .whereType<Map<String, dynamic>>()
-              .map((s) => AgentStep(
-                    type: s['type'] as String? ?? 'status',
-                    content: s['content'] as String? ?? '',
-                    toolName: s['tool_name'] as String?,
-                    isCompleted: s['is_completed'] as bool? ?? true,
-                  ))
+              .map(
+                (s) => AgentStep(
+                  type: s['type'] as String? ?? 'status',
+                  content: s['content'] as String? ?? '',
+                  toolName: s['tool_name'] as String?,
+                  isCompleted: s['is_completed'] as bool? ?? true,
+                ),
+              )
               .toList(),
         );
       });
@@ -256,8 +258,8 @@ extension _AgentChatView on _AgentChatPageState {
     int? elapsedMs,
     required bool isActive,
   }) {
-    final hasActions = result != null &&
-        result.actions.any((a) => a.type == 'open_scene');
+    final hasActions =
+        result != null && result.actions.any((a) => a.type == 'open_scene');
     final topCandidates = result?.candidates.take(3).toList() ?? [];
     final followUp = result?.followUp;
 
@@ -285,9 +287,7 @@ extension _AgentChatView on _AgentChatPageState {
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF151B12)
-                  : const Color(0xFFFFFEF6),
+              color: isDark ? const Color(0xFF151B12) : const Color(0xFFFFFEF6),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: BDDesign.colorFadedOlive.withValues(
@@ -306,8 +306,7 @@ extension _AgentChatView on _AgentChatPageState {
                     data: answer,
                     builders: {'code': CodeElementBuilder(isDark, context)},
                     styleSheet: MarkdownStyleSheet(
-                      p: TextStyle(
-                        color: textColor, fontSize: 14, height: 1.6),
+                      p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
                       code: TextStyle(
                         color: textColor,
                         fontSize: 12.5,
@@ -333,11 +332,13 @@ extension _AgentChatView on _AgentChatPageState {
               child: AgentAssetCard(
                 displayName: model['display_name']?.toString(),
                 description: model['description']?.toString() ?? '',
-                tags: (model['tags'] as List?)
+                tags:
+                    (model['tags'] as List?)
                         ?.map((e) => e.toString())
                         .toList() ??
                     const [],
                 previewImgPath: model['preview_img_path']?.toString(),
+                previewWebpPath: readPreviewWebpPath(model),
                 isDark: isDark,
                 onOpen: _buildAssetOnOpen(model),
               ),
@@ -348,7 +349,8 @@ extension _AgentChatView on _AgentChatPageState {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: AgentAssetCard(
-                displayName: topCandidates[i].displayName ??
+                displayName:
+                    topCandidates[i].displayName ??
                     (topCandidates[i].description.isNotEmpty
                         ? topCandidates[i].description
                         : topCandidates[i].sceneId),
@@ -357,6 +359,7 @@ extension _AgentChatView on _AgentChatPageState {
                     : '场景 ${topCandidates[i].sceneId}',
                 tags: topCandidates[i].tags,
                 previewImgPath: topCandidates[i].previewImgPath,
+                previewWebpPath: topCandidates[i].previewWebpPath,
                 score: topCandidates[i].score,
                 isDark: isDark,
                 actionLabel: i == 0 ? '飞到视角' : '打开场景',
@@ -406,7 +409,10 @@ extension _AgentChatView on _AgentChatPageState {
   }
 
   Widget _buildActiveAgentBubble(
-      bool isDark, Color textColor, Color hintColor) {
+    bool isDark,
+    Color textColor,
+    Color hintColor,
+  ) {
     final msg = _activeChatMessage;
     if (msg == null) return const SizedBox.shrink();
 
@@ -435,8 +441,9 @@ extension _AgentChatView on _AgentChatPageState {
             listenable: msg,
             builder: (context, _) {
               final elapsed = _elapsedDuration;
-              final elapsedLabel =
-                  elapsed != null ? _formatElapsed(elapsed) : null;
+              final elapsedLabel = elapsed != null
+                  ? _formatElapsed(elapsed)
+                  : null;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -481,18 +488,22 @@ extension _AgentChatView on _AgentChatPageState {
                         if (elapsedLabel != null)
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: isDark
                                   ? Colors.white.withValues(alpha: 0.06)
-                                  : BDDesign.colorMutedBlue
-                                      .withValues(alpha: 0.08),
+                                  : BDDesign.colorMutedBlue.withValues(
+                                      alpha: 0.08,
+                                    ),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
                                 color: isDark
                                     ? Colors.white.withValues(alpha: 0.08)
-                                    : BDDesign.colorMutedBlue
-                                        .withValues(alpha: 0.16),
+                                    : BDDesign.colorMutedBlue.withValues(
+                                        alpha: 0.16,
+                                      ),
                               ),
                             ),
                             child: Text(
@@ -513,15 +524,22 @@ extension _AgentChatView on _AgentChatPageState {
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.red,
                                 side: const BorderSide(
-                                    color: Colors.red, width: 1),
+                                  color: Colors.red,
+                                  width: 1,
+                                ),
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8),
+                                  horizontal: 8,
+                                ),
                               ),
                               onPressed: _stopSearch,
                               icon: const Icon(
-                                  Icons.stop_circle_outlined, size: 14),
-                              label: const Text('停止',
-                                  style: TextStyle(fontSize: 12)),
+                                Icons.stop_circle_outlined,
+                                size: 14,
+                              ),
+                              label: const Text(
+                                '停止',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ),
                       ],
@@ -628,9 +646,7 @@ extension _AgentChatView on _AgentChatPageState {
         style: ElevatedButton.styleFrom(
           backgroundColor: BDDesign.colorMutedBlue,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           elevation: 0,
         ),
         onPressed: () => _openResult(result),
@@ -658,14 +674,14 @@ extension _AgentChatView on _AgentChatPageState {
     final rawPly = openScene.ply!;
     final modelUrl =
         rawPly.startsWith('http://') || rawPly.startsWith('https://')
-            ? rawPly
-            : toPublicUrl(rawPly);
+        ? rawPly
+        : toPublicUrl(rawPly);
     final posesUrlResolved =
         openScene.poses != null &&
-                openScene.poses!.isNotEmpty &&
-                !openScene.poses!.startsWith('http')
-            ? toPublicUrl(openScene.poses!)
-            : openScene.poses ?? toPosesUrl(rawPly);
+            openScene.poses!.isNotEmpty &&
+            !openScene.poses!.startsWith('http')
+        ? toPublicUrl(openScene.poses!)
+        : openScene.poses ?? toPosesUrl(rawPly);
 
     unawaited(
       openViewer(
@@ -686,8 +702,8 @@ extension _AgentChatView on _AgentChatPageState {
     return () {
       final modelUrl =
           plyPath.startsWith('http://') || plyPath.startsWith('https://')
-              ? plyPath
-              : toPublicUrl(plyPath);
+          ? plyPath
+          : toPublicUrl(plyPath);
       final posesUrl = toPosesUrl(plyPath);
       unawaited(
         openViewer(
@@ -713,8 +729,8 @@ extension _AgentChatView on _AgentChatPageState {
     return () {
       final modelUrl =
           plyPath.startsWith('http://') || plyPath.startsWith('https://')
-              ? plyPath
-              : toPublicUrl(plyPath);
+          ? plyPath
+          : toPublicUrl(plyPath);
       final posesUrl = toPosesUrl(plyPath);
       unawaited(
         openViewer(
@@ -770,7 +786,8 @@ extension _AgentChatView on _AgentChatPageState {
               textInputAction: TextInputAction.send,
               onSubmitted: _submitQuery,
               decoration: InputDecoration(
-                hintText: _activeResult?.followUp?.inputPlaceholder ??
+                hintText:
+                    _activeResult?.followUp?.inputPlaceholder ??
                     textLocalize('agent_input_hint'),
                 hintStyle: TextStyle(
                   color: isDark
@@ -793,7 +810,9 @@ extension _AgentChatView on _AgentChatPageState {
                   ),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 isDense: true,
               ),
             ),

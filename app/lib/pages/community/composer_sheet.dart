@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../services/location_service.dart';
+import 'amap_search.dart';
 import 'location_picker.dart';
 import 'models.dart';
 
@@ -110,9 +111,22 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
         _pickedLat = p.latitude;
         _pickedLng = p.longitude;
       });
-      // 没有 placeName 时不强制反查；用户可后续点"在地图选点"或手动填
-      // 这里简单地把坐标作为占位，提示用户
-      if (_placeController.text.trim().isEmpty) {
+      // 调高德逆地理编码把坐标转成可读地点名；失败则回退到坐标占位。
+      String placeName = '';
+      try {
+        final regeo = await AmapSearchService.instance.regeoSearch(p);
+        placeName = regeo.placeName.isNotEmpty
+            ? regeo.placeName
+            : regeo.formattedAddress;
+      } on AmapSearchException catch (_) {
+        // 静默降级，不打断"已获取当前位置"的主流程
+      } catch (_) {
+        // 同上
+      }
+      if (!mounted) return;
+      if (placeName.isNotEmpty) {
+        _placeController.text = placeName;
+      } else if (_placeController.text.trim().isEmpty) {
         _placeController.text =
             '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
       }

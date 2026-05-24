@@ -7,6 +7,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
+import '../../services/preview_image_resolver.dart';
 import '../../services/thumbnail_cache.dart';
 import 'model_card.dart';
 
@@ -352,8 +353,11 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
   Object? lastError;
   ImageStream? _imageStream;
   ImageStreamListener? _imageStreamListener;
+  bool _didUseFallback = false;
+  String? _activeImageUrl;
 
   String get imageUrl;
+  String? get fallbackImageUrl => null;
 
   @override
   void initState() {
@@ -372,6 +376,8 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
       _stopListening();
       resolvedImage = null;
       lastError = null;
+      _didUseFallback = false;
+      _activeImageUrl = null;
       _resolveImage();
     }
   }
@@ -383,19 +389,25 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
       return;
     }
 
-    if (imageUrl.startsWith('http')) {
+    _resolveUrl(imageUrl);
+  }
+
+  void _resolveUrl(String url) {
+    _activeImageUrl = url;
+    if (url.startsWith('http')) {
       // Check disk cache first, fall back to network
-      ThumbnailCache().getCachedPath(imageUrl).then((cachedPath) {
-        if (cachedPath != null && mounted && imageUrl == this.imageUrl) {
+      ThumbnailCache().getCachedPath(url).then((cachedPath) {
+        if (cachedPath != null && mounted && _activeImageUrl == url) {
           _resolveFromProvider(FileImage(File(cachedPath)));
           return;
         }
-        _resolveFromProvider(NetworkImage(imageUrl));
+        if (_activeImageUrl != url) return;
+        _resolveFromProvider(NetworkImage(url));
         // Also cache to disk for offline use
-        ThumbnailCache().getPath(imageUrl);
+        ThumbnailCache().getPath(url);
       });
     } else {
-      _resolveFromProvider(FileImage(File(imageUrl)));
+      _resolveFromProvider(FileImage(File(url)));
     }
   }
 
@@ -414,6 +426,16 @@ mixin _NetworkImageResolverMixin<T extends StatefulWidget> on State<T> {
         });
       },
       onError: (Object error, StackTrace? stackTrace) {
+        final fallback = fallbackImageUrl?.trim();
+        if (!_didUseFallback &&
+            fallback != null &&
+            fallback.isNotEmpty &&
+            fallback != _activeImageUrl) {
+          _didUseFallback = true;
+          _stopListening();
+          _resolveUrl(fallback);
+          return;
+        }
         if (!mounted) {
           return;
         }
@@ -539,11 +561,13 @@ class _AdaptiveFrameThumbnailState extends State<_AdaptiveFrameThumbnail>
 
 class _CoverNetworkImage extends StatefulWidget {
   final String imageUrl;
+  final String? fallbackImageUrl;
   final Color backgroundColor;
   final Widget errorWidget;
 
   const _CoverNetworkImage({
     required this.imageUrl,
+    this.fallbackImageUrl,
     required this.backgroundColor,
     required this.errorWidget,
   });
@@ -558,8 +582,14 @@ class _CoverNetworkImageState extends State<_CoverNetworkImage>
   String get imageUrl => widget.imageUrl;
 
   @override
+  String? get fallbackImageUrl => widget.fallbackImageUrl;
+
+  @override
   void didUpdateWidget(covariant _CoverNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.fallbackImageUrl != widget.fallbackImageUrl) {
+      _didUseFallback = false;
+    }
     onImageUrlChanged(oldWidget.imageUrl);
   }
 
@@ -596,7 +626,10 @@ class _CoverNetworkImageState extends State<_CoverNetworkImage>
                   child: SizedBox(
                     width: img.width.toDouble(),
                     height: img.height.toDouble(),
-                    child: RawImage(image: img, filterQuality: FilterQuality.low),
+                    child: RawImage(
+                      image: img,
+                      filterQuality: FilterQuality.low,
+                    ),
                   ),
                 ),
               ),
@@ -646,6 +679,10 @@ class RecallModelTile extends StatelessWidget {
               ? plyPath
               : (toPublicUrl != null ? toPublicUrl!(plyPath) : ''))
         : '';
+    final previewPaths = resolvePreviewImagePaths(
+      model,
+      normalize: toPublicUrl,
+    );
     final radius = BorderRadius.circular(28.0);
 
     return Container(
@@ -693,11 +730,10 @@ class RecallModelTile extends StatelessWidget {
                           ),
                   ),
                   clipBehavior: Clip.hardEdge,
-                  child:
-                      model['preview_img_path'] != null &&
-                          model['preview_img_path'].toString().isNotEmpty
+                  child: previewPaths.primary != null
                       ? _CoverNetworkImage(
-                          imageUrl: model['preview_img_path'].toString(),
+                          imageUrl: previewPaths.primary!,
+                          fallbackImageUrl: previewPaths.fallback,
                           backgroundColor: isDark
                               ? darkInput
                               : theme.grayColor3,
@@ -816,4 +852,3 @@ class RecallModelMockCover extends StatelessWidget {
     );
   }
 }
-

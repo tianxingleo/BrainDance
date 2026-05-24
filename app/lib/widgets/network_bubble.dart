@@ -18,6 +18,7 @@ class _NetworkBubbleOverlayState extends State<NetworkBubbleOverlay>
   late final Animation<double> _fade;
   late final Animation<double> _scale;
   Timer? _dismissTimer;
+  String? _activeMessageKey;
 
   @override
   void initState() {
@@ -34,10 +35,41 @@ class _NetworkBubbleOverlayState extends State<NetworkBubbleOverlay>
       begin: 0.88,
       end: 1,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    networkService.addListener(_onNetworkChanged);
+  }
+
+  void _onNetworkChanged() {
+    final messageKey = networkService.bubbleMessage;
+
+    if (messageKey == null) {
+      if (_activeMessageKey != null) {
+        _dismissTimer?.cancel();
+        if (!_ctrl.isDismissed) _ctrl.reverse();
+        _activeMessageKey = null;
+        setState(() {});
+      }
+      return;
+    }
+
+    if (_activeMessageKey != messageKey) {
+      _activeMessageKey = messageKey;
+      _dismissTimer?.cancel();
+      _ctrl.forward();
+      final isReLogin = networkService.navigateToLoginAfterDismiss;
+      _dismissTimer = Timer(Duration(seconds: isReLogin ? 3 : 4), () {
+        if (mounted) {
+          _ctrl.reverse();
+          networkService.onBubbleDismissed();
+        }
+      });
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    networkService.removeListener(_onNetworkChanged);
     _dismissTimer?.cancel();
     _ctrl.dispose();
     super.dispose();
@@ -45,40 +77,27 @@ class _NetworkBubbleOverlayState extends State<NetworkBubbleOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: networkService,
-      builder: (context, child) {
-        final messageKey = networkService.bubbleMessage;
-        if (messageKey == null) {
-          _dismissTimer?.cancel();
-          if (!_ctrl.isDismissed) _ctrl.reverse();
-          return const SizedBox.shrink();
-        }
+    final messageKey = _activeMessageKey;
+    if (messageKey == null) {
+      return const SizedBox.shrink();
+    }
 
-        _dismissTimer?.cancel();
-        _ctrl.forward();
-        final isReLogin = networkService.navigateToLoginAfterDismiss;
-        _dismissTimer = Timer(Duration(seconds: isReLogin ? 3 : 4), () {
-          if (mounted) {
-            _ctrl.reverse();
-            networkService.onBubbleDismissed();
-          }
-        });
+    final isReLogin = networkService.navigateToLoginAfterDismiss;
 
-        return Positioned.fill(
-          child: AnimatedBuilder(
-            animation: _ctrl,
-            builder: (context, child) {
-              if (_ctrl.isDismissed) return const SizedBox.shrink();
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          if (_ctrl.isDismissed) return const SizedBox.shrink();
 
-              final icon = isReLogin
-                  ? Icons.login_rounded
-                  : Icons.wifi_off_rounded;
-              final iconColor = isReLogin
-                  ? const Color(0xFFFFB74D)
-                  : Colors.orange.withAlpha(200);
+          final icon = isReLogin
+              ? Icons.login_rounded
+              : Icons.wifi_off_rounded;
+          final iconColor = isReLogin
+              ? const Color(0xFFFFB74D)
+              : Colors.orange.withAlpha(200);
 
-              return Align(
+          return Align(
                 alignment: const Alignment(0, 0.30),
                 child: FadeTransition(
                   opacity: _fade,
@@ -128,7 +147,5 @@ class _NetworkBubbleOverlayState extends State<NetworkBubbleOverlay>
             },
           ),
         );
-      },
-    );
   }
 }

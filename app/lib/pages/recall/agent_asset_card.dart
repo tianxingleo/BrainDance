@@ -2,12 +2,15 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../configs/motion_tokens.dart';
+import '../../services/preview_image_resolver.dart';
+import '../../widgets/animated_network_image.dart';
 
 class AgentAssetCard extends StatelessWidget {
   final String? displayName;
   final String description;
   final List<String> tags;
   final String? previewImgPath;
+  final String? previewWebpPath;
   final double? score;
   final String scoreLabel;
   final bool isDark;
@@ -20,6 +23,7 @@ class AgentAssetCard extends StatelessWidget {
     required this.description,
     this.tags = const [],
     this.previewImgPath,
+    this.previewWebpPath,
     this.score,
     this.scoreLabel = '置信度',
     required this.isDark,
@@ -27,9 +31,15 @@ class AgentAssetCard extends StatelessWidget {
     this.actionLabel = '打开场景',
   });
 
-  String? get _thumbnailUrl {
-    if (previewImgPath == null || previewImgPath!.isEmpty) return null;
-    var raw = previewImgPath!.trim();
+  PreviewImagePaths get _thumbnailPaths {
+    return resolvePreviewImagePaths({
+      'preview_img_path': previewImgPath,
+      'preview_webp_path': previewWebpPath,
+    }, normalize: _normalizeAssetUrl);
+  }
+
+  String _normalizeAssetUrl(String raw) {
+    raw = raw.trim();
     const marker = '/storage/v1/object/public/braindance-assets/';
     final idx = raw.indexOf(marker);
     if (idx >= 0) raw = raw.substring(idx + marker.length);
@@ -40,12 +50,12 @@ class AgentAssetCard extends StatelessWidget {
           .from('braindance-assets')
           .getPublicUrl(raw);
     } catch (_) {
-      return null;
+      return raw;
     }
   }
 
   void _showDetailDialog(BuildContext context) {
-    final url = _thumbnailUrl;
+    final paths = _thumbnailPaths;
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -53,7 +63,8 @@ class AgentAssetCard extends StatelessWidget {
       transitionDuration: const Duration(milliseconds: 250),
       pageBuilder: (ctx, anim, secondAnim) {
         return _AssetDetailDialog(
-          url: url,
+          imageUrl: paths.primary,
+          fallbackImageUrl: paths.fallback,
           displayName: displayName,
           description: description,
           tags: tags,
@@ -78,7 +89,7 @@ class AgentAssetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final url = _thumbnailUrl;
+    final paths = _thumbnailPaths;
     final cardColor = isDark
         ? Colors.white.withValues(alpha: 0.06)
         : Colors.white.withValues(alpha: 0.85);
@@ -105,15 +116,13 @@ class AgentAssetCard extends StatelessWidget {
           children: [
             SizedBox(
               height: 120,
-              child: url != null
-                  ? Image.network(
-                      url,
+              child: paths.primary != null
+                  ? BDFadeInNetworkImage(
+                      imageUrl: paths.primary!,
+                      fallbackImageUrl: paths.fallback,
+                      placeholder: _buildPlaceholder(loading: true),
+                      errorWidget: _buildPlaceholder(),
                       fit: BoxFit.cover,
-                      loadingBuilder: (_, child, progress) {
-                        if (progress == null) return child;
-                        return _buildPlaceholder(loading: true);
-                      },
-                      errorBuilder: (_, __, ___) => _buildPlaceholder(),
                     )
                   : _buildPlaceholder(),
             ),
@@ -143,8 +152,9 @@ class AgentAssetCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color:
-                                BDDesign.colorMutedBlue.withValues(alpha: 0.15),
+                            color: BDDesign.colorMutedBlue.withValues(
+                              alpha: 0.15,
+                            ),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -222,23 +232,18 @@ class AgentAssetCard extends StatelessWidget {
                   : Colors.black.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Text(
-              tag,
-              style: TextStyle(color: hintColor, fontSize: 11),
-            ),
+            child: Text(tag, style: TextStyle(color: hintColor, fontSize: 11)),
           ),
         if (overflow > 0)
-          Text(
-            '+$overflow',
-            style: TextStyle(color: hintColor, fontSize: 11),
-          ),
+          Text('+$overflow', style: TextStyle(color: hintColor, fontSize: 11)),
       ],
     );
   }
 }
 
 class _AssetDetailDialog extends StatelessWidget {
-  final String? url;
+  final String? imageUrl;
+  final String? fallbackImageUrl;
   final String? displayName;
   final String description;
   final List<String> tags;
@@ -249,7 +254,8 @@ class _AssetDetailDialog extends StatelessWidget {
   final String actionLabel;
 
   const _AssetDetailDialog({
-    this.url,
+    this.imageUrl,
+    this.fallbackImageUrl,
     this.displayName,
     required this.description,
     required this.tags,
@@ -297,11 +303,13 @@ class _AssetDetailDialog extends StatelessWidget {
                       SizedBox(
                         height: 180,
                         width: double.infinity,
-                        child: url != null
-                            ? Image.network(
-                                url!,
+                        child: imageUrl != null
+                            ? BDFadeInNetworkImage(
+                                imageUrl: imageUrl!,
+                                fallbackImageUrl: fallbackImageUrl,
+                                placeholder: _placeholder(),
+                                errorWidget: _placeholder(),
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => _placeholder(),
                               )
                             : _placeholder(),
                       ),
@@ -351,8 +359,9 @@ class _AssetDetailDialog extends StatelessWidget {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: BDDesign.colorMutedBlue
-                                      .withValues(alpha: 0.15),
+                                  color: BDDesign.colorMutedBlue.withValues(
+                                    alpha: 0.15,
+                                  ),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -383,27 +392,29 @@ class _AssetDetailDialog extends StatelessWidget {
                             spacing: 6,
                             runSpacing: 6,
                             children: tags
-                                .map((tag) => Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
+                                .map(
+                                  (tag) => Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.08)
+                                          : Colors.black.withValues(
+                                              alpha: 0.05,
+                                            ),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      tag,
+                                      style: TextStyle(
+                                        color: hintColor,
+                                        fontSize: 12,
                                       ),
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? Colors.white
-                                                .withValues(alpha: 0.08)
-                                            : Colors.black
-                                                .withValues(alpha: 0.05),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        tag,
-                                        style: TextStyle(
-                                          color: hintColor,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ))
+                                    ),
+                                  ),
+                                )
                                 .toList(),
                           ),
                         ],
@@ -425,10 +436,14 @@ class _AssetDetailDialog extends StatelessWidget {
                                 Navigator.of(context).pop();
                                 onOpen!();
                               },
-                              icon: const Icon(Icons.open_in_new_rounded,
-                                  size: 16),
-                              label: Text(actionLabel,
-                                  style: const TextStyle(fontSize: 14)),
+                              icon: const Icon(
+                                Icons.open_in_new_rounded,
+                                size: 16,
+                              ),
+                              label: Text(
+                                actionLabel,
+                                style: const TextStyle(fontSize: 14),
+                              ),
                             ),
                           ),
                         ],

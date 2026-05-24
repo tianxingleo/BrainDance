@@ -440,6 +440,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       params['target'] = '/targets/braindance-card.mind';
       params['mode'] = 'marker-ar';
     } else {
+      params['airGestureAvailable'] = '1';
+      params['gestureCamera'] = 'front';
       final payload = _buildViewerPayload();
       if (payload.isNotEmpty) {
         params['payload'] = jsonEncode(payload);
@@ -614,7 +616,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     // 同步渲染器状态到 WebView
     _controller?.runJavaScript(
-        "window.setRendererStateFromFlutter($_useSparkViewer)");
+      "window.setRendererStateFromFlutter($_useSparkViewer)",
+    );
   }
 
   void _sendThemeToVue() {

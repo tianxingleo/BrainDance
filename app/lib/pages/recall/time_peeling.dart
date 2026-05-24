@@ -276,87 +276,87 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
             const SizedBox(height: 10),
             SizedBox(
               height: kCarouselHeight,
-              child: Stack(
-                children: [
-                  RepaintBoundary(
-                    child: PageView.builder(
-                      controller: _pageController,
-                      itemCount: _totalCount,
-                      clipBehavior: Clip.hardEdge,
-                      itemBuilder: (context, index) {
-                        if (index == 0) {
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final fadeStop =
+                      (kEdgeFadeWidth / constraints.maxWidth).clamp(0.0, 0.5);
+                  return ShaderMask(
+                    blendMode: BlendMode.dstIn,
+                    shaderCallback: (rect) => LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: const [
+                        Colors.transparent,
+                        Colors.black,
+                        Colors.black,
+                        Colors.transparent,
+                      ],
+                      stops: [0.0, fadeStop, 1.0 - fadeStop, 1.0],
+                    ).createShader(rect),
+                    child: RepaintBoundary(
+                      child: PageView.builder(
+                        controller: _pageController,
+                        itemCount: _totalCount,
+                        clipBehavior: Clip.hardEdge,
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            return _TimePeelingCarouselItem(
+                              pagePosition: _pagePosition,
+                              index: index,
+                              child: _buildCreateCard(),
+                            );
+                          }
+
+                          final model = widget.models[index - 1];
+                          final cardKey = widget.modelCardKeyFor(model);
+                          final isActionTarget = widget.isSameModel(
+                            widget.activeModelAction,
+                            model,
+                          );
+
                           return _TimePeelingCarouselItem(
                             pagePosition: _pagePosition,
                             index: index,
-                            child: _buildCreateCard(),
-                          );
-                        }
-
-                        final model = widget.models[index - 1];
-                        final cardKey = widget.modelCardKeyFor(model);
-                        final isActionTarget = widget.isSameModel(
-                          widget.activeModelAction,
-                          model,
-                        );
-
-                        return _TimePeelingCarouselItem(
-                          pagePosition: _pagePosition,
-                          index: index,
-                          forceHidden: isActionTarget,
-                          child: IgnorePointer(
-                            ignoring: isActionTarget,
-                            child: GestureDetector(
-                              onTap: () =>
-                                  widget.onNavigateToViewer(model, null),
-                              onLongPressStart: (_) => widget
-                                  .onShowModelActions(model, imageOnly: true),
-                              child: Container(
-                                key: cardKey,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(28),
-                                  border: Border.all(
-                                    color: widget.isDark
-                                        ? Colors.white.withValues(alpha: 0.08)
-                                        : Colors.black.withValues(alpha: 0.06),
-                                    width: 1,
+                            forceHidden: isActionTarget,
+                            child: IgnorePointer(
+                              ignoring: isActionTarget,
+                              child: GestureDetector(
+                                onTap: () =>
+                                    widget.onNavigateToViewer(model, null),
+                                onLongPressStart: (_) => widget
+                                    .onShowModelActions(model, imageOnly: true),
+                                child: Container(
+                                  key: cardKey,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(28),
+                                    border: Border.all(
+                                      color: widget.isDark
+                                          ? Colors.white.withValues(alpha: 0.08)
+                                          : Colors.black.withValues(alpha: 0.06),
+                                      width: 1,
+                                    ),
                                   ),
-                                ),
-                                child: RepaintBoundary(
-                                  child: RecallModelTile(
-                                    model: model,
-                                    theme: widget.theme,
-                                    isDark: widget.isDark,
-                                    darkCard: widget.darkCard,
-                                    darkInput: widget.darkInput,
-                                    textColor: widget.textColor,
-                                    hintTextColor: widget.hintTextColor,
-                                    imageOnly: true,
+                                  child: RepaintBoundary(
+                                    child: RecallModelTile(
+                                      model: model,
+                                      theme: widget.theme,
+                                      isDark: widget.isDark,
+                                      darkCard: widget.darkCard,
+                                      darkInput: widget.darkInput,
+                                      textColor: widget.textColor,
+                                      hintTextColor: widget.hintTextColor,
+                                      imageOnly: true,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                  const Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    child: IgnorePointer(
-                      child: _HorizontalEdgeFade(isLeft: true),
-                    ),
-                  ),
-                  const Positioned(
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    child: IgnorePointer(
-                      child: _HorizontalEdgeFade(isLeft: false),
-                    ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
             SizedBox(
@@ -484,31 +484,6 @@ class _TimePeelingCarouselItem extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _HorizontalEdgeFade extends StatelessWidget {
-  final bool isLeft;
-
-  const _HorizontalEdgeFade({required this.isLeft});
-
-  @override
-  Widget build(BuildContext context) {
-    final background = Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF11161D)
-        : const Color(0xFFF4F6F8);
-    return SizedBox(
-      width: kEdgeFadeWidth,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: isLeft ? Alignment.centerLeft : Alignment.centerRight,
-            end: isLeft ? Alignment.centerRight : Alignment.centerLeft,
-            colors: [background, background.withValues(alpha: 0.0)],
-          ),
-        ),
-      ),
     );
   }
 }
