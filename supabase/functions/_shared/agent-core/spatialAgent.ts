@@ -1206,16 +1206,21 @@ function buildStopSearchSummaryPayload(input: {
     }))
     .sort((a, b) => b.score - a.score);
 
-  const truncate = (text: string | null | undefined, max = 80): string => {
-    if (!text) return "";
-    const trimmed = text.trim();
-    return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
-  };
-
-  const topCandidates = rankedWithScore.slice(0, 2).map(({ candidate, score }) => ({
+  const topCandidates = rankedWithScore.slice(0, 5).map(({ candidate, score }) => ({
+    scene_id: candidate.sceneId,
+    model_id: candidate.modelId,
     display_name: candidate.displayName ?? null,
-    description: truncate(candidate.description, 80),
-    fused_score: Number(score.toFixed(3)),
+    description: candidate.description,
+    tags: candidate.tags,
+    best_pose: candidate.bestPose
+      ? {
+        image_name: candidate.bestPose.image_name,
+        similarity: candidate.bestPose.similarity,
+        tag: candidate.bestPose.tag,
+      }
+      : null,
+    source_scores: candidate.sourceScores,
+    fused_score: score,
   }));
 
   const topScore = rankedWithScore[0]?.score ?? 0;
@@ -1223,26 +1228,18 @@ function buildStopSearchSummaryPayload(input: {
     Object.keys(c.sourceScores).length >= 2
   );
 
-  const operation = input.assetState.operation
-    ? {
-      tool_name: input.assetState.operation.tool_name,
-      affected_count: input.assetState.operation.affected_count,
-      requires_confirmation: input.assetState.operation.requires_confirmation,
-    }
-    : null;
-
   return {
     user_query: input.query,
     stop_reason: typeof input.stopReason === "string" ? input.stopReason : "",
     stop_confidence: typeof input.stopConfidence === "number"
       ? input.stopConfidence
       : null,
+    tool_trace: input.trace,
     spatial_candidates: topCandidates,
     candidate_count: input.candidates.size,
-    top_fused_score: Number(topScore.toFixed(3)),
+    top_fused_score: topScore,
     has_multi_source_evidence: hasMultiSourceEvidence,
-    last_tool_name: input.assetState.lastToolName ?? null,
-    asset_operation: operation,
+    asset_context: serializeAssetContext(input.assetState),
   };
 }
 
@@ -1291,7 +1288,7 @@ async function buildStopSearchUserFacingSummary(input: {
     ),
     new HumanMessage(
       `用户问题：${input.query}\n\n当前工具结果摘要：\n${
-        JSON.stringify(payload)
+        JSON.stringify(payload, null, 2)
       }\n\n请输出给用户看的最终回答。`,
     ),
   ];
