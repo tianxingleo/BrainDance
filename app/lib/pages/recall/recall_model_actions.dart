@@ -23,6 +23,7 @@ extension _RecallPageModelActions on _RecallPageState {
     required String modelUrl,
     String? previewUrl,
     String? displayName,
+    String? description,
     bool isLocalOnly = false,
     File? localFile,
   }) async {
@@ -36,6 +37,8 @@ extension _RecallPageModelActions on _RecallPageState {
           'preview_img_path': previewUrl,
         if (displayName != null && displayName.isNotEmpty)
           'display_name': displayName,
+        if (description != null && description.isNotEmpty)
+          'description': description,
       };
       if (meta.isNotEmpty) {
         await metaFile.writeAsString(
@@ -133,6 +136,7 @@ extension _RecallPageModelActions on _RecallPageState {
               modelUrl: modelUrl,
               previewUrl: previewUrl,
               displayName: sceneId,
+              description: model['description']?.toString() ?? '',
             );
             if (previewUrl != null && previewUrl.isNotEmpty) {
               try {
@@ -525,6 +529,7 @@ extension _RecallPageModelActions on _RecallPageState {
           modelUrl: modelUrl,
           previewUrl: model['preview_img_path']?.toString(),
           displayName: _modelDisplayName(model, fallback: ''),
+          description: model['description']?.toString() ?? '',
           localFile: File(targetPath),
         ),
       );
