@@ -378,6 +378,14 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
   }
 
   Future<void> _submit() async {
+    final trimmedName = nameController.text.trim();
+    if (trimmedName.isEmpty) {
+      if (mounted) {
+        showAppToast(context, textLocalize('video_submit_name_required'));
+        _nameFocusNode.requestFocus();
+      }
+      return;
+    }
     final client = Supabase.instance.client;
     var user = client.auth.currentUser;
     if (user == null) {
@@ -511,9 +519,7 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       await client.from('processing_tasks').insert({
         'scene_id': sceneId,
         'user_id': user.id,
-        'display_name': nameController.text.trim().isEmpty
-            ? null
-            : nameController.text.trim(),
+        'display_name': trimmedName,
         'task_type': 'video_dual_chain',
         'task_params': {
           'slow_pipeline': 'video_3dgs',
@@ -602,7 +608,6 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
       final pending = ref.read(pendingSubmitTitleProvider);
       if (pending != null && pending.isNotEmpty) {
         nameController.text = pending;
-        ref.read(pendingSubmitTitleProvider.notifier).state = null;
       }
     }
     final isDark = Theme.of(context).brightness == Brightness.dark;

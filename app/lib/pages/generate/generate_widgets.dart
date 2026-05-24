@@ -294,11 +294,11 @@ class _GenerateTabBarState extends State<_GenerateTabBar> {
 
 class _GenerateSectionHeading extends StatelessWidget {
   final String title;
-  final String description;
+  final String? description;
 
   const _GenerateSectionHeading({
     required this.title,
-    required this.description,
+    this.description,
   });
 
   @override
@@ -316,17 +316,19 @@ class _GenerateSectionHeading extends StatelessWidget {
             color: isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack,
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          description,
-          style: TextStyle(
-            fontSize: 13,
-            height: 1.45,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.62)
-                : BDDesign.colorMutedBlue,
+        if (description != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            description!,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.62)
+                  : BDDesign.colorMutedBlue,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../configs/app_config.dart';
 import '../configs/app_theme.dart';
 import '../configs/motion_tokens.dart';
+import '../main.dart' show pendingSubmitTitleProvider;
 import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
@@ -35,11 +37,15 @@ PageRoute<T> _verticalSlideRoute<T>({
 }
 
 /// Create 引导页 — record 和 generate 的统一入口
-class CreateGuidePage extends StatelessWidget {
+class CreateGuidePage extends ConsumerWidget {
   const CreateGuidePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pendingName = ref.watch(pendingSubmitTitleProvider);
+    final headerTitle = (pendingName != null && pendingName.isNotEmpty)
+        ? textLocalize('create_for_model').replaceAll('[NAME]', pendingName)
+        : textLocalize('create');
     return Scaffold(
       backgroundColor: Colors.transparent,
       extendBody: true,
@@ -50,7 +56,7 @@ class CreateGuidePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               BDPageHeader(
-                title: textLocalize('create'),
+                title: headerTitle,
                 subtitle: textLocalize('create_guide_subtitle'),
               ),
               const SizedBox(height: 12),

@@ -723,6 +723,7 @@ export type AgentProgressEvent =
     data: {
       delta: string;
       done?: boolean;
+      streamed?: boolean;
     };
   }
   | {
@@ -1205,21 +1206,16 @@ function buildStopSearchSummaryPayload(input: {
     }))
     .sort((a, b) => b.score - a.score);
 
-  const topCandidates = rankedWithScore.slice(0, 5).map(({ candidate, score }) => ({
-    scene_id: candidate.sceneId,
-    model_id: candidate.modelId,
+  const truncate = (text: string | null | undefined, max = 80): string => {
+    if (!text) return "";
+    const trimmed = text.trim();
+    return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+  };
+
+  const topCandidates = rankedWithScore.slice(0, 2).map(({ candidate, score }) => ({
     display_name: candidate.displayName ?? null,
-    description: candidate.description,
-    tags: candidate.tags,
-    best_pose: candidate.bestPose
-      ? {
-        image_name: candidate.bestPose.image_name,
-        similarity: candidate.bestPose.similarity,
-        tag: candidate.bestPose.tag,
-      }
-      : null,
-    source_scores: candidate.sourceScores,
-    fused_score: score,
+    description: truncate(candidate.description, 80),
+    fused_score: Number(score.toFixed(3)),
   }));
 
   const topScore = rankedWithScore[0]?.score ?? 0;
@@ -1227,18 +1223,26 @@ function buildStopSearchSummaryPayload(input: {
     Object.keys(c.sourceScores).length >= 2
   );
 
+  const operation = input.assetState.operation
+    ? {
+      tool_name: input.assetState.operation.tool_name,
+      affected_count: input.assetState.operation.affected_count,
+      requires_confirmation: input.assetState.operation.requires_confirmation,
+    }
+    : null;
+
   return {
     user_query: input.query,
     stop_reason: typeof input.stopReason === "string" ? input.stopReason : "",
     stop_confidence: typeof input.stopConfidence === "number"
       ? input.stopConfidence
       : null,
-    tool_trace: input.trace,
     spatial_candidates: topCandidates,
     candidate_count: input.candidates.size,
-    top_fused_score: topScore,
+    top_fused_score: Number(topScore.toFixed(3)),
     has_multi_source_evidence: hasMultiSourceEvidence,
-    asset_context: serializeAssetContext(input.assetState),
+    last_tool_name: input.assetState.lastToolName ?? null,
+    asset_operation: operation,
   };
 }
 
@@ -1261,7 +1265,7 @@ async function buildStopSearchUserFacingSummary(input: {
   });
 
   const payload = buildStopSearchSummaryPayload(input);
-  const result = await input.model.invoke([
+  const messages = [
     new SystemMessage(
       [
         "你是 BrainDance 的空间记忆 Agent。",
@@ -1287,12 +1291,38 @@ async function buildStopSearchUserFacingSummary(input: {
     ),
     new HumanMessage(
       `用户问题：${input.query}\n\n当前工具结果摘要：\n${
-        JSON.stringify(payload, null, 2)
+        JSON.stringify(payload)
       }\n\n请输出给用户看的最终回答。`,
     ),
-  ]);
+  ];
 
-  return extractModelTextContent(result.content).trim();
+  let collected = "";
+  try {
+    const stream = await input.model.stream(messages);
+    for await (const chunk of stream) {
+      const piece = extractModelTextContent((chunk as { content?: unknown })?.content);
+      if (!piece) continue;
+      collected += piece;
+      if (input.callbacks?.onEvent) {
+        await input.callbacks.onEvent({
+          event: "message",
+          data: { delta: piece, streamed: true },
+        });
+      }
+    }
+    if (collected && input.callbacks?.onEvent) {
+      await input.callbacks.onEvent({
+        event: "message",
+        data: { delta: "", done: true, streamed: true },
+      });
+    }
+    return collected.trim();
+  } catch (err) {
+    console.warn("[StopSearchSummary] streaming failed, fall back to invoke:", err);
+    if (collected.trim()) return collected.trim();
+    const result = await input.model.invoke(messages);
+    return extractModelTextContent(result.content).trim();
+  }
 }
 
 export function pickSpatialSearchAnswerAfterStop(input: {

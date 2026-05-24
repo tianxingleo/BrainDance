@@ -309,7 +309,11 @@ extension _GenerateSubmissionX on _GeneratePageState {
     try {
       final response = await client.functions.invoke(
         'confirm-text-image',
-        body: {'image_url': _generatedImageUrl, 'prompt': prompt},
+        body: {
+          'image_url': _generatedImageUrl,
+          'prompt': prompt,
+          'display_name': _modelNameController.text.trim(),
+        },
       );
 
       final data = response.data;
@@ -345,6 +349,14 @@ extension _GenerateSubmissionX on _GeneratePageState {
   }
 
   Future<void> _submit() async {
+    final modelName = _modelNameController.text.trim();
+    if (modelName.isEmpty) {
+      if (mounted) {
+        showAppToast(context, textLocalize('gen_model_name_required'));
+        _modelNameFocusNode.requestFocus();
+      }
+      return;
+    }
     if (_tabController.index == 0) {
       await _submitImageTask();
       return;
@@ -399,6 +411,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         'user_id': user.id,
         'status': 'pending',
         'task_type': taskType,
+        'display_name': _modelNameController.text.trim(),
       });
 
       if (mounted) {
@@ -526,6 +539,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
         'user_id': user.id,
         'status': 'pending',
         'task_type': taskType,
+        'display_name': _modelNameController.text.trim(),
         if (taskParams != null) 'task_params': taskParams,
       });
 

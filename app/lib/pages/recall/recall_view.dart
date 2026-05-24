@@ -292,7 +292,7 @@ extension _RecallPageView on _RecallPageState {
                                         .read(pendingSubmitTitleProvider.notifier)
                                         .state =
                                     name;
-                                ref.read(pageIndexProvider.notifier).state = 1;
+                                ref.read(pageIndexProvider.notifier).state = 2;
                               },
                             ),
                         ],
@@ -342,7 +342,7 @@ extension _RecallPageView on _RecallPageState {
                                         .read(pendingSubmitTitleProvider.notifier)
                                         .state =
                                     name;
-                                ref.read(pageIndexProvider.notifier).state = 1;
+                                ref.read(pageIndexProvider.notifier).state = 2;
                               },
                             ),
                         ],
@@ -392,7 +392,7 @@ extension _RecallPageView on _RecallPageState {
                                         .read(pendingSubmitTitleProvider.notifier)
                                         .state =
                                     name;
-                                ref.read(pageIndexProvider.notifier).state = 1;
+                                ref.read(pageIndexProvider.notifier).state = 2;
                               },
                             ),
                         ],

@@ -10,7 +10,7 @@ import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/extra_func_v2/video_thumbnail.dart';
-import 'package:braindance/main.dart' show pageIndexProvider;
+import 'package:braindance/main.dart' show pageIndexProvider, pendingSubmitTitleProvider;
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:braindance/widgets/app_toast.dart';
 import 'package:braindance/widgets/bd_tab_switcher.dart';
@@ -42,6 +42,10 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   late final TabController _tabController;
   late final ScrollController _scrollController;
   late final TextEditingController _textEditingController;
+  late final TextEditingController _modelNameController;
+  late final FocusNode _modelNameFocusNode;
+  bool _isModelNameFocused = false;
+  bool _didPrefillModelName = false;
   final ImagePicker _picker = ImagePicker();
 
   static Key _uploadKey = UniqueKey();
@@ -104,6 +108,13 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     );
     _scrollController = ScrollController();
     _textEditingController = TextEditingController();
+    _modelNameController = TextEditingController();
+    _modelNameFocusNode = FocusNode()
+      ..addListener(() {
+        if (mounted) {
+          setState(() => _isModelNameFocused = _modelNameFocusNode.hasFocus);
+        }
+      });
 
     if (firstCheck) {
       return;
@@ -120,6 +131,8 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     _tabController.dispose();
     _scrollController.dispose();
     _textEditingController.dispose();
+    _modelNameController.dispose();
+    _modelNameFocusNode.dispose();
     super.dispose();
   }
 
@@ -255,6 +268,16 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
   @override
   Widget build(BuildContext context) {
     final isGeneratePageActive = ref.watch(pageIndexProvider) == 1;
+    final pendingName = ref.watch(pendingSubmitTitleProvider);
+    if (!_didPrefillModelName &&
+        pendingName != null &&
+        pendingName.isNotEmpty) {
+      _didPrefillModelName = true;
+      _modelNameController.text = pendingName;
+    }
+    final headerTitle = (pendingName != null && pendingName.isNotEmpty)
+        ? textLocalize('gen_top_for_model').replaceAll('[NAME]', pendingName)
+        : textLocalize('gen_top');
     if (isGeneratePageActive) {
       _wasGeneratePageActive = true;
     } else if (_wasGeneratePageActive) {
@@ -278,6 +301,65 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
     final bgCardColor = isDark
         ? const Color(0xFF1C1C1E)
         : BDDesign.colorPaperWhite;
+    final hintColor = isDark
+        ? Colors.white.withValues(alpha: 0.45)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.55);
+
+    final Widget modelNameSection = Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _GenerateSectionHeading(
+            title: textLocalize('gen_model_name_label'),
+          ),
+          const SizedBox(height: 12),
+          AnimatedContainer(
+            duration: BDMotion.durationFast,
+            curve: Curves.easeOutCubic,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isModelNameFocused
+                    ? BDDesign.colorMutedBlue
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : BDDesign.colorMutedBlue.withValues(alpha: 0.10)),
+                width: _isModelNameFocused ? 1.5 : 1,
+              ),
+            ),
+            child: TextField(
+              controller: _modelNameController,
+              focusNode: _modelNameFocusNode,
+              style: TextStyle(color: textColor, fontSize: 15),
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: textLocalize('gen_model_name_hint'),
+                hintStyle: TextStyle(color: hintColor, fontSize: 15),
+                filled: true,
+                fillColor: bgCardColor,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 14,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
 
     final currentSelectionCount = switch (_tabController.index) {
       0 => GenConfig.uploadedImages.length,
@@ -355,6 +437,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  modelNameSection,
                   _GenerateSectionHeading(
                     title: textLocalize('gen_section_image'),
                     description: textLocalize('gen_tip_pic').replaceAll(
@@ -387,6 +470,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  modelNameSection,
                   _GenerateSectionHeading(
                     title: textLocalize('gen_section_text'),
                     description: textLocalize('gen_tip_text'),
@@ -504,6 +588,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  modelNameSection,
                   _GenerateSectionHeading(
                     title: textLocalize('gen_section_video'),
                     description: textLocalize('gen_tip_video'),
@@ -624,7 +709,7 @@ class _GeneratePageState extends ConsumerState<GeneratePage>
                 Column(
                   children: [
                     BDPageHeader(
-                      title: textLocalize('gen_top'),
+                      title: headerTitle,
                       //subtitle: textLocalize('gen_subtitle'),
                       trailing: BDStatusPill(
                         label: uploadLabel,
