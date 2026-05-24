@@ -246,25 +246,25 @@ extension _RecallPageView on _RecallPageState {
                               },
                         )
                       else ...[
-                        if (_officialModels.isNotEmpty) ...[
+                        if (_localModels.isNotEmpty) ...[
                           SliverToBoxAdapter(
                             child: Consumer(
                               builder: (context, watchRef, _) {
                                 final isExpanded = watchRef.watch(
-                                  recallOfficialExpandedProvider,
+                                  recallLocalExpandedProvider,
                                 );
                                 return RecallModelSectionHeader(
-                                  icon: Icons.verified_rounded,
-                                  color: BDDesign.colorMutedBlue,
-                                  title: textLocalize('recall_official_models'),
-                                  count: _officialModels.length,
+                                  icon: Icons.folder_open_rounded,
+                                  color: const Color(0xFFCC9A5C),
+                                  title: textLocalize('recall_local_models'),
+                                  count: _localModels.length,
                                   isExpanded: isExpanded,
                                   isDark: isDark,
                                   textColor: textColor,
                                   onToggle: () {
                                     ref
                                         .read(
-                                          recallOfficialExpandedProvider.notifier,
+                                          recallLocalExpandedProvider.notifier,
                                         )
                                         .update((s) => !s);
                                   },
@@ -272,13 +272,13 @@ extension _RecallPageView on _RecallPageState {
                               },
                             ),
                           ),
-                          if (ref.watch(recallOfficialExpandedProvider))
+                          if (ref.watch(recallLocalExpandedProvider))
                             TimePeelingList(
                               theme: theme,
                               isDark: isDark,
                               darkCard: darkCard,
                               darkInput: darkInput,
-                              groupedModels: _groupModelsByName(_officialModels),
+                              groupedModels: _groupModelsByName(_localModels),
                               activeModelAction: _activeModelAction,
                               modelCardKeyFor: _modelCardKeyFor,
                               isSameModel: _isSameModel,
@@ -346,25 +346,25 @@ extension _RecallPageView on _RecallPageState {
                               },
                             ),
                         ],
-                        if (_localModels.isNotEmpty) ...[
+                        if (_officialModels.isNotEmpty) ...[
                           SliverToBoxAdapter(
                             child: Consumer(
                               builder: (context, watchRef, _) {
                                 final isExpanded = watchRef.watch(
-                                  recallLocalExpandedProvider,
+                                  recallOfficialExpandedProvider,
                                 );
                                 return RecallModelSectionHeader(
-                                  icon: Icons.folder_open_rounded,
-                                  color: const Color(0xFFCC9A5C),
-                                  title: textLocalize('recall_local_models'),
-                                  count: _localModels.length,
+                                  icon: Icons.verified_rounded,
+                                  color: BDDesign.colorMutedBlue,
+                                  title: textLocalize('recall_official_models'),
+                                  count: _officialModels.length,
                                   isExpanded: isExpanded,
                                   isDark: isDark,
                                   textColor: textColor,
                                   onToggle: () {
                                     ref
                                         .read(
-                                          recallLocalExpandedProvider.notifier,
+                                          recallOfficialExpandedProvider.notifier,
                                         )
                                         .update((s) => !s);
                                   },
@@ -372,13 +372,13 @@ extension _RecallPageView on _RecallPageState {
                               },
                             ),
                           ),
-                          if (ref.watch(recallLocalExpandedProvider))
+                          if (ref.watch(recallOfficialExpandedProvider))
                             TimePeelingList(
                               theme: theme,
                               isDark: isDark,
                               darkCard: darkCard,
                               darkInput: darkInput,
-                              groupedModels: _groupModelsByName(_localModels),
+                              groupedModels: _groupModelsByName(_officialModels),
                               activeModelAction: _activeModelAction,
                               modelCardKeyFor: _modelCardKeyFor,
                               isSameModel: _isSameModel,
