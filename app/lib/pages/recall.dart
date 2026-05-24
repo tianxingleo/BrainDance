@@ -27,6 +27,8 @@ import '../main.dart'
         overviewLocalIndexingProvider,
         pageIndexProvider,
         pendingSubmitTitleProvider,
+        recallOfficialExpandedProvider,
+        recallRegularExpandedProvider,
         recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
@@ -49,6 +51,7 @@ import 'recall/model_detail_sheet.dart';
 import 'recall/time_peeling.dart';
 import 'recall/processing_section.dart';
 import 'recall/rename_model_dialog.dart';
+import 'recall/model_section_header.dart';
 import 'recall/search_header_section.dart';
 import 'recall/search_mode.dart';
 import 'recall/agent_asset_card.dart';
@@ -143,6 +146,12 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _openingViewerLabel;
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = false;
+
+  List<Map<String, dynamic>> get _officialModels =>
+      _models.where((m) => m['is_official'] == true).toList();
+
+  List<Map<String, dynamic>> get _regularModels =>
+      _models.where((m) => m['is_official'] != true).toList();
   bool _isLocalModelLoading = false;
   bool _isLocalModelReady = false;
   bool _isModelDownloading = false;

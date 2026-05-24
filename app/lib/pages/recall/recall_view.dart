@@ -245,29 +245,108 @@ extension _RecallPageView on _RecallPageState {
                                 _showModelActions(model, imageOnly: imageOnly);
                               },
                         )
-                      else
-                        TimePeelingList(
-                          theme: theme,
-                          isDark: isDark,
-                          darkCard: darkCard,
-                          darkInput: darkInput,
-                          groupedModels: _groupModelsByName(_models),
-                          activeModelAction: _activeModelAction,
-                          modelCardKeyFor: _modelCardKeyFor,
-                          isSameModel: _isSameModel,
-                          onNavigateToViewer: _navigateToViewer,
-                          onShowModelActions:
-                              (model, {bool imageOnly = false}) {
-                                _showModelActions(model, imageOnly: imageOnly);
+                      else ...[
+                        if (_officialModels.isNotEmpty) ...[
+                          SliverToBoxAdapter(
+                            child: Consumer(
+                              builder: (context, watchRef, _) {
+                                final isExpanded = watchRef.watch(
+                                  recallOfficialExpandedProvider,
+                                );
+                                return RecallModelSectionHeader(
+                                  icon: Icons.verified_rounded,
+                                  color: BDDesign.colorMutedBlue,
+                                  title: textLocalize('recall_official_models'),
+                                  count: _officialModels.length,
+                                  isExpanded: isExpanded,
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  onToggle: () {
+                                    ref
+                                        .read(
+                                          recallOfficialExpandedProvider.notifier,
+                                        )
+                                        .update((s) => !s);
+                                  },
+                                );
                               },
-                          onAddNewTask: (name) {
-                            ref
-                                    .read(pendingSubmitTitleProvider.notifier)
-                                    .state =
-                                name;
-                            ref.read(pageIndexProvider.notifier).state = 1;
-                          },
-                        ),
+                            ),
+                          ),
+                          if (ref.watch(recallOfficialExpandedProvider))
+                            TimePeelingList(
+                              theme: theme,
+                              isDark: isDark,
+                              darkCard: darkCard,
+                              darkInput: darkInput,
+                              groupedModels: _groupModelsByName(_officialModels),
+                              activeModelAction: _activeModelAction,
+                              modelCardKeyFor: _modelCardKeyFor,
+                              isSameModel: _isSameModel,
+                              onNavigateToViewer: _navigateToViewer,
+                              onShowModelActions:
+                                  (model, {bool imageOnly = false}) {
+                                    _showModelActions(model, imageOnly: imageOnly);
+                                  },
+                              onAddNewTask: (name) {
+                                ref
+                                        .read(pendingSubmitTitleProvider.notifier)
+                                        .state =
+                                    name;
+                                ref.read(pageIndexProvider.notifier).state = 1;
+                              },
+                            ),
+                        ],
+                        if (_regularModels.isNotEmpty) ...[
+                          SliverToBoxAdapter(
+                            child: Consumer(
+                              builder: (context, watchRef, _) {
+                                final isExpanded = watchRef.watch(
+                                  recallRegularExpandedProvider,
+                                );
+                                return RecallModelSectionHeader(
+                                  icon: Icons.folder_rounded,
+                                  color: const Color(0xFF8899BB),
+                                  title: textLocalize('recall_regular_models'),
+                                  count: _regularModels.length,
+                                  isExpanded: isExpanded,
+                                  isDark: isDark,
+                                  textColor: textColor,
+                                  onToggle: () {
+                                    ref
+                                        .read(
+                                          recallRegularExpandedProvider.notifier,
+                                        )
+                                        .update((s) => !s);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                          if (ref.watch(recallRegularExpandedProvider))
+                            TimePeelingList(
+                              theme: theme,
+                              isDark: isDark,
+                              darkCard: darkCard,
+                              darkInput: darkInput,
+                              groupedModels: _groupModelsByName(_regularModels),
+                              activeModelAction: _activeModelAction,
+                              modelCardKeyFor: _modelCardKeyFor,
+                              isSameModel: _isSameModel,
+                              onNavigateToViewer: _navigateToViewer,
+                              onShowModelActions:
+                                  (model, {bool imageOnly = false}) {
+                                    _showModelActions(model, imageOnly: imageOnly);
+                                  },
+                              onAddNewTask: (name) {
+                                ref
+                                        .read(pendingSubmitTitleProvider.notifier)
+                                        .state =
+                                    name;
+                                ref.read(pageIndexProvider.notifier).state = 1;
+                              },
+                            ),
+                        ],
+                      ],
                       const SliverToBoxAdapter(child: SizedBox(height: 96)),
                     ],
                   ),
