@@ -1430,24 +1430,9 @@ function buildPersonalizedGreeting(ltm: LongTermMemory): string {
     lines.push(profileLines.join("\n"));
   }
 
-  // 最近搜索回顾
-  const recentCount = Math.min(ltm.recentSearches.length, 3);
-  if (recentCount > 0) {
-    lines.push(`\n最近${recentCount}次搜索：`);
-    const recents = ltm.recentSearches.slice(-recentCount);
-    for (const entry of recents) {
-      const summary = entry.topResultSummary ? ` → ${entry.topResultSummary}` : "";
-      lines.push(`• 「${entry.query}」${summary}`);
-    }
-  }
-
   // 建议
   lines.push("\n基于你的偏好，以下是一些建议：");
   const suggestions: string[] = [];
-  const lastSearch = ltm.recentSearches[ltm.recentSearches.length - 1];
-  if (lastSearch) {
-    suggestions.push(`继续探索「${lastSearch.query}」相关内容`);
-  }
   if (ltm.preferredRegions.length > 0 && ltm.preferredObjects.length > 0) {
     suggestions.push(`查看${ltm.preferredRegions[0]}区域的${ltm.preferredObjects[0]}变化`);
   }

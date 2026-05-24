@@ -26,8 +26,7 @@ const onClick = () => {
       </svg>
     </span>
     <span class="ar-text">
-      <span class="ar-title">进入 AR (Spark)</span>
-      <span class="ar-desc">切换到 Spark 渲染并启动 Marker AR</span>
+      <span class="ar-title">AR</span>
     </span>
     <span class="ar-chevron" aria-hidden="true">›</span>
   </button>
@@ -90,12 +89,6 @@ const onClick = () => {
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
-}
-
-.ar-desc {
-  font-size: 11px;
-  color: var(--text-muted, rgba(30, 30, 32, 0.5));
-  line-height: 1.3;
 }
 
 .ar-chevron {

@@ -545,6 +545,10 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           } else if (data['action'] == 'switchViewer') {
             final useSpark = data['useSpark'] == true;
             _switchViewer(useSpark);
+          } else if (data['action'] == 'enterMarkerAr') {
+            if (!_isMarkerArMode) {
+              _switchMarkerArMode();
+            }
           } else if (data['status'] == 'error') {
             debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
@@ -992,17 +996,6 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   //   );
   // }
 
-  Widget _buildMarkerArButton(bool isDark) {
-    return _buildFloatingCircleButton(
-      icon: _isMarkerArMode
-          ? Icons.view_in_ar_rounded
-          : Icons.view_in_ar_outlined,
-      onPressed: _switchMarkerArMode,
-      isDark: isDark,
-      tooltip: _isMarkerArMode ? '退出 Marker AR' : '进入 Marker AR',
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
@@ -1214,19 +1207,15 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                         children: [
                           _buildFloatingCircleButton(
                             icon: Icons.arrow_back_rounded,
-                            onPressed: () => Navigator.of(context).pop(),
+                            onPressed: () {
+                              if (_isMarkerArMode || _useSparkViewer) {
+                                _switchViewer(false);
+                              } else {
+                                Navigator.of(context).pop();
+                              }
+                            },
                             isDark: isDark,
                             tooltip: '\u8fd4\u56de',
-                          ),
-                          const Spacer(),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildMarkerArButton(isDark),
-                              // 暂时注释掉渲染器切换按钮
-                              // const SizedBox(width: 10),
-                              // _buildFloatingViewerToggle(isDark),
-                            ],
                           ),
                         ],
                       ),

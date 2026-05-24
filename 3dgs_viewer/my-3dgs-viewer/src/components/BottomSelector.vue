@@ -16,7 +16,7 @@ const emit = defineEmits(['selectModel', 'selectPose']);
 
 const mode = ref('pose'); // 'pose' | 'model'
 const scrollRef = ref(null);
-const loadedThumbs = ref({});
+const failedThumbs = ref({});
 
 let isDragging = false;
 let dragStartX = 0;
@@ -48,7 +48,7 @@ function formatTime(dateStr) {
 watch(
   () => props.models,
   (models) => {
-    modelItems.value = [...models]
+    const items = [...models]
       .sort((a, b) => {
         const ta = new Date(a.createdAt || 0).getTime();
         const tb = new Date(b.createdAt || 0).getTime();
@@ -57,8 +57,20 @@ watch(
       .map((model) => ({
         ...model,
         formattedTime: formatTime(model.createdAt),
-        thumb: model.previewImg || model.previewImage || model.preview_url || model.preview || '',
+        thumb:
+          model.previewImg ||
+          model.previewImage ||
+          model.preview_url ||
+          model.preview ||
+          model.cover ||
+          model.coverUrl ||
+          model.cover_url ||
+          model.thumbnail ||
+          model.thumbnailUrl ||
+          model.thumbnail_url ||
+          '',
       }));
+    modelItems.value = items;
   },
   { immediate: true },
 );
@@ -72,6 +84,14 @@ function onClickModel(model) {
 function onClickPose(pose) {
   if (dragMoved) return;
   emit('selectPose', pose);
+}
+
+function onThumbError(url, ctx) {
+  if (!url) return;
+  if (!failedThumbs.value[url]) {
+    failedThumbs.value = { ...failedThumbs.value, [url]: true };
+    console.warn('[BottomSelector] thumbnail load failed:', url, ctx || '');
+  }
 }
 
 function scrollToActive() {
@@ -148,11 +168,10 @@ onBeforeUnmount(() => {
             @click="onClickPose(pose)"
           >
             <img
-              v-if="pose.image_url"
+              v-if="pose.image_url && !failedThumbs[pose.image_url]"
               :src="pose.image_url"
               class="bs-thumb"
-              :class="{ 'bs-thumb--loaded': loadedThumbs[pose.image_url] }"
-              @load="loadedThumbs[pose.image_url] = true"
+              @error="onThumbError(pose.image_url)"
               draggable="false"
               loading="eager"
               decoding="async"
@@ -173,11 +192,10 @@ onBeforeUnmount(() => {
             @click="onClickModel(model)"
           >
             <img
-              v-if="model.thumb"
+              v-if="model.thumb && !failedThumbs[model.thumb]"
               :src="model.thumb"
               class="bs-thumb"
-              :class="{ 'bs-thumb--loaded': loadedThumbs[model.thumb] }"
-              @load="loadedThumbs[model.thumb] = true"
+              @error="onThumbError(model.thumb, { id: model.id, name: model.name })"
               draggable="false"
               loading="eager"
               decoding="async"
@@ -288,34 +306,42 @@ onBeforeUnmount(() => {
   overflow: hidden;
   cursor: pointer;
   transition:
-    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.22s ease,
-    border-color 0.22s ease,
-    box-shadow 0.22s ease;
-  border: 2px solid var(--card-border, rgba(107, 122, 143, 0.12));
-  opacity: 0.74;
-  box-shadow: 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
-  transform: scale(0.92);
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease,
+    box-shadow 0.25s ease,
+    filter 0.25s ease;
+  opacity: 0.78;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: scale(0.95);
   transform-origin: center;
   outline: none;
   -webkit-tap-highlight-color: transparent;
 }
 .bs-item:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 2px 8px var(--card-shadow, rgba(0, 0, 0, 0.08));
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .bs-item--active {
-  border-color: #CC9A5C;
   opacity: 1;
-  box-shadow: 0 4px 14px rgba(204, 154, 92, 0.32);
-  transform: scale(1.08);
+  transform: scale(1.05);
+  filter: saturate(1.05);
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.18),
+    0 6px 16px rgba(204, 154, 92, 0.26);
 }
 .bs-item--active:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55), 0 4px 14px rgba(204, 154, 92, 0.32);
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.28),
+    0 6px 16px rgba(204, 154, 92, 0.3);
 }
 .bs-item:hover:not(.bs-item--active) {
-  opacity: 0.92;
-  border-color: var(--input-focus-border, rgba(107, 122, 143, 0.28));
+  opacity: 0.95;
+  transform: scale(0.98);
 }
 
 .bs-thumb {
@@ -327,14 +353,8 @@ onBeforeUnmount(() => {
   -webkit-user-drag: none;
   -webkit-tap-highlight-color: transparent;
   background: linear-gradient(135deg, rgba(60, 60, 66, 0.35) 0%, rgba(40, 40, 46, 0.45) 100%);
-  opacity: 0;
-  transition: opacity 0.4s ease;
-}
-.bs-thumb.bs-thumb--loaded {
-  opacity: 1;
 }
 .bs-thumb--empty {
-  opacity: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -392,23 +412,28 @@ onBeforeUnmount(() => {
 }
 
 [data-theme="dark"] .bs-item {
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 [data-theme="dark"] .bs-item:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2),
-    0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.4);
 }
 [data-theme="dark"] .bs-item:hover:not(.bs-item--active) {
-  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.45);
 }
 [data-theme="dark"] .bs-item--active {
-  border-color: #CC9A5C;
-  box-shadow: 0 4px 14px rgba(204, 154, 92, 0.4);
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.22),
+    0 6px 18px rgba(204, 154, 92, 0.34);
 }
 [data-theme="dark"] .bs-item--active:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.22),
-    0 4px 14px rgba(204, 154, 92, 0.4);
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.32),
+    0 6px 18px rgba(204, 154, 92, 0.4);
 }
 [data-theme="dark"] .bs-thumb {
   background: linear-gradient(
