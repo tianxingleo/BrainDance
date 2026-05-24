@@ -288,6 +288,10 @@ class _CommunityComposerSheetState extends State<_CommunityComposerSheet> {
           ),
         ),
         IconButton(
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+          ),
           onPressed: () => Navigator.pop(context),
           icon: Icon(Icons.close_rounded, color: textColor),
         ),

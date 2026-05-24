@@ -660,7 +660,7 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
               focusTrigger: _searchFocusTrigger,
               searchFieldLeftInset: 52,
             ),
-            _buildBackButton(),
+            _buildBackButton(isDark: context.isDarkMode),
           ],
         ),
       ),
@@ -689,31 +689,28 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
               onSaveDraft: _saveDraft,
               searchFieldLeftInset: 52,
             ),
-            _buildBackButton(),
+            _buildBackButton(isDark: context.isDarkMode),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBackButton() {
+  Widget _buildBackButton({required bool isDark}) {
+    final iconColor = isDark ? Colors.white : Colors.black;
     return Positioned(
       left: 16,
       top: 8,
-      child: GestureDetector(
-        onTap: _goBack,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.35),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.arrow_back_rounded,
-            color: Colors.white,
-            size: 22,
-          ),
+      child: IconButton(
+        style: IconButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+        ),
+        onPressed: _goBack,
+        icon: Icon(
+          Icons.arrow_back_rounded,
+          color: iconColor,
+          size: 22,
         ),
       ),
     );
