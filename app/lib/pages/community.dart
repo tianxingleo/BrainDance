@@ -700,20 +700,16 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
     return Positioned(
       left: 16,
       top: 8,
-      child: GestureDetector(
-        onTap: _goBack,
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.35),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.arrow_back_rounded,
-            color: Colors.white,
-            size: 22,
-          ),
+      child: IconButton(
+        style: IconButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+        ),
+        onPressed: _goBack,
+        icon: const Icon(
+          Icons.arrow_back_rounded,
+          color: Colors.white,
+          size: 22,
         ),
       ),
     );
