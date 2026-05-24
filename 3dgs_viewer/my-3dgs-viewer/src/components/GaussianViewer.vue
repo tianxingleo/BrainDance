@@ -3969,9 +3969,9 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container {
-  --flutter-safe-top: 92px;
+  --flutter-safe-top: 56px;
   --flutter-safe-left: 14px;
-  --flutter-safe-right: 154px;
+  --flutter-safe-right: 14px;
 
   --bg-gradient-1: rgba(228, 232, 237, 0.16);
   --bg-gradient-2: rgba(107, 122, 143, 0.14);
@@ -4760,9 +4760,9 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   .app-container {
-    --flutter-safe-top: 84px;
+    --flutter-safe-top: 48px;
     --flutter-safe-left: 12px;
-    --flutter-safe-right: 144px;
+    --flutter-safe-right: 12px;
   }
 
   .top-hud {

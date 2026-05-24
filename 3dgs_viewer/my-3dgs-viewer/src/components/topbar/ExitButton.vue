@@ -21,8 +21,8 @@ const onClick = () => emit('exit');
 
 <style scoped>
 .exit-btn {
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
   background: var(--card-bg, rgba(249, 249, 248, 0.84));
@@ -61,8 +61,8 @@ const onClick = () => emit('exit');
 }
 
 .exit-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   display: block;
   fill: currentColor;
 }

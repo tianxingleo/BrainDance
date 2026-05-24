@@ -26,10 +26,10 @@
 <style scoped>
 .topbar {
   position: absolute;
-  top: 30px;
-  left: 8px;
-  right: 8px;
-  z-index: 130;
+  top: var(--flutter-safe-top, 56px);
+  left: var(--flutter-safe-left, 14px);
+  right: var(--flutter-safe-right, 14px);
+  z-index: 160;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
