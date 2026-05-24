@@ -328,18 +328,20 @@ class RecallModelActionOverlayState extends State<RecallModelActionOverlay>
                               },
                             ),
                           ],
-                          const SizedBox(height: 6),
-                          ActionMenuItem(
-                            icon: Icons.public_rounded,
-                            label: textLocalize('recall_share_community'),
-                            isDark: widget.isDark,
-                            onTap: () async {
-                              widget.onDismiss();
-                              await widget.onShareModelToCommunity(
-                                widget.model,
-                              );
-                            },
-                          ),
+                          if (widget.model['_is_local_only'] != true) ...[
+                            const SizedBox(height: 6),
+                            ActionMenuItem(
+                              icon: Icons.public_rounded,
+                              label: textLocalize('recall_share_community'),
+                              isDark: widget.isDark,
+                              onTap: () async {
+                                widget.onDismiss();
+                                await widget.onShareModelToCommunity(
+                                  widget.model,
+                                );
+                              },
+                            ),
+                          ],
                         ],
                       ),
                     ),
