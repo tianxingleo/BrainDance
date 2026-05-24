@@ -1143,14 +1143,6 @@ function isCreativeQuery(
   return /导览|旁白|脚本|故事线|创作|叙事|大纲|narrat/.test(normalized);
 }
 
-function isMemoryGraphQuery(
-  query: string,
-  options: SpatialSearchAgentOptions,
-): boolean {
-  const normalized = query.trim().toLowerCase();
-  return /趋势|越来越|长期|缺失模式|变化时间线|关系摘要|是不是.*空了|是不是.*多了/.test(normalized);
-}
-
 
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
   if (!Array.isArray(input)) return null;
@@ -4348,12 +4340,9 @@ export async function runSpatialSearchAgent(
     }, options);
   }
 
-  // --- creative / memory_graph 保留独立路径 ---
+  // --- creative 保留独立路径 ---
   if (isCreativeQuery(query, options)) {
     return await buildCreativeModeResponse({ supabase, query, options, callbacks });
-  }
-  if (isMemoryGraphQuery(query, options)) {
-    return await buildMemoryGraphModeResponse({ supabase, query, options, callbacks });
   }
 
   // --- 资产写入重放（用户确认执行上一轮预览）---

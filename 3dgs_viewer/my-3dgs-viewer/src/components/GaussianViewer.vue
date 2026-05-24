@@ -4600,7 +4600,7 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: calc(var(--flutter-safe-top) + 88px);
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
@@ -4614,6 +4614,20 @@ button.active {
   backdrop-filter: blur(16px);
   transform-origin: top right;
   will-change: transform, opacity, filter;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  outline: none;
+}
+
+.reference-overlay,
+.reference-overlay * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reference-overlay:focus,
+.reference-overlay:focus-visible {
+  outline: none;
 }
 
 .ref-title {
@@ -4744,8 +4758,8 @@ button.active {
 /* FPS 计数器 */
 .fps-counter {
   position: absolute;
-  top: 64px;
-  left: 8px;
+  top: calc(var(--flutter-safe-top) + 68px);
+  left: var(--flutter-safe-left);
   z-index: 90;
   color: var(--text-primary);
   background: var(--fps-bg);
@@ -4831,7 +4845,7 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: calc(var(--flutter-safe-top) + 48px);
+    top: calc(var(--flutter-safe-top) + 80px);
     right: 12px;
     width: 112px;
     min-width: 112px;
