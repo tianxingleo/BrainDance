@@ -27,6 +27,9 @@ import '../main.dart'
         overviewLocalIndexingProvider,
         pageIndexProvider,
         pendingSubmitTitleProvider,
+        recallOfficialExpandedProvider,
+        recallLocalExpandedProvider,
+        recallRegularExpandedProvider,
         recallScrollToTopSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
@@ -35,6 +38,7 @@ import '../services/local_rag_index.dart';
 import '../services/local_model_catalog_service.dart';
 import '../services/local_model_scanner.dart';
 import '../services/preview_image_resolver.dart';
+import '../services/thumbnail_cache.dart';
 import '../services/download_event_bus.dart';
 import '../services/viewer_navigation.dart';
 import '../widgets/bd_surfaces.dart';
@@ -49,6 +53,7 @@ import 'recall/model_detail_sheet.dart';
 import 'recall/time_peeling.dart';
 import 'recall/processing_section.dart';
 import 'recall/rename_model_dialog.dart';
+import 'recall/model_section_header.dart';
 import 'recall/search_header_section.dart';
 import 'recall/search_mode.dart';
 import 'recall/agent_asset_card.dart';
@@ -98,7 +103,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;
-  RecallSearchMode _searchMode = RecallSearchMode.local;
+  RecallSearchMode _searchMode = RecallSearchMode.cloud;
   LlamaEngine? _localQnaModel;
   StreamSubscription<dynamic>? _llamaStreamSubscription;
   StreamSubscription<String>? _agentStreamSubscription;
@@ -143,6 +148,15 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   String? _openingViewerLabel;
   bool _isLocalIndexing = false;
   bool _isProcessingExpanded = false;
+
+  List<Map<String, dynamic>> get _officialModels =>
+      _models.where((m) => m['is_official'] == true).toList();
+
+  List<Map<String, dynamic>> get _regularModels =>
+      _models.where((m) => m['is_official'] != true && m['_is_local_only'] != true).toList();
+
+  List<Map<String, dynamic>> get _localModels =>
+      _models.where((m) => m['_is_local_only'] == true).toList();
   bool _isLocalModelLoading = false;
   bool _isLocalModelReady = false;
   bool _isModelDownloading = false;

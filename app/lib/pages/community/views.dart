@@ -65,7 +65,7 @@ class CommunityRecommendView extends StatelessWidget {
     final bottomPad = MediaQuery.paddingOf(context).bottom + 80.0;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(16, 4, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
       child: Column(
         children: [
           // 地图面板
@@ -78,75 +78,74 @@ class CommunityRecommendView extends StatelessWidget {
               borderRadius: BDDesign.radiusLarge,
             ),
             child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final mapWidth = constraints.maxWidth;
-                    final mapHeight = math.max(200.0, mapWidth * 0.48);
-                    return GestureDetector(
-                      onTap: onOpenMap,
-                      child: SizedBox(
-                        height: mapHeight,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(26),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              CommunityAmapPreview(
-                                viewport: mapViewport,
-                                width: mapWidth.round().clamp(320, 1024),
-                                height: mapHeight.round().clamp(200, 1024),
-                                markers: mapMarkers,
-                              ),
-                              Positioned(
-                                right: 12,
-                                top: 12,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color:
-                                        (isDark ? Colors.black : Colors.white)
-                                            .withValues(alpha: 0.82),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.white.withValues(alpha: 0.08)
-                                          : BDDesign.colorMutedBlue.withValues(
-                                              alpha: 0.10,
-                                            ),
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.open_in_full_rounded,
-                                          color: hintColor,
-                                          size: 16,
+              builder: (context, constraints) {
+                final mapWidth = constraints.maxWidth;
+                final mapHeight = math.max(200.0, mapWidth * 0.48);
+                return GestureDetector(
+                  onTap: onOpenMap,
+                  child: SizedBox(
+                    height: mapHeight,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(26),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CommunityAmapPreview(
+                            viewport: mapViewport,
+                            width: mapWidth.round().clamp(320, 1024),
+                            height: mapHeight.round().clamp(200, 1024),
+                            markers: mapMarkers,
+                          ),
+                          Positioned(
+                            right: 12,
+                            top: 12,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: (isDark ? Colors.black : Colors.white)
+                                    .withValues(alpha: 0.82),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : BDDesign.colorMutedBlue.withValues(
+                                          alpha: 0.10,
                                         ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          '调整地图',
-                                          style: TextStyle(
-                                            color: hintColor,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12.5,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
                                 ),
                               ),
-                            ],
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.open_in_full_rounded,
+                                      color: hintColor,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '调整地图',
+                                      style: TextStyle(
+                                        color: hintColor,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
           const SizedBox(height: 14),
           // 标签筛选栏
@@ -165,7 +164,7 @@ class CommunityRecommendView extends StatelessWidget {
             onToggleTag: onToggleTag,
             onClearFilters: onClearFilters,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 14),
           // 模型列表
           if (posts.isEmpty)
             _ExploreEmptyHint(
@@ -176,22 +175,19 @@ class CommunityRecommendView extends StatelessWidget {
               onClearFilters: onClearFilters,
             )
           else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: posts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final post = posts[index];
-                return _RecommendPostCard(
+            ...List.generate(posts.length, (i) {
+              final post = posts[i];
+              return [
+                if (i > 0) const SizedBox(height: 16),
+                _RecommendPostCard(
                   post: post,
                   isDark: isDark,
                   textColor: textColor,
                   hintColor: hintColor,
                   onTap: () => onTapPost(post),
-                );
-              },
-            ),
+                ),
+              ];
+            }).expand((list) => list),
         ],
       ),
     );
@@ -762,7 +758,10 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
     }
 
     if (missing.isNotEmpty) {
-      showAppToast(context, '${textLocalize('community_required_hint')}${missing.join('、')}');
+      showAppToast(
+        context,
+        '${textLocalize('community_required_hint')}${missing.join('、')}',
+      );
       return;
     }
     widget.onSubmit();
@@ -887,63 +886,63 @@ class _CommunitySubmitViewState extends State<CommunitySubmitView> {
                     borderRadius: BDDesign.radiusLarge,
                     child: ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: _filteredModels.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(height: 1, indent: 48),
-                    itemBuilder: (context, index) {
-                      final model = _filteredModels[index];
-                      final isSelected = widget.selectedModels.any(
-                        (m) => m.id == model.id,
-                      );
-                      return GestureDetector(
-                        onTap: () => widget.onToggleModel(model),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(
-                                    0xFF2E7CF6,
-                                  ).withValues(alpha: 0.08)
-                                : Colors.transparent,
-                            borderRadius: BDDesign.radiusLarge,
-                          ),
-                          child: Row(
-                            children: [
-                              _CommunityThumbnail(
-                                imageUrl: model.coverUrl,
-                                fallbackImageUrl: model.coverFallbackUrl,
-                                height: 32,
-                                width: 32,
-                                icon: Icons.view_in_ar_rounded,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  model.sceneId,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                      itemCount: _filteredModels.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, indent: 48),
+                      itemBuilder: (context, index) {
+                        final model = _filteredModels[index];
+                        final isSelected = widget.selectedModels.any(
+                          (m) => m.id == model.id,
+                        );
+                        return GestureDetector(
+                          onTap: () => widget.onToggleModel(model),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(
+                                      0xFF2E7CF6,
+                                    ).withValues(alpha: 0.08)
+                                  : Colors.transparent,
+                              borderRadius: BDDesign.radiusLarge,
+                            ),
+                            child: Row(
+                              children: [
+                                _CommunityThumbnail(
+                                  imageUrl: model.coverUrl,
+                                  fallbackImageUrl: model.coverFallbackUrl,
+                                  height: 32,
+                                  width: 32,
+                                  icon: Icons.view_in_ar_rounded,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    model.sceneId,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: textColor,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (isSelected)
-                                const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: Color(0xFF2E7CF6),
-                                  size: 20,
-                                ),
-                            ],
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: Color(0xFF2E7CF6),
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -1467,7 +1466,7 @@ class _ExploreFilterBar extends StatelessWidget {
               : '当前区域 $visibleCount/$totalCount 条 · ZOOM $zoom')
         : '调整地图后将按可视区域筛选 · 共 $totalCount 条';
     return BDPanelCard(
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1553,8 +1552,8 @@ class _TagPill extends StatelessWidget {
           color: selected
               ? const Color(0xFF2E7CF6)
               : (isDark
-                  ? AppTheme.darkSurfaceElevated
-                  : const Color(0xFFF3F5F9)),
+                    ? AppTheme.darkSurfaceElevated
+                    : const Color(0xFFF3F5F9)),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: selected
@@ -1663,8 +1662,7 @@ class _SubmitLocationSection extends StatefulWidget {
   });
 
   @override
-  State<_SubmitLocationSection> createState() =>
-      _SubmitLocationSectionState();
+  State<_SubmitLocationSection> createState() => _SubmitLocationSectionState();
 }
 
 class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
@@ -1718,8 +1716,10 @@ class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
       if (placeName.isNotEmpty) {
         setState(() => widget.placeController.text = placeName);
       } else if (widget.placeController.text.trim().isEmpty) {
-        setState(() => widget.placeController.text =
-            '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}');
+        setState(
+          () => widget.placeController.text =
+              '${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}',
+        );
       }
       showAppToast(context, '已获取当前位置');
     } on LocationException catch (e) {
@@ -1801,8 +1801,11 @@ class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
             ),
             child: Row(
               children: [
-                Icon(Icons.place_rounded,
-                    size: 18, color: BDDesign.colorMutedBlue),
+                Icon(
+                  Icons.place_rounded,
+                  size: 18,
+                  color: BDDesign.colorMutedBlue,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1820,8 +1823,11 @@ class _SubmitLocationSectionState extends State<_SubmitLocationSection> {
                   tooltip: '清除',
                   splashRadius: 18,
                   onPressed: _reset,
-                  icon: Icon(Icons.close_rounded,
-                      size: 18, color: widget.hintColor),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: widget.hintColor,
+                  ),
                 ),
               ],
             ),

@@ -110,6 +110,16 @@ extension _RecallPageModelActions on _RecallPageState {
           displayName: sceneId,
         ),
       );
+
+      // Cache the preview thumbnail locally so offline scanning can find it
+      unawaited(() async {
+        final previewUrl = model['preview_img_path']?.toString() ?? '';
+        if (previewUrl.isNotEmpty) {
+          try {
+            await ThumbnailCache().getPath(previewUrl);
+          } catch (_) {}
+        }
+      }());
     }
 
     _setViewerOpeningState(true, label: sceneId);
@@ -511,6 +521,16 @@ extension _RecallPageModelActions on _RecallPageState {
           localFile: File(targetPath),
         ),
       );
+
+      // Cache the preview thumbnail locally so offline scanning can find it
+      unawaited(() async {
+        final previewUrl = model['preview_img_path']?.toString() ?? '';
+        if (previewUrl.isNotEmpty) {
+          try {
+            await ThumbnailCache().getPath(previewUrl);
+          } catch (_) {}
+        }
+      }());
     } catch (e) {
       if (mounted) {
         debugPrint('[RecallModelActions] download error: $e');

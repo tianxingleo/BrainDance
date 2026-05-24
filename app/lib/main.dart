@@ -50,6 +50,9 @@ final overviewStatsProvider = StateProvider<Map<String, int>>(
   },
 );
 final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
+final recallOfficialExpandedProvider = StateProvider<bool>((ref) => true);
+final recallRegularExpandedProvider = StateProvider<bool>((ref) => true);
+final recallLocalExpandedProvider = StateProvider<bool>((ref) => true);
 
 // 社区帖子刷新信号 — 发布/删除/切换可见性后自增，设置页和社区页双向同步
 final myPostsRefreshSignal = StateProvider<int>((ref) => 0);

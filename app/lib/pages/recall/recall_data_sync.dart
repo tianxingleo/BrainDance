@@ -232,7 +232,7 @@ extension _RecallPageDataSync on _RecallPageState {
       final response = await Supabase.instance.client
           .from('model_assets')
           .select(
-            'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at',
+            'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, is_official',
           )
           .order('created_at', ascending: false);
 
@@ -279,6 +279,14 @@ extension _RecallPageDataSync on _RecallPageState {
           m['preview_img_path'] = _normalizeStorageUrl(raw);
         }
         materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
+      }
+
+      try {
+        final scanner = const LocalModelScanner();
+        final localModels = await scanner.scanDownloadedModels();
+        models.addAll(localModels);
+      } catch (_) {
+        // best-effort: local models don't block cloud display
       }
 
       if (models.isEmpty) {
