@@ -78,9 +78,12 @@ class LocalModelScanner {
       try {
         final stat = await file.stat();
         final meta = await _readMetaSidecar(file.path);
+        // Only include models with a .meta.json sidecar (written by recall page)
+        if (meta.isEmpty) continue;
         final name = meta['display_name'] as String? ??
             _fileNameWithoutExtension(file.path);
         final sizeMb = (stat.size / (1024 * 1024)).toStringAsFixed(1);
+        final desc = meta['description'] as String? ?? '';
 
         // Resolve preview image from metadata + thumbnail cache
         String previewPath = '';
@@ -97,7 +100,9 @@ class LocalModelScanner {
           'id': 'local_${file.path.hashCode}',
           'scene_id': name,
           'display_name': name,
-          'description': '$sizeMb MB  ·  ${file.path}',
+          'description': desc.isNotEmpty
+              ? '$sizeMb MB  ·  $desc'
+              : '$sizeMb MB',
           'ply_path': file.path,
           'preview_img_path': previewPath,
           'tags': ['local', 'offline'],

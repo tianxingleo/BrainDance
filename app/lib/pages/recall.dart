@@ -30,7 +30,8 @@ import '../main.dart'
         recallOfficialExpandedProvider,
         recallLocalExpandedProvider,
         recallRegularExpandedProvider,
-        recallScrollToTopSignal;
+        recallScrollToTopSignal,
+        myPostsRefreshSignal;
 import '../configs/motion_tokens.dart';
 import '../services/agent_recall_service.dart';
 import '../services/dual_chain_phase.dart';
