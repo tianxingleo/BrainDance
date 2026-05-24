@@ -229,14 +229,25 @@ extension _RecallPageDataSync on _RecallPageState {
     bool showErrorToast = true,
   }) async {
     try {
-      final response = await Supabase.instance.client
-          .from('model_assets')
-          .select(
-            'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, is_official',
-          )
-          .order('created_at', ascending: false);
-
-      final models = List<Map<String, dynamic>>.from(response);
+      List<Map<String, dynamic>> models;
+      try {
+        final response = await Supabase.instance.client
+            .from('model_assets')
+            .select(
+              'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, is_official',
+            )
+            .order('created_at', ascending: false);
+        models = List<Map<String, dynamic>>.from(response);
+      } catch (_) {
+        // is_official column may not exist yet — fall back without it
+        final response = await Supabase.instance.client
+            .from('model_assets')
+            .select(
+              'id, scene_id, user_id, display_name, description, objects, tags, ply_path, preview_img_path, meta_info, created_at',
+            )
+            .order('created_at', ascending: false);
+        models = List<Map<String, dynamic>>.from(response);
+      }
 
       // Merge display_name from processing_tasks as fallback for rows missing it
       try {
