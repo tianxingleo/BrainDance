@@ -152,8 +152,9 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   List<Map<String, dynamic>> get _officialModels =>
       _models.where((m) => m['is_official'] == true).toList();
 
-  List<Map<String, dynamic>> get _regularModels =>
-      _models.where((m) => m['is_official'] != true).toList();
+  List<Map<String, dynamic>> get _regularModels => _models
+      .where((m) => m['is_official'] != true && m['_is_local_only'] != true)
+      .toList();
 
   List<Map<String, dynamic>> get _localModels =>
       _models.where((m) => m['_is_local_only'] == true).toList();
