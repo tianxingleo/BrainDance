@@ -56,6 +56,7 @@ const isCinematicPaused = ref(false);
 const cinematicSmoothness = ref(0.68);
 const cinematicSubjectLock = ref(true);
 const showCinematicPanel = ref(false);
+const useSparkRenderer = ref(false);
 const modelList = ref([]);
 const activeModelId = ref('');
 const showBottomSelector = computed(() => modelList.value.length > 1 || (!isOrbitMode.value && filteredPoses.value.length > 0));
@@ -3694,6 +3695,11 @@ onMounted(() => {
       }
     };
 
+    // 注册供 Flutter 同步当前渲染器选择的桥
+    window.setRendererStateFromFlutter = (useSpark) => {
+      useSparkRenderer.value = !!useSpark;
+    };
+
     // 通知 Flutter 页面已就绪
     if (window.BrainDanceChannel) {
       window.BrainDanceChannel.postMessage(JSON.stringify({ status: 'ready' }));
@@ -3744,6 +3750,13 @@ const onExitFromVue = () => {
       console.info('[exit] 非 Flutter 环境，已忽略退出请求');
     }
   }
+};
+
+const onSwitchRenderer = (useSpark) => {
+  const next = !!useSpark;
+  if (useSparkRenderer.value === next) return;
+  useSparkRenderer.value = next;
+  sendFlutterMessage({ action: 'switchViewer', useSpark: next });
 };
 
 const onEnterMarkerArFromVue = () => {
@@ -3834,8 +3847,10 @@ onBeforeUnmount(async () => {
           :focal-max="focalMax"
           :current-view-fov="currentViewFov"
           :current-view-focal-px="currentViewFocalPx"
+          :use-spark-renderer="useSparkRenderer"
           @enter-ar="onEnterMarkerArFromVue"
           @update:viewMode="switchViewMode"
+          @update:useSparkRenderer="onSwitchRenderer"
           @update:cinematicSpeed="(v) => (cinematicSpeed = v)"
           @update:cinematicLoop="(v) => (cinematicLoop = v)"
           @update:cinematicSmoothness="(v) => (cinematicSmoothness = v)"
@@ -3969,9 +3984,9 @@ onBeforeUnmount(async () => {
 
 <style scoped>
 .app-container {
-  --flutter-safe-top: 92px;
+  --flutter-safe-top: 56px;
   --flutter-safe-left: 14px;
-  --flutter-safe-right: 154px;
+  --flutter-safe-right: 14px;
 
   --bg-gradient-1: rgba(228, 232, 237, 0.16);
   --bg-gradient-2: rgba(107, 122, 143, 0.14);
@@ -4585,7 +4600,7 @@ button.active {
 /* 参考图浮窗 */
 .reference-overlay {
   position: absolute;
-  top: calc(var(--flutter-safe-top) + 56px);
+  top: calc(var(--flutter-safe-top) + 88px);
   right: 14px;
   width: min(22vw, 148px);
   min-width: 112px;
@@ -4599,6 +4614,20 @@ button.active {
   backdrop-filter: blur(16px);
   transform-origin: top right;
   will-change: transform, opacity, filter;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  outline: none;
+}
+
+.reference-overlay,
+.reference-overlay * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reference-overlay:focus,
+.reference-overlay:focus-visible {
+  outline: none;
 }
 
 .ref-title {
@@ -4729,8 +4758,8 @@ button.active {
 /* FPS 计数器 */
 .fps-counter {
   position: absolute;
-  top: 64px;
-  left: 8px;
+  top: calc(var(--flutter-safe-top) + 68px);
+  left: var(--flutter-safe-left);
   z-index: 90;
   color: var(--text-primary);
   background: var(--fps-bg);
@@ -4760,9 +4789,9 @@ input[type='range'] {
 
 @media (max-width: 768px) {
   .app-container {
-    --flutter-safe-top: 84px;
+    --flutter-safe-top: 48px;
     --flutter-safe-left: 12px;
-    --flutter-safe-right: 144px;
+    --flutter-safe-right: 12px;
   }
 
   .top-hud {
@@ -4816,7 +4845,7 @@ input[type='range'] {
   }
 
   .reference-overlay {
-    top: calc(var(--flutter-safe-top) + 48px);
+    top: calc(var(--flutter-safe-top) + 80px);
     right: 12px;
     width: 112px;
     min-width: 112px;

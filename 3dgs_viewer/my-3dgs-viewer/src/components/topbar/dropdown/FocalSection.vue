@@ -1,24 +1,23 @@
 <script setup>
-import { ref } from 'vue';
-
 const props = defineProps({
   manualFocalPx: { type: [Number, null], default: null },
   focalMin: { type: Number, required: true },
   focalMax: { type: Number, required: true },
   currentViewFov: { type: Number, default: 0 },
   currentViewFocalPx: { type: Number, default: 0 },
+  expanded: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
   'update:manualFocalPx',
+  'update:expanded',
   'input',
   'change',
   'reset',
 ]);
 
-const expanded = ref(false);
 const toggle = () => {
-  expanded.value = !expanded.value;
+  emit('update:expanded', !props.expanded);
 };
 
 const onRangeInput = (event) => {
@@ -45,10 +44,10 @@ const onReset = () => emit('reset');
         <span class="fs-eyebrow">Lens Control</span>
         <span class="fs-title">焦距</span>
       </span>
-      <span class="fs-chevron" :class="{ 'fs-chevron--open': expanded }" aria-hidden="true">▾</span>
+      <span class="fs-chevron" :class="{ 'fs-chevron--open': props.expanded }" aria-hidden="true">▾</span>
     </button>
 
-    <div v-if="expanded" class="fs-body">
+    <div v-if="props.expanded" class="fs-body">
       <input
         class="fs-range"
         type="range"
