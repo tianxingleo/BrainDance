@@ -170,6 +170,7 @@ let particleSystemRevealDone = false;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
+let activeFocalTween = null;
 let activeCameraFlightId = 0;
 let isOrbitRecenterFlightActive = false;
 let pendingInitialTarget = null;
@@ -392,7 +393,7 @@ const addSplatSceneWithFormatFallback = async (sourceUrl) => {
 const applyFocalLengthPx = (focalPx, options = {}) => {
   if (!viewer || !viewer.camera) return;
   // 优先使用位姿 JSON 中记录的真实图像高度，否则回退到视口高度
-  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  const h = Number(options.imageHeightPx || sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight);
   if (!h || !focalPx) return;
 
   const targetFov = calcFovFromFocal(focalPx, h);
@@ -400,8 +401,12 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
 
   const cam = viewer.camera;
   const duration = options.duration ?? 0;
+  if (activeFocalTween) {
+    activeFocalTween.kill();
+    activeFocalTween = null;
+  }
   if (duration > 0) {
-    gsap.to(cam, {
+    activeFocalTween = gsap.to(cam, {
       fov: targetFov,
       duration,
       ease: options.ease || 'power2.out',
@@ -411,6 +416,12 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
         requestRender();
         refreshCurrentFocalInfo();
         updateIntroParticleCameraScale();
+      },
+      onComplete: () => {
+        activeFocalTween = null;
+      },
+      onInterrupt: () => {
+        activeFocalTween = null;
       }
     });
   } else {
@@ -429,7 +440,7 @@ const clampFocalPx = (focalPx) => {
 
 const getActiveFocalPx = () => {
   const focal = Number(
-    manualFocalPx.value || currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX
+    manualFocalPx.value || currentViewFocalPx.value || getCaptureFocalState().focalPx || DEFAULT_FOCAL_PX
   );
   return clampFocalPx(focal);
 };
@@ -447,13 +458,13 @@ const zoomByFocalScale = (scaleFactor) => {
 };
 
 const focalMin = computed(() => {
-  const base = Number(sceneMetadata.value.fl_y || 0);
+  const base = Number(getCaptureFocalState().focalPx || 0);
   if (base > 0) return Math.max(50, Math.floor(base * 0.4));
   return 50;
 });
 
 const focalMax = computed(() => {
-  const base = Number(sceneMetadata.value.fl_y || 0);
+  const base = Number(getCaptureFocalState().focalPx || 0);
   if (base > 0) return Math.max(500, Math.ceil(base * 2.5));
   return 3000;
 });
@@ -474,10 +485,20 @@ const onManualFocalChange = () => {
 };
 
 const resetFocalToCapture = () => {
-  const captureFocal = Number(sceneMetadata.value.fl_y || 0);
-  if (!captureFocal) return;
+  const captureState = getCaptureFocalState();
+  const captureFocal = Number(captureState.focalPx || 0);
+  if (!Number.isFinite(captureFocal) || captureFocal <= 0) return;
+  interruptCinematicPlayback();
+  interruptCameraFlightFromUserInput();
+  if (captureState.imageHeightPx > 0) {
+    sceneMetadata.value.h = captureState.imageHeightPx;
+  }
   manualFocalPx.value = Number(captureFocal.toFixed(1));
-  applyFocalLengthPx(captureFocal, { duration: 0.5, ease: 'power2.inOut' });
+  applyFocalLengthPx(captureFocal, {
+    duration: 0.5,
+    ease: 'power2.inOut',
+    imageHeightPx: captureState.imageHeightPx,
+  });
 };
 
 const updateDebugInfo = () => {
@@ -893,6 +914,10 @@ const stopCameraTweens = () => {
     activeCameraTween.kill();
     activeCameraTween = null;
   }
+  if (activeFocalTween) {
+    activeFocalTween.kill();
+    activeFocalTween = null;
+  }
   isOrbitRecenterFlightActive = false;
   orbitNeedsRecenterAfterPoseFlight = false;
   gsap.killTweensOf(viewer.camera.position);
@@ -940,6 +965,40 @@ const setActivePosePresentationState = (poseData, options = {}) => {
 
   activeImage.value = poseData?.image_url || getPoseImageId(poseData);
   activeTag.value = poseData?.tag || '';
+};
+
+const getActivePoseData = () => {
+  const id = activePoseId.value;
+  if (!id || !Array.isArray(cameraPoses.value)) return null;
+  return cameraPoses.value.find((pose) => getPosePresentationId(pose) === id) || null;
+};
+
+const getCaptureFocalState = () => {
+  const activePose = getActivePoseData();
+  const poseFocal = Number(activePose?.fl_y || 0);
+  const poseHeight = Number(activePose?.h || 0);
+  if (Number.isFinite(poseFocal) && poseFocal > 0) {
+    return {
+      focalPx: poseFocal,
+      imageHeightPx: Number.isFinite(poseHeight) && poseHeight > 0
+        ? poseHeight
+        : Number(sceneMetadata.value.h || 0),
+    };
+  }
+
+  const metadataFocal = Number(sceneMetadata.value.fl_y || 0);
+  const metadataHeight = Number(sceneMetadata.value.h || 0);
+  if (Number.isFinite(metadataFocal) && metadataFocal > 0) {
+    return {
+      focalPx: metadataFocal,
+      imageHeightPx: Number.isFinite(metadataHeight) ? metadataHeight : 0,
+    };
+  }
+
+  return {
+    focalPx: DEFAULT_FOCAL_PX,
+    imageHeightPx: Number.isFinite(metadataHeight) ? metadataHeight : 0,
+  };
 };
 
 const stopCinematicPlayback = (options = {}) => {
@@ -2388,6 +2447,7 @@ const flyToImage = (poseData, options = {}) => {
   }
   if (!options.keepCinematic) interruptCinematicPlayback();
   stopInteractionInertia();
+  stopCameraTweens();
 
   const cam = viewer.camera;
   const targetPosition = targetCameraState.position;
@@ -2417,7 +2477,6 @@ const flyToImage = (poseData, options = {}) => {
   const startQuat = cam.quaternion.clone();
   const animState = { t: 0 };
 
-  stopCameraTweens();
   gsap.killTweensOf(animState);
   activeCameraFlightId += 1;
   const flightId = activeCameraFlightId;
