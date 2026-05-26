@@ -15,11 +15,8 @@ class AppConfig {
   static const Color primaryColor = Color.fromRGBO(113, 131, 143, 1);
   static const Color accentColor = Color.fromRGBO(232, 234, 220, 1);
   static void initializeAppConfig() {
-    try {
-      AppConfig.langMap = Localize.getLangMap(Platform.localeName);
-    } catch (e) {
-      AppConfig.langMap = Localize.getLangMap("en_US");
-    }
+    AppConfig.langMap = Localize.getLangMap(Platform.localeName);
+    debugPrint("Loaded language: ${Platform.localeName}");
   }
 }
 

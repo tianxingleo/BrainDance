@@ -355,8 +355,9 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
   void _onNotificationChanged() {
     final notification = taskNotificationService.currentNotification;
     final route = taskNotificationService.currentRoute;
-    final routeAllowed =
-        taskNotificationService.isNotificationEnabledForRoute(route);
+    final routeAllowed = taskNotificationService.isNotificationEnabledForRoute(
+      route,
+    );
 
     if (notification == null || !routeAllowed) {
       if (_activeNotification != null) {

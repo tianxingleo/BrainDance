@@ -662,7 +662,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "agent_error_http": "agent-recall request failed (HTTP {status})",
       "agent": "Agent",
       "agent_empty_title": "Spatial Intelligence Agent",
-      "agent_empty_subtitle": "Describe scenes, objects, or actions you want to find",
+      "agent_empty_subtitle":
+          "Describe scenes, objects, or actions you want to find",
       "agent_input_hint": "Describe the scene or action...",
       "agent_conversations": "Conversations",
       "agent_no_conversations": "No conversations yet",
@@ -955,7 +956,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "community_required_hint": "Missing: ",
       "community_field_optional": "Optional",
       "community_offline_title": "Community Unavailable",
-      "community_offline_hint": "Network is required to browse community content",
+      "community_offline_hint":
+          "Network is required to browse community content",
       "community_field_model": "Model",
       "community_field_title": "Title",
       "community_field_caption": "Caption",
@@ -976,7 +978,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "community_search_recommended": "Recommended",
       "community_search_no_results": "No results found",
       "community_search_try_other": "Try other keywords",
-      "community_submit_no_models": "No models to share yet. Create a memory model first.",
+      "community_submit_no_models":
+          "No models to share yet. Create a memory model first.",
       "community_submit_post_info": "Post Info",
       "community_submit_selected_count": "%d model(s) selected",
       "community_draft_saved": "Draft saved",
@@ -999,7 +1002,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       "video_exit_confirm": "Exit",
       "video_exit_cancel": "Cancel",
       "video_preprocess_cancel_title": "Compressing Video",
-      "video_preprocess_cancel_message": "Video compression is in progress. Do you want to cancel?",
+      "video_preprocess_cancel_message":
+          "Video compression is in progress. Do you want to cancel?",
       "video_preprocess_cancel_confirm": "Cancel Compression",
       "video_preprocess_cancel_continue": "Continue Compression",
       "video_preprocess_fail": "Video compression failed. Please try again.",
@@ -1065,7 +1069,8 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
       // Streaming stop dialog
       "stream_stop_title": "Stop Streaming",
       "stream_stop_capturing": "%d frames captured, %d uploaded. Stop?",
-      "stream_stop_uploading": "%d frames pending. Stopping discards them. %d uploaded frames can be kept or deleted.",
+      "stream_stop_uploading":
+          "%d frames pending. Stopping discards them. %d uploaded frames can be kept or deleted.",
       "stream_stop_delete": "Delete uploaded frames",
       "stream_stop_btn_cancel": "Continue",
       "stream_stop_btn_confirm": "Stop",
@@ -1080,11 +1085,15 @@ When finally exporting, confirm the settings are 1080p and 30fps.""",
 
 class Localize {
   static Map<String, String> getLangMap(String localeCode) {
+    final normalized = localeCode.replaceAll('-', '_').split('#').first;
+    final langCode = normalized.split('_').first.toLowerCase();
+
     for (var lang in Language.values) {
-      if (lang.map['locale'] == localeCode) {
+      final mapLocale = lang.map['locale'] ?? '';
+      if (mapLocale.toLowerCase().startsWith(langCode)) {
         return lang.map;
       }
     }
-    return Language.en.map; // Default to English if not found
+    return Language.en.map;
   }
 }
