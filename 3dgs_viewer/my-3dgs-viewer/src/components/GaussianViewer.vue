@@ -180,6 +180,7 @@ let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
 let interactionFrameHandle = 0;
 let renderRequested = false;
+let suppressCameraInputUntilMs = 0;
 let xrSession = null;
 let xrSessionEndHandler = null;
 let vrHud = null;
@@ -499,6 +500,24 @@ const resetFocalToCapture = () => {
     ease: 'power2.inOut',
     imageHeightPx: captureState.imageHeightPx,
   });
+};
+
+const suppressCameraInputAfterUiClose = () => {
+  suppressCameraInputUntilMs = performance.now() + 300;
+  resetManualCameraInputState();
+};
+
+const isUiInteractionEvent = (event) => {
+  const target = event?.target;
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest(
+    '.topbar, .bs-root, .gesture-panel, .reference-overlay, button, input, textarea, select, a, [role="button"], [role="menu"]'
+  ));
+};
+
+const shouldIgnoreCameraInputEvent = (event) => {
+  if (performance.now() < suppressCameraInputUntilMs) return true;
+  return isUiInteractionEvent(event);
 };
 
 const updateDebugInfo = () => {
@@ -3386,6 +3405,7 @@ const handleFreePinchMove = (touches) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3461,6 +3481,7 @@ const onMouseUp = () => {
 };
 
 const onWheel = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (!viewer || !viewer.camera) return;
   if (isCameraFlightLocked()) return;
   if (isOrbitMode.value && startOrbitRecenterFlight()) return;
@@ -3479,6 +3500,7 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3673,7 +3695,8 @@ const onTouchEnd = (e) => {
   }
 };
 
-const onCapturedUserCameraInput = () => {
+const onCapturedUserCameraInput = (event) => {
+  if (shouldIgnoreCameraInputEvent(event)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3905,6 +3928,7 @@ onBeforeUnmount(async () => {
           @focal-input="onManualFocalChange"
           @focal-change="onManualFocalChange"
           @focal-reset="resetFocalToCapture"
+          @dropdown-close="suppressCameraInputAfterUiClose"
         />
       </template>
     </TopBar>

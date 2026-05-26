@@ -43,6 +43,7 @@ const emit = defineEmits([
   'focal-input',
   'focal-change',
   'focal-reset',
+  'dropdown-close',
 ]);
 
 const open = ref(false);
@@ -58,17 +59,18 @@ const toggle = () => {
   if (!open.value) expandedSection.value = '';
 };
 
-const close = () => {
+const close = (reason = 'manual') => {
+  const wasOpen = open.value;
   open.value = false;
   expandedSection.value = '';
+  if (wasOpen) emit('dropdown-close', reason);
 };
 
 const onDocumentPointerDown = (event) => {
   if (!open.value) return;
   const root = rootRef.value;
   if (root && !root.contains(event.target)) {
-    open.value = false;
-    expandedSection.value = '';
+    close('outside-pointer');
   }
 };
 
@@ -87,7 +89,7 @@ onBeforeUnmount(() => {
 });
 
 const onEnterAr = () => {
-  close();
+  close('enter-ar');
   emit('enter-ar');
 };
 </script>
