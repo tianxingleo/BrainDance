@@ -543,7 +543,8 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
       top: 0,
       left: 0,
       right: 0,
-      child: Container(
+      child: RepaintBoundary(
+        child: Container(
         padding: EdgeInsets.fromLTRB(
           20,
           MediaQuery.paddingOf(context).top + 12,
@@ -639,6 +640,7 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
             ],
           ),
         ),
+      ),
     );
   }
 
@@ -801,8 +803,7 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
                 ),
               ),
             ),
-            if (_currentPage == null)
-              RepaintBoundary(child: _buildFloatingHeader(isDark)),
+            if (_currentPage == null) _buildFloatingHeader(isDark),
           ],
         ),
       ),

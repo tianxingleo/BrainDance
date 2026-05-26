@@ -25,11 +25,11 @@ void showAppToast(BuildContext context, String message) {
   final bottomPadding = MediaQuery.paddingOf(context).bottom;
 
   final entry = OverlayEntry(
-    builder: (_) => IgnorePointer(
-      child: Positioned(
-        left: 0,
-        right: 0,
-        bottom: bottomPadding + 100,
+    builder: (_) => Positioned(
+      left: 0,
+      right: 0,
+      bottom: bottomPadding + 100,
+      child: IgnorePointer(
         child: Center(
           child: Material(
             color: Colors.transparent,

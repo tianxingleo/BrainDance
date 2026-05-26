@@ -18,6 +18,7 @@ import 'pages/community.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/extra_func/language.dart';
 import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/gen_config.dart';
@@ -34,7 +35,7 @@ import 'widgets/theme_animation_overlay.dart';
 final themeData = TDTheme.defaultData();
 //MainScreen
 final pageIndexProvider = StateProvider((ref) => 0);
-final loadingProvider = StateProvider((ref) => true);
+final loadingProvider = StateProvider((ref) => false);
 final isRecordingProvider = StateProvider((ref) => false);
 final pendingSubmitTitleProvider = StateProvider<String?>((ref) => null);
 final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
@@ -70,6 +71,25 @@ void main() async {
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
+  // 启动阶段同步加载用户设置，避免进入首页后异步加载导致首屏空白
+  final bool settingsLoaded = await SetConfig.loadMsgFromFile();
+  if (settingsLoaded) {
+    final localeCode = SetConfig.settingsMsg[0];
+    if (localeCode.isNotEmpty) {
+      AppConfig.langMap = Localize.getLangMap(localeCode);
+    }
+    final nightVal = SetConfig.settingsMsg[1];
+    if (nightVal == 'true') {
+      AppConfig.isNightMode = true;
+    } else if (nightVal == 'false') {
+      AppConfig.isNightMode = false;
+    } else if (nightVal.isEmpty) {
+      AppConfig.isNightMode =
+          widgetsBinding.platformDispatcher.platformBrightness ==
+          Brightness.dark;
+    }
+    AppConfig.hasReadRecordTip = SetConfig.settingsMsg[2] == 'true';
+  }
   await dotenv.load(fileName: ".env");
   final supabaseResolution = await SupabaseConfig.resolveEndpoint();
   SupabaseConfig.applyRuntimeResolution(supabaseResolution);
@@ -146,22 +166,37 @@ class MyApp extends StatelessWidget with WidgetsBindingObserver {
   }
 }
 
-class Home extends ConsumerWidget {
+class Home extends ConsumerStatefulWidget {
   const Home({super.key});
-  void loadSettings(WidgetRef ref) async {
-    if (!ref.read(loadingProvider)) {
-      return;
-    }
-    final bool suc = await SetConfig.loadMsgFromFile();
-    if (suc) {
-      SetConfig.loadSettingsFromMsg(ref);
-    }
-    ref.read(loadingProvider.notifier).state = false;
-    FlutterNativeSplash.remove();
+
+  @override
+  ConsumerState<Home> createState() => _HomeState();
+}
+
+class _HomeState extends ConsumerState<Home> {
+  bool _settingsApplied = false;
+  bool _splashRemoved = false;
+
+  void _applySettingsOnce() {
+    if (_settingsApplied) return;
+    _settingsApplied = true;
+    // settingsMsg 已在 main() 中同步加载完成；这里仅同步到 provider。
+    SetConfig.loadSettingsFromMsg(ref);
+  }
+
+  void _removeSplashOnce() {
+    if (_splashRemoved) return;
+    _splashRemoved = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterNativeSplash.remove();
+    });
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    _applySettingsOnce();
+    _removeSplashOnce();
+
     final localeCode = ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
 
@@ -195,7 +230,6 @@ class Home extends ConsumerWidget {
         switch (settings.name) {
           case '/':
             builder = (context) {
-              loadSettings(ref);
               return MainScreen();
             };
           case '/login':
@@ -615,10 +649,10 @@ class _MainScreenState extends ConsumerState<MainScreen>
     return Scaffold(
       resizeToAvoidBottomInset: false,
       extendBody: true,
-      body: BDPageBackdrop(
-        child: isLoading
-            ? const SizedBox.shrink()
-            : Stack(
+      body: isLoading
+          ? const SizedBox.shrink()
+          : BDPageBackdrop(
+              child: Stack(
                 children: [
                   // ── 页面槽位：保证每个页面的 State 不被销毁 ──
                   ...List.generate(_pageCount, (i) {
@@ -707,7 +741,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
                     ),
                 ],
               ),
-      ),
+            ),
     );
   }
 }
