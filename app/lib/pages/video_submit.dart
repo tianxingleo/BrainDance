@@ -734,7 +734,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: LinearProgressIndicator(
-                                  value: _preprocessProgress,
+                                  value: _preprocessProgress > 0
+                                      ? _preprocessProgress
+                                      : null,
                                   minHeight: 5,
                                   backgroundColor: isDark
                                       ? Colors.white.withAlpha(20)
@@ -756,7 +758,9 @@ class _VideoSubmitPageState extends ConsumerState<VideoSubmitPage> {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '${(_preprocessProgress * 100).toStringAsFixed(0)}%',
+                                    _preprocessProgress > 0
+                                        ? '${(_preprocessProgress * 100).toStringAsFixed(0)}%'
+                                        : textLocalize('video_preprocess_cancel_title'),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: hintColor,
