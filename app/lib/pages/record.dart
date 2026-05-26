@@ -125,6 +125,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
   Timer? _hapticLoopTimer;
   _MotionState? _hapticLoopState;
   _MotionState _motionState = _MotionState.steady;
+  bool _blockHaptics = false;
 
   final List<double> _accelHistory = [];
 
@@ -325,7 +326,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
 
     if (navigateToSubmit && mounted) {
-      Navigator.push(
+      _blockHaptics = true;
+      _stopHapticLoop();
+      await Navigator.push(
         context,
         PageRouteBuilder(
           transitionDuration: BDMotion.durationNormal,
@@ -351,6 +354,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
           },
         ),
       );
+      _blockHaptics = false;
     }
   }
 
@@ -1035,6 +1039,10 @@ class _RecordPageState extends ConsumerState<RecordPage>
   }
 
   void _syncMotionHaptics(_MotionState state) {
+    if (_blockHaptics) {
+      _stopHapticLoop();
+      return;
+    }
     if (state == _MotionState.ideal) {
       _stopHapticLoop();
       return;
