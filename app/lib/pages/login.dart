@@ -79,12 +79,12 @@ class _LoginPageState extends State<LoginPage> {
     } on AuthException catch (e) {
       if (mounted) {
         debugPrint('[Login] auth error: $e');
-        showAppToast(context, textLocalize('login_auth_fail'));
+        showAppToast(context, '${textLocalize('login_auth_fail')}: ${e.message}');
       }
     } catch (e) {
       if (mounted) {
         debugPrint('[Login] error: $e');
-        showAppToast(context, textLocalize('login_error'));
+        showAppToast(context, '${textLocalize('login_error')}: $e');
       }
     } finally {
       if (mounted) {
