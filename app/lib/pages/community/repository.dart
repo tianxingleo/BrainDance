@@ -48,66 +48,9 @@ class CommunityRepository {
           .order('created_at', ascending: false)
           .limit(24);
 
-      final posts = response.map<CommunityPost>((raw) {
-        final map = Map<String, dynamic>.from(raw);
-        final model = map['model_assets'] is Map
-            ? Map<String, dynamic>.from(map['model_assets'] as Map)
-            : <String, dynamic>{};
-        final modelUrl = _normalizeStorageUrl(
-          model['ply_path']?.toString() ?? '',
-        );
-        final cover = _resolvePostCover(map, model);
-        final metadata = _parseMetadata(map['metadata']);
-
-        return CommunityPost(
-          id: map['id'].toString(),
-          title:
-              map['title']?.toString() ??
-              textLocalize('community_unnamed_memory'),
-          caption:
-              map['caption']?.toString() ??
-              model['description']?.toString() ??
-              '',
-          placeName:
-              map['place_name']?.toString() ??
-              textLocalize('community_no_location'),
-          latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
-          longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          userId: map['user_id']?.toString() ?? '',
-          authorName: metadata['author_email']?.toString() ??
-              map['user_id']?.toString() ??
-              textLocalize('community_anonymous'),
-          modelName:
-              map['model_name']?.toString() ??
-              model['display_name']?.toString() ??
-              model['scene_id']?.toString() ??
-              '3D 模型',
-          modelUrl: modelUrl,
-          posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-          coverUrl: cover.primary,
-          coverFallbackUrl: cover.fallback,
-          createdAt:
-              DateTime.tryParse(map['created_at']?.toString() ?? '') ??
-              DateTime.now(),
-          tags: _extractTags(
-            model['description']?.toString(),
-            map['place_name']?.toString(),
-          ),
-          isPublic: metadata['is_public'] != false,
-          likeCount: (metadata['likes'] as List?)?.length ?? 0,
-          favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
-          viewCount: _readViewCount(metadata),
-          isLikedByCurrentUser: _containsUser(metadata['likes'], currentUserId),
-          isFavoritedByCurrentUser: _containsUser(
-            metadata['favorites'],
-            currentUserId,
-          ),
-          extraImages: List<Map<String, dynamic>>.from(
-            metadata['images'] ?? [],
-          ),
-          commentCount: (metadata['comments'] as List?)?.length ?? 0,
-        );
-      }).toList();
+      final posts = response
+          .map((raw) => _mapRowToPost(Map<String, dynamic>.from(raw)))
+          .toList();
 
       // Filter: public posts + own posts
       final visible = posts.where((p) {
@@ -238,60 +181,7 @@ class CommunityRepository {
           .eq('id', postId)
           .maybeSingle();
       if (response == null) return null;
-      final map = Map<String, dynamic>.from(response);
-      final model = map['model_assets'] is Map
-          ? Map<String, dynamic>.from(map['model_assets'] as Map)
-          : <String, dynamic>{};
-      final modelUrl = _normalizeStorageUrl(
-        model['ply_path']?.toString() ?? '',
-      );
-      final cover = _resolvePostCover(map, model);
-      final metadata = _parseMetadata(map['metadata']);
-      return CommunityPost(
-        id: map['id'].toString(),
-        title:
-            map['title']?.toString() ??
-            textLocalize('community_unnamed_memory'),
-        caption:
-            map['caption']?.toString() ??
-            model['description']?.toString() ??
-            '',
-        placeName:
-            map['place_name']?.toString() ??
-            textLocalize('community_no_location'),
-        latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
-        longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-        userId: map['user_id']?.toString() ?? '',
-        authorName: metadata['author_email']?.toString() ??
-            map['user_id']?.toString() ??
-            textLocalize('community_anonymous'),
-        modelName: map['model_name']?.toString() ??
-            model['display_name']?.toString() ??
-            model['scene_id']?.toString() ??
-            '3D 模型',
-        modelUrl: modelUrl,
-        posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-        coverUrl: cover.primary,
-        coverFallbackUrl: cover.fallback,
-        createdAt:
-            DateTime.tryParse(map['created_at']?.toString() ?? '') ??
-            DateTime.now(),
-        tags: _extractTags(
-          model['description']?.toString(),
-          map['place_name']?.toString(),
-        ),
-        isPublic: metadata['is_public'] != false,
-        likeCount: (metadata['likes'] as List?)?.length ?? 0,
-        favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
-        commentCount: (metadata['comments'] as List?)?.length ?? 0,
-        viewCount: _readViewCount(metadata),
-        isLikedByCurrentUser: _containsUser(metadata['likes'], currentUserId),
-        isFavoritedByCurrentUser: _containsUser(
-          metadata['favorites'],
-          currentUserId,
-        ),
-        extraImages: List<Map<String, dynamic>>.from(metadata['images'] ?? []),
-      );
+      return _mapRowToPost(Map<String, dynamic>.from(response));
     } catch (_) {
       return null;
     }
@@ -307,62 +197,9 @@ class CommunityRepository {
           .select(_postSelect)
           .eq('user_id', uid)
           .order('created_at', ascending: false);
-      final posts = response.map<CommunityPost>((raw) {
-        final map = Map<String, dynamic>.from(raw);
-        final model = map['model_assets'] is Map
-            ? Map<String, dynamic>.from(map['model_assets'] as Map)
-            : <String, dynamic>{};
-        final metadata = _parseMetadata(map['metadata']);
-        final modelUrl = _normalizeStorageUrl(
-          model['ply_path']?.toString() ?? '',
-        );
-        final cover = _resolvePostCover(map, model);
-
-        return CommunityPost(
-          id: map['id'].toString(),
-          title:
-              map['title']?.toString() ??
-              textLocalize('community_unnamed_memory'),
-          caption:
-              map['caption']?.toString() ??
-              model['description']?.toString() ??
-              '',
-          placeName:
-              map['place_name']?.toString() ??
-              textLocalize('community_no_location'),
-          latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
-          longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
-          userId: map['user_id']?.toString() ?? '',
-          authorName: metadata['author_email']?.toString() ??
-              map['user_id']?.toString() ??
-              textLocalize('community_anonymous'),
-          modelName: map['model_name']?.toString() ??
-              model['display_name']?.toString() ??
-              model['scene_id']?.toString() ??
-              '3D 模型',
-          modelUrl: modelUrl,
-          posesUrl: _posesUrlFromPath(model['ply_path']?.toString()),
-          coverUrl: cover.primary,
-          coverFallbackUrl: cover.fallback,
-          createdAt:
-              DateTime.tryParse(map['created_at']?.toString() ?? '') ??
-              DateTime.now(),
-          tags: _extractTags(
-            model['description']?.toString(),
-            map['place_name']?.toString(),
-          ),
-          isPublic: metadata['is_public'] != false,
-          likeCount: (metadata['likes'] as List?)?.length ?? 0,
-          favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
-          commentCount: (metadata['comments'] as List?)?.length ?? 0,
-          viewCount: _readViewCount(metadata),
-          isLikedByCurrentUser: _containsUser(metadata['likes'], uid),
-          isFavoritedByCurrentUser: _containsUser(metadata['favorites'], uid),
-          extraImages: List<Map<String, dynamic>>.from(
-            metadata['images'] ?? [],
-          ),
-        );
-      }).toList();
+      final posts = response
+          .map((raw) => _mapRowToPost(Map<String, dynamic>.from(raw)))
+          .toList();
 
       return [
         ..._localDrafts.where((post) => post.id.startsWith('local-$uid-')),
@@ -789,6 +626,63 @@ class CommunityRepository {
     return 0;
   }
 
+  /// 将 Supabase 返回的 community_posts 行（含 model_assets JOIN）转为
+  /// [CommunityPost]。RLS 拦截非所有者的 JOIN 时，从 cover_image_url
+  /// 反推模型文件路径兜底。
+  CommunityPost _mapRowToPost(Map<String, dynamic> map) {
+    final model = map['model_assets'] is Map
+        ? Map<String, dynamic>.from(map['model_assets'] as Map)
+        : <String, dynamic>{};
+    final modelUrl = _normalizeStorageUrl(
+      model['ply_path']?.toString() ?? '',
+    );
+    final posesUrl = _posesUrlFromPath(model['ply_path']?.toString());
+    final derived = modelUrl.isEmpty
+        ? _deriveModelUrlFromCover(map['cover_image_url']?.toString())
+        : null;
+    final cover = _resolvePostCover(map, model);
+    final metadata = _parseMetadata(map['metadata']);
+
+    return CommunityPost(
+      id: map['id'].toString(),
+      title:
+          map['title']?.toString() ?? textLocalize('community_unnamed_memory'),
+      caption:
+          map['caption']?.toString() ?? model['description']?.toString() ?? '',
+      placeName:
+          map['place_name']?.toString() ?? textLocalize('community_no_location'),
+      latitude: (map['latitude'] as num?)?.toDouble() ?? 0,
+      longitude: (map['longitude'] as num?)?.toDouble() ?? 0,
+      userId: map['user_id']?.toString() ?? '',
+      authorName: metadata['author_email']?.toString() ??
+          map['user_id']?.toString() ??
+          textLocalize('community_anonymous'),
+      modelName: map['model_name']?.toString() ??
+          model['display_name']?.toString() ??
+          model['scene_id']?.toString() ??
+          '3D 模型',
+      modelUrl: derived != null ? derived.modelUrl : modelUrl,
+      posesUrl: derived != null ? derived.posesUrl : posesUrl,
+      coverUrl: cover.primary,
+      coverFallbackUrl: cover.fallback,
+      createdAt:
+          DateTime.tryParse(map['created_at']?.toString() ?? '') ?? DateTime.now(),
+      tags: _extractTags(
+        model['description']?.toString(),
+        map['place_name']?.toString(),
+      ),
+      isPublic: metadata['is_public'] != false,
+      likeCount: (metadata['likes'] as List?)?.length ?? 0,
+      favoriteCount: (metadata['favorites'] as List?)?.length ?? 0,
+      viewCount: _readViewCount(metadata),
+      isLikedByCurrentUser: _containsUser(metadata['likes'], currentUserId),
+      isFavoritedByCurrentUser:
+          _containsUser(metadata['favorites'], currentUserId),
+      extraImages: List<Map<String, dynamic>>.from(metadata['images'] ?? []),
+      commentCount: (metadata['comments'] as List?)?.length ?? 0,
+    );
+  }
+
   PreviewImagePaths _resolvePostCover(
     Map<String, dynamic> post,
     Map<String, dynamic> model,
@@ -818,6 +712,32 @@ class CommunityRepository {
     } catch (_) {
       return raw;
     }
+  }
+
+  /// RLS 拦截非所有者对 model_assets 的 JOIN 时，
+  /// 从 community_posts 自带的 cover_image_url 反推模型文件路径。
+  /// cover URL 格式: .../braindance-assets/{user_id}/{scene_id}/...
+  /// 模型输出固定路径: {user_id}/{scene_id}/output/point_cloud.splat
+  ({String modelUrl, String? posesUrl}) _deriveModelUrlFromCover(
+    String? coverUrl,
+  ) {
+    if (coverUrl == null || coverUrl.isEmpty) {
+      return (modelUrl: '', posesUrl: null);
+    }
+    const marker = '/storage/v1/object/public/braindance-assets/';
+    final idx = coverUrl.indexOf(marker);
+    if (idx < 0) return (modelUrl: '', posesUrl: null);
+
+    final storagePath = coverUrl.substring(idx + marker.length);
+    final segments = storagePath.split('/');
+    if (segments.length < 2) return (modelUrl: '', posesUrl: null);
+
+    final modelPath =
+        '${segments[0]}/${segments[1]}/output/point_cloud.splat';
+    return (
+      modelUrl: _normalizeStorageUrl(modelPath),
+      posesUrl: _posesUrlFromPath(modelPath),
+    );
   }
 
   String? _posesUrlFromPath(String? storagePath) {
