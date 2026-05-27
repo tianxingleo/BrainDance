@@ -14,6 +14,16 @@ class RecoConfig {
   //可变
   static int camNum = 0;
   static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
+
+  static List<int> get backCameraIndices {
+    final indices = <int>[];
+    for (var i = 0; i < cameras.length; i++) {
+      if (cameras[i].lensDirection == CameraLensDirection.back) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }
   //基础函数
   static Future<bool> cameraInitialize() async {
     cameraController = CameraController(cameras[camNum], resolutionPreset);
