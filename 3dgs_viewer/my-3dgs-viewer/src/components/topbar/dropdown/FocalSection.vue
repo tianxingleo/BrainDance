@@ -80,7 +80,14 @@ const onReset = () => emit('reset');
         <span>{{ Number(props.currentViewFocalPx).toFixed(1) }} px</span>
       </div>
 
-      <button type="button" class="fs-reset" @click="onReset">恢复拍摄焦距</button>
+      <button
+        type="button"
+        class="fs-reset"
+        @pointerdown.stop
+        @mousedown.stop
+        @touchstart.stop
+        @click.stop="onReset"
+      >恢复拍摄焦距</button>
     </div>
   </div>
 </template>
