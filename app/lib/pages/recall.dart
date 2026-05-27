@@ -57,6 +57,7 @@ import 'recall/rename_model_dialog.dart';
 import 'recall/model_section_header.dart';
 import 'recall/search_header_section.dart';
 import 'recall/search_mode.dart';
+import 'recall/local_ai_preset_data.dart';
 import 'recall/agent_asset_card.dart';
 
 part 'recall/recall_agent_runtime.dart';
@@ -172,6 +173,7 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   int _modelDownloadedBytes = 0;
   int? _modelDownloadTotalBytes;
   int _searchRequestId = 0;
+  int _presetGenerationId = 0;
 
   final darkBg = const Color(0xFF101014);
   final darkCard = const Color(0xFF18181C);
