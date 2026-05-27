@@ -4,8 +4,7 @@ import 'package:braindance/configs/supabase_config.dart';
 class LocalAiPresetData {
   static bool? _overriddenEnabled;
 
-  static bool get isEnabled =>
-      _overriddenEnabled ?? (kDebugMode || SupabaseConfig.isAdminMode);
+  static bool get isEnabled => _overriddenEnabled ?? true;
 
   static set isEnabled(bool value) {
     _overriddenEnabled = value;
