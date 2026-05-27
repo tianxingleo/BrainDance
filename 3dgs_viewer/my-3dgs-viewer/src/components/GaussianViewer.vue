@@ -48,6 +48,7 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const captureFocalState = ref({ focalPx: 0, imageHeightPx: 0 }); // 当前拍摄位姿的原始焦距
 const cinematicSpeed = ref(1);
 const cinematicProgress = ref(0);
 const cinematicLoop = ref(true);
@@ -170,6 +171,7 @@ let particleSystemRevealDone = false;
 const worldUp = new THREE.Vector3(0, 1, 0);
 const centerModeUp = new THREE.Vector3(0, 0, 1);
 let activeCameraTween = null;
+let activeFocalTween = null;
 let activeCameraFlightId = 0;
 let isOrbitRecenterFlightActive = false;
 let pendingInitialTarget = null;
@@ -179,6 +181,7 @@ let posesFetchSettled = false;
 let cinematicFrameHandle = 0;
 let interactionFrameHandle = 0;
 let renderRequested = false;
+let suppressCameraInputUntilMs = 0;
 let xrSession = null;
 let xrSessionEndHandler = null;
 let vrHud = null;
@@ -392,7 +395,7 @@ const addSplatSceneWithFormatFallback = async (sourceUrl) => {
 const applyFocalLengthPx = (focalPx, options = {}) => {
   if (!viewer || !viewer.camera) return;
   // 优先使用位姿 JSON 中记录的真实图像高度，否则回退到视口高度
-  const h = sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight;
+  const h = Number(options.imageHeightPx || sceneMetadata.value.h || containerRef.value?.clientHeight || window.innerHeight);
   if (!h || !focalPx) return;
 
   const targetFov = calcFovFromFocal(focalPx, h);
@@ -400,8 +403,12 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
 
   const cam = viewer.camera;
   const duration = options.duration ?? 0;
+  if (activeFocalTween) {
+    activeFocalTween.kill();
+    activeFocalTween = null;
+  }
   if (duration > 0) {
-    gsap.to(cam, {
+    activeFocalTween = gsap.to(cam, {
       fov: targetFov,
       duration,
       ease: options.ease || 'power2.out',
@@ -411,6 +418,12 @@ const applyFocalLengthPx = (focalPx, options = {}) => {
         requestRender();
         refreshCurrentFocalInfo();
         updateIntroParticleCameraScale();
+      },
+      onComplete: () => {
+        activeFocalTween = null;
+      },
+      onInterrupt: () => {
+        activeFocalTween = null;
       }
     });
   } else {
@@ -429,7 +442,7 @@ const clampFocalPx = (focalPx) => {
 
 const getActiveFocalPx = () => {
   const focal = Number(
-    manualFocalPx.value || currentViewFocalPx.value || sceneMetadata.value.fl_y || DEFAULT_FOCAL_PX
+    manualFocalPx.value || currentViewFocalPx.value || getCaptureFocalState().focalPx || DEFAULT_FOCAL_PX
   );
   return clampFocalPx(focal);
 };
@@ -447,13 +460,13 @@ const zoomByFocalScale = (scaleFactor) => {
 };
 
 const focalMin = computed(() => {
-  const base = Number(sceneMetadata.value.fl_y || 0);
+  const base = Number(getCaptureFocalState().focalPx || 0);
   if (base > 0) return Math.max(50, Math.floor(base * 0.4));
   return 50;
 });
 
 const focalMax = computed(() => {
-  const base = Number(sceneMetadata.value.fl_y || 0);
+  const base = Number(getCaptureFocalState().focalPx || 0);
   if (base > 0) return Math.max(500, Math.ceil(base * 2.5));
   return 3000;
 });
@@ -474,10 +487,38 @@ const onManualFocalChange = () => {
 };
 
 const resetFocalToCapture = () => {
-  const captureFocal = Number(sceneMetadata.value.fl_y || 0);
-  if (!captureFocal) return;
+  const captureState = getCaptureFocalState();
+  const captureFocal = Number(captureState.focalPx || 0);
+  if (!Number.isFinite(captureFocal) || captureFocal <= 0) return;
+  interruptCinematicPlayback();
+  interruptCameraFlightFromUserInput();
+  if (captureState.imageHeightPx > 0) {
+    sceneMetadata.value.h = captureState.imageHeightPx;
+  }
   manualFocalPx.value = Number(captureFocal.toFixed(1));
-  applyFocalLengthPx(captureFocal, { duration: 0.5, ease: 'power2.inOut' });
+  applyFocalLengthPx(captureFocal, {
+    duration: 0.5,
+    ease: 'power2.inOut',
+    imageHeightPx: captureState.imageHeightPx,
+  });
+};
+
+const suppressCameraInputAfterUiClose = () => {
+  suppressCameraInputUntilMs = performance.now() + 300;
+  resetManualCameraInputState();
+};
+
+const isUiInteractionEvent = (event) => {
+  const target = event?.target;
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest(
+    '.topbar, .bs-root, .gesture-panel, .reference-overlay, button, input, textarea, select, a, [role="button"], [role="menu"]'
+  ));
+};
+
+const shouldIgnoreCameraInputEvent = (event) => {
+  if (performance.now() < suppressCameraInputUntilMs) return true;
+  return isUiInteractionEvent(event);
 };
 
 const updateDebugInfo = () => {
@@ -893,6 +934,10 @@ const stopCameraTweens = () => {
     activeCameraTween.kill();
     activeCameraTween = null;
   }
+  if (activeFocalTween) {
+    activeFocalTween.kill();
+    activeFocalTween = null;
+  }
   isOrbitRecenterFlightActive = false;
   orbitNeedsRecenterAfterPoseFlight = false;
   gsap.killTweensOf(viewer.camera.position);
@@ -940,6 +985,59 @@ const setActivePosePresentationState = (poseData, options = {}) => {
 
   activeImage.value = poseData?.image_url || getPoseImageId(poseData);
   activeTag.value = poseData?.tag || '';
+};
+
+const getActivePoseData = () => {
+  const id = activePoseId.value;
+  if (!id || !Array.isArray(cameraPoses.value)) return null;
+  return cameraPoses.value.find((pose) => getPosePresentationId(pose) === id) || null;
+};
+
+const rememberCaptureFocalState = (focalPx, imageHeightPx) => {
+  const focal = Number(focalPx || 0);
+  const height = Number(imageHeightPx || 0);
+  if (!Number.isFinite(focal) || focal <= 0) return;
+
+  captureFocalState.value = {
+    focalPx: focal,
+    imageHeightPx: Number.isFinite(height) && height > 0 ? height : 0,
+  };
+};
+
+const getCaptureFocalState = () => {
+  const rememberedFocal = Number(captureFocalState.value.focalPx || 0);
+  if (Number.isFinite(rememberedFocal) && rememberedFocal > 0) {
+    return {
+      focalPx: rememberedFocal,
+      imageHeightPx: Number(captureFocalState.value.imageHeightPx || 0),
+    };
+  }
+
+  const activePose = getActivePoseData();
+  const poseFocal = Number(activePose?.fl_y || 0);
+  const poseHeight = Number(activePose?.h || 0);
+  if (Number.isFinite(poseFocal) && poseFocal > 0) {
+    return {
+      focalPx: poseFocal,
+      imageHeightPx: Number.isFinite(poseHeight) && poseHeight > 0
+        ? poseHeight
+        : Number(sceneMetadata.value.h || 0),
+    };
+  }
+
+  const metadataFocal = Number(sceneMetadata.value.fl_y || 0);
+  const metadataHeight = Number(sceneMetadata.value.h || 0);
+  if (Number.isFinite(metadataFocal) && metadataFocal > 0) {
+    return {
+      focalPx: metadataFocal,
+      imageHeightPx: Number.isFinite(metadataHeight) ? metadataHeight : 0,
+    };
+  }
+
+  return {
+    focalPx: DEFAULT_FOCAL_PX,
+    imageHeightPx: Number.isFinite(metadataHeight) ? metadataHeight : 0,
+  };
 };
 
 const stopCinematicPlayback = (options = {}) => {
@@ -2025,9 +2123,11 @@ const beginIntroAnimationToResolvedPose = () => {
   if (targetPose) setActivePosePresentation(targetPose);
   if (targetCameraState?.fl_y && targetCameraState?.h) {
     sceneMetadata.value.h = targetCameraState.h;
+    rememberCaptureFocalState(targetCameraState.fl_y, targetCameraState.h);
     manualFocalPx.value = Number(targetCameraState.fl_y.toFixed(1));
     applyFocalLengthPx(targetCameraState.fl_y);
   } else {
+    rememberCaptureFocalState(DEFAULT_FOCAL_PX, sceneMetadata.value.h);
     applyFocalLengthPx(DEFAULT_FOCAL_PX);
   }
 
@@ -2235,6 +2335,7 @@ const applyCinematicSample = (sample) => {
 
   if (cinematicState.filteredSample.fl_y && cinematicState.filteredSample.h) {
     sceneMetadata.value.h = cinematicState.filteredSample.h;
+    rememberCaptureFocalState(cinematicState.filteredSample.fl_y, cinematicState.filteredSample.h);
     manualFocalPx.value = Number(cinematicState.filteredSample.fl_y.toFixed(1));
     applyFocalLengthPx(cinematicState.filteredSample.fl_y);
   } else {
@@ -2388,6 +2489,7 @@ const flyToImage = (poseData, options = {}) => {
   }
   if (!options.keepCinematic) interruptCinematicPlayback();
   stopInteractionInertia();
+  stopCameraTweens();
 
   const cam = viewer.camera;
   const targetPosition = targetCameraState.position;
@@ -2399,6 +2501,7 @@ const flyToImage = (poseData, options = {}) => {
   const h = targetCameraState.h;
   if (fl_y && h) {
     sceneMetadata.value.h = h;
+    rememberCaptureFocalState(fl_y, h);
     manualFocalPx.value = Number(fl_y.toFixed(1));
     applyFocalLengthPx(fl_y, { duration: 1.5, ease: 'power3.inOut' });
   }
@@ -2417,7 +2520,6 @@ const flyToImage = (poseData, options = {}) => {
   const startQuat = cam.quaternion.clone();
   const animState = { t: 0 };
 
-  stopCameraTweens();
   gsap.killTweensOf(animState);
   activeCameraFlightId += 1;
   const flightId = activeCameraFlightId;
@@ -2684,6 +2786,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   activeImage.value = '';
   activeTag.value = '';
   sceneMetadata.value = {};
+  captureFocalState.value = { focalPx: 0, imageHeightPx: 0 };
 
   // 更新 URL（如果有新传入的值）
   const hasExplicitModelSwitch = Boolean(plyUrl) && plyUrl !== currentPlyUrl;
@@ -2727,6 +2830,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
     manualFocalPx.value = DEFAULT_FOCAL_PX;
+    rememberCaptureFocalState(DEFAULT_FOCAL_PX, 0);
     createVrHud();
 
     // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
@@ -2750,6 +2854,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
             fl_x: data?.fl_x || firstPose.fl_x || 0,
             fl_y: data?.fl_y || firstPose.fl_y || 0,
           };
+          rememberCaptureFocalState(sceneMetadata.value.fl_y, sceneMetadata.value.h);
           manualFocalPx.value = Number((sceneMetadata.value.fl_y || 0).toFixed(1));
           cameraPoses.value = normalizedPoses.map((pose) => {
             let imgUrl = pose.image_url || pose.imageUrl || '';
@@ -3327,6 +3432,7 @@ const handleFreePinchMove = (touches) => {
 
 // --- 简单拖拽微调逻辑 ---
 const onMouseDown = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3402,6 +3508,7 @@ const onMouseUp = () => {
 };
 
 const onWheel = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (!viewer || !viewer.camera) return;
   if (isCameraFlightLocked()) return;
   if (isOrbitMode.value && startOrbitRecenterFlight()) return;
@@ -3420,6 +3527,7 @@ const onWheel = (e) => {
 
 // --- 移动端 Touch 事件支持 ---
 const onTouchStart = (e) => {
+  if (shouldIgnoreCameraInputEvent(e)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3614,7 +3722,8 @@ const onTouchEnd = (e) => {
   }
 };
 
-const onCapturedUserCameraInput = () => {
+const onCapturedUserCameraInput = (event) => {
+  if (shouldIgnoreCameraInputEvent(event)) return;
   if (isCameraFlightLocked()) {
     resetManualCameraInputState();
     return;
@@ -3846,6 +3955,7 @@ onBeforeUnmount(async () => {
           @focal-input="onManualFocalChange"
           @focal-change="onManualFocalChange"
           @focal-reset="resetFocalToCapture"
+          @dropdown-close="suppressCameraInputAfterUiClose"
         />
       </template>
     </TopBar>

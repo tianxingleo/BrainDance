@@ -177,6 +177,18 @@ class _HomeState extends ConsumerState<Home> {
   bool _settingsApplied = false;
   bool _splashRemoved = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // 在首帧之前推迟到 microtask，避免在 build 期间修改被 watch 的 Riverpod provider
+    // (flutter_riverpod 3.x 会因此抛出断言错误，导致 Home.build 永远完不成、
+    // FlutterNativeSplash.remove 永远不被调用，启动卡死在原生 Splash)。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _applySettingsOnce();
+    });
+  }
+
   void _applySettingsOnce() {
     if (_settingsApplied) return;
     _settingsApplied = true;
@@ -194,7 +206,6 @@ class _HomeState extends ConsumerState<Home> {
 
   @override
   Widget build(BuildContext context) {
-    _applySettingsOnce();
     _removeSplashOnce();
 
     final localeCode = ref.watch(localeProvider);
