@@ -5,12 +5,13 @@ import 'package:braindance/configs/app_theme.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/services/thumbnail_cache.dart';
 import 'package:braindance/services/viewer_navigation.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../main.dart' show myCollectionRefreshSignal;
+import '../../main.dart' show myCollectionRefreshSignal, myPostsRefreshSignal;
 import 'models.dart';
 import 'repository.dart';
 
@@ -86,6 +87,11 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
     if (_imageEntries.isEmpty) return _post.modelName;
     return _imageEntries[_currentImageIndex]['modelName']?.toString() ??
         _post.modelName;
+  }
+
+  bool get _isOwner {
+    final uid = _repository.currentUserId;
+    return uid.isNotEmpty && uid == _post.userId;
   }
 
   @override
@@ -204,6 +210,44 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
         setState(() => _metadata = meta);
       });
     });
+  }
+
+  Future<void> _toggleVisibility() async {
+    final original = _post;
+    final toggled = _post.copyWith(isPublic: !_post.isPublic);
+    setState(() => _post = toggled);
+    showAppToast(context, textLocalize('my_post_updating'));
+    await _repository.togglePostVisibility(original);
+    ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_updated'));
+  }
+
+  Future<void> _confirmDeletePost() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(textLocalize('my_delete_post')),
+        content: Text(textLocalize('my_delete_post_confirm')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(textLocalize('recall_delete_confirm_cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(textLocalize('recall_delete_confirm_yes')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    showAppToast(context, textLocalize('my_post_deleting'));
+    await _repository.deletePost(_post.id);
+    ref.read(myPostsRefreshSignal.notifier).state++;
+    if (!mounted) return;
+    showAppToast(context, textLocalize('my_post_deleted'));
+    Navigator.pop(context);
   }
 
   void _scrollToComments() {
@@ -405,6 +449,10 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
                                     fontSize: 13,
                                   ),
                                 ),
+                                if (_isOwner) ...[
+                                  const SizedBox(height: 8),
+                                  _PrivacyBadge(isPublic: _post.isPublic),
+                                ],
                               ],
                             ),
                           ),
@@ -587,6 +635,7 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
             ],
           ),
           _buildBackButton(),
+          if (_isOwner) _buildOwnerMenu(),
         ],
       ),
     );
@@ -607,6 +656,72 @@ class _CommunityDetailPageState extends ConsumerState<CommunityDetailPage> {
           ),
           child: const Icon(
             Icons.arrow_back_rounded,
+            color: Colors.white,
+            size: 22,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOwnerMenu() {
+    return Positioned(
+      right: 12,
+      top: MediaQuery.paddingOf(context).top + 8,
+      child: PopupMenuButton<String>(
+        color: context.isDarkMode
+            ? const Color(0xFF2A2D32)
+            : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        onSelected: (value) {
+          if (value == 'visibility') _toggleVisibility();
+          if (value == 'delete') _confirmDeletePost();
+        },
+        itemBuilder: (context) => [
+          PopupMenuItem(
+            value: 'visibility',
+            child: Row(
+              children: [
+                Icon(
+                  _post.isPublic
+                      ? Icons.lock_outline_rounded
+                      : Icons.public_rounded,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  _post.isPublic
+                      ? textLocalize('my_make_private')
+                      : textLocalize('my_make_public'),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'delete',
+            child: Row(
+              children: [
+                const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.red),
+                const SizedBox(width: 10),
+                Text(
+                  textLocalize('my_delete_post'),
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ],
+            ),
+          ),
+        ],
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.more_horiz_rounded,
             color: Colors.white,
             size: 22,
           ),
@@ -851,6 +966,44 @@ class _ActionButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PrivacyBadge extends StatelessWidget {
+  final bool isPublic;
+
+  const _PrivacyBadge({required this.isPublic});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isPublic
+            ? const Color(0xFF2E7CF6).withValues(alpha: 0.10)
+            : const Color(0xFFEAC86B).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isPublic ? Icons.public_rounded : Icons.lock_rounded,
+            size: 12,
+            color: isPublic ? const Color(0xFF2E7CF6) : const Color(0xFFEAC86B),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            isPublic ? '公开' : '私密',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isPublic ? const Color(0xFF2E7CF6) : const Color(0xFFEAC86B),
+            ),
+          ),
+        ],
       ),
     );
   }
