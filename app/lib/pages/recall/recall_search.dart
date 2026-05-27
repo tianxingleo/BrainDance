@@ -383,6 +383,7 @@ extension _RecallPageSearch on _RecallPageState {
   Future<void> _handleSearchSubmitted(String value) async {
     final query = value.trim();
     if (_searchMode == RecallSearchMode.localAi) {
+      _presetGenerationId++;
       await _searchModels(query);
       if (query.isNotEmpty) {
         await _askLocalQuestion(question: query);
@@ -485,6 +486,7 @@ extension _RecallPageSearch on _RecallPageState {
         _localAnswer = '';
         _localReasoning = '';
         _localContextPreview = '';
+        _presetGenerationId++;
       }
       if (mode != RecallSearchMode.agent) {
         _resetAgentUiState(preserveSession: false);

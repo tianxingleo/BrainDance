@@ -347,9 +347,8 @@ export function buildCenterModeBounds(
   }
 
   const useOrbitAngles = topology === 'full_orbit' || topology === 'semi_orbit';
-  const useForwardAngles = topology === 'panorama_anchor';
-  const yawSource = useOrbitAngles ? orbitYawAngles : useForwardAngles ? forwardYawAngles : orbitYawAngles;
-  const pitchSource = useOrbitAngles ? orbitPitchAngles : useForwardAngles ? forwardPitchAngles : forwardPitchAngles;
+  const yawSource = useOrbitAngles ? orbitYawAngles : [];
+  const pitchSource = useOrbitAngles ? orbitPitchAngles : [];
 
   const yawIntervals = buildCircularInterval(
     yawSource,
@@ -357,16 +356,22 @@ export function buildCenterModeBounds(
   );
 
   const pitchMarginDeg = topology === 'full_orbit' ? 10 : topology === 'semi_orbit' ? 14 : 16;
-  const pitchMin = THREE.MathUtils.clamp(
-    percentile(pitchSource, 0.05) - THREE.MathUtils.degToRad(pitchMarginDeg),
-    -Math.PI / 2 + 0.03,
-    Math.PI / 2 - 0.03,
-  );
-  const pitchMax = THREE.MathUtils.clamp(
-    percentile(pitchSource, 0.95) + THREE.MathUtils.degToRad(pitchMarginDeg),
-    -Math.PI / 2 + 0.03,
-    Math.PI / 2 - 0.03,
-  );
+  // orbit 的 yaw/pitch 表达的是“相机所在位置”，forward 表达的是“相机看向哪里”。
+  // 二者在中心观察场景里通常相差 180 度，不能把 forward 当作 orbit 位置边界。
+  const pitchMin = useOrbitAngles
+    ? THREE.MathUtils.clamp(
+      percentile(pitchSource, 0.05) - THREE.MathUtils.degToRad(pitchMarginDeg),
+      -Math.PI / 2 + 0.03,
+      Math.PI / 2 - 0.03,
+    )
+    : THREE.MathUtils.degToRad(-82);
+  const pitchMax = useOrbitAngles
+    ? THREE.MathUtils.clamp(
+      percentile(pitchSource, 0.95) + THREE.MathUtils.degToRad(pitchMarginDeg),
+      -Math.PI / 2 + 0.03,
+      Math.PI / 2 - 0.03,
+    )
+    : THREE.MathUtils.degToRad(82);
 
   const radiusLowerPct = topology === 'full_orbit' ? 0.01 : topology === 'semi_orbit' ? 0.02 : 0.04;
   const radiusUpperPct = topology === 'full_orbit' ? 0.98 : topology === 'semi_orbit' ? 0.96 : 0.94;

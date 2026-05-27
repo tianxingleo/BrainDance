@@ -311,6 +311,13 @@ tmp/
 
 # 文档处理临时产物
 tmp/docs/
+temp_docx_edit*/
+temp_docx_unpacked*/
+temp_docx_media/
+temp_docx_output/
+temp_doc_*.md
+temp_verify*.md
+modify_doc.py
 
 # =========================
 # 10. Document Files (文档文件)

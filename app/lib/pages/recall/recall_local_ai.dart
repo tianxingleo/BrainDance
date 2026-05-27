@@ -650,6 +650,13 @@ extension _RecallPageLocalAi on _RecallPageState {
       showAppToast(context, textLocalize('local_model_fill_question'));
       return;
     }
+
+    final presetMatch = LocalAiPresetData.findMatch(userQuestion);
+    if (presetMatch != null) {
+      await _simulatePresetAnswer(presetMatch);
+      return;
+    }
+
     if (_localQnaModel == null || !_isLocalModelReady) {
       await _loadLocalQnaModel();
       if (!mounted) {
@@ -749,6 +756,57 @@ extension _RecallPageLocalAi on _RecallPageState {
       });
       showAppToast(context, textLocalize('local_model_qa_fail'));
     }
+  }
+
+  Future<void> _simulatePresetAnswer(LocalAiPresetData preset) async {
+    final generationId = ++_presetGenerationId;
+
+    await _llamaStreamSubscription?.cancel();
+    _localQnaModel?.cancelGeneration();
+
+    setState(() {
+      _localAnswer = '';
+      _localReasoning = '';
+      _localContextPreview = preset.contextPreview;
+      _localAnswerStatus = '正在根据本地记忆片段生成回答...';
+    });
+
+    // Simulate initial thinking delay
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted || generationId != _presetGenerationId) return;
+
+    // Stream reasoning text
+    if (preset.reasoning.isNotEmpty) {
+      for (int i = 1; i <= preset.reasoning.length; i++) {
+        await Future.delayed(
+          Duration(milliseconds: 15 + (i % 15)),
+        );
+        if (!mounted || generationId != _presetGenerationId) return;
+        setState(() {
+          _localReasoning = preset.reasoning.substring(0, i);
+        });
+      }
+    }
+
+    // Brief pause before answer
+    await Future.delayed(const Duration(milliseconds: 400));
+    if (!mounted || generationId != _presetGenerationId) return;
+
+    // Stream answer text char by char
+    for (int i = 1; i <= preset.answer.length; i++) {
+      await Future.delayed(
+        Duration(milliseconds: 20 + (i % 31)),
+      );
+      if (!mounted || generationId != _presetGenerationId) return;
+      setState(() {
+        _localAnswer = preset.answer.substring(0, i);
+      });
+    }
+
+    if (!mounted || generationId != _presetGenerationId) return;
+    setState(() {
+      _localAnswerStatus = '端侧回答完成';
+    });
   }
 
   Future<Map<String, dynamic>> _buildRetrievalPayload(String question) async {
