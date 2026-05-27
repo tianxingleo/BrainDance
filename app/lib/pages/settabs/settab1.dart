@@ -8,6 +8,7 @@ import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 
@@ -38,6 +39,11 @@ Widget setTab1(BuildContext context, WidgetRef ref) {
         BDPanelCard(
           padding: EdgeInsets.zero,
           child: _ClearCacheRow(context: context),
+        ),
+        const SizedBox(height: 12),
+        BDPanelCard(
+          padding: EdgeInsets.zero,
+          child: _LogoutRow(context: context),
         ),
       ],
     ),
@@ -272,6 +278,95 @@ class _ClearCacheRow extends StatelessWidget {
                 ),
               ),
               Icon(Icons.chevron_right_rounded, color: actionColor, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LogoutRow extends StatelessWidget {
+  final BuildContext context;
+  const _LogoutRow({required this.context});
+
+  @override
+  Widget build(BuildContext ctx) {
+    const radius = BorderRadius.all(Radius.circular(28));
+
+    return Material(
+      color: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: radius,
+      child: InkWell(
+        onTap: () async {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialogCtx) {
+              final dialogIsDark =
+                  Theme.of(dialogCtx).brightness == Brightness.dark;
+              return AlertDialog(
+                title: Text(
+                  textLocalize('set_logout'),
+                  style: TextStyle(
+                    color: dialogIsDark ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                content: Text(
+                  textLocalize('set_logout_message'),
+                  style: TextStyle(
+                    color:
+                        dialogIsDark ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(false),
+                    child: Text(
+                      textLocalize('recall_delete_confirm_cancel'),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(true),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                    ),
+                    child: Text(textLocalize('set_logout')),
+                  ),
+                ],
+              );
+            },
+          );
+          if (confirmed != true) return;
+          await Supabase.instance.client.auth.signOut();
+          if (context.mounted) {
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              '/login',
+              (_) => false,
+            );
+          }
+        },
+        borderRadius: radius,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  textLocalize('set_logout'),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.redAccent,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.logout_rounded,
+                color: Colors.redAccent,
+                size: 20,
+              ),
             ],
           ),
         ),
