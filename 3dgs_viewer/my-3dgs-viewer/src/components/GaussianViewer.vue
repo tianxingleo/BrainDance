@@ -48,6 +48,7 @@ const showFocalSettings = ref(false); // 焦距设置面板
 const currentViewFov = ref(0); // 当前相机FOV
 const currentViewFocalPx = ref(0); // 当前相机等效焦距（像素）
 const manualFocalPx = ref(null); // 手动焦距输入
+const captureFocalState = ref({ focalPx: 0, imageHeightPx: 0 }); // 当前拍摄位姿的原始焦距
 const cinematicSpeed = ref(1);
 const cinematicProgress = ref(0);
 const cinematicLoop = ref(true);
@@ -992,7 +993,26 @@ const getActivePoseData = () => {
   return cameraPoses.value.find((pose) => getPosePresentationId(pose) === id) || null;
 };
 
+const rememberCaptureFocalState = (focalPx, imageHeightPx) => {
+  const focal = Number(focalPx || 0);
+  const height = Number(imageHeightPx || 0);
+  if (!Number.isFinite(focal) || focal <= 0) return;
+
+  captureFocalState.value = {
+    focalPx: focal,
+    imageHeightPx: Number.isFinite(height) && height > 0 ? height : 0,
+  };
+};
+
 const getCaptureFocalState = () => {
+  const rememberedFocal = Number(captureFocalState.value.focalPx || 0);
+  if (Number.isFinite(rememberedFocal) && rememberedFocal > 0) {
+    return {
+      focalPx: rememberedFocal,
+      imageHeightPx: Number(captureFocalState.value.imageHeightPx || 0),
+    };
+  }
+
   const activePose = getActivePoseData();
   const poseFocal = Number(activePose?.fl_y || 0);
   const poseHeight = Number(activePose?.h || 0);
@@ -2103,9 +2123,11 @@ const beginIntroAnimationToResolvedPose = () => {
   if (targetPose) setActivePosePresentation(targetPose);
   if (targetCameraState?.fl_y && targetCameraState?.h) {
     sceneMetadata.value.h = targetCameraState.h;
+    rememberCaptureFocalState(targetCameraState.fl_y, targetCameraState.h);
     manualFocalPx.value = Number(targetCameraState.fl_y.toFixed(1));
     applyFocalLengthPx(targetCameraState.fl_y);
   } else {
+    rememberCaptureFocalState(DEFAULT_FOCAL_PX, sceneMetadata.value.h);
     applyFocalLengthPx(DEFAULT_FOCAL_PX);
   }
 
@@ -2313,6 +2335,7 @@ const applyCinematicSample = (sample) => {
 
   if (cinematicState.filteredSample.fl_y && cinematicState.filteredSample.h) {
     sceneMetadata.value.h = cinematicState.filteredSample.h;
+    rememberCaptureFocalState(cinematicState.filteredSample.fl_y, cinematicState.filteredSample.h);
     manualFocalPx.value = Number(cinematicState.filteredSample.fl_y.toFixed(1));
     applyFocalLengthPx(cinematicState.filteredSample.fl_y);
   } else {
@@ -2478,6 +2501,7 @@ const flyToImage = (poseData, options = {}) => {
   const h = targetCameraState.h;
   if (fl_y && h) {
     sceneMetadata.value.h = h;
+    rememberCaptureFocalState(fl_y, h);
     manualFocalPx.value = Number(fl_y.toFixed(1));
     applyFocalLengthPx(fl_y, { duration: 1.5, ease: 'power3.inOut' });
   }
@@ -2762,6 +2786,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   activeImage.value = '';
   activeTag.value = '';
   sceneMetadata.value = {};
+  captureFocalState.value = { focalPx: 0, imageHeightPx: 0 };
 
   // 更新 URL（如果有新传入的值）
   const hasExplicitModelSwitch = Boolean(plyUrl) && plyUrl !== currentPlyUrl;
@@ -2805,6 +2830,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     viewer = new GaussianSplats3D.Viewer(config);
     window.viewer = viewer;
     manualFocalPx.value = DEFAULT_FOCAL_PX;
+    rememberCaptureFocalState(DEFAULT_FOCAL_PX, 0);
     createVrHud();
 
     // 加载模型：同名 .ksplat/.splat 存在时优先使用，失败后回退原始 PLY。
@@ -2828,6 +2854,7 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
             fl_x: data?.fl_x || firstPose.fl_x || 0,
             fl_y: data?.fl_y || firstPose.fl_y || 0,
           };
+          rememberCaptureFocalState(sceneMetadata.value.fl_y, sceneMetadata.value.h);
           manualFocalPx.value = Number((sceneMetadata.value.fl_y || 0).toFixed(1));
           cameraPoses.value = normalizedPoses.map((pose) => {
             let imgUrl = pose.image_url || pose.imageUrl || '';
