@@ -127,6 +127,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
   _MotionState _motionState = _MotionState.steady;
   bool _blockHaptics = false;
   int _currentBackCamPosition = 0;
+  int _currentFrontCamPosition = 0;
 
   final List<double> _accelHistory = [];
 
@@ -157,6 +158,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
     RecoConfig.onUpdate = () {
       if (mounted) {
         _syncBackCamPosition();
+        _syncFrontCamPosition();
         setState(() {});
       }
     };
@@ -1174,15 +1176,20 @@ class _RecordPageState extends ConsumerState<RecordPage>
     }
   }
 
-  Future<void> _cycleRearCamera() async {
-    if (!RecoConfig.cameraEnabled) return;
+  void _syncFrontCamPosition() {
+    if (RecoConfig.cameras.isEmpty) return;
+    if (RecoConfig.cameras[RecoConfig.camNum].lensDirection !=
+        CameraLensDirection.front) {
+      return;
+    }
+    final frontIndices = RecoConfig.frontCameraIndices;
+    final pos = frontIndices.indexOf(RecoConfig.camNum);
+    if (pos >= 0) {
+      _currentFrontCamPosition = pos;
+    }
+  }
 
-    final backIndices = RecoConfig.backCameraIndices;
-    if (backIndices.length <= 1) return;
-
-    _currentBackCamPosition = (_currentBackCamPosition + 1) % backIndices.length;
-    final targetIndex = backIndices[_currentBackCamPosition];
-
+  Future<void> _switchToCamera(int targetIndex) async {
     try {
       if (ref.read(isRecordingProvider)) {
         await RecoConfig.trySwitchCameraDescription(targetIndex);
@@ -1195,6 +1202,27 @@ class _RecordPageState extends ConsumerState<RecordPage>
       if (mounted) {
         showAppToast(context, textLocalize('reco_no_switch'));
       }
+    }
+  }
+
+  Future<void> _cycleCurrentCamera() async {
+    if (!RecoConfig.cameraEnabled || RecoConfig.cameras.isEmpty) return;
+
+    final currentDirection =
+        RecoConfig.cameras[RecoConfig.camNum].lensDirection;
+
+    if (currentDirection == CameraLensDirection.back) {
+      final backIndices = RecoConfig.backCameraIndices;
+      if (backIndices.length <= 1) return;
+      _currentBackCamPosition =
+          (_currentBackCamPosition + 1) % backIndices.length;
+      await _switchToCamera(backIndices[_currentBackCamPosition]);
+    } else if (currentDirection == CameraLensDirection.front) {
+      final frontIndices = RecoConfig.frontCameraIndices;
+      if (frontIndices.length <= 1) return;
+      _currentFrontCamPosition =
+          (_currentFrontCamPosition + 1) % frontIndices.length;
+      await _switchToCamera(frontIndices[_currentFrontCamPosition]);
     }
   }
 
@@ -1229,29 +1257,19 @@ class _RecordPageState extends ConsumerState<RecordPage>
       }
       targetIndex = backIndices[_currentBackCamPosition];
     } else {
-      final frontIndex = _findPrimaryCameraIndex(CameraLensDirection.front);
-      if (frontIndex == null) {
+      final frontIndices = RecoConfig.frontCameraIndices;
+      if (frontIndices.isEmpty) {
         if (mounted) showAppToast(context, textLocalize('reco_no_switch'));
         return;
       }
-      targetIndex = frontIndex;
+      if (_currentFrontCamPosition >= frontIndices.length) {
+        _currentFrontCamPosition = 0;
+      }
+      targetIndex = frontIndices[_currentFrontCamPosition];
     }
 
     if (targetIndex == RecoConfig.camNum) return;
-
-    try {
-      if (ref.read(isRecordingProvider)) {
-        await RecoConfig.trySwitchCameraDescription(targetIndex);
-      } else {
-        RecoConfig.camNum = targetIndex;
-        await RecoConfig.cameraInitialize();
-      }
-      if (mounted) setState(() {});
-    } catch (_) {
-      if (mounted) {
-        showAppToast(context, textLocalize('reco_no_switch'));
-      }
-    }
+    await _switchToCamera(targetIndex);
   }
 
   @override
@@ -1302,9 +1320,15 @@ class _RecordPageState extends ConsumerState<RecordPage>
         _findPrimaryCameraIndex(CameraLensDirection.front) != null &&
         _findPrimaryCameraIndex(CameraLensDirection.back) != null;
     final backCameraCount = RecoConfig.backCameraIndices.length;
-    final showRearCamBadge =
-        currentLensDirection == CameraLensDirection.back &&
-        backCameraCount > 1;
+    final frontCameraCount = RecoConfig.frontCameraIndices.length;
+    final showCamBadge =
+        (currentLensDirection == CameraLensDirection.back &&
+            backCameraCount > 1) ||
+        (currentLensDirection == CameraLensDirection.front &&
+            frontCameraCount > 1);
+    final camPositionText = currentLensDirection == CameraLensDirection.back
+        ? '${_currentBackCamPosition + 1}/$backCameraCount'
+        : '${_currentFrontCamPosition + 1}/$frontCameraCount';
     final cornerControlBottom = bottomPadding + 28;
     final bottomOffset =
         bottomPadding +
@@ -1482,7 +1506,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                           : null,
                     ),
                   ),
-                  if (showRearCamBadge) ...[
+                  if (showCamBadge) ...[
                     const SizedBox(width: 8),
                     _RecordOverlayPanel(
                       padding: const EdgeInsets.symmetric(
@@ -1490,7 +1514,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                         vertical: 6,
                       ),
                       child: GestureDetector(
-                        onTap: _cycleRearCamera,
+                        onTap: _cycleCurrentCamera,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1501,7 +1525,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              '${_currentBackCamPosition + 1}/$backCameraCount',
+                              camPositionText,
                               style: const TextStyle(
                                 color: BDDesign.colorPaperWhite,
                                 fontSize: 12,
