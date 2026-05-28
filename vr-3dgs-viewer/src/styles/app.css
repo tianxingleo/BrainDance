@@ -409,15 +409,7 @@ button.active {
 }
 
 #VRButton {
-  position: fixed !important;
-  right: 20px !important;
-  bottom: 20px !important;
-  left: auto !important;
-  z-index: 100090 !important;
-  min-width: 160px !important;
-  border-radius: 8px !important;
-  border: 1px solid rgba(255, 255, 255, 0.28) !important;
-  background: rgba(28, 121, 108, 0.92) !important;
+  display: none !important;
 }
 
 @media (max-width: 640px) {

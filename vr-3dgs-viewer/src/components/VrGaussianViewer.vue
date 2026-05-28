@@ -2906,6 +2906,7 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
 
   if (previewMode.value === 'webxr') {
     installXrSessionListeners()
+    removeBuiltInVrButton()
   }
 
   activeModelIndex = modelList.value.findIndex((item) => item.id === model.id)
@@ -3225,24 +3226,87 @@ function installXrSessionListeners() {
   })
 }
 
-async function enterVrSession() {
+function removeBuiltInVrButton() {
+  const buttons = containerRef.value?.querySelectorAll('#VRButton') || []
+  buttons.forEach((button) => button.remove())
+}
+
+function syncActiveVrSession(session: XRSession) {
   const runtime = getRuntimeViewer()
-  if (!runtime?.renderer?.xr || !navigator.xr) return
-  runtime.renderer.xr.enabled = true
-  runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
-  installXrSessionListeners()
-  const session = await navigator.xr.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
-  })
-  await runtime.renderer.xr.setSession(session)
   xrSession = session
   isVrPresenting.value = true
+  runtime?.renderer?.xr.setReferenceSpaceType?.('local-floor')
   ensureSceneRoots()
   ensureSpectatorRenderer()
   resizeSpectatorRenderer()
   ensureControllerRig()
   refreshHudDisplay()
   startControllerLoop()
+  status.value = 'WebXR 会话已启动'
+  errorMessage.value = ''
+}
+
+function getXrErrorMessage(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === 'InvalidStateError') {
+      return '已有沉浸式 XR 会话正在运行，请先退出当前 VR 会话后再重新进入。'
+    }
+    if (error.name === 'NotSupportedError') {
+      return '当前浏览器或运行时不支持 immersive-vr，请确认使用 PC Chrome/Edge 并已启动 SteamVR。'
+    }
+    if (error.name === 'SecurityError') {
+      return 'WebXR 需要 HTTPS 安全上下文，请使用 https://127.0.0.1:5174 打开。'
+    }
+    if (error.name === 'NotAllowedError') {
+      return '浏览器拒绝启动 VR 会话，请确认这是由按钮点击触发且站点允许 XR 权限。'
+    }
+    return `${error.name}: ${error.message}`
+  }
+  return error instanceof Error ? error.message : '进入 VR 失败'
+}
+
+async function enterVrSession() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer?.xr) {
+    errorMessage.value = 'VR 渲染器尚未初始化，请等待模型加载完成后再进入 VR。'
+    return
+  }
+  if (!navigator.xr) {
+    errorMessage.value = '当前页面没有 WebXR 能力，请确认使用 HTTPS 和支持 WebXR 的 PC Chrome/Edge。'
+    return
+  }
+
+  const existingSession = runtime.renderer.xr.getSession() || xrSession
+  if (existingSession) {
+    syncActiveVrSession(existingSession)
+    return
+  }
+
+  try {
+    status.value = '正在请求 WebXR 会话'
+    errorMessage.value = ''
+    runtime.renderer.xr.enabled = true
+    runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
+    installXrSessionListeners()
+    removeBuiltInVrButton()
+
+    const supported = await navigator.xr.isSessionSupported?.('immersive-vr')
+    if (supported === false) {
+      errorMessage.value = '当前 WebXR 运行时不支持 immersive-vr，请确认 SteamVR 已启动并识别头显。'
+      status.value = 'WebXR 会话未启动'
+      return
+    }
+
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
+    })
+    await runtime.renderer.xr.setSession(session)
+    syncActiveVrSession(session)
+  } catch (error) {
+    console.error('[BrainDance VR] 进入 VR 失败:', error)
+    errorMessage.value = getXrErrorMessage(error)
+    status.value = 'WebXR 会话启动失败'
+  }
 }
 
 async function exitVrSession() {
