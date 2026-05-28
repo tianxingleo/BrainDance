@@ -703,7 +703,6 @@ export type AgentProgressEvent =
       phase: string;
       summary: string;
       detail?: string;
-      internal?: boolean;
     };
   }
   | {
@@ -717,7 +716,6 @@ export type AgentProgressEvent =
     event: "thought" | "thinking";
     data: {
       content: string;
-      internal?: boolean;
     };
   }
   | {
@@ -725,7 +723,6 @@ export type AgentProgressEvent =
     data: {
       delta: string;
       done?: boolean;
-      streamed?: boolean;
     };
   }
   | {
@@ -1146,6 +1143,14 @@ function isCreativeQuery(
   return /导览|旁白|脚本|故事线|创作|叙事|大纲|narrat/.test(normalized);
 }
 
+function isMemoryGraphQuery(
+  query: string,
+  options: SpatialSearchAgentOptions,
+): boolean {
+  const normalized = query.trim().toLowerCase();
+  return /趋势|越来越|长期|缺失模式|变化时间线|关系摘要|是不是.*空了|是不是.*多了/.test(normalized);
+}
+
 
 function normalizeMatrix(input: unknown): number[] | number[][] | null {
   if (!Array.isArray(input)) return null;
@@ -1197,18 +1202,9 @@ function buildStopSearchSummaryPayload(input: {
   candidates: Map<string, SceneCandidate>;
   assetState: AssetToolState;
 }): Record<string, unknown> {
-  const pseudoIntent: Pick<SpatialIntent, "rewrittenQuery" | "targetType"> = {
-    rewrittenQuery: input.query,
-    targetType: "scene",
-  };
-  const rankedWithScore = [...input.candidates.values()]
-    .map((candidate) => ({
-      candidate,
-      score: scoreSceneCandidate(candidate, pseudoIntent),
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  const topCandidates = rankedWithScore.slice(0, 5).map(({ candidate, score }) => ({
+  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
+    candidate,
+  ) => ({
     scene_id: candidate.sceneId,
     model_id: candidate.modelId,
     display_name: candidate.displayName ?? null,
@@ -1222,13 +1218,7 @@ function buildStopSearchSummaryPayload(input: {
       }
       : null,
     source_scores: candidate.sourceScores,
-    fused_score: score,
   }));
-
-  const topScore = rankedWithScore[0]?.score ?? 0;
-  const hasMultiSourceEvidence = [...input.candidates.values()].some((c) =>
-    Object.keys(c.sourceScores).length >= 2
-  );
 
   return {
     user_query: input.query,
@@ -1238,9 +1228,6 @@ function buildStopSearchSummaryPayload(input: {
       : null,
     tool_trace: input.trace,
     spatial_candidates: topCandidates,
-    candidate_count: input.candidates.size,
-    top_fused_score: topScore,
-    has_multi_source_evidence: hasMultiSourceEvidence,
     asset_context: serializeAssetContext(input.assetState),
   };
 }
@@ -1264,28 +1251,16 @@ async function buildStopSearchUserFacingSummary(input: {
   });
 
   const payload = buildStopSearchSummaryPayload(input);
-  const messages = [
+  const result = await input.model.invoke([
     new SystemMessage(
       [
         "你是 BrainDance 的空间记忆 Agent。",
-        "你刚刚主动调用了 stop_search，现在需要基于已有工具结果生成一段直接反馈给前端用户的中文自然语言回答。",
-        "",
-        "【判断依据按优先级】",
-        "1) top_fused_score（系统融合分，权威信号）",
-        "2) has_multi_source_evidence（是否有交叉证据）",
-        "3) candidate_count（候选数量）",
-        "4) stop_confidence（你刚才的自评，仅作参考，不要单独依赖）",
-        "",
-        "【硬规则 — 必须严格执行】",
-        "- candidate_count = 0 或 top_fused_score < 0.45：必须明确告诉用户没有找到匹配，不要描述任何候选当作答案。建议用户补充时间、地点或物体描述。",
-        "- 0.45 ≤ top_fused_score < 0.62 或 has_multi_source_evidence = false：使用保留语气（如 可能 / 或许 / 相关性不高），并主动询问是否就是用户想找的，不要用肯定句陈述场景。",
-        "- top_fused_score ≥ 0.62 且 has_multi_source_evidence = true：才能用肯定语气描述命中场景。",
-        "- 资产操作预览：说明当前只是预览以及下一步需要确认。",
-        "",
-        "【表述要求】",
-        "- 不要提及 JSON、内部 trace、工具链、stop_search、score、置信度等系统术语。",
-        "- 不要编造工具结果中不存在的场景、数量或字段。",
-        "- 控制在 2 到 4 句，语气自然、明确。否定时也要明确，不要含糊其辞。",
+        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
+        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
+        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
+        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
+        "不要编造工具结果中不存在的场景、数量或字段。",
+        "控制在 2 到 4 句，语气自然、明确。",
       ].join("\n"),
     ),
     new HumanMessage(
@@ -1293,51 +1268,20 @@ async function buildStopSearchUserFacingSummary(input: {
         JSON.stringify(payload, null, 2)
       }\n\n请输出给用户看的最终回答。`,
     ),
-  ];
+  ]);
 
-  let collected = "";
-  try {
-    const stream = await input.model.stream(messages);
-    for await (const chunk of stream) {
-      const piece = extractModelTextContent((chunk as { content?: unknown })?.content);
-      if (!piece) continue;
-      collected += piece;
-      if (input.callbacks?.onEvent) {
-        await input.callbacks.onEvent({
-          event: "message",
-          data: { delta: piece, streamed: true },
-        });
-      }
-    }
-    if (collected && input.callbacks?.onEvent) {
-      await input.callbacks.onEvent({
-        event: "message",
-        data: { delta: "", done: true, streamed: true },
-      });
-    }
-    return collected.trim();
-  } catch (err) {
-    console.warn("[StopSearchSummary] streaming failed, fall back to invoke:", err);
-    if (collected.trim()) return collected.trim();
-    const result = await input.model.invoke(messages);
-    return extractModelTextContent(result.content).trim();
-  }
+  return extractModelTextContent(result.content).trim();
 }
 
 export function pickSpatialSearchAnswerAfterStop(input: {
   trace: Array<{ toolName: string }>;
   stopSummary: string;
   deterministicAnswer: string;
-  directAnswer?: string;
 }): string {
-  const summary = input.stopSummary.trim();
-  const direct = (input.directAnswer ?? "").trim();
-  if (input.trace.length === 0 && direct) {
-    return direct;
-  }
   const hasStopSearch = input.trace.some((entry) =>
     entry.toolName === "stop_search"
   );
+  const summary = input.stopSummary.trim();
   return hasStopSearch && summary ? summary : input.deterministicAnswer;
 }
 
@@ -1381,7 +1325,6 @@ async function emitProgress(
 async function emitThought(
   callbacks: AgentRuntimeCallbacks | undefined,
   content: string,
-  options: { internal?: boolean } = {},
 ): Promise<void> {
   const normalized = content.trim();
   if (!normalized) {
@@ -1391,7 +1334,6 @@ async function emitThought(
     event: "thought",
     data: {
       content: normalized,
-      ...(options.internal ? { internal: true } : {}),
     },
   });
 }
@@ -1469,6 +1411,10 @@ function buildPersonalizedGreeting(ltm: LongTermMemory): string {
   // 建议
   lines.push("\n基于你的偏好，以下是一些建议：");
   const suggestions: string[] = [];
+  const lastSearch = ltm.recentSearches[ltm.recentSearches.length - 1];
+  if (lastSearch) {
+    suggestions.push(`继续探索「${lastSearch.query}」相关内容`);
+  }
   if (ltm.preferredRegions.length > 0 && ltm.preferredObjects.length > 0) {
     suggestions.push(`查看${ltm.preferredRegions[0]}区域的${ltm.preferredObjects[0]}变化`);
   }
@@ -1887,6 +1833,11 @@ async function replayPendingAssetWriteIfNeeded(input: {
     return null;
   }
 
+  const userId = options.userId;
+  if (!userId) {
+    throw new Error("agent 调用缺少 userId，无法进行用户级数据隔离");
+  }
+
   const pending = options.sessionState?.lastOperationPreview;
   if (!pending?.toolName || !pending.args) {
     return null;
@@ -1924,6 +1875,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
     [
       "write_model_assets",
       buildWriteModelAssetsTool(supabase, {
+        userId,
         selectedModelIds: options.selectedModelIds,
         allowWrite: true,
       }),
@@ -1931,6 +1883,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
     [
       "rename_model_asset",
       buildRenameModelAssetTool(supabase, {
+        userId,
         selectedModelIds: options.selectedModelIds,
         allowWrite: true,
       }),
@@ -1938,6 +1891,7 @@ async function replayPendingAssetWriteIfNeeded(input: {
     [
       "batch_patch_model_metadata",
       buildBatchPatchModelMetadataTool(supabase, {
+        userId,
         selectedModelIds: options.selectedModelIds,
         allowWrite: true,
       }),
@@ -2073,6 +2027,7 @@ async function parseSpatialIntent(
 async function buildPoseTool(
   supabase: SupabaseClient,
   embeddings: OpenAIEmbeddings,
+  userId: string,
 ): Promise<DynamicStructuredTool> {
   return new DynamicStructuredTool({
     name: "pose_semantic_search",
@@ -2090,7 +2045,7 @@ async function buildPoseTool(
       const { data, error } = await supabase.rpc("match_memory_poses", {
         query_embedding: queryEmbedding,
         match_threshold: threshold,
-        match_count: limit,
+        match_count: Math.max(limit * 5, 20),
         filter_start: startTime,
         filter_end: endTime,
       } as never) as { data: unknown; error: { message: string } | null };
@@ -2099,9 +2054,14 @@ async function buildPoseTool(
         throw new Error(`pose_semantic_search 执行失败: ${error.message}`);
       }
 
-      const rows = Array.isArray(data)
+      const rawRows = Array.isArray(data)
         ? data as Array<Record<string, unknown>>
         : [];
+      // service role 下 RPC 内部 auth.uid() 为 NULL，函数会返回全库结果。
+      // 这里按 userId 在客户端再过滤一次，避免用户级数据互相暴露。
+      const rows = rawRows
+        .filter((row) => typeof row.user_id === "string" && row.user_id === userId)
+        .slice(0, limit);
       const enriched: PoseSearchRow[] = [];
       const modelIds = [...new Set(
         rows
@@ -2153,6 +2113,7 @@ async function buildPoseTool(
           .select(
             "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, display_name",
           )
+          .eq("user_id", userId)
           .in("id", modelIds);
 
         if (assetError) {
@@ -2217,6 +2178,7 @@ async function buildPoseTool(
 
 async function buildSceneTool(
   supabase: SupabaseClient,
+  userId: string,
 ): Promise<DynamicStructuredTool> {
   return new DynamicStructuredTool({
     name: "scene_metadata_search",
@@ -2235,6 +2197,7 @@ async function buildSceneTool(
         .select(
           "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
         )
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         // 避免把中文关键词直接下推到 ilike 过滤，减少 PostgREST 在大表上的慢查询风险。
         .limit(Math.max(limit * 20, 120));
@@ -2281,6 +2244,7 @@ async function buildSceneTool(
 
 async function buildRecentSceneTool(
   supabase: SupabaseClient,
+  userId: string,
 ): Promise<DynamicStructuredTool> {
   return new DynamicStructuredTool({
     name: "recent_scene_search",
@@ -2296,6 +2260,7 @@ async function buildRecentSceneTool(
         .select(
           "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
         )
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(limit);
 
@@ -2954,7 +2919,7 @@ function buildStopSearchTool(): DynamicStructuredTool {
   });
 }
 
-function buildTimeCompareTool(): DynamicStructuredTool {
+function buildTimeCompareTool(userId: string): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "time_compare",
     description:
@@ -2963,7 +2928,7 @@ function buildTimeCompareTool(): DynamicStructuredTool {
       query: z.string().describe("用户关于时间对比的自然语言查询"),
     }),
     func: async ({ query }) => {
-      const result = await runTimeCompareAgent(query);
+      const result = await runTimeCompareAgent(query, userId);
       return JSON.stringify(result);
     },
   });
@@ -3035,13 +3000,6 @@ async function executeUnifiedAgentLoop(input: {
     msgs.push(response);
     const toolCalls = Array.isArray(response.tool_calls) ? response.tool_calls : [];
     if (toolCalls.length === 0) {
-      await emitProgress(callbacks, {
-        event: "status",
-        data: {
-          phase: "direct_reply",
-          summary: "Agent 直接给出回答",
-        },
-      });
       return { messages: msgs, round, shouldStop: true };
     }
     return { messages: msgs, round, shouldStop: false };
@@ -3059,21 +3017,11 @@ async function executeUnifiedAgentLoop(input: {
     const toolCalls = Array.isArray(lastAiMsg?.tool_calls) ? lastAiMsg.tool_calls : [];
 
     let executedAny = false;
-    const duplicatedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
     for (const toolCall of toolCalls) {
       const toolArgs = toolCall.args ?? {};
       const sig = `${toolCall.name}:${stringifyToolArgs(toolArgs)}`;
       if (seen.has(sig)) {
-        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}，提示模型换思路`);
-        duplicatedToolCalls.push({ name: toolCall.name, args: toolArgs });
-        msgs.push(new ToolMessage({
-          tool_call_id: toolCall.id ?? toolCall.name,
-          content: JSON.stringify({
-            skipped: true,
-            reason: "duplicate_call",
-            message: `已跳过：${toolCall.name} 用相同参数已经在前面的轮次执行过，结果不会变化。`,
-          }),
-        }));
+        await emitThought(callbacks, `跳过重复调用 ${toolCall.name}`);
         continue;
       }
       seen.add(sig);
@@ -3147,30 +3095,6 @@ async function executeUnifiedAgentLoop(input: {
     }
 
     if (!executedAny) {
-      if (duplicatedToolCalls.length > 0) {
-        const duplicatedSummary = duplicatedToolCalls
-          .map((tc) => `${tc.name}(${stringifyToolArgs(tc.args)})`)
-          .join("; ");
-        msgs.push(new SystemMessage(
-          [
-            `本轮你请求的所有工具调用都已经在之前用相同参数执行过：${duplicatedSummary}。`,
-            "重复调用不会带来新信息，请改变策略：",
-            "1) 换工具（pose_semantic_search / scene_metadata_search / recent_scene_search 之间切换）；",
-            "2) 或显著修改参数（改写 query、放宽/收紧时间窗口、调整 sceneId/limit）；",
-            "3) 如果当前候选已经足够回答问题，调用 stop_search；",
-            "4) 如果确认无法找到匹配，也请调用 stop_search 并在 reason 中说明，不要再重复同一调用。",
-          ].join("\n"),
-        ));
-        await emitProgress(callbacks, {
-          event: "status",
-          data: {
-            phase: "duplicate_tool_calls_detected",
-            summary: `检测到 ${duplicatedToolCalls.length} 个重复工具调用，已注入策略切换提示`,
-            detail: duplicatedSummary,
-          },
-        });
-        return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: false };
-      }
       return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen, shouldStop: true };
     }
     return { messages: msgs, candidates: cands, assetState: aState, trace: tr, seenSignatures: seen };
@@ -3970,6 +3894,10 @@ async function buildTimeCompareModeResponse(
   options: SpatialSearchAgentOptions,
   callbacks?: AgentRuntimeCallbacks,
 ): Promise<SpatialSearchResponse> {
+  const userId = options.userId;
+  if (!userId) {
+    throw new Error("agent 调用缺少 userId，无法进行用户级数据隔离");
+  }
   await emitProgress(callbacks, {
     event: "status",
     data: {
@@ -3977,7 +3905,7 @@ async function buildTimeCompareModeResponse(
       summary: "已进入时间对比模式，正在对比时间窗口中的场景差异",
     },
   });
-  const result = await runTimeCompareAgent(query);
+  const result = await runTimeCompareAgent(query, userId);
   const selectedReason = result.comparison.target
     ? "优先选择最近时间窗口中的目标版本作为主候选"
     : "当前仅命中单侧时间窗口，保留现有可信证据";
@@ -4073,6 +4001,11 @@ async function buildCreativeModeResponse(input: {
   options: SpatialSearchAgentOptions;
   callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  const userId = input.options.userId;
+  if (!userId) {
+    throw new Error("agent 调用缺少 userId，无法进行用户级数据隔离");
+  }
+
   await emitProgress(input.callbacks, {
     event: "status",
     data: {
@@ -4089,6 +4022,7 @@ async function buildCreativeModeResponse(input: {
   const storyContext = await prepareStoryContext(input.supabase, {
     modelIds,
   }, {
+    userId,
     selectedModelIds: modelIds,
   });
   const outline = generateStoryOutlineFromContext(storyContext, input.query);
@@ -4106,6 +4040,7 @@ async function buildCreativeModeResponse(input: {
       modelIds,
       outline,
       currentSceneId: input.options.currentSceneId,
+      userId,
     })
     : null;
 
@@ -4174,6 +4109,11 @@ async function buildMemoryGraphModeResponse(input: {
   options: SpatialSearchAgentOptions;
   callbacks?: AgentRuntimeCallbacks;
 }): Promise<SpatialSearchResponse> {
+  const userId = input.options.userId;
+  if (!userId) {
+    throw new Error("agent 调用缺少 userId，无法进行用户级数据隔离");
+  }
+
   await emitProgress(input.callbacks, {
     event: "status",
     data: {
@@ -4190,18 +4130,22 @@ async function buildMemoryGraphModeResponse(input: {
   const trend = await getRecentPlaceTrend(input.supabase, {
     modelId: focusModelId,
     lookback: 5,
+    userId,
   });
   const missing = await findMissingObjectPattern(input.supabase, {
     modelId: focusModelId,
     objectName: "耳机",
     lookback: 5,
+    userId,
   });
   const timeline = await summarizePlaceChangeTimeline(input.supabase, {
     modelId: focusModelId,
     limit: 8,
+    userId,
   });
   const graph = await buildPersonalMemoryGraphSummary(input.supabase, {
     modelId: focusModelId,
+    userId,
   });
 
   return finalizeResponse({
@@ -4280,8 +4224,13 @@ export async function runSpatialSearchAgent(
   });
   options.presentation = assetPresentation;
 
-  if (options.userId && !options.longTermMemory) {
-    options.longTermMemory = await loadLongTermMemory(supabase, options.userId);
+  const userId = options.userId;
+  if (!userId) {
+    throw new Error("agent 调用缺少 userId，无法进行用户级数据隔离");
+  }
+
+  if (!options.longTermMemory) {
+    options.longTermMemory = await loadLongTermMemory(supabase, userId);
   }
 
   await emitProgress(callbacks, {
@@ -4332,9 +4281,12 @@ export async function runSpatialSearchAgent(
     }, options);
   }
 
-  // --- creative 保留独立路径 ---
+  // --- creative / memory_graph 保留独立路径 ---
   if (isCreativeQuery(query, options)) {
     return await buildCreativeModeResponse({ supabase, query, options, callbacks });
+  }
+  if (isMemoryGraphQuery(query, options)) {
+    return await buildMemoryGraphModeResponse({ supabase, query, options, callbacks });
   }
 
   // --- 资产写入重放（用户确认执行上一轮预览）---
@@ -4344,22 +4296,22 @@ export async function runSpatialSearchAgent(
   // --- 构建统一工具池 ---
   const embeddings = createEmbeddingsModel(env);
   const allTools: DynamicStructuredTool[] = [
-    await buildPoseTool(supabase, embeddings),
-    await buildSceneTool(supabase),
-    await buildRecentSceneTool(supabase),
-    buildReadModelAssetsTool(supabase, { selectedModelIds: options.selectedModelIds, embeddings }),
-    buildWriteModelAssetsTool(supabase, { selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
-    buildRenameModelAssetTool(supabase, { selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
-    buildBatchPatchModelMetadataTool(supabase, { selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
-    buildGetModelAssetBundleTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildCompareModelAssetsTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildGetPoseSummaryTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildFindRelatedModelsTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildListPlaceVersionsTool(supabase),
-    buildCreateMemoryCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildAddModelsToCollectionTool(supabase, { selectedModelIds: options.selectedModelIds }),
-    buildSummarizeCollectionTool(supabase),
-    buildTimeCompareTool(),
+    await buildPoseTool(supabase, embeddings, userId),
+    await buildSceneTool(supabase, userId),
+    await buildRecentSceneTool(supabase, userId),
+    buildReadModelAssetsTool(supabase, { userId, selectedModelIds: options.selectedModelIds, embeddings }),
+    buildWriteModelAssetsTool(supabase, { userId, selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
+    buildRenameModelAssetTool(supabase, { userId, selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
+    buildBatchPatchModelMetadataTool(supabase, { userId, selectedModelIds: options.selectedModelIds, allowWrite: options.executionMode === "execute" }),
+    buildGetModelAssetBundleTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildCompareModelAssetsTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildGetPoseSummaryTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildFindRelatedModelsTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildListPlaceVersionsTool(supabase, { userId }),
+    buildCreateMemoryCollectionTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildAddModelsToCollectionTool(supabase, { userId, selectedModelIds: options.selectedModelIds }),
+    buildSummarizeCollectionTool(supabase, { userId }),
+    buildTimeCompareTool(userId),
     buildStopSearchTool(),
   ];
 
@@ -4470,12 +4422,11 @@ export async function runSpatialSearchAgent(
   const topCandidates = deduplicatedCandidates
     .slice(0, spatialPresentation.effective_model_count)
     .map(serializeSceneCandidate);
-  const lastAgentText = extractLastAgentTextFromMessages(finalMessages);
+  const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
   const answer = pickSpatialSearchAnswerAfterStop({
     trace,
-    stopSummary: lastAgentText,
+    stopSummary: stopSearchSummary,
     deterministicAnswer: selection.answer,
-    directAnswer: lastAgentText,
   });
 
   return finalizeResponseWithLongTermMemory(supabase, {

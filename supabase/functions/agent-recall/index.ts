@@ -105,16 +105,11 @@ serve(async (req: Request) => {
 
           void (async () => {
             try {
-              let messageStreamed = false;
               const result = await runSpatialSearchAgent(
                 parsed.data.query,
                 agentOptions,
                 {
                   onEvent: async (event: AgentProgressEvent) => {
-                    if (event.event === "message") {
-                      const delta = (event.data as { delta?: string })?.delta ?? "";
-                      if (delta.length > 0) messageStreamed = true;
-                    }
                     writeStreamEvent(
                       controller,
                       streamFormat,
@@ -125,16 +120,14 @@ serve(async (req: Request) => {
                 },
               );
 
-              if (!messageStreamed) {
-                writeStreamEvent(controller, streamFormat, "status", {
-                  phase: "final_answer",
-                  summary: "检索与工具调用已完成，正在整理最终回答",
+              writeStreamEvent(controller, streamFormat, "status", {
+                phase: "final_answer",
+                summary: "检索与工具调用已完成，正在整理最终回答",
+              });
+              for (const chunk of chunkText(result.answer)) {
+                writeStreamEvent(controller, streamFormat, "message", {
+                  delta: chunk,
                 });
-                for (const chunk of chunkText(result.answer)) {
-                  writeStreamEvent(controller, streamFormat, "message", {
-                    delta: chunk,
-                  });
-                }
               }
 
               writeStreamEvent(controller, streamFormat, "done", result);
