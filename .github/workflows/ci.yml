@@ -29,12 +29,12 @@ jobs:
 
       # ── CI 需要的占位文件，本地由 build_to_flutter.ps1 生成 ──
       - name: Create placeholder assets for CI
-        working-directory: ${{ github.workspace }}
         run: |
-          touch app/.env
-          mkdir -p app/assets/webgl/assets app/assets/webgl_spark/assets
-          echo "// CI placeholder" > app/assets/webgl/assets/.gitkeep
-          echo "// CI placeholder" > app/assets/webgl_spark/assets/.gitkeep
+          touch .env
+          mkdir -p assets/webgl/assets assets/webgl_spark/assets
+          echo "// placeholder" > assets/webgl/assets/.gitkeep
+          echo "// placeholder" > assets/webgl_spark/assets/.gitkeep
+          ls -la .env assets/webgl/assets/ assets/webgl_spark/assets/
 
       - uses: subosito/flutter-action@v2
         with:
