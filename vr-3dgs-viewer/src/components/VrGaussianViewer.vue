@@ -99,7 +99,6 @@ const status = ref('等待初始化')
 const errorMessage = ref('')
 const fps = ref(0)
 const isVrPresenting = ref(false)
-const isVrSessionStarting = ref(false)
 const persistedClientState = loadViewerClientState()
 const previewMode = ref<PreviewMode>(persistedClientState.previewMode || getPreviewMode())
 const activePayload = ref<BrainDanceViewerPayload | null>(null)
@@ -2918,9 +2917,7 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
     antialiased: false,
     ignoreDevicePixelRatio: true,
     dynamicScene: true,
-    // WebXR 会话由本组件的“进入 VR”按钮统一管理；禁用库内置 VRButton，
-    // 避免第三方按钮和自定义按钮同时 requestSession 导致重复会话异常。
-    webXRMode: GaussianSplats3D.WebXRMode.None,
+    webXRMode: previewMode.value === 'webxr' ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
     sphericalHarmonicsDegree: 0,
     selfDrivenMode: previewMode.value !== 'stereo',
     useBuiltInControls: previewMode.value !== 'webxr',
@@ -3229,7 +3226,6 @@ function installXrSessionListeners() {
   if (!xr?.addEventListener) return
   xrSessionListenersInstalled = true
   xr.addEventListener('sessionstart', () => {
-    isVrSessionStarting.value = false
     isVrPresenting.value = true
     xrSession = xr.getSession() || xrSession
     ensureSceneRoots()
@@ -3240,7 +3236,6 @@ function installXrSessionListeners() {
     status.value = 'WebXR 会话已启动'
   })
   xr.addEventListener('sessionend', () => {
-    isVrSessionStarting.value = false
     isVrPresenting.value = false
     xrSession = null
     stopControllerLoop()
@@ -3252,7 +3247,6 @@ function installXrSessionListeners() {
 
 function syncActiveVrSession(session: XRSession) {
   const runtime = getRuntimeViewer()
-  isVrSessionStarting.value = false
   xrSession = session
   isVrPresenting.value = true
   runtime?.renderer?.xr.setReferenceSpaceType?.('local-floor')
@@ -3287,10 +3281,6 @@ function getXrErrorMessage(error: unknown) {
 
 async function enterVrSession() {
   const runtime = getRuntimeViewer()
-  if (isVrSessionStarting.value) {
-    status.value = 'WebXR 会话正在启动'
-    return
-  }
   if (!runtime?.renderer?.xr) {
     errorMessage.value = 'VR 渲染器尚未初始化，请等待模型加载完成后再进入 VR。'
     return
@@ -3306,37 +3296,18 @@ async function enterVrSession() {
     return
   }
 
-  try {
-    isVrSessionStarting.value = true
-    status.value = '正在请求 WebXR 会话'
-    errorMessage.value = ''
-    runtime.renderer.xr.enabled = true
-    runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
-    installXrSessionListeners()
-
-    const supported = await navigator.xr.isSessionSupported?.('immersive-vr')
-    if (supported === false) {
-      isVrSessionStarting.value = false
-      errorMessage.value = '当前 WebXR 运行时不支持 immersive-vr，请确认 SteamVR 已启动并识别头显。'
-      status.value = 'WebXR 会话未启动'
-      return
-    }
-
-    const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'],
-    })
-    await runtime.renderer.xr.setSession(session)
-    syncActiveVrSession(session)
-  } catch (error) {
-    isVrSessionStarting.value = false
-    console.error('[BrainDance VR] 进入 VR 失败:', error)
-    errorMessage.value = getXrErrorMessage(error)
-    status.value = 'WebXR 会话启动失败'
+  const builtInButton = containerRef.value?.querySelector<HTMLButtonElement>('#VRButton')
+  if (!builtInButton || builtInButton.disabled || builtInButton.textContent?.includes('NOT')) {
+    errorMessage.value = '内置 WebXR 入口尚未就绪，请确认使用 HTTPS、SteamVR 已启动且浏览器支持 WebXR。'
+    status.value = 'WebXR 会话未启动'
+    return
   }
+  status.value = '正在通过内置 WebXR 入口进入 VR'
+  errorMessage.value = ''
+  builtInButton.click()
 }
 
 async function exitVrSession() {
-  isVrSessionStarting.value = false
   const runtime = getRuntimeViewer()
   const session = runtime?.renderer?.xr.getSession() || xrSession
   if (session) await session.end()
@@ -3545,9 +3516,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="button-row xr-row">
-        <button type="button" :disabled="isVrSessionStarting || isVrPresenting" @click="enterVrSession">
-          {{ isVrSessionStarting ? '启动中' : (isVrPresenting ? 'VR 中' : '进入 VR') }}
-        </button>
+        <button type="button" :disabled="isVrPresenting" @click="enterVrSession">{{ isVrPresenting ? 'VR 中' : '进入 VR' }}</button>
         <button type="button" @click="exitVrSession">退出 VR</button>
         <button type="button" @click="isDesktopPanelOpen = !isDesktopPanelOpen">面板</button>
       </div>
