@@ -362,7 +362,7 @@ class CommunityRepository {
         },
       }).select('id');
 
-      if (insertResult is List && insertResult.isNotEmpty) {
+      if (insertResult.isNotEmpty) {
         final realId = insertResult[0]['id']?.toString();
         if (realId != null && realId.isNotEmpty) {
           return optimistic.copyWithRealId(realId);

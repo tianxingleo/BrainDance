@@ -27,15 +27,15 @@ extension _RecallPageDataSync on _RecallPageState {
 
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
-    final taskId = (newData?['id'] ?? oldData?['id'])?.toString();
+    final taskId = (newData['id'] ?? oldData['id'])?.toString();
     final String? status =
-        newData?['status']?.toString() ?? oldData?['status']?.toString();
+        newData['status']?.toString() ?? oldData['status']?.toString();
 
     if (taskId == null) return;
 
     if (status == 'processing') {
       // 更新或添加 processing 任务
-      final rawLogs = newData?['logs'];
+      final rawLogs = newData['logs'];
       final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
       final allLogs = _parseAllLogMsgs(logsJson);
       if (mounted) {
@@ -53,8 +53,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       // 终态前再扫一次最新 logs，避免错过最后一次写入的里程碑
-      final rawLogs = newData?['logs'];
-      final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
+      final rawLogs = newData['logs'];
       final finalLogs = _parseAllLogMsgs(logsJson);
       _processDualChainMilestones(taskId, newData, finalLogs);
       if (mounted) {

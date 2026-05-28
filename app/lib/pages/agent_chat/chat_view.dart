@@ -372,7 +372,7 @@ extension _AgentChatView on _AgentChatPageState {
             !isTimeCompareMode &&
             topCandidates.isEmpty) ...[
           const SizedBox(height: 12),
-          _buildOpenSceneButton(result!, isDark),
+          _buildOpenSceneButton(result, isDark),
         ],
         if (result?.mode != null &&
             !(isAssetMode && assetModels.isNotEmpty)) ...[

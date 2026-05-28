@@ -727,9 +727,9 @@ class _RecordPageState extends ConsumerState<RecordPage>
             }
           }
         } finally {
-          unawaited(File(filePath).delete().catchError((_) {}));
+          unawaited(File(filePath).delete().catchError((_) => File('')));
           if (compressedPath != null) {
-            unawaited(File(compressedPath).delete().catchError((_) {}));
+            unawaited(File(compressedPath).delete().catchError((_) => File('')));
           }
         }
 
@@ -910,7 +910,7 @@ class _RecordPageState extends ConsumerState<RecordPage>
 
   void _resetStreamingState() {
     for (final (filePath, _) in _uploadQueue) {
-      unawaited(File(filePath).delete().catchError((_) {}));
+      unawaited(File(filePath).delete().catchError((_) => File('')));
     }
     _uploadQueue.clear();
     _queueLocked = false;
