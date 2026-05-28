@@ -304,7 +304,7 @@ extension _AgentChatView on _AgentChatPageState {
                   )
                 : MarkdownBody(
                     data: answer,
-                    builders: {'code': CodeElementBuilder(isDark, context)},
+                    builders: {'code': CodeElementBuilder(isDark)},
                     styleSheet: MarkdownStyleSheet(
                       p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
                       code: TextStyle(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,6 +14,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/download_event_bus.dart';
+import '../services/dual_chain_phase.dart';
 
 // ============================================================
 // Dev/prod mode notes
@@ -67,6 +69,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   bool _downloadCancelled = false;
   late bool _useSparkViewer;
   bool _isMarkerArMode = false;
+  StreamSubscription<DualChainEvent>? _dualChainSub;
+  bool _slowReadyDialogShown = false;
+  bool _isReloadingForSlowChain = false;
 
   void _attachViewerHeaders(HttpResponse response) {
     response.headers.add('Access-Control-Allow-Origin', '*');
@@ -85,6 +90,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     super.initState();
     _useSparkViewer = widget.useSparkViewer || widget.initialMarkerArMode;
     _isMarkerArMode = widget.initialMarkerArMode;
+    _dualChainSub = dualChainEventStream.listen(_onDualChainEvent);
 
     // Flutter Web is not supported here. Desktop uses the external browser mode.
     if (kIsWeb) {
@@ -112,7 +118,80 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   void dispose() {
     _downloadCancelled = true;
     _localServer?.close();
+    _dualChainSub?.cancel();
     super.dispose();
+  }
+
+  /// 监听 Recall 端广播的双链事件。当当前 Viewer 正在显示的 sceneId 命中
+  /// 慢链完成里程碑时，弹出对话框允许用户重载到完整模型。
+  void _onDualChainEvent(DualChainEvent event) {
+    if (!mounted) return;
+    if (_slowReadyDialogShown) return;
+    if (event.milestone != DualChainMilestone.slowReady) return;
+    if (event.sceneId.isEmpty) return;
+    if (event.sceneId != widget.sceneId) return;
+
+    _slowReadyDialogShown = true;
+    // 调度到 frame 之外，避免在 build 过程中 showDialog 引发断言。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _showSlowReadyDialog();
+    });
+  }
+
+  Future<void> _showSlowReadyDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(textLocalize('dual_chain_viewer_dialog_title')),
+        content: Text(textLocalize('dual_chain_viewer_dialog_body')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(textLocalize('dual_chain_viewer_dialog_keep')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(textLocalize('dual_chain_viewer_dialog_reload')),
+          ),
+        ],
+      ),
+    );
+    if (result == true && mounted) {
+      await _reloadModelToLatestVersion();
+    }
+  }
+
+  /// 慢链完成后用户选择"重新加载"：清掉本地缓存路径并重走下载/加载流程。
+  /// Recall 端的 invalidateViewerCacheForUrl 已经先清了磁盘文件，因此
+  /// _prepareModelAndLoad 会发现 localFile 不存在并重新下载完整模型。
+  Future<void> _reloadModelToLatestVersion() async {
+    if (!mounted || _isReloadingForSlowChain) return;
+    setState(() {
+      _isReloadingForSlowChain = true;
+      _localModelPath = null;
+      _isWebReady = false;
+      _isDownloading = false;
+      _downloadProgress = 0.0;
+      _downloadedBytes = 0;
+      _totalBytes = -1;
+      _downloadCancelled = false;
+    });
+    try {
+      await _prepareModelAndLoad();
+    } catch (e) {
+      debugPrint('[WebGLViewer] reload to latest failed: $e');
+      if (mounted) {
+        showAppToast(context, textLocalize('viewer_download_fail'));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isReloadingForSlowChain = false;
+        });
+      }
+    }
   }
 
   void _stopDownload() {
