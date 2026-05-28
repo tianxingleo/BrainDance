@@ -38,9 +38,8 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          # pubspec.yaml 中 environment.sdk: ^3.10.7
-          # flutter-action 会自动选择 channel 中满足约束的最新版本
+          # 锁定版本避免最新 stable 引入 breaking change（如 IconData 变 final）
+          flutter-version: '3.38.0'
           cache: true
 
       - name: Install dependencies
