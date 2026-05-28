@@ -327,6 +327,7 @@ const queueCount = computed(() => pendingCount.value + processingCount.value)
 
 const refreshModeText = computed(() => (autoRefresh.value ? `${refreshSeconds.value}s 自动刷新` : '手动刷新'))
 const totalUserCount = computed(() => userSummaries.value.length)
+const resourceRecordCount = computed(() => modelAssetCount.value + memoryPoseCount.value)
 
 const storageModeText = computed(() => {
   if (storageProbeMode.value === 'bucket_list') return '列桶模式'
@@ -795,9 +796,9 @@ const overviewCards = computed(() => [
   },
   {
     key: 'assets',
-    label: '模型资产',
-    value: `${modelAssetCount.value}`,
-    note: `姿态 ${memoryPoseCount.value}`,
+    label: '资源数据',
+    value: `${resourceRecordCount.value}`,
+    note: `模型 ${modelAssetCount.value} / 姿态 ${memoryPoseCount.value}`,
     icon: 'lucide:boxes',
     tone: 'neutral' as const,
   },
@@ -1184,51 +1185,58 @@ const refreshDashboard = async () => {
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
   ])
 
-  if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
-    errorMessage.value =
-      tasksRes.error?.message ||
-      workerRes.error?.message ||
-      processingTaskCountRes.error?.message ||
-      assetCountRes.error?.message ||
-      poseCountRes.error?.message ||
-      '数据读取失败'
-  } else {
-    if (ragCountRes.error) dataWarnings.value.push(`rag_docs 计数失败：${ragCountRes.error.message}`)
-    if (taskTableCountRes.error) dataWarnings.value.push(`tasks 计数失败：${taskTableCountRes.error.message}`)
-    if (task24hRes.error) dataWarnings.value.push(`24h 任务统计失败：${task24hRes.error.message}`)
-    if (asset7dRes.error) dataWarnings.value.push(`7d 资产统计失败：${asset7dRes.error.message}`)
+  const readErrors = [
+    tasksRes.error ? `processing_tasks 列表读取失败：${tasksRes.error.message}` : '',
+    workerRes.error ? `worker_nodes 读取失败：${workerRes.error.message}` : '',
+    processingTaskCountRes.error ? `processing_tasks 计数失败：${processingTaskCountRes.error.message}` : '',
+    assetCountRes.error ? `model_assets 计数失败：${assetCountRes.error.message}` : '',
+    poseCountRes.error ? `memory_poses 计数失败：${poseCountRes.error.message}` : '',
+  ].filter(Boolean)
 
-    const tasks = (tasksRes.data ?? []) as ProcessingTask[]
-    const workers = (workerRes.data ?? []) as WorkerNode[]
-    const activityRows = await fetchUserActivitySummary(since24h, since7d)
+  dataWarnings.value.push(
+    ...readErrors,
+    ...(ragCountRes.error ? [`rag_docs 计数失败：${ragCountRes.error.message}`] : []),
+    ...(taskTableCountRes.error ? [`tasks 计数失败：${taskTableCountRes.error.message}`] : []),
+    ...(task24hRes.error ? [`24h 任务统计失败：${task24hRes.error.message}`] : []),
+    ...(asset7dRes.error ? [`7d 资产统计失败：${asset7dRes.error.message}`] : []),
+  )
 
-    taskRows.value = tasks
-    workerRows.value = workers
-    userSummaries.value = buildUserSummaries(activityRows)
-    modelAssetCount.value = assetCountRes.count ?? 0
-    memoryPoseCount.value = poseCountRes.count ?? 0
-
-    const tasks24hRows = (task24hRes.data ?? []) as Array<{ status: string; user_id: string }>
-    timeBasedStats.value = {
-      tasks24h: task24hRes.error ? 0 : (task24hRes.count ?? 0),
-      failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
-      completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
-      totalUsers: userSummaries.value.length,
-      activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
-      activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
-      assets7d: asset7dRes.error ? 0 : (asset7dRes.count ?? 0),
-    }
-
-    dbCounts.value = {
-      processing_tasks: processingTaskCountRes.count ?? 0,
-      model_assets: assetCountRes.count ?? 0,
-      memory_poses: poseCountRes.count ?? 0,
-      rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
-      tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
-    }
-
-    lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
+  if (readErrors.length) {
+    errorMessage.value = '部分数据读取失败，已保留可读取的数据。'
   }
+
+  const tasks = tasksRes.error ? [] : ((tasksRes.data ?? []) as ProcessingTask[])
+  const workers = workerRes.error ? [] : ((workerRes.data ?? []) as WorkerNode[])
+  const activityRows = await fetchUserActivitySummary(since24h, since7d)
+
+  taskRows.value = tasks
+  workerRows.value = workers
+  userSummaries.value = buildUserSummaries(activityRows)
+  modelAssetCount.value = assetCountRes.error ? 0 : (assetCountRes.count ?? 0)
+  memoryPoseCount.value = poseCountRes.error ? 0 : (poseCountRes.count ?? 0)
+
+  const tasks24hRows = task24hRes.error
+    ? []
+    : ((task24hRes.data ?? []) as Array<{ status: string; user_id: string }>)
+  timeBasedStats.value = {
+    tasks24h: task24hRes.error ? 0 : (task24hRes.count ?? 0),
+    failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
+    completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
+    totalUsers: userSummaries.value.length,
+    activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
+    activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
+    assets7d: asset7dRes.error ? 0 : (asset7dRes.count ?? 0),
+  }
+
+  dbCounts.value = {
+    processing_tasks: processingTaskCountRes.error ? 0 : (processingTaskCountRes.count ?? 0),
+    model_assets: assetCountRes.error ? 0 : (assetCountRes.count ?? 0),
+    memory_poses: poseCountRes.error ? 0 : (poseCountRes.count ?? 0),
+    rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
+    tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
+  }
+
+  lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
 
   await Promise.all([fetchStorageStats(), refreshEdgeChecks()])
 
@@ -1433,8 +1441,8 @@ onUnmounted(() => {
               <strong>{{ failedCount }}</strong>
             </article>
             <article class="phone-stat-card">
-              <span>资产</span>
-              <strong>{{ modelAssetCount }}</strong>
+              <span>资源</span>
+              <strong>{{ resourceRecordCount }}</strong>
             </article>
             <article class="phone-stat-card">
               <span>用户</span>
