@@ -1252,6 +1252,26 @@ function addHudAction(action: HudAction) {
   hudActions.push(action)
 }
 
+function fitHudText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) return text
+  const ellipsis = '...'
+  let left = 0
+  let right = text.length
+  while (left < right) {
+    const mid = Math.ceil((left + right) / 2)
+    if (ctx.measureText(`${text.slice(0, mid)}${ellipsis}`).width <= maxWidth) {
+      left = mid
+    } else {
+      right = mid - 1
+    }
+  }
+  return `${text.slice(0, left)}${ellipsis}`
+}
+
+function fillHudText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number) {
+  ctx.fillText(fitHudText(ctx, text, maxWidth), x, y)
+}
+
 function drawHudButton(
   ctx: CanvasRenderingContext2D,
   action: HudAction,
@@ -1277,7 +1297,7 @@ function drawHudButton(
   ctx.font = '700 20px Inter, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(action.label.slice(0, 18), action.x + action.width / 2, action.y + action.height / 2)
+  ctx.fillText(fitHudText(ctx, action.label, action.width - 20), action.x + action.width / 2, action.y + action.height / 2)
   ctx.restore()
 }
 
@@ -1307,10 +1327,10 @@ function drawHudListItem(
   ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = '#f7f8fb'
   ctx.font = '700 22px Inter, sans-serif'
-  ctx.fillText(action.label.slice(0, 32), action.x + 18, action.y + 28)
+  fillHudText(ctx, action.label, action.x + 18, action.y + 28, action.width - 36)
   ctx.fillStyle = 'rgba(247, 248, 251, 0.62)'
   ctx.font = '18px Inter, sans-serif'
-  ctx.fillText(meta.slice(0, 64), action.x + 18, action.y + 54)
+  fillHudText(ctx, meta, action.x + 18, action.y + 54, action.width - 36)
   ctx.restore()
 }
 
@@ -1328,7 +1348,7 @@ function drawHudTabs(ctx: CanvasRenderingContext2D) {
       id: `tab:${tab.view}`,
       label: tab.label,
       x: 44 + index * 148,
-      y: 206,
+      y: 222,
       width: 132,
       height: 42,
       kind: 'tab',
@@ -1352,7 +1372,7 @@ function drawHudControls(ctx: CanvasRenderingContext2D) {
       id: button.id,
       label: button.label,
       x: 44 + index * 134,
-      y: 282,
+      y: 292,
       width: 120,
       height: 42,
       kind: 'button',
@@ -1374,7 +1394,7 @@ function drawHudControls(ctx: CanvasRenderingContext2D) {
       id: button.id,
       label: button.label,
       x: 44 + index * 154,
-      y: 338,
+      y: 348,
       width: 140,
       height: 42,
       kind: 'button',
@@ -1398,7 +1418,7 @@ function drawHudControls(ctx: CanvasRenderingContext2D) {
       id: button.id,
       label: button.label,
       x: 44 + index * 116,
-      y: 394,
+      y: 404,
       width: 102,
       height: 42,
       kind: 'button',
@@ -1410,8 +1430,8 @@ function drawHudControls(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = 'rgba(247, 248, 251, 0.70)'
   ctx.font = '22px Inter, sans-serif'
   ctx.textAlign = 'left'
-  ctx.fillText(`当前：${modelLabel.value} / ${qualityLabel.value} / ${measurementDistanceLabel.value}`, 44, 492)
-  ctx.fillText(`提示：用控制器光标指向按钮，扣 Trigger 执行；Grip 抓取模型，双手 Grip 缩放。`, 44, 532)
+  fillHudText(ctx, `当前：${modelLabel.value} / ${qualityLabel.value} / ${measurementDistanceLabel.value}`, 44, 502, 936)
+  fillHudText(ctx, `提示：用控制器光标指向按钮，扣 Trigger 执行；Grip 抓取模型，双手 Grip 缩放。`, 44, 542, 936)
 }
 
 function drawHudAuth(ctx: CanvasRenderingContext2D) {
@@ -1466,15 +1486,15 @@ function drawHudAuth(ctx: CanvasRenderingContext2D) {
 }
 
 function drawHudCollection(ctx: CanvasRenderingContext2D) {
-  const yStart = 278
+  const yStart = hudView.value === 'models' ? 350 : 292
   const rowHeight = 68
-  const maxRows = 5
+  const maxRows = hudView.value === 'models' ? 3 : 4
   if (hudView.value === 'models') {
     drawHudButton(ctx, {
       id: 'models:refresh',
       label: remoteModelsLoading.value ? '同步中' : '刷新云端',
       x: 44,
-      y: 214,
+      y: 292,
       width: 188,
       height: 46,
       kind: 'button',
@@ -1486,7 +1506,7 @@ function drawHudCollection(ctx: CanvasRenderingContext2D) {
       id: 'models:source',
       label: remoteModelSource.value === 'mine' ? '我的模型' : '社区模型',
       x: 252,
-      y: 214,
+      y: 292,
       width: 188,
       height: 46,
       kind: 'button',
@@ -1574,21 +1594,21 @@ function drawHud() {
 
   ctx.fillStyle = '#f7f8fb'
   ctx.font = '700 48px Inter, sans-serif'
-  ctx.fillText('BrainDance VR', 44, 72)
+  fillHudText(ctx, 'BrainDance VR', 44, 72, 936)
   ctx.font = '28px Inter, sans-serif'
   ctx.fillStyle = 'rgba(247, 248, 251, 0.82)'
-  ctx.fillText(`${loadPhase.value.toUpperCase()} · ${loadText.value}`, 44, 118)
+  fillHudText(ctx, `${loadPhase.value.toUpperCase()} · ${loadText.value}`, 44, 116, 936)
 
   const barWidth = 520
   ctx.fillStyle = 'rgba(247, 248, 251, 0.14)'
-  ctx.fillRect(44, 148, barWidth, 18)
+  ctx.fillRect(44, 136, barWidth, 18)
   ctx.fillStyle = '#9ed0c6'
-  ctx.fillRect(44, 148, barWidth * loadProgress.value, 18)
+  ctx.fillRect(44, 136, barWidth * loadProgress.value, 18)
 
   ctx.font = '24px Inter, sans-serif'
   ctx.fillStyle = '#f7f8fb'
-  ctx.fillText(`FPS ${fps.value || '--'}   |   模型 ${modelLabel.value}`, 44, 224)
-  ctx.fillText(`用户 ${authLabel.value}   |   状态 ${status.value}`, 44, 184)
+  fillHudText(ctx, `用户 ${authLabel.value}   |   状态 ${status.value}`, 44, 184, 936)
+  fillHudText(ctx, `FPS ${fps.value || '--'}   |   模型 ${modelLabel.value}`, 44, 212, 936)
 
   drawHudTabs(ctx)
   if (hudView.value === 'controls') {
@@ -1603,7 +1623,7 @@ function drawHud() {
   ctx.fillStyle = hover ? '#f2c38f' : 'rgba(247, 248, 251, 0.58)'
   ctx.font = '20px Inter, sans-serif'
   ctx.textAlign = 'left'
-  ctx.fillText(hover ? `Trigger：${hover.label}` : '光标指向按钮后扣 Trigger 选择；B/Y 收起或展开 HUD。', 44, 614)
+  fillHudText(ctx, hover ? `Trigger：${hover.label}` : '光标指向按钮后扣 Trigger 选择；B/Y 收起或展开 HUD。', 44, 614, 900)
 
   if (hudPointerHit && hudPointerDistance > 0) {
     ctx.fillStyle = '#f2c38f'
@@ -3225,24 +3245,66 @@ function installXrSessionListeners() {
   })
 }
 
-async function enterVrSession() {
+function syncActiveVrSession(session: XRSession) {
   const runtime = getRuntimeViewer()
-  if (!runtime?.renderer?.xr || !navigator.xr) return
-  runtime.renderer.xr.enabled = true
-  runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
-  installXrSessionListeners()
-  const session = await navigator.xr.requestSession('immersive-vr', {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
-  })
-  await runtime.renderer.xr.setSession(session)
   xrSession = session
   isVrPresenting.value = true
+  runtime?.renderer?.xr.setReferenceSpaceType?.('local-floor')
   ensureSceneRoots()
   ensureSpectatorRenderer()
   resizeSpectatorRenderer()
   ensureControllerRig()
   refreshHudDisplay()
   startControllerLoop()
+  status.value = 'WebXR 会话已启动'
+  errorMessage.value = ''
+}
+
+function getXrErrorMessage(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === 'InvalidStateError') {
+      return '已有沉浸式 XR 会话正在运行，请先退出当前 VR 会话后再重新进入。'
+    }
+    if (error.name === 'NotSupportedError') {
+      return '当前浏览器或运行时不支持 immersive-vr，请确认使用 PC Chrome/Edge 并已启动 SteamVR。'
+    }
+    if (error.name === 'SecurityError') {
+      return 'WebXR 需要 HTTPS 安全上下文，请使用 https://127.0.0.1:5174 打开。'
+    }
+    if (error.name === 'NotAllowedError') {
+      return '浏览器拒绝启动 VR 会话，请确认这是由按钮点击触发且站点允许 XR 权限。'
+    }
+    return `${error.name}: ${error.message}`
+  }
+  return error instanceof Error ? error.message : '进入 VR 失败'
+}
+
+async function enterVrSession() {
+  const runtime = getRuntimeViewer()
+  if (!runtime?.renderer?.xr) {
+    errorMessage.value = 'VR 渲染器尚未初始化，请等待模型加载完成后再进入 VR。'
+    return
+  }
+  if (!navigator.xr) {
+    errorMessage.value = '当前页面没有 WebXR 能力，请确认使用 HTTPS 和支持 WebXR 的 PC Chrome/Edge。'
+    return
+  }
+
+  const existingSession = runtime.renderer.xr.getSession() || xrSession
+  if (existingSession) {
+    syncActiveVrSession(existingSession)
+    return
+  }
+
+  const builtInButton = containerRef.value?.querySelector<HTMLButtonElement>('#VRButton')
+  if (!builtInButton || builtInButton.disabled || builtInButton.textContent?.includes('NOT')) {
+    errorMessage.value = '内置 WebXR 入口尚未就绪，请确认使用 HTTPS、SteamVR 已启动且浏览器支持 WebXR。'
+    status.value = 'WebXR 会话未启动'
+    return
+  }
+  status.value = '正在通过内置 WebXR 入口进入 VR'
+  errorMessage.value = ''
+  builtInButton.click()
 }
 
 async function exitVrSession() {
@@ -3454,7 +3516,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="button-row xr-row">
-        <button type="button" @click="enterVrSession">进入 VR</button>
+        <button type="button" :disabled="isVrPresenting" @click="enterVrSession">{{ isVrPresenting ? 'VR 中' : '进入 VR' }}</button>
         <button type="button" @click="exitVrSession">退出 VR</button>
         <button type="button" @click="isDesktopPanelOpen = !isDesktopPanelOpen">面板</button>
       </div>

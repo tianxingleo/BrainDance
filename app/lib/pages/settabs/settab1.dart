@@ -58,8 +58,6 @@ class _LanguageRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
-    final actionColor = isDark ? BDDesign.colorMutedBlueLight : BDDesign.colorMutedBlue;
-
     return Row(
       children: [
         Text(

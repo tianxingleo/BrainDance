@@ -1,6 +1,3 @@
-import 'package:flutter/foundation.dart';
-import 'package:braindance/configs/supabase_config.dart';
-
 class LocalAiPresetData {
   static bool? _overriddenEnabled;
 
