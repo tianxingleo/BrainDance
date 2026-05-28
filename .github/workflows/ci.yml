@@ -38,8 +38,8 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          # 锁定版本避免最新 stable 引入 breaking change（如 IconData 变 final）
-          flutter-version: '3.38.0'
+          # 锁定版本避免 latest stable 引入 breaking change
+          flutter-version: '3.41.2'
           cache: true
 
       - name: Install dependencies
