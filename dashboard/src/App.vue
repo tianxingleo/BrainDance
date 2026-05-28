@@ -89,7 +89,7 @@ interface WorkerNode {
   } | null
 }
 
-interface UserActivityRpcRow {
+interface UserActivityAggregateRow {
   user_id: string
   total_tasks: number
   tasks_24h: number
@@ -871,7 +871,7 @@ const formatUserId = (userId: string) => {
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`
 }
 
-const buildUserSummaries = (rows: UserActivityRpcRow[]): UserActivitySummary[] =>
+const buildUserSummaries = (rows: UserActivityAggregateRow[]): UserActivitySummary[] =>
   rows.map((s) => ({
     userId: s.user_id,
     displayName: s.user_id.slice(0, 8) + '...',
@@ -883,7 +883,7 @@ const buildUserSummaries = (rows: UserActivityRpcRow[]): UserActivitySummary[] =
     lastSeenAt: s.last_active,
   }))
 
-const fetchFallbackUserActivity = async (since24h: string, since7d: string) => {
+const fetchUserActivitySummary = async (since24h: string, since7d: string) => {
   const [taskUserRes, assetUserRes] = await Promise.all([
     supabase
       .from('processing_tasks')
@@ -899,16 +899,16 @@ const fetchFallbackUserActivity = async (since24h: string, since7d: string) => {
 
   if (taskUserRes.error || assetUserRes.error) {
     dataWarnings.value.push(
-      `用户活跃兜底聚合失败：${taskUserRes.error?.message || assetUserRes.error?.message || '未知错误'}`,
+      `用户活跃聚合失败：${taskUserRes.error?.message || assetUserRes.error?.message || '未知错误'}`,
     )
     return []
   }
 
-  const byUser = new Map<string, UserActivityRpcRow>()
+  const byUser = new Map<string, UserActivityAggregateRow>()
   const ensureUser = (userId: string) => {
     const existing = byUser.get(userId)
     if (existing) return existing
-    const created: UserActivityRpcRow = {
+    const created: UserActivityAggregateRow = {
       user_id: userId,
       total_tasks: 0,
       tasks_24h: 0,
@@ -921,7 +921,7 @@ const fetchFallbackUserActivity = async (since24h: string, since7d: string) => {
     return created
   }
 
-  const touchLastActive = (row: UserActivityRpcRow, createdAt: string | null) => {
+  const touchLastActive = (row: UserActivityAggregateRow, createdAt: string | null) => {
     if (!createdAt) return
     if (!row.last_active || dayjs(createdAt).isAfter(dayjs(row.last_active))) {
       row.last_active = createdAt
@@ -1160,7 +1160,6 @@ const refreshDashboard = async () => {
     taskTableCountRes,
     task24hRes,
     asset7dRes,
-    userActivityRes,
   ] = await Promise.all([
     supabase
       .from('processing_tasks')
@@ -1183,8 +1182,6 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
-    // 使用 RPC 替代 3 次 fetchAllRows 全表扫描
-    supabase.rpc('get_user_activity_summary', {}),
   ])
 
   if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
@@ -1203,13 +1200,7 @@ const refreshDashboard = async () => {
 
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
     const workers = (workerRes.data ?? []) as WorkerNode[]
-    let activityRows = (userActivityRes.data ?? []) as UserActivityRpcRow[]
-    if (userActivityRes.error) {
-      dataWarnings.value.push(
-        `用户活跃 RPC 不可用，已使用最多 5000 行前端兜底聚合：${userActivityRes.error.message}`,
-      )
-      activityRows = await fetchFallbackUserActivity(since24h, since7d)
-    }
+    const activityRows = await fetchUserActivitySummary(since24h, since7d)
 
     taskRows.value = tasks
     workerRows.value = workers

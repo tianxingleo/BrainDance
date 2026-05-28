@@ -807,6 +807,37 @@ textarea {
   --el-table-border-color: var(--stroke);
   --el-table-text-color: var(--ink-1);
   --el-table-header-text-color: var(--ink-2);
+  --el-table-current-row-bg-color: color-mix(in srgb, var(--surface-soft) 78%, transparent);
+  --el-fill-color-lighter: color-mix(in srgb, var(--surface-soft) 54%, transparent);
+  background: transparent !important;
+  color: var(--ink-1);
+}
+
+.el-table__inner-wrapper,
+.el-table__body-wrapper,
+.el-table__header-wrapper,
+.el-table__footer-wrapper {
+  background: transparent !important;
+}
+
+.el-table th.el-table__cell {
+  background: color-mix(in srgb, var(--surface-soft) 92%, transparent) !important;
+  color: var(--ink-2);
+}
+
+.el-table tr,
+.el-table td.el-table__cell {
+  background: transparent !important;
+  color: var(--ink-1);
+}
+
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: color-mix(in srgb, var(--surface-soft) 58%, transparent) !important;
+}
+
+.el-table__body tr:hover > td.el-table__cell,
+.el-table--striped .el-table__body tr.el-table__row--striped:hover > td.el-table__cell {
+  background: color-mix(in srgb, var(--surface-soft) 92%, transparent) !important;
 }
 
 .el-progress-bar__outer {
