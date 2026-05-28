@@ -2917,7 +2917,9 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
     antialiased: false,
     ignoreDevicePixelRatio: true,
     dynamicScene: true,
-    webXRMode: previewMode.value === 'webxr' ? GaussianSplats3D.WebXRMode.VR : GaussianSplats3D.WebXRMode.None,
+    // WebXR 会话由本组件的“进入 VR”按钮统一管理；禁用库内置 VRButton，
+    // 避免第三方按钮和自定义按钮同时 requestSession 导致重复会话异常。
+    webXRMode: GaussianSplats3D.WebXRMode.None,
     sphericalHarmonicsDegree: 0,
     selfDrivenMode: previewMode.value !== 'stereo',
     useBuiltInControls: previewMode.value !== 'webxr',
@@ -2926,7 +2928,6 @@ async function loadModel(model: BrainDanceRecallModel, options: { preserveState?
 
   if (previewMode.value === 'webxr') {
     installXrSessionListeners()
-    removeBuiltInVrButton()
   }
 
   activeModelIndex = modelList.value.findIndex((item) => item.id === model.id)
@@ -3246,11 +3247,6 @@ function installXrSessionListeners() {
   })
 }
 
-function removeBuiltInVrButton() {
-  const buttons = containerRef.value?.querySelectorAll('#VRButton') || []
-  buttons.forEach((button) => button.remove())
-}
-
 function syncActiveVrSession(session: XRSession) {
   const runtime = getRuntimeViewer()
   xrSession = session
@@ -3308,7 +3304,6 @@ async function enterVrSession() {
     runtime.renderer.xr.enabled = true
     runtime.renderer.xr.setReferenceSpaceType?.('local-floor')
     installXrSessionListeners()
-    removeBuiltInVrButton()
 
     const supported = await navigator.xr.isSessionSupported?.('immersive-vr')
     if (supported === false) {
