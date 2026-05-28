@@ -1,6 +1,11 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/configs/motion_tokens.dart';
+import 'package:braindance/widgets/animated_network_image.dart';
 import '../../services/viewer_navigation.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
@@ -121,8 +126,13 @@ class SearchResultCard extends StatelessWidget {
                   final imageName = frame['image_name'];
                   final frameSim = frame['similarity'] as double?;
 
-                  final imageUrl =
-                      "https://kntcynswgrmgbbgntkiv.supabase.co/storage/v1/object/public/braindance-assets/$userId/$sceneId/output/images/$imageName";
+                  final imageUrl = Supabase.instance.client.storage
+                      .from('braindance-assets')
+                      .getPublicUrl('$userId/$sceneId/output/images/$imageName');
+                  developer.log(
+                    '[RecallPreview] url=$imageUrl | user=$userId scene=$sceneId image=$imageName',
+                    name: 'ResultCard',
+                  );
 
                   return GestureDetector(
                     onTap: () => _navigateToViewer(context, frame),
@@ -142,17 +152,29 @@ class SearchResultCard extends StatelessWidget {
                               color: isDark ? darkInput : theme.grayColor3,
                               child: Padding(
                                 padding: const EdgeInsets.all(6.0),
-                                child: Image.network(
-                                  imageUrl,
+                                child: BDFadeInNetworkImage(
+                                  imageUrl: imageUrl,
+                                  placeholder: const Center(
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  errorWidget: const Center(
+                                    child: Icon(
+                                      Icons.broken_image,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                                   fit: BoxFit.contain,
                                   alignment: Alignment.center,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Center(
-                                        child: Icon(
-                                          Icons.broken_image,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
+                                  backgroundColor:
+                                      isDark ? darkInput : theme.grayColor3,
+                                  duration: BDMotion.durationSlow,
+                                  curve: BDMotion.curveEnter,
                                 ),
                               ),
                             ),
@@ -195,7 +217,7 @@ class SearchResultCard extends StatelessWidget {
     final plyPath = model['ply_path'] as String? ?? '';
     final modelUrl = plyPath.isNotEmpty
         ? toPublicUrl(plyPath)
-        : './models/scene_auto_sync_raw.ply';
+        : '';
     final posesUrlResolved = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
     final sceneId =
         model['display_name']?.toString() ??

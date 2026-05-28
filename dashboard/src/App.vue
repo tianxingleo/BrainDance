@@ -30,10 +30,9 @@ interface ProcessingTask {
 
 interface UserActivitySummary {
   userId: string
+  displayName: string
   taskCount: number
   assetCount: number
-  legacyTaskCount: number
-  totalActions: number
   task24h: number
   task7d: number
   asset7d: number
@@ -96,6 +95,14 @@ const storageLoading = ref(false)
 const errorMessage = ref('')
 const storageError = ref('')
 const lastUpdated = ref<string | null>(null)
+
+// 认证状态
+const isAuthenticated = ref(false)
+const authLoading = ref(true)
+const loginEmail = ref('')
+const loginPassword = ref('')
+const loginError = ref('')
+const loginSubmitting = ref(false)
 
 const taskRows = ref<ProcessingTask[]>([])
 const workerRows = ref<WorkerNode[]>([])
@@ -624,6 +631,27 @@ const applyTheme = () => {
   document.documentElement.style.setProperty('--accent-color', accentColor.value)
 }
 
+const handleLogin = async () => {
+  loginError.value = ''
+  if (!loginEmail.value || !loginPassword.value) {
+    loginError.value = '请输入邮箱和密码'
+    return
+  }
+  loginSubmitting.value = true
+  const { error } = await supabase.auth.signInWithPassword({
+    email: loginEmail.value,
+    password: loginPassword.value,
+  })
+  loginSubmitting.value = false
+  if (error) {
+    loginError.value = error.message
+  }
+}
+
+const handleLogout = async () => {
+  await supabase.auth.signOut()
+}
+
 const updateWorkerDesiredState = async (
   worker: WorkerNode,
   desiredState: 'run' | 'pause' | 'interrupt',
@@ -829,108 +857,6 @@ const activeAlertCount = computed(() =>
 const formatUserId = (userId: string) => {
   if (userId.length <= 14) return userId
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`
-}
-
-const fetchAllRows = async <T,>(table: string, columns: string, orderColumn = 'created_at') => {
-  const pageSize = 1000
-  let from = 0
-  const rows: T[] = []
-
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(columns)
-      .order(orderColumn, { ascending: false })
-      .range(from, from + pageSize - 1)
-
-    if (error) {
-      console.warn(`[dashboard] failed to fetch rows from ${table}:`, error.message)
-      return rows
-    }
-
-    const chunk = (data ?? []) as T[]
-    rows.push(...chunk)
-
-    if (chunk.length < pageSize) break
-    from += pageSize
-  }
-
-  return rows
-}
-
-const buildUserSummaries = (
-  processingTaskUsers: Array<{ user_id: string; created_at: string }>,
-  assetUsers: Array<{ user_id: string | null; created_at: string }>,
-  legacyTaskUsers: Array<{ user_id: string; created_at: string }>,
-) => {
-  const now = dayjs()
-  const since24h = now.subtract(24, 'hour')
-  const since7d = now.subtract(7, 'day')
-  const map = new Map<string, UserActivitySummary>()
-
-  const ensureUser = (userId: string) => {
-    const normalized = userId.trim()
-    if (!normalized) return null
-
-    const existing = map.get(normalized)
-    if (existing) return existing
-
-    const next: UserActivitySummary = {
-      userId: normalized,
-      taskCount: 0,
-      assetCount: 0,
-      legacyTaskCount: 0,
-      totalActions: 0,
-      task24h: 0,
-      task7d: 0,
-      asset7d: 0,
-      lastSeenAt: null,
-    }
-    map.set(normalized, next)
-    return next
-  }
-
-  const bumpLastSeen = (summary: UserActivitySummary, createdAt: string) => {
-    if (!summary.lastSeenAt || dayjs(createdAt).isAfter(dayjs(summary.lastSeenAt))) {
-      summary.lastSeenAt = createdAt
-    }
-  }
-
-  processingTaskUsers.forEach((item) => {
-    const summary = ensureUser(item.user_id)
-    if (!summary) return
-    summary.taskCount += 1
-    summary.totalActions += 1
-    bumpLastSeen(summary, item.created_at)
-
-    const createdAt = dayjs(item.created_at)
-    if (createdAt.isAfter(since24h)) summary.task24h += 1
-    if (createdAt.isAfter(since7d)) summary.task7d += 1
-  })
-
-  assetUsers.forEach((item) => {
-    if (!item.user_id) return
-    const summary = ensureUser(item.user_id)
-    if (!summary) return
-    summary.assetCount += 1
-    summary.totalActions += 1
-    bumpLastSeen(summary, item.created_at)
-
-    const createdAt = dayjs(item.created_at)
-    if (createdAt.isAfter(since7d)) summary.asset7d += 1
-  })
-
-  legacyTaskUsers.forEach((item) => {
-    const summary = ensureUser(item.user_id)
-    if (!summary) return
-    summary.legacyTaskCount += 1
-    bumpLastSeen(summary, item.created_at)
-  })
-
-  return Array.from(map.values()).sort((a, b) => {
-    if (b.totalActions !== a.totalActions) return b.totalActions - a.totalActions
-    return dayjs(b.lastSeenAt ?? 0).valueOf() - dayjs(a.lastSeenAt ?? 0).valueOf()
-  })
 }
 
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
@@ -1140,9 +1066,7 @@ const refreshDashboard = async () => {
     taskTableCountRes,
     task24hRes,
     asset7dRes,
-    processingTaskUsers,
-    assetUsers,
-    legacyTaskUsers,
+    userActivityRes,
   ] = await Promise.all([
     supabase
       .from('processing_tasks')
@@ -1165,9 +1089,8 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
-    fetchAllRows<{ user_id: string; created_at: string }>('processing_tasks', 'user_id, created_at'),
-    fetchAllRows<{ user_id: string | null; created_at: string }>('model_assets', 'user_id, created_at'),
-    fetchAllRows<{ user_id: string; created_at: string }>('tasks', 'user_id, created_at'),
+    // 使用 RPC 替代 3 次 fetchAllRows 全表扫描
+    supabase.rpc('get_user_activity_summary', {}),
   ])
 
   if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
@@ -1181,10 +1104,28 @@ const refreshDashboard = async () => {
   } else {
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
     const workers = (workerRes.data ?? []) as WorkerNode[]
-    const summaries = buildUserSummaries(processingTaskUsers, assetUsers, legacyTaskUsers)
+    // RPC 返回的是聚合后的用户活跃数据
+    const rpcSummaries = (userActivityRes.data ?? []) as Array<{
+      user_id: string
+      total_tasks: number
+      tasks_24h: number
+      tasks_7d: number
+      total_assets: number
+      assets_7d: number
+      last_active: string | null
+    }>
     taskRows.value = tasks
     workerRows.value = workers
-    userSummaries.value = summaries
+    userSummaries.value = rpcSummaries.map((s) => ({
+      userId: s.user_id,
+      displayName: s.user_id.slice(0, 8) + '...',
+      taskCount: s.total_tasks,
+      assetCount: s.total_assets,
+      task24h: s.tasks_24h,
+      task7d: s.tasks_7d,
+      asset7d: s.assets_7d,
+      lastSeenAt: s.last_active,
+    }))
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
 
@@ -1193,9 +1134,9 @@ const refreshDashboard = async () => {
       tasks24h: task24hRes.count ?? 0,
       failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
       completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
-      totalUsers: summaries.length,
+      totalUsers: userSummaries.value.length,
       activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
-      activeUsers7d: summaries.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
+      activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
       assets7d: asset7dRes.count ?? 0,
     }
 
@@ -1268,6 +1209,17 @@ onMounted(async () => {
   }
   applyTheme()
 
+  // 认证检查：监听 Supabase Auth 状态
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    isAuthenticated.value = !!session
+    authLoading.value = false
+  })
+  supabase.auth.onAuthStateChange((_event, session) => {
+    isAuthenticated.value = !!session
+    authLoading.value = false
+  })
+
+  if (!isAuthenticated.value) return
   await refreshDashboard()
 
   bindChannel('processing_tasks', 'dashboard-processing-tasks')
@@ -1294,7 +1246,47 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <!-- 认证加载中 -->
+  <div v-if="authLoading" class="auth-loading">
+    <p>正在验证登录状态...</p>
+  </div>
+
+  <!-- 登录表单 -->
+  <div v-else-if="!isAuthenticated" class="login-page">
+    <div class="login-card glass-card">
+      <h2>BrainDance Dashboard</h2>
+      <p class="login-subtitle">请登录以访问管理面板</p>
+      <form @submit.prevent="handleLogin">
+        <el-input
+          v-model="loginEmail"
+          type="email"
+          placeholder="邮箱"
+          :disabled="loginSubmitting"
+          style="margin-bottom: 12px;"
+        />
+        <el-input
+          v-model="loginPassword"
+          type="password"
+          placeholder="密码"
+          show-password
+          :disabled="loginSubmitting"
+          style="margin-bottom: 12px;"
+        />
+        <p v-if="loginError" class="login-error">{{ loginError }}</p>
+        <el-button
+          type="primary"
+          native-type="submit"
+          :loading="loginSubmitting"
+          style="width: 100%;"
+        >
+          登录
+        </el-button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 已认证：主 Dashboard -->
+  <div v-else class="dashboard-page">
     <section class="shell-grid">
       <aside class="phone-shell">
         <div class="phone-shell__glow"></div>
@@ -1418,6 +1410,11 @@ onUnmounted(() => {
                   :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
                 />
               </div>
+
+              <el-button size="small" @click="handleLogout">
+                <Icon icon="lucide:log-out" />
+                <span>登出</span>
+              </el-button>
             </div>
           </div>
 
@@ -1949,7 +1946,7 @@ onUnmounted(() => {
                     <div class="alert-item-top">
                       <div>
                         <span class="alert-label">{{ formatUserId(item.userId) }}</span>
-                        <strong class="alert-value">{{ item.totalActions }}</strong>
+                        <strong class="alert-value">{{ item.taskCount + item.assetCount }}</strong>
                       </div>
                       <el-tag type="info">任务 {{ item.taskCount }}</el-tag>
                     </div>

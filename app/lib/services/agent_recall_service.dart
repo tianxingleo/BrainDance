@@ -1,8 +1,15 @@
+// agent_recall_models 导出，保持旧调用方 import 路径不变
+export 'agent_recall_models.dart';
+
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../configs/app_config.dart';
 import '../configs/supabase_config.dart';
+import 'agent_recall_error.dart';
+import 'agent_recall_models.dart';
+import 'agent_recall_streaming.dart';
 
 // ── Data models ──────────────────────────────────────────────
 
@@ -30,6 +37,27 @@ class AgentStep extends ChangeNotifier {
   void updateContent(String newContent) {
     content = newContent;
     notifyListeners();
+  }
+
+  String get compactTitle {
+    final trimmed = content.trim();
+    if (type == 'tool_call') {
+      return toolName?.trim().isNotEmpty == true ? toolName!.trim() : '未命名工具';
+    }
+    if (trimmed.isEmpty) {
+      switch (type) {
+        case 'status':
+          return '状态更新';
+        case 'thought':
+          return '思考';
+        case 'error':
+          return '执行异常';
+        default:
+          return '步骤';
+      }
+    }
+    final firstLine = trimmed.split('\n').first.trim();
+    return firstLine.isEmpty ? trimmed : firstLine;
   }
 }
 
@@ -93,21 +121,42 @@ class ChatMessage extends ChangeNotifier {
   }
 }
 
+class AgentConversationEntry {
+  final String userQuery;
+  final DateTime timestamp;
+  final ChatMessage agentMessage;
+  AgentRecallResponse? agentResult;
+  Duration? elapsed;
+
+  AgentConversationEntry({
+    required this.userQuery,
+    required this.timestamp,
+    required this.agentMessage,
+  });
+
+  bool get isComplete =>
+      agentResult != null || agentMessage.finalAnswer.isNotEmpty;
+}
+
 class AgentRecallResponse {
   final String mode;
   final String answer;
   final AgentEvidence? evidence;
   final List<AgentAction> actions;
   final List<AgentCandidate> candidates;
+  final List<AgentToolTrace> toolTrace;
+  final Map<String, dynamic>? responseResolution;
   final String? selectedCandidateReason;
   final Map<String, dynamic>? assetContext;
   final Map<String, dynamic>? compareContext;
+  final CompareContext? compareData;
   final Map<String, dynamic>? collectionContext;
   final Map<String, dynamic>? creativeContext;
   final Map<String, dynamic>? memoryGraphContext;
   final AgentSessionState? sessionState;
   final AgentFollowUp? followUp;
   final String? conversationSummary;
+  final Map<String, dynamic>? shortTermMemory;
 
   AgentRecallResponse({
     required this.mode,
@@ -115,15 +164,19 @@ class AgentRecallResponse {
     required this.evidence,
     required this.actions,
     this.candidates = const [],
+    this.toolTrace = const [],
+    this.responseResolution,
     this.selectedCandidateReason,
     this.assetContext,
     this.compareContext,
+    this.compareData,
     this.collectionContext,
     this.creativeContext,
     this.memoryGraphContext,
     this.sessionState,
     this.followUp,
     this.conversationSummary,
+    this.shortTermMemory,
   });
 
   factory AgentRecallResponse.fromJson(Map<String, dynamic> json) {
@@ -135,6 +188,96 @@ class AgentRecallResponse {
     final evidenceMap = rawEvidence is Map
         ? Map<String, dynamic>.from(rawEvidence)
         : null;
+
+    final assetCtx = json['asset_context'] is Map
+        ? Map<String, dynamic>.from(json['asset_context'] as Map)
+        : null;
+
+    // Build lookup from asset_context bundle/list for enriching candidates
+    final Map<String, Map<String, dynamic>> assetLookup = {};
+    if (assetCtx != null) {
+      for (final source in ['bundle', 'list']) {
+        final items = assetCtx[source] as List?;
+        if (items == null) continue;
+        for (final item in items) {
+          if (item is Map) {
+            final id = item['id']?.toString() ?? '';
+            if (id.isNotEmpty) {
+              assetLookup[id] = Map<String, dynamic>.from(item);
+            }
+          }
+        }
+      }
+    }
+
+    var candidates = rawCandidates.map((item) {
+      final map = Map<String, dynamic>.from(item as Map);
+      final modelId = map['model_id']?.toString() ?? '';
+      final enrichment = assetLookup[modelId];
+      if (enrichment != null) {
+        _fillIfMissing(map, 'display_name', enrichment['display_name']);
+        _fillIfMissing(map, 'tags', enrichment['tags']);
+        _fillIfMissing(map, 'preview_img_path', enrichment['preview_img_path']);
+        _fillIfMissing(
+          map,
+          'preview_webp_path',
+          enrichment['preview_webp_path'] ??
+              (enrichment['meta_info'] is Map
+                  ? (enrichment['meta_info'] as Map)['preview_webp_path']
+                  : null),
+        );
+        _fillIfMissing(map, 'created_at', enrichment['created_at']);
+        _fillIfMissing(map, 'ply_path', enrichment['ply_path']);
+      }
+      return AgentCandidate.fromJson(map);
+    }).toList();
+
+    // Fallback: synthesize candidate from evidence/actions when backend
+    // returns empty candidates but has spatial match data.
+    if (candidates.isEmpty) {
+      final evidenceSceneId = evidenceMap?['sceneId']?.toString() ?? '';
+      final evidenceModelId = evidenceMap?['modelId']?.toString() ?? '';
+      final evidenceSimilarity =
+          (evidenceMap?['similarity'] as num?)?.toDouble() ?? 0.0;
+      final evidenceDesc = evidenceMap?['description']?.toString() ?? '';
+      final evidenceTags =
+          (evidenceMap?['tags'] as List?)?.map((e) => e.toString()).toList() ??
+          const <String>[];
+
+      final actions = ((json['actions'] as List?) ?? [])
+          .map((a) => a is Map ? Map<String, dynamic>.from(a) : null)
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      final openScene = actions.firstWhere(
+        (a) => a['type'] == 'open_scene',
+        orElse: () => const <String, dynamic>{},
+      );
+      final payload = openScene['payload'] is Map
+          ? Map<String, dynamic>.from(openScene['payload'] as Map)
+          : const <String, dynamic>{};
+
+      final synthSceneId = evidenceSceneId.isNotEmpty
+          ? evidenceSceneId
+          : payload['sceneId']?.toString() ?? '';
+      final synthModelId = evidenceModelId.isNotEmpty
+          ? evidenceModelId
+          : payload['modelId']?.toString() ?? '';
+      final synthPly = payload['ply']?.toString();
+
+      if (synthSceneId.isNotEmpty && evidenceSimilarity > 0) {
+        candidates = [
+          AgentCandidate(
+            sceneId: synthSceneId,
+            modelId: synthModelId,
+            score: evidenceSimilarity,
+            description: evidenceDesc,
+            tags: evidenceTags,
+            plyPath: synthPly,
+          ),
+        ];
+      }
+    }
+
     return AgentRecallResponse(
       mode: json['mode']?.toString() ?? 'spatial_search',
       answer: json['answer']?.toString() ?? '',
@@ -150,19 +293,22 @@ class AgentRecallResponse {
                 AgentAction.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      candidates: rawCandidates
+      candidates: candidates,
+      toolTrace: ((json['tool_trace'] as List?) ?? [])
           .map(
             (item) =>
-                AgentCandidate.fromJson(Map<String, dynamic>.from(item as Map)),
+                AgentToolTrace.fromJson(Map<String, dynamic>.from(item as Map)),
           )
           .toList(),
-      selectedCandidateReason: json['selected_candidate_reason']?.toString(),
-      assetContext: json['asset_context'] is Map
-          ? Map<String, dynamic>.from(json['asset_context'] as Map)
+      responseResolution: json['response_resolution'] is Map
+          ? Map<String, dynamic>.from(json['response_resolution'] as Map)
           : null,
+      selectedCandidateReason: json['selected_candidate_reason']?.toString(),
+      assetContext: assetCtx,
       compareContext: json['compare_context'] is Map
           ? Map<String, dynamic>.from(json['compare_context'] as Map)
           : null,
+      compareData: CompareContext.fromJson(json['compare_context']),
       collectionContext: json['collection_context'] is Map
           ? Map<String, dynamic>.from(json['collection_context'] as Map)
           : null,
@@ -183,7 +329,23 @@ class AgentRecallResponse {
             )
           : null,
       conversationSummary: json['conversation_summary']?.toString(),
+      shortTermMemory: json['short_term_memory'] is Map
+          ? Map<String, dynamic>.from(json['short_term_memory'] as Map)
+          : null,
     );
+  }
+}
+
+void _fillIfMissing(Map<String, dynamic> target, String key, dynamic value) {
+  final current = target[key];
+  final hasCurrent = switch (current) {
+    null => false,
+    String value => value.trim().isNotEmpty,
+    List value => value.isNotEmpty,
+    _ => true,
+  };
+  if (!hasCurrent && value != null) {
+    target[key] = value;
   }
 }
 
@@ -227,7 +389,9 @@ class AgentSessionState {
       if (lastSelectedModelIds != null)
         'lastSelectedModelIds': lastSelectedModelIds,
       if (lastCandidateRefs != null)
-        'lastCandidateRefs': lastCandidateRefs!.map((item) => item.toJson()).toList(),
+        'lastCandidateRefs': lastCandidateRefs!
+            .map((item) => item.toJson())
+            .toList(),
       if (lastOperationPreview != null)
         'lastOperationPreview': lastOperationPreview!.toJson(),
     };
@@ -269,16 +433,27 @@ class AgentCandidateRef {
 class AgentOperationPreview {
   final String toolName;
   final int affectedCount;
+  final List<String>? modelIds;
+  final Map<String, dynamic>? args;
 
   AgentOperationPreview({
     required this.toolName,
     required this.affectedCount,
+    this.modelIds,
+    this.args,
   });
 
   factory AgentOperationPreview.fromJson(Map<String, dynamic> json) {
     return AgentOperationPreview(
       toolName: json['toolName']?.toString() ?? '',
       affectedCount: (json['affectedCount'] as num?)?.toInt() ?? 0,
+      modelIds: (json['modelIds'] as List?)
+          ?.map((item) => item.toString())
+          .where((item) => item.trim().isNotEmpty)
+          .toList(),
+      args: json['args'] is Map
+          ? Map<String, dynamic>.from(json['args'] as Map)
+          : null,
     );
   }
 
@@ -286,6 +461,8 @@ class AgentOperationPreview {
     return {
       'toolName': toolName,
       'affectedCount': affectedCount,
+      if (modelIds != null) 'modelIds': modelIds,
+      if (args != null) 'args': args,
     };
   }
 }
@@ -327,6 +504,12 @@ class AgentCandidate {
   final double score;
   final String description;
   final String? poseImageId;
+  final String? displayName;
+  final List<String> tags;
+  final String? previewImgPath;
+  final String? previewWebpPath;
+  final String? createdAt;
+  final String? plyPath;
 
   AgentCandidate({
     required this.sceneId,
@@ -334,6 +517,12 @@ class AgentCandidate {
     required this.score,
     required this.description,
     this.poseImageId,
+    this.displayName,
+    this.tags = const [],
+    this.previewImgPath,
+    this.previewWebpPath,
+    this.createdAt,
+    this.plyPath,
   });
 
   factory AgentCandidate.fromJson(Map<String, dynamic> json) {
@@ -343,6 +532,44 @@ class AgentCandidate {
       score: (json['score'] as num?)?.toDouble() ?? 0.0,
       description: json['description']?.toString() ?? '',
       poseImageId: json['pose_image_id']?.toString(),
+      displayName: json['display_name']?.toString(),
+      tags:
+          (json['tags'] as List?)?.map((e) => e.toString()).toList() ??
+          const [],
+      previewImgPath: json['preview_img_path']?.toString(),
+      previewWebpPath:
+          json['preview_webp_path']?.toString() ??
+          (json['meta_info'] is Map
+              ? (json['meta_info'] as Map)['preview_webp_path']?.toString()
+              : null),
+      createdAt: json['created_at']?.toString(),
+      plyPath: json['ply_path']?.toString(),
+    );
+  }
+}
+
+class AgentToolTrace {
+  final String toolName;
+  final Map<String, dynamic> args;
+  final String resultSummary;
+
+  AgentToolTrace({
+    required this.toolName,
+    required this.args,
+    required this.resultSummary,
+  });
+
+  factory AgentToolTrace.fromJson(Map<String, dynamic> json) {
+    return AgentToolTrace(
+      toolName:
+          json['toolName']?.toString() ?? json['tool_name']?.toString() ?? '',
+      args: json['args'] is Map
+          ? Map<String, dynamic>.from(json['args'] as Map)
+          : const <String, dynamic>{},
+      resultSummary:
+          json['resultSummary']?.toString() ??
+          json['result_summary']?.toString() ??
+          '',
     );
   }
 }
@@ -397,6 +624,7 @@ class AgentMatchedFrame {
 
 class AgentAction {
   final String type;
+  final String? title;
   final String sceneId;
   final String? modelId;
   final String? ply;
@@ -406,6 +634,7 @@ class AgentAction {
 
   AgentAction({
     required this.type,
+    this.title,
     required this.sceneId,
     this.modelId,
     this.ply,
@@ -414,6 +643,13 @@ class AgentAction {
     this.matrix,
   });
 
+  AgentActionSlot get slot {
+    final t = title ?? '';
+    if (t.contains('旧版')) return AgentActionSlot.baseline;
+    if (t.contains('新版')) return AgentActionSlot.target;
+    return AgentActionSlot.unknown;
+  }
+
   factory AgentAction.fromJson(Map<String, dynamic> json) {
     final payload = json['payload'] is Map
         ? Map<String, dynamic>.from(json['payload'] as Map)
@@ -421,6 +657,7 @@ class AgentAction {
     final rawMatrix = payload['matrix'] ?? json['matrix'];
     return AgentAction(
       type: json['type']?.toString() ?? '',
+      title: json['title']?.toString(),
       sceneId:
           payload['sceneId']?.toString() ?? json['sceneId']?.toString() ?? '',
       modelId: payload['modelId']?.toString() ?? json['modelId']?.toString(),
@@ -476,22 +713,17 @@ class AgentRecallService {
   }) async* {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
-      throw Exception('查询语句不能为空');
+      throw Exception(textLocalize('agent_error_empty_query'));
     }
 
-    final baseUrl = SupabaseConfig.url.trim();
-    if (baseUrl.isEmpty) {
-      throw Exception('未配置 SUPABASE_URL，无法建立 Agent 流式连接');
+    final endpoint = SupabaseConfig.edgeFunctionUrl('agent-recall');
+    if (endpoint.isEmpty) {
+      throw Exception(textLocalize('agent_error_missing_supabase_url'));
     }
-
-    // 构造 Edge Function URL
-    final endpoint = baseUrl.endsWith('/')
-        ? '${baseUrl}functions/v1/agent-recall'
-        : '$baseUrl/functions/v1/agent-recall';
 
     final dio = Dio();
     // 配置超时 (根据需要调整)
-    dio.options.connectTimeout = const Duration(seconds: 10);
+    dio.options.connectTimeout = const Duration(seconds: 20);
     dio.options.receiveTimeout = const Duration(seconds: 300); // 长连接需较长超时
 
     try {
@@ -507,7 +739,8 @@ class AgentRecallService {
           headers: {
             'Authorization': token != null ? 'Bearer $token' : null,
             'apikey': apiKey,
-            'Accept': 'application/x-ndjson',
+            'Accept': 'text/event-stream, application/x-ndjson',
+            'Cache-Control': 'no-cache',
             'Content-Type': 'application/json',
           },
         ),
@@ -520,6 +753,8 @@ class AgentRecallService {
           if (currentMode != null) 'currentMode': currentMode,
           if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
           if (sessionId != null) 'sessionId': sessionId,
+          if (_client.auth.currentUser?.id != null)
+            'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
@@ -531,14 +766,29 @@ class AgentRecallService {
         throw Exception('Response stream is null');
       }
 
-      await for (final line
-          in stream
-              .cast<List<int>>()
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())) {
-        final trimmed = line.trim();
-        if (trimmed.isNotEmpty) {
-          yield trimmed;
+      final eventBuffer = StringBuffer();
+      await for (final chunk in stream.cast<List<int>>().transform(
+        utf8.decoder,
+      )) {
+        if (chunk.isEmpty) {
+          continue;
+        }
+        eventBuffer.write(chunk);
+        final rawBuffer = eventBuffer.toString();
+        final parsed = drainStreamingEvents(rawBuffer);
+        eventBuffer.clear();
+        if (parsed.remaining < rawBuffer.length) {
+          eventBuffer.write(rawBuffer.substring(parsed.remaining));
+        }
+        for (final event in parsed.events) {
+          yield event;
+        }
+      }
+
+      final tail = eventBuffer.toString().trim();
+      if (tail.isNotEmpty) {
+        for (final event in parseEventChunk(tail)) {
+          yield event;
         }
       }
     } catch (e) {
@@ -563,7 +813,7 @@ class AgentRecallService {
       } catch (fallbackError) {
         yield jsonEncode({
           'event': 'error',
-          'data': _normalizeInvokeError(fallbackError),
+          'data': normalizeInvokeError(fallbackError),
         });
       }
     } finally {
@@ -585,7 +835,7 @@ class AgentRecallService {
   }) async {
     final trimmedQuery = query.trim();
     if (trimmedQuery.isEmpty) {
-      throw Exception('查询语句不能为空');
+      throw Exception(textLocalize('agent_error_empty_query'));
     }
 
     try {
@@ -600,15 +850,17 @@ class AgentRecallService {
           if (currentMode != null) 'currentMode': currentMode,
           if (candidateSceneIds != null) 'candidateSceneIds': candidateSceneIds,
           if (sessionId != null) 'sessionId': sessionId,
+          if (_client.auth.currentUser?.id != null)
+            'userId': _client.auth.currentUser!.id,
           if (conversationSummary != null)
             'conversationSummary': conversationSummary,
           if (sessionState != null) 'sessionState': sessionState.toJson(),
         },
       );
 
-      final data = _decodeInvokeData(response.data);
+      final data = decodeInvokeData(response.data);
       if (data is! Map) {
-        throw Exception('agent-recall 返回格式错误');
+        throw Exception(textLocalize('agent_error_bad_response'));
       }
 
       if (data['error'] != null) {
@@ -617,7 +869,7 @@ class AgentRecallService {
 
       return AgentRecallResponse.fromJson(Map<String, dynamic>.from(data));
     } catch (e) {
-      throw Exception(_normalizeInvokeError(e));
+      throw Exception(normalizeInvokeError(e));
     }
   }
 
@@ -661,11 +913,27 @@ class AgentRecallService {
               'scene_id': candidate.sceneId,
               'model_id': candidate.modelId,
               'score': candidate.score,
+              'display_name': candidate.displayName,
               'description': candidate.description,
               'pose_image_id': candidate.poseImageId,
+              'tags': candidate.tags,
+              'preview_img_path': candidate.previewImgPath,
+              'preview_webp_path': candidate.previewWebpPath,
+              'created_at': candidate.createdAt,
+              'ply_path': candidate.plyPath,
             },
           )
           .toList(),
+      'tool_trace': response.toolTrace
+          .map(
+            (trace) => {
+              'tool_name': trace.toolName,
+              'args': trace.args,
+              'result_summary': trace.resultSummary,
+            },
+          )
+          .toList(),
+      'response_resolution': response.responseResolution,
       'selected_candidate_reason': response.selectedCandidateReason,
       'asset_context': response.assetContext,
       'compare_context': response.compareContext,
@@ -684,77 +952,5 @@ class AgentRecallService {
               'suggested_replies': response.followUp!.suggestedReplies,
             },
     };
-  }
-
-  Object? _decodeInvokeData(Object? data) {
-    if (data is String) {
-      final trimmed = data.trim();
-      if (trimmed.isEmpty) {
-        return null;
-      }
-
-      try {
-        return jsonDecode(trimmed);
-      } catch (_) {
-        return trimmed;
-      }
-    }
-
-    return data;
-  }
-
-  String _normalizeDioError(DioException error) {
-    final status = error.response?.statusCode;
-    final data = _decodeInvokeData(error.response?.data);
-    if (data is Map && data['error'] != null) {
-      return data['error'].toString();
-    }
-    if (data is Map && data['message'] != null) {
-      return data['message'].toString();
-    }
-    if (data is String && data.trim().isNotEmpty) {
-      return data.trim();
-    }
-    if (status == 503) {
-      return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
-    }
-    if (status == 502 || status == 504) {
-      return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
-    }
-    if (status != null) {
-      return 'agent-recall 调用失败（HTTP $status）';
-    }
-    return error.message ?? error.toString();
-  }
-
-  String _normalizeInvokeError(Object error) {
-    if (error is DioException) {
-      return _normalizeDioError(error);
-    }
-
-    if (error is FunctionException) {
-      final detail = _decodeInvokeData(error.details);
-      if (detail is Map && detail['error'] != null) {
-        return detail['error'].toString();
-      }
-      if (detail is Map && detail['message'] != null) {
-        return detail['message'].toString();
-      }
-      if (detail is String && detail.isNotEmpty) {
-        return detail;
-      }
-      if (error.reasonPhrase != null && error.reasonPhrase!.isNotEmpty) {
-        return error.reasonPhrase!;
-      }
-      if (error.status == 503) {
-        return 'agent-recall 当前不可用（HTTP 503）。这通常表示 Edge Function worker 启动失败，或上游模型网关暂时不可用。请优先检查 Supabase Edge Function 日志。';
-      }
-      if (error.status == 502 || error.status == 504) {
-        return 'agent-recall 上游服务响应异常，请检查 Edge Function 日志和模型网关配置';
-      }
-      return 'agent-recall 调用失败（HTTP ${error.status}）';
-    }
-
-    return error.toString();
   }
 }

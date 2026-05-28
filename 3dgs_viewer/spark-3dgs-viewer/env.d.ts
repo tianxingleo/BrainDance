@@ -5,3 +5,16 @@ declare module '*.vue' {
   const component: DefineComponent<object, object, unknown>
   export default component
 }
+
+declare module 'mind-ar/dist/mindar-image-three.prod.js' {
+  export const MindARThree: unknown
+}
+
+interface Window {
+  BrainDanceChannel?: {
+    postMessage?: (message: string) => void
+  }
+  setModelListForTimePeeling?: (...args: unknown[]) => void
+  loadModelFromFlutter?: (...args: unknown[]) => void
+  setThemeFromFlutter?: (...args: unknown[]) => void
+}

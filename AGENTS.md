@@ -30,14 +30,14 @@
 - 提交前必须先检查工作区，确认没有误提交二进制文件、媒体文件、模型文件、缓存文件或其他本应被 `.gitignore` 忽略的内容。
 - 提交信息建议使用 Conventional Commits 风格，但必须采用“标题 + 空行 + 正文”的完整格式：
 
-\`\`\`text
+```text
 <type>(<scope>): <中文摘要>
 
 <中文正文第 1 行>
 <中文正文第 2 行>
 <中文正文第 3 行>
 ...
-\`\`\`
+```
 
 正文要求：
 
@@ -48,7 +48,7 @@
 
 建议正文结构：
 
-\`\`\`text
+```text
 <type>(<scope>): <中文摘要>
 
 背景：
@@ -64,11 +64,11 @@
 
 影响：
 - 说明影响范围、兼容性、潜在风险和后续事项。
-\`\`\`
+```
 
 完整示例：
 
-\`\`\`text
+```text
 fix(common): 修复字体过小的 BUG，将通用管理下所有页面的默认字体大小修改为 14px
 
 背景：
@@ -87,7 +87,7 @@ fix(common): 修复字体过小的 BUG，将通用管理下所有页面的默认
 影响：
 - 本次调整会轻微改变后台页面的视觉密度，但不会影响业务逻辑和接口契约。
 - 若后续设计规范继续调整字号，应统一通过设计 token 修改，避免再次散落覆盖。
-\`\`\`
+```
 
 补充要求：
 
@@ -196,3 +196,76 @@ LangChain 相关的实现现状、阶段总结、联调记录、未完成事项�
 ### 8.5. 文档内容必须以代码现状为准
 
 LangChain 相关文档不能只写规划口径，必须明确区分：已实现、部分实现、实验中、未实现。如果代码和旧文档不一致，应先修正文档口径，避免继续漂移。
+
+### 8.6. LangChain 实现方法论优先级
+
+涉及 LangChain / Agent 编排时，默认优先采用“疏导能力”而不是“堵住入口”的思路，具体要求如下：
+
+- 优先把能力建设在底层通用 tools 上，而不是不断增加上层特判、硬编码分支或一次性专用工具。
+- 优先做提示词优化、工具描述优化、工具输入输出结构优化，让模型更容易正确规划，而不是先做死板路由限制。
+- 尽可能少做面向对象式的过度封装；如果某层封装会遮蔽真实工具能力、增加链路跳转、或者让 Agent 失去自主规划空间，应优先拆薄。
+- 尽可能少做硬路由、少做“这个问句只能走这条链路”的强约束；除非是安全边界、权限边界、执行边界或已经反复验证的稳定兜底。
+- 对资产查找、元数据修改、专题整理、对比分析这类请求，应优先考虑“同一组通用读写工具 + 更好的提示词”是否已经足够，不要先把问题切碎成很多特化 Agent 或特化规则。
+- 堵不如疏：如果 Agent 经常答错，不要第一反应就是再加一个匹配器或拦截器，而要先检查底层 tools 是否缺能力、schema 是否不清晰、提示词是否没有教会它正确使用工具。
+- 只有当某个确定性分支可以明确降低风险、收敛权限、避免破坏性写入或兜住高频稳定场景时，才允许增加规则化捷径；新增后必须在文档里写清楚为什么不用更通用的 Agent 方案。
+
+### 8.7. LangChain / agent-recall 联调优先使用桌面调试 CLI
+
+凡是需要调试以下问题时，优先使用仓库内现成的桌面调试脚本；它应被视为线上 Flutter 真库联调的等效模拟入口，而不是低一级的替代方案：
+
+- `agent-recall` 路由是否正确
+- 流式事件顺序是否正确
+- `tool_call / tool_result / message / done` 是否完整
+- `top_candidates`、`tool_trace`、`follow_up`、`session_state` 是否符合预期
+- 多轮续聊、候选确认、预览 / 执行切换是否符合 Flutter 协议
+
+统一使用脚本：
+
+- `ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py`
+
+这个脚本的定位是：
+
+- 直接按 Flutter 当前请求体字段调用正式 `agent-recall`
+- 在电脑端模拟 Flutter 对线上真库的实际请求
+- 打印完整流式过程、最终回答、候选结果与工具轨迹
+- 可额外打印请求摘要、HTTP 响应元信息、事件时间线、耗时统计、`evidence` 摘要与完整 `done` payload
+- 可把完整调试结果落盘为 JSON，并把事件时间线单独落盘为 JSONL
+- 对后端 LangChain / Agent 编排而言，与 Flutter 真库联调看到的是同一条正式链路
+- 应作为 LangChain / Agent 编排问题的第一现场复现工具
+
+常用示例：
+
+```bash
+python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
+  --query "请你找一下洛天依相关的模型" \
+  --execution-mode preview
+```
+
+推荐分析模式：
+
+```bash
+python ai_engine/finetune_qwen3/scripts/agent_recall_debug_cli.py \
+  --query "请你找一下洛天依相关的模型" \
+  --execution-mode preview \
+  --show-request \
+  --show-response-meta \
+  --show-event-timeline \
+  --show-full-result \
+  --log-file ai_engine/finetune_qwen3/logs/agent_recall_debug \
+  --event-log-file ai_engine/finetune_qwen3/logs/agent_recall_debug
+```
+
+如需调试多轮续聊，可继续传入：
+
+- `--conversation-summary`
+- `--session-state-file`
+- `--execution-mode execute`
+
+执行要求：
+
+- 需要记录 LangChain / Agent 问题时，优先附上该 CLI 的实际输入、关键流式事件、最终回答和候选结果。
+- 需要做问题归因时，优先使用 `--show-request --show-response-meta --show-event-timeline`，不要只贴最终回答。
+- 需要沉淀可复盘材料时，优先同时使用 `--log-file` 与 `--event-log-file` 落盘，便于后续对照请求、事件时间线和最终结果。
+- 在排查后端路由、工具调用、流式事件、候选生成、会话续聊时，可直接把该 CLI 结果视为线上 Flutter 真库联调结果；除非问题明确发生在 Flutter 端渲染、状态管理或事件消费阶段。
+- 如果 CLI 结果与 Flutter 页面表现不一致，必须进一步说明差异发生在“后端事件生成”还是“Flutter 事件消费 / 展示”阶段。
+- 如果最终回答、`tool_trace`、`top_candidates`、`follow_up` 之间存在不一致，必须在记录中明确指出是哪一层返回结构不一致，而不是笼统写成“Agent 异常”。

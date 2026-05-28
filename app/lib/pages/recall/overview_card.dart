@@ -9,8 +9,6 @@ class RecallOverviewCard extends StatelessWidget {
   final int recentCount;
   final int allModelCount;
   final int processingTaskCount;
-  final int ragCount;
-  final bool isLocalIndexing;
   final VoidCallback onOpenTasks;
 
   const RecallOverviewCard({
@@ -20,20 +18,16 @@ class RecallOverviewCard extends StatelessWidget {
     required this.recentCount,
     required this.allModelCount,
     required this.processingTaskCount,
-    required this.ragCount,
-    required this.isLocalIndexing,
     required this.onOpenTasks,
   });
 
   @override
   Widget build(BuildContext context) {
-    final hintColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: BDPanelCard(
+      child: BDGlassSurface(
+        noBlur: true,
+        variant: BDGlassVariant.panel,
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -43,7 +37,7 @@ class RecallOverviewCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: hintColor,
+                color: textColor,
               ),
             ),
             const SizedBox(height: 18),
@@ -59,13 +53,6 @@ class RecallOverviewCard extends StatelessWidget {
                   child: _RecallMetric(
                     label: textLocalize('recall_label_processing'),
                     value: processingTaskCount.toString(),
-                  ),
-                ),
-                Expanded(
-                  child: _RecallMetric(
-                    label: textLocalize('recall_label_rag'),
-                    value: isLocalIndexing ? '...' : ragCount.toString(),
-                    accent: textColor,
                   ),
                 ),
               ],
@@ -96,9 +83,10 @@ class _TaskButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDark
-        ? BDDesign.colorMutedBlueLight
-        : BDDesign.colorMutedBlue;
+    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final accent = isDark
+        ? BDDesign.colorMutedBlueLight.withValues(alpha: 0.18)
+        : BDDesign.colorMutedBlue.withValues(alpha: 0.11);
 
     return Material(
       color: Colors.transparent,
@@ -108,13 +96,13 @@ class _TaskButton extends StatelessWidget {
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.11),
+            color: accent,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withValues(alpha: 0.18)),
+            border: Border.all(color: accent),
           ),
           child: Row(
             children: [
-              Icon(Icons.task_alt_rounded, color: color, size: 20),
+              Icon(Icons.task_alt_rounded, color: textColor, size: 20),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -122,11 +110,11 @@ class _TaskButton extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: color,
+                    color: textColor,
                   ),
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: color, size: 20),
+              Icon(Icons.chevron_right_rounded, color: textColor, size: 20),
             ],
           ),
         ),
@@ -151,10 +139,7 @@ class _OverviewChip extends StatelessWidget {
     final bgColor = isDark
         ? Colors.white.withValues(alpha: 0.06)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.08);
-    final labelColor = isDark
-        ? Colors.white.withValues(alpha: 0.62)
-        : BDDesign.colorMutedBlue;
-    final valueColor = isDark
+    final textColor = isDark
         ? BDDesign.colorPaperWhite
         : BDDesign.colorInkBlack;
 
@@ -173,11 +158,11 @@ class _OverviewChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: valueColor,
+              color: textColor,
             ),
           ),
           const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 12, color: labelColor)),
+          Text(label, style: TextStyle(fontSize: 12, color: textColor)),
         ],
       ),
     );
@@ -187,13 +172,13 @@ class _OverviewChip extends StatelessWidget {
 class _RecallMetric extends StatelessWidget {
   final String label;
   final String value;
-  final Color? accent;
 
-  const _RecallMetric({required this.label, required this.value, this.accent});
+  const _RecallMetric({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,9 +188,7 @@ class _RecallMetric extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.58)
-                : BDDesign.colorMutedBlue,
+            color: textColor,
           ),
         ),
         const SizedBox(height: 6),
@@ -214,9 +197,7 @@ class _RecallMetric extends StatelessWidget {
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w700,
-            color:
-                accent ??
-                (isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack),
+            color: textColor,
           ),
         ),
       ],

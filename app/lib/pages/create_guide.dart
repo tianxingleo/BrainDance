@@ -1,65 +1,100 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../configs/app_config.dart';
 import '../configs/app_theme.dart';
 import '../configs/motion_tokens.dart';
+import '../main.dart' show pendingSubmitTitleProvider;
 import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
+import 'community.dart';
+
+PageRoute<T> _verticalSlideRoute<T>({
+  required WidgetBuilder builder,
+  required bool fromTop, // true = 新页面从上进（相机），false = 从下进（图文生成）
+}) {
+  return PageRouteBuilder<T>(
+    transitionDuration: BDMotion.durationNormal,
+    reverseTransitionDuration: BDMotion.durationNormal,
+    opaque: true,
+    pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      final double dir = fromTop ? -1.0 : 1.0;
+      // 新页面入场：从 dir 方向滑入
+      final enterAnim = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeInOutCubic,
+      );
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: Offset(0, dir),
+          end: Offset.zero,
+        ).animate(enterAnim),
+        child: child,
+      );
+    },
+  );
+}
 
 /// Create 引导页 — record 和 generate 的统一入口
-class CreateGuidePage extends StatelessWidget {
+class CreateGuidePage extends ConsumerWidget {
   const CreateGuidePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pendingName = ref.watch(pendingSubmitTitleProvider);
+    final headerTitle = (pendingName != null && pendingName.isNotEmpty)
+        ? textLocalize('create_for_model').replaceAll('[NAME]', pendingName)
+        : textLocalize('create');
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: BDPageBackdrop(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 96.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                BDPageHeader(
-                  title: textLocalize('create'),
-                  subtitle: textLocalize('create_guide_subtitle'),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        _buildEntryCard(
-                          context,
-                          icon: Icons.camera_rounded,
-                          title: textLocalize('record'),
-                          subtitle: textLocalize('create_record_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const RecordPage()),
-                          ),
+      extendBody: true,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 96.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              BDPageHeader(
+                title: headerTitle,
+                subtitle: textLocalize('create_guide_subtitle'),
+              ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    _buildEntryCard(
+                      context,
+                      icon: Icons.camera_rounded,
+                      title: textLocalize('record'),
+                      subtitle: textLocalize('create_record_desc'),
+                      onTap: () => Navigator.push(
+                        context,
+                        _verticalSlideRoute(
+                          builder: (_) => const RecordPage(),
+                          fromTop: true,
                         ),
-                        const SizedBox(height: 16),
-                        _buildEntryCard(
-                          context,
-                          icon: Icons.auto_awesome_rounded,
-                          title: textLocalize('generate'),
-                          subtitle: textLocalize('create_generate_desc'),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const GeneratePage()),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 16),
+                    _buildEntryCard(
+                      context,
+                      icon: Icons.auto_awesome_rounded,
+                      title: textLocalize('generate'),
+                      subtitle: textLocalize('create_generate_desc'),
+                      onTap: () => Navigator.push(
+                        context,
+                        _verticalSlideRoute(
+                          builder: (_) => const GeneratePage(),
+                          fromTop: false,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -80,8 +115,9 @@ class CreateGuidePage extends StatelessWidget {
     final iconColor = isDark
         ? BDDesign.colorPaperWhite
         : BDDesign.colorMutedBlue;
-    final textColor =
-        isDark ? BDDesign.colorPaperWhite : BDDesign.colorInkBlack;
+    final textColor = isDark
+        ? BDDesign.colorPaperWhite
+        : BDDesign.colorInkBlack;
     final hintColor = isDark
         ? Colors.white.withValues(alpha: 0.55)
         : BDDesign.colorMutedBlue.withValues(alpha: 0.72);
@@ -117,19 +153,12 @@ class CreateGuidePage extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    style: TextStyle(
-                      color: hintColor,
-                      fontSize: 13,
-                    ),
+                    style: TextStyle(color: hintColor, fontSize: 13),
                   ),
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: hintColor,
-              size: 22,
-            ),
+            Icon(Icons.chevron_right_rounded, color: hintColor, size: 22),
           ],
         ),
       ),

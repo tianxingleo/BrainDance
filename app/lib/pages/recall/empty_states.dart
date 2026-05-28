@@ -31,7 +31,7 @@ class RecallEmptyState extends StatelessWidget {
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
@@ -90,10 +90,26 @@ class RecallEmptyState extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => WebGLViewerPage(
+                  PageRouteBuilder(
+                    transitionDuration: const Duration(milliseconds: 320),
+                    reverseTransitionDuration: const Duration(milliseconds: 320),
+                    opaque: true,
+                    pageBuilder: (_, __, ___) => WebGLViewerPage(
                       sceneId: textLocalize('recall_demo_title'),
                     ),
+                    transitionsBuilder: (_, animation, __, child) {
+                      final curved = CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeInOutCubic,
+                      );
+                      return SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, -1),
+                          end: Offset.zero,
+                        ).animate(curved),
+                        child: child,
+                      );
+                    },
                   ),
                 );
               },
@@ -131,7 +147,7 @@ class RecallSearchEmptyState extends StatelessWidget {
     final hintTextColor = isDark ? const Color(0xFFCCCCCC) : theme.fontGyColor3;
     return Center(
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.85,
+        width: MediaQuery.sizeOf(context).width * 0.85,
         padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
         decoration: BoxDecoration(
           color: isDark ? darkCard : theme.whiteColor1.withAlpha(200),
@@ -166,7 +182,7 @@ class RecallSearchEmptyState extends StatelessWidget {
                 RecallSearchMode.localAi => textLocalize(
                   'recall_local_ai_empty',
                 ),
-                RecallSearchMode.agent => '输入空间问题后点击搜索，Agent 将为你定位场景',
+                RecallSearchMode.agent => '输入空间问题或管理指令后点击搜索，Agent 会处理对应的三维记忆任务',
               },
               font: theme.fontBodyMedium,
               textColor: hintTextColor,

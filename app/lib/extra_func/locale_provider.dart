@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../configs/app_config.dart';
+
 class LocaleNotifier extends StateNotifier<String> {
-  LocaleNotifier() : super('en_US');
+  LocaleNotifier() : super(AppConfig.langMap['locale'] ?? 'en_US');
   String get locale {
     return state;
   }

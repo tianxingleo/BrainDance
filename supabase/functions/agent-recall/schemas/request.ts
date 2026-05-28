@@ -7,6 +7,26 @@ const candidateSceneRefSchema = z.object({
   description: z.string(),
 });
 
+const entitySlotSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["model", "scene", "location"]),
+  label: z.string().max(60),
+  mentionedAt: z.number().int().min(0),
+  source: z.enum(["result", "user"]),
+});
+
+const preferenceMapSchema = z.object({
+  regions: z.array(z.string()).max(3).optional(),
+  assetTypes: z.array(z.string()).max(3).optional(),
+  timeRange: z.string().nullable().optional(),
+});
+
+const shortTermMemorySchema = z.object({
+  entities: z.array(entitySlotSchema).max(5),
+  preferences: preferenceMapSchema,
+  turnCount: z.number().int().min(0),
+}).nullable().optional();
+
 const sessionStateSchema = z.object({
   lastMode: z.enum([
     "spatial_search",
@@ -20,6 +40,8 @@ const sessionStateSchema = z.object({
   lastOperationPreview: z.object({
     toolName: z.string(),
     affectedCount: z.number().int().min(0),
+    modelIds: z.array(z.string()).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
   }).nullable().optional(),
 }).nullable().optional();
 
@@ -36,7 +58,9 @@ export const agentRecallRequestSchema = z.object({
     .nullable().optional(),
   candidateSceneIds: z.array(z.string()).optional(),
   sessionId: z.string().optional(),
+  userId: z.string().optional(),
   conversationSummary: z.string().nullable().optional(),
+  shortTermMemory: shortTermMemorySchema,
   sessionState: sessionStateSchema,
 });
 

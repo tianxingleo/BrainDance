@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../extra_func/theme_animation_notifier.dart';
+import '../configs/set_config.dart';
+import '../configs/app_config.dart';
 import 'dart:ui' as ui;
 
 class ThemeAnimationOverlay extends ConsumerStatefulWidget {
@@ -18,38 +20,69 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
-  
+
+  static const int _baseDurationMs = 1200;
+
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-        duration: const Duration(milliseconds: 800), vsync: this);
-    
+        duration: const Duration(milliseconds: _baseDurationMs), vsync: this);
+
     _animation = CurvedAnimation(
-        parent: _controller, 
-        curve: Curves.easeOutQuint,
+      parent: _controller,
+      curve: const Cubic(0.33, 0.0, 0.67, 1.0),
     );
-    
-    // Listen to provider changes to trigger animation
-    // But ref.listen in build() is safer? No, usually in build or initState/dispose
-    // But since it's a provider change triggering animation, using ref.listen in build is better practice.
+
+    _animation.addListener(_updateFraction);
+  }
+
+  void _updateFraction() {
+    final state = ref.read(themeAnimationProvider);
+    if (!state.isAnimating) return;
+    final curveValue = _animation.value;
+    if (state.isReversing) {
+      themeAnimationFraction.value = state.startFraction * (1.0 - curveValue);
+    } else {
+      themeAnimationFraction.value = state.startFraction + (1.0 - state.startFraction) * curveValue;
+    }
   }
 
   @override
   void dispose() {
+    _animation.removeListener(_updateFraction);
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Listen to trigger animation
     ref.listen<ThemeAnimationState>(themeAnimationProvider, (previous, next) {
       if (next.isAnimating && !(previous?.isAnimating ?? false)) {
+        _controller.duration = const Duration(milliseconds: _baseDurationMs);
         _controller.reset();
-        _controller.forward().then((_) {
+        _controller.forward().orCancel.then((_) {
           ref.read(themeAnimationProvider.notifier).end();
-        });
+        }, onError: (_) {});
+      } else if (next.isAnimating && (previous?.isReversing != next.isReversing)) {
+        final distance = next.isReversing
+            ? next.startFraction
+            : (1.0 - next.startFraction);
+        final ms = (distance * _baseDurationMs).round().clamp(100, _baseDurationMs);
+        _controller.duration = Duration(milliseconds: ms);
+        _controller.reset();
+        _controller.forward().orCancel.then((_) {
+          final endState = ref.read(themeAnimationProvider);
+          if (endState.isReversing) {
+            SetConfig.setNightMode(!AppConfig.isNightMode, ref);
+            SetConfig.saveMsgToFile();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              ref.read(themeAnimationProvider.notifier).end();
+            });
+          } else {
+            ref.read(themeAnimationProvider.notifier).end();
+          }
+        }, onError: (_) {});
       }
     });
 
@@ -59,30 +92,22 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
 
     return Stack(
       children: [
-        // Layer 0: The real app (which will update to the NEW theme deeply inside)
-        // We wrap child with RepaintBoundary here to make sure we can capture it
         RepaintBoundary(
-            key: themeAnimationKey,
-            child: widget.child,
+          key: themeAnimationKey,
+          child: widget.child,
         ),
-
-        // Layer 1: The OLD theme screenshot with a HOLE being punched out
         if (isAnimating && screenshot != null)
           Positioned.fill(
             child: IgnorePointer(
-              // Allow touches to pass through during animation? 
-              // Usually safer to block touches or ignore. Ignoring is better if the animation is purely visual overlay.
-              child: AnimatedBuilder(
-                animation: _animation,
-                builder: (context, child) {
-                  return CustomPaint(
-                    painter: _ScreenshotPainter(
-                      image: screenshot,
-                      center: animationState.center,
-                      radiusValid: _animation.value,
-                    ),
-                  );
-                },
+              child: CustomPaint(
+                painter: _ScreenshotPainter(
+                  image: screenshot,
+                  center: animationState.center,
+                  animation: _animation,
+                  mode: animationState.mode,
+                  isReversing: animationState.isReversing,
+                  startFraction: animationState.startFraction,
+                ),
               ),
             ),
           ),
@@ -94,38 +119,51 @@ class _ThemeAnimationOverlayState extends ConsumerState<ThemeAnimationOverlay>
 class _ScreenshotPainter extends CustomPainter {
   final ui.Image image;
   final Offset center;
-  final double radiusValid; // 0.0 to 1.0
+  final Animation<double> animation;
+  final ThemeTransitionMode mode;
+  final bool isReversing;
+  final double startFraction;
 
   _ScreenshotPainter({
     required this.image,
     required this.center,
-    required this.radiusValid,
-  });
+    required this.animation,
+    required this.mode,
+    required this.isReversing,
+    required this.startFraction,
+  }) : super(repaint: animation);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final curveValue = animation.value;
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    
-    // 使用离屏渲染层来做遮罩，相比复杂的 clipPath 更能够利用硬件加速，极大提升帧率
-    canvas.saveLayer(dst, Paint());
-    
-    // 绘制旧主题的截屏，降低 filterQuality 到 low，避免缩放时过度消耗 GPU
-    final paint = Paint()..filterQuality = FilterQuality.low;
     final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
-    canvas.drawImageRect(image, src, dst, paint);
-    
-    final double maxRadius = _maxDistance(center, size);
-    final double specificRadius = maxRadius * radiusValid;
+    final maxDist = _maxDistance(center, size);
 
-    // 用 BlendMode.clear '挖' 出一个不断扩大的圆洞，露出底层的新主题
-    final clearPaint = Paint()
-      ..blendMode = BlendMode.clear
-      ..style = PaintingStyle.fill;
-    
-    canvas.drawCircle(center, specificRadius, clearPaint);
-    
-    // 合成图层
-    canvas.restore();
+    double fraction;
+    if (isReversing) {
+      fraction = startFraction * (1.0 - curveValue);
+    } else {
+      fraction = startFraction + (1.0 - startFraction) * curveValue;
+    }
+
+    if (mode == ThemeTransitionMode.expandHole) {
+      final radius = maxDist * fraction;
+      final holePath = Path()
+        ..addRect(dst)
+        ..addOval(Rect.fromCircle(center: center, radius: radius));
+      holePath.fillType = PathFillType.evenOdd;
+      canvas.save();
+      canvas.clipPath(holePath);
+      canvas.drawImageRect(image, src, dst, Paint()..filterQuality = FilterQuality.none);
+      canvas.restore();
+    } else {
+      final radius = maxDist * (1.0 - fraction);
+      canvas.save();
+      canvas.clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: radius)));
+      canvas.drawImageRect(image, src, dst, Paint()..filterQuality = FilterQuality.none);
+      canvas.restore();
+    }
   }
 
   double _maxDistance(Offset p, Size size) {
@@ -139,8 +177,6 @@ class _ScreenshotPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ScreenshotPainter oldDelegate) {
-    return oldDelegate.image != image ||
-           oldDelegate.center != center ||
-           oldDelegate.radiusValid != radiusValid;
+    return oldDelegate.image != image || oldDelegate.center != center || oldDelegate.mode != mode;
   }
 }

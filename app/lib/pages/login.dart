@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
 import 'package:braindance/configs/app_config.dart';
@@ -15,6 +16,25 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  Widget _buildSupabaseWarning(
+    String message,
+    ColorScheme colorScheme,
+  ) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.errorContainer.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(color: colorScheme.onErrorContainer, height: 1.4),
+      ),
+    );
+  }
+
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
@@ -40,7 +60,7 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showText(textLocalize('login_signup_success'), context: context);
+          showAppToast(context, textLocalize('login_signup_success'));
           setState(() {
             _isSignUp = false; // 注册成功后切回登录界面
           });
@@ -52,17 +72,19 @@ class _LoginPageState extends State<LoginPage> {
           password: _passwordController.text.trim(),
         );
         if (mounted) {
-          TDToast.showSuccess(textLocalize('login_success'), context: context);
+          showAppToast(context, textLocalize('login_success'));
           Navigator.of(context).pushReplacementNamed('/'); // 回到首页
         }
       }
     } on AuthException catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('login_auth_fail')}: ${e.message}', context: context);
+        debugPrint('[Login] auth error: $e');
+        showAppToast(context, '${textLocalize('login_auth_fail')}: ${e.message}');
       }
     } catch (e) {
       if (mounted) {
-        TDToast.showText('${textLocalize('login_error')}: $e', context: context);
+        debugPrint('[Login] error: $e');
+        showAppToast(context, '${textLocalize('login_error')}: $e');
       }
     } finally {
       if (mounted) {
@@ -77,6 +99,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final theme = TDTheme.of(context);
     final colorScheme = Theme.of(context).colorScheme;
+    final supabaseDiagnostic = SupabaseConfig.runtimeDiagnosticMessage;
 
     if (SupabaseConfig.isAdminMode) {
       return Scaffold(
@@ -97,6 +120,8 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (supabaseDiagnostic?.isNotEmpty ?? false)
+                    _buildSupabaseWarning(supabaseDiagnostic!, colorScheme),
                   Icon(
                     Icons.admin_panel_settings,
                     size: 64,
@@ -173,6 +198,8 @@ class _LoginPageState extends State<LoginPage> {
                   key: ValueKey<bool>(_isSignUp),
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (supabaseDiagnostic?.isNotEmpty ?? false)
+                      _buildSupabaseWarning(supabaseDiagnostic!, colorScheme),
                     TDText(
                       _isSignUp ? textLocalize('login_create_account') : textLocalize('login_welcome'),
                       font: theme.fontTitleLarge,

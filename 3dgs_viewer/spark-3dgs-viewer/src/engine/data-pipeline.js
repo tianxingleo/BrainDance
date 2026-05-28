@@ -196,9 +196,10 @@ export class DataPipeline {
     };
   }
 
-  async load(url) {
+  async load(url, options = {}) {
     const lowerUrl = String(url || '').toLowerCase();
     const isSplatLike = lowerUrl.endsWith('.splat') || lowerUrl.endsWith('.ksplat');
+    const allowSplatFallback = options.allowSplatFallback === true;
     let normalizedData = null;
     let colors = null;
 
@@ -225,10 +226,20 @@ export class DataPipeline {
       console.info('[BrainDance][DataPipeline] Skip PLY parsing for splat source:', url);
     }
 
-    if (!normalizedData) {
+    if (!normalizedData && (!isSplatLike || allowSplatFallback)) {
       const fallback = createFallbackCloud();
       normalizedData = fallback;
       colors = fallback.colors;
+    }
+
+    if (!normalizedData) {
+      this.bounds.center.set(0, 0, 0);
+      this.bounds.size.set(0, 0, 0);
+      this.bounds.radius = 0;
+      this.count = 0;
+      this.textureSize = 0;
+      this.points = null;
+      return;
     }
 
     this.bounds.center.copy(normalizedData.center);

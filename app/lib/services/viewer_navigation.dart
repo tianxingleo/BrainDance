@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../pages/webgl_viewer.dart';
+import 'preview_image_resolver.dart';
 
 // ── URL helpers ──────────────────────────────────────────────
 
@@ -14,6 +17,20 @@ String toPublicUrl(String storagePath) {
   } catch (_) {
     return storagePath;
   }
+}
+
+/// 把数据库中可能存为旧服务器完整 URL 的 storage 路径，归一为当前
+/// Supabase 配置下的公开 URL。规则与 recall_data_sync 保持一致。
+String _normalizeStorageUrl(String raw) {
+  const marker = '/storage/v1/object/public/braindance-assets/';
+  final idx = raw.indexOf(marker);
+  if (idx >= 0) {
+    return toPublicUrl(raw.substring(idx + marker.length));
+  }
+  if (!raw.startsWith('http')) {
+    return toPublicUrl(raw);
+  }
+  return raw;
 }
 
 /// 根据模型 ply_path 推导同场景的 webgl_poses.json 公开 URL。
@@ -36,9 +53,7 @@ String? toPosesUrl(String? plyPath) {
 // ── Sibling query ────────────────────────────────────────────
 
 /// 根据 sceneId（display_name）自动查询兄弟模型（同名场景的不同时间版本）。
-Future<List<Map<String, dynamic>>> _querySiblingModels(
-  String sceneId,
-) async {
+Future<List<Map<String, dynamic>>> _querySiblingModels(String sceneId) async {
   try {
     // 1. 查 processing_tasks 获取当前 sceneId 对应的 display_name
     //    sceneId 参数可能是 display_name，也可能是 scene_id
@@ -97,6 +112,12 @@ Future<List<Map<String, dynamic>>> _querySiblingModels(
       if (displayNameMap.containsKey(sid)) {
         m['display_name'] = displayNameMap[sid];
       }
+
+      final raw = m['preview_img_path']?.toString() ?? '';
+      if (raw.isNotEmpty) {
+        m['preview_img_path'] = _normalizeStorageUrl(raw);
+      }
+      materializePreviewWebpPath(m, normalize: _normalizeStorageUrl);
     }
 
     return assets;
@@ -108,6 +129,8 @@ Future<List<Map<String, dynamic>>> _querySiblingModels(
 // ── Unified navigation ──────────────────────────────────────
 
 /// 统一的 3DGS Viewer 入口。自动查询兄弟模型并传入 timePeelingModels。
+Completer<void>? _viewerLaunchInFlight;
+
 Future<void> openViewer(
   BuildContext context, {
   required String initialModelUrl,
@@ -115,21 +138,56 @@ Future<void> openViewer(
   required String sceneId,
   List<double>? initialPose,
   String? initialPoseId,
+  bool initialMarkerArMode = false,
 }) async {
-  final siblings = await _querySiblingModels(sceneId);
+  final inFlight = _viewerLaunchInFlight;
+  if (inFlight != null) {
+    return inFlight.future;
+  }
 
-  if (!context.mounted) return;
+  final guard = Completer<void>();
+  _viewerLaunchInFlight = guard;
 
-  Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => WebGLViewerPage(
-        initialModelUrl: initialModelUrl,
-        posesUrl: posesUrl,
-        sceneId: sceneId,
-        initialPose: initialPose,
-        initialPoseId: initialPoseId,
-        timePeelingModels: siblings,
+  try {
+    final siblings = await _querySiblingModels(sceneId);
+    if (!context.mounted) return;
+
+    await Navigator.of(context).push(
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 320),
+        opaque: true,
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            WebGLViewerPage(
+              initialModelUrl: initialModelUrl,
+              posesUrl: posesUrl,
+              sceneId: sceneId,
+              initialPose: initialPose,
+              initialPoseId: initialPoseId,
+              initialMarkerArMode: initialMarkerArMode,
+              timePeelingModels: siblings,
+            ),
+        transitionsBuilder: (_, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeInOutCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -1),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
       ),
-    ),
-  );
+    );
+  } finally {
+    if (!guard.isCompleted) {
+      guard.complete();
+    }
+    if (identical(_viewerLaunchInFlight, guard)) {
+      _viewerLaunchInFlight = null;
+    }
+  }
 }

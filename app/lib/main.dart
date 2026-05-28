@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:braindance/configs/reco_config.dart';
@@ -10,26 +11,35 @@ import 'package:flutter/material.dart';
 import 'package:braindance/extra_func/theme_provider.dart';
 import 'package:braindance/extra_func/locale_provider.dart';
 import 'pages/recall.dart';
+import 'pages/agent_chat.dart';
 import 'pages/settings.dart';
 import 'pages/create_guide.dart';
+import 'pages/community.dart';
 import 'pages/login.dart';
 import 'pages/task_list.dart';
 import 'package:braindance/configs/app_config.dart';
+import 'package:braindance/extra_func/language.dart';
 import 'package:braindance/configs/app_theme.dart';
+import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/configs/gen_config.dart';
 import 'package:braindance/configs/supabase_config.dart';
 import 'package:braindance/configs/set_config.dart';
 import 'services/task_notification_service.dart';
+import 'services/network_service.dart';
 import 'floating_nav_bar.dart';
 import 'widgets/bd_surfaces.dart';
+import 'widgets/network_bubble.dart';
 import 'widgets/theme_animation_overlay.dart';
 
 //App Data
 final themeData = TDTheme.defaultData();
 //MainScreen
 final pageIndexProvider = StateProvider((ref) => 0);
-final loadingProvider = StateProvider((ref) => true);
+final loadingProvider = StateProvider((ref) => false);
 final isRecordingProvider = StateProvider((ref) => false);
+final pendingSubmitTitleProvider = StateProvider<String?>((ref) => null);
+final recallScrollToTopSignal = StateProvider<int>((ref) => 0);
+final pageAnimatingProvider = StateProvider<bool>((ref) => false);
 
 // OverviewCard 统计数据，recall 写入，manage 读取
 final overviewStatsProvider = StateProvider<Map<String, int>>(
@@ -41,17 +51,51 @@ final overviewStatsProvider = StateProvider<Map<String, int>>(
   },
 );
 final overviewLocalIndexingProvider = StateProvider<bool>((ref) => false);
+final recallOfficialExpandedProvider = StateProvider<bool>((ref) => true);
+final recallRegularExpandedProvider = StateProvider<bool>((ref) => true);
+final recallLocalExpandedProvider = StateProvider<bool>((ref) => true);
+
+// 社区帖子刷新信号 — 发布/删除/切换可见性后自增，设置页和社区页双向同步
+final myPostsRefreshSignal = StateProvider<int>((ref) => 0);
+
+// 收藏/点赞刷新信号 — 仅设置页监听，避免社区页不必要的全量刷新
+final myCollectionRefreshSignal = StateProvider<int>((ref) => 0);
 
 // 全局 NavigatorKey
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   TDTheme.needMultiTheme(true);
 
   /// 开启多套主题功能
   AppConfig.initializeAppConfig(); //加载默认数据
+  // 启动阶段同步加载用户设置，避免进入首页后异步加载导致首屏空白
+  final bool settingsLoaded = await SetConfig.loadMsgFromFile();
+  if (settingsLoaded) {
+    final localeCode = SetConfig.settingsMsg[0];
+    if (localeCode.isNotEmpty) {
+      AppConfig.langMap = Localize.getLangMap(localeCode);
+    }
+    final nightVal = SetConfig.settingsMsg[1];
+    if (nightVal == 'true') {
+      AppConfig.isNightMode = true;
+    } else if (nightVal == 'false') {
+      AppConfig.isNightMode = false;
+    } else if (nightVal.isEmpty) {
+      AppConfig.isNightMode =
+          widgetsBinding.platformDispatcher.platformBrightness ==
+          Brightness.dark;
+    }
+    AppConfig.hasReadRecordTip = SetConfig.settingsMsg[2] == 'true';
+  }
   await dotenv.load(fileName: ".env");
+  final supabaseResolution = await SupabaseConfig.resolveEndpoint();
+  SupabaseConfig.applyRuntimeResolution(supabaseResolution);
+  if (supabaseResolution.diagnosticMessage?.isNotEmpty ?? false) {
+    debugPrint('Supabase bootstrap: ${supabaseResolution.diagnosticMessage}');
+  }
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.apiKey,
@@ -60,6 +104,10 @@ void main() async {
   // 初始化全局任务通知服务
   taskNotificationService.setNavigatorKey(navigatorKey);
   await taskNotificationService.init();
+
+  // 初始化全局网络状态监测服务
+  networkService.setNavigatorKey(navigatorKey);
+  await networkService.init();
   //Camera
   try {
     final List<CameraDescription> camsTemp = await availableCameras();
@@ -118,21 +166,48 @@ class MyApp extends StatelessWidget with WidgetsBindingObserver {
   }
 }
 
-class Home extends ConsumerWidget {
+class Home extends ConsumerStatefulWidget {
   const Home({super.key});
-  void loadSettings(WidgetRef ref) async {
-    if (!ref.read(loadingProvider)) {
-      return;
-    }
-    final bool suc = await SetConfig.loadMsgFromFile();
-    if (suc) {
-      SetConfig.loadSettingsFromMsg(ref);
-    }
-    ref.read(loadingProvider.notifier).state = false;
+
+  @override
+  ConsumerState<Home> createState() => _HomeState();
+}
+
+class _HomeState extends ConsumerState<Home> {
+  bool _settingsApplied = false;
+  bool _splashRemoved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 在首帧之前推迟到 microtask，避免在 build 期间修改被 watch 的 Riverpod provider
+    // (flutter_riverpod 3.x 会因此抛出断言错误，导致 Home.build 永远完不成、
+    // FlutterNativeSplash.remove 永远不被调用，启动卡死在原生 Splash)。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _applySettingsOnce();
+    });
+  }
+
+  void _applySettingsOnce() {
+    if (_settingsApplied) return;
+    _settingsApplied = true;
+    // settingsMsg 已在 main() 中同步加载完成；这里仅同步到 provider。
+    SetConfig.loadSettingsFromMsg(ref);
+  }
+
+  void _removeSplashOnce() {
+    if (_splashRemoved) return;
+    _splashRemoved = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterNativeSplash.remove();
+    });
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    _removeSplashOnce();
+
     final localeCode = ref.watch(localeProvider);
     final themeModeAsync = ref.watch(themeModeProvider);
 
@@ -156,18 +231,54 @@ class Home extends ConsumerWidget {
         ),
       ),
       themeMode: themeModeAsync,
+      themeAnimationDuration: Duration.zero,
       initialRoute: canEnterApp
           ? '/'
           : '/login', // secret key 走管理员模式，anon key 仍按登录态进入
-      routes: {
-        // 路由表：路径 -> 页面构建器
-        '/': (context) {
-          loadSettings(ref);
-          return MainScreen();
-        }, // 根路径对应主屏幕
-        '/login': (context) => const LoginPage(), // 登录页
-        '/example': (context) => RecallPage(), // "/example"路径对应....
-        '/tasks': (context) => const TaskListPage(), // 任务列表页
+      onGenerateRoute: (settings) {
+        WidgetBuilder builder;
+        bool useSlide = false;
+        switch (settings.name) {
+          case '/':
+            builder = (context) {
+              return MainScreen();
+            };
+          case '/login':
+            builder = (_) => const LoginPage();
+          case '/example':
+            builder = (_) => RecallPage();
+          case '/tasks':
+            builder = (_) => const TaskListPage();
+            useSlide = true;
+          default:
+            return null;
+        }
+        if (useSlide) {
+          return PageRouteBuilder(
+            settings: settings,
+            transitionDuration: BDMotion.durationNormal,
+            reverseTransitionDuration: BDMotion.durationNormal,
+            opaque: true,
+            pageBuilder: (ctx, _, _) => builder(ctx),
+            transitionsBuilder: (ctx, animation, _a, child) {
+              final curved = animation.drive(
+                CurveTween(curve: Curves.easeInOutCubic),
+              );
+              final screenHeight = MediaQuery.sizeOf(ctx).height;
+              return AnimatedBuilder(
+                animation: curved,
+                builder: (_, child) {
+                  return Transform.translate(
+                    offset: Offset(0, -(1.0 - curved.value) * screenHeight),
+                    child: child,
+                  );
+                },
+                child: child,
+              );
+            },
+          );
+        }
+        return MaterialPageRoute(settings: settings, builder: builder);
       },
       // 使用 builder 创建全局 Overlay，确保通知弹窗能在任意界面显示
       builder: (context, child) {
@@ -179,6 +290,7 @@ class Home extends ConsumerWidget {
                 child!,
                 // 语言切换时一并重建全局通知和页面树，避免旧文案残留
                 const GlobalNotificationOverlay(),
+                const NetworkBubbleOverlay(),
               ],
             ),
           ),
@@ -213,6 +325,7 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
   Timer? _autoHideTimer;
+  TaskNotificationData? _activeNotification;
 
   @override
   void initState() {
@@ -246,10 +359,45 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
         taskNotificationService.hideNotification();
       }
     });
+
+    taskNotificationService.addListener(_onNotificationChanged);
+  }
+
+  void _onNotificationChanged() {
+    final notification = taskNotificationService.currentNotification;
+    final route = taskNotificationService.currentRoute;
+    final routeAllowed = taskNotificationService.isNotificationEnabledForRoute(
+      route,
+    );
+
+    if (notification == null || !routeAllowed) {
+      if (_activeNotification != null) {
+        _activeNotification = null;
+        _showController.reset();
+        _hideController.reset();
+        _autoHideTimer?.cancel();
+        setState(() {});
+      }
+      return;
+    }
+
+    if (_activeNotification != notification) {
+      _activeNotification = notification;
+      _hideController.reset();
+      _showController.forward();
+      _autoHideTimer?.cancel();
+      _autoHideTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted && taskNotificationService.currentNotification != null) {
+          _hideController.forward(from: 0);
+        }
+      });
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    taskNotificationService.removeListener(_onNotificationChanged);
     _autoHideTimer?.cancel();
     _showController.dispose();
     _hideController.dispose();
@@ -258,41 +406,11 @@ class _GlobalNotificationOverlayState extends State<GlobalNotificationOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: taskNotificationService,
-      builder: (context, child) {
-        final notification = taskNotificationService.currentNotification;
-        if (notification == null) {
-          // 重置动画控制器
-          _showController.reset();
-          _hideController.reset();
-          _autoHideTimer?.cancel();
-          return const SizedBox.shrink();
-        }
-
-        // 检查当前路由是否允许显示通知
-        final currentRoute = taskNotificationService.currentRoute;
-        if (!taskNotificationService.isNotificationEnabledForRoute(
-          currentRoute,
-        )) {
-          return const SizedBox.shrink();
-        }
-
-        // 显示动画：滑入
-        _showController.forward();
-
-        // 启动1秒后开始淡出动画（总显示时间约2秒）
-        _autoHideTimer?.cancel();
-        _autoHideTimer = Timer(const Duration(seconds: 1), () {
-          // 等待显示动画完成后，开始1秒淡出动画
-          if (mounted && taskNotificationService.currentNotification != null) {
-            _hideController.forward(from: 0);
-          }
-        });
-
-        return _buildNotificationWidget(notification);
-      },
-    );
+    final notification = _activeNotification;
+    if (notification == null) {
+      return const SizedBox.shrink();
+    }
+    return _buildNotificationWidget(notification);
   }
 
   Widget _buildNotificationWidget(TaskNotificationData notification) {
@@ -418,12 +536,14 @@ class MainScreen extends ConsumerStatefulWidget {
 
 class _MainScreenState extends ConsumerState<MainScreen>
     with TickerProviderStateMixin {
-  static const int _pageCount = 3;
+  static const int _pageCount = 5;
 
   int _previousIndex = 0;
+  int _lastTabIndex = 0; // 上次不同的 tab，用于同 tab 重复点击时回退
   int _slideDirection = 1; // 1 = slide from right, -1 = slide from left
 
   late final AnimationController _animController;
+  late final Animation<double> _curvedAnimation;
   bool _isAnimating = false;
 
   /// 懒缓存：首次访问时创建，之后一直保留在 widget tree 中
@@ -434,19 +554,27 @@ class _MainScreenState extends ConsumerState<MainScreen>
   void initState() {
     super.initState();
     _animController =
-        AnimationController(
-          duration: const Duration(milliseconds: 360),
-          vsync: this,
-        )..addStatusListener((status) {
-          if (status == AnimationStatus.completed) {
-            if (mounted) {
-              setState(() {
-                _isAnimating = false;
-                _previousIndex = ref.read(pageIndexProvider);
-              });
+        AnimationController(duration: BDMotion.durationNormal, vsync: this)
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) {
+              ref.read(pageAnimatingProvider.notifier).state = false;
+              if (mounted) {
+                setState(() {
+                  _isAnimating = false;
+                  _previousIndex = ref.read(pageIndexProvider);
+                });
+              }
             }
-          }
-        });
+          });
+    _curvedAnimation = _animController.drive(
+      CurveTween(curve: Curves.easeInOutCubic),
+    );
+
+    // 首帧只渲染当前页，首帧结束后立即预热其余 Tab 页面（Offstage），消除首次切换掉帧
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _builtPages.addAll({1, 2, 3, 4}));
+    });
   }
 
   @override
@@ -462,8 +590,12 @@ class _MainScreenState extends ConsumerState<MainScreen>
       case 0:
         page = const RecallPage();
       case 1:
-        page = const CreateGuidePage();
+        page = const AgentChatPage();
       case 2:
+        page = const CreateGuidePage();
+      case 3:
+        page = const CommunityPage();
+      case 4:
         page = const SettingsPage();
       default:
         page = const RecallPage();
@@ -474,12 +606,25 @@ class _MainScreenState extends ConsumerState<MainScreen>
 
   void _switchToPage(int newIndex) {
     final oldIndex = ref.read(pageIndexProvider);
-    if (newIndex == oldIndex) return;
+    if (newIndex == oldIndex) {
+      final createIdx = 2;
+      if (newIndex == createIdx && _lastTabIndex != oldIndex) {
+        _switchToPage(_lastTabIndex);
+      } else if (newIndex == 0) {
+        ref.read(recallScrollToTopSignal.notifier).update((s) => s + 1);
+      }
+      return;
+    }
 
-    _slideDirection = newIndex > oldIndex ? 1 : -1;
-    _previousIndex = oldIndex;
-    _builtPages.add(newIndex);
-    _isAnimating = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    _lastTabIndex = oldIndex;
+    ref.read(pageAnimatingProvider.notifier).state = true;
+    setState(() {
+      _slideDirection = newIndex > oldIndex ? 1 : -1;
+      _previousIndex = oldIndex;
+      _builtPages.add(newIndex);
+      _isAnimating = true;
+    });
     _animController.forward(from: 0);
     ref.read(pageIndexProvider.notifier).state = newIndex;
   }
@@ -490,70 +635,91 @@ class _MainScreenState extends ConsumerState<MainScreen>
     final int pageIndex = ref.watch(pageIndexProvider);
     final bool isRecording = ref.watch(isRecordingProvider);
 
+    // 离开创作页时清掉待预填的模型名，避免下次再进显示残留标题
+    ref.listen<int>(pageIndexProvider, (prev, next) {
+      if (prev == 2 && next != 2) {
+        ref.read(pendingSubmitTitleProvider.notifier).state = null;
+      }
+    });
+
     // 外部改 pageIndex 时（如 provider 直接修改），同步方向
-    // _previousIndex 保留旧值供动画使用，动画结束后在回调中更新
     if (pageIndex != _previousIndex && !_isAnimating) {
-      _slideDirection = pageIndex > _previousIndex ? 1 : -1;
-      _builtPages.add(pageIndex);
-      _isAnimating = true;
-      _animController.forward(from: 0);
+      FocusManager.instance.primaryFocus?.unfocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(pageAnimatingProvider.notifier).state = true;
+        setState(() {
+          _slideDirection = pageIndex > _previousIndex ? 1 : -1;
+          _builtPages.add(pageIndex);
+          _isAnimating = true;
+        });
+        _animController.forward(from: 0);
+      });
     }
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       extendBody: true,
-      body: BDPageBackdrop(
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Stack(
+      body: isLoading
+          ? const SizedBox.shrink()
+          : BDPageBackdrop(
+              child: Stack(
                 children: [
-                  // ── 3 个页面槽位，位置永远固定，保证 State 不被重建 ──
+                  // ── 页面槽位：保证每个页面的 State 不被销毁 ──
                   ...List.generate(_pageCount, (i) {
                     if (!_builtPages.contains(i)) {
-                      // 占位：保持索引稳定，类型始终是 SizedBox
                       return const SizedBox.shrink();
                     }
-                    final isActive = i == pageIndex;
-                    final isLeaving =
-                        _isAnimating && i == _previousIndex && i != pageIndex;
 
-                    // AnimatedBuilder.child 不随动画帧重建 → 页面 State 保留
                     return AnimatedBuilder(
-                      animation: _animController,
+                      animation: _curvedAnimation,
                       builder: (context, child) {
-                        Offset translation = Offset.zero;
-                        double opacity = isActive ? 1.0 : 0.0;
+                        final bool isActive = i == pageIndex;
+                        // 外部直接修改 pageIndexProvider 时，_isAnimating 在当前帧还未置 true，
+                        // 需要按 t=0 的状态渲染，避免新页面在最终位置闪现一帧。
+                        final bool pendingAnim =
+                            !_isAnimating && pageIndex != _previousIndex;
+                        final bool effectiveAnim = _isAnimating || pendingAnim;
+                        final int effectiveDir = pendingAnim
+                            ? (pageIndex > _previousIndex ? 1 : -1)
+                            : _slideDirection;
+                        final bool isLeaving =
+                            effectiveAnim &&
+                            i == _previousIndex &&
+                            i != pageIndex;
+                        final double t = pendingAnim
+                            ? 0.0
+                            : _curvedAnimation.value;
+                        double dx = 0;
 
-                        if (_isAnimating && isActive) {
-                          // 入场：从侧面滑入 + 淡入
-                          final t = Curves.easeOutCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(
-                            0.15 * _slideDirection * (1.0 - t),
-                            0,
-                          );
-                          opacity = t;
+                        if (effectiveAnim && isActive) {
+                          dx =
+                              effectiveDir *
+                              (1.0 - t) *
+                              MediaQuery.sizeOf(context).width;
                         } else if (isLeaving) {
-                          // 离场：向反方向滑出 + 淡出
-                          final t = Curves.easeInCubic.transform(
-                            _animController.value,
-                          );
-                          translation = Offset(-0.15 * _slideDirection * t, 0);
-                          opacity = 1.0 - t;
+                          dx =
+                              -effectiveDir *
+                              t *
+                              MediaQuery.sizeOf(context).width;
                         }
 
-                        return IgnorePointer(
-                          ignoring: !isActive,
-                          child: FractionalTranslation(
-                            translation: translation,
-                            child: Opacity(
-                              opacity: opacity.clamp(0.0, 1.0),
-                              child: RepaintBoundary(child: child),
+                        final bool isVisible = isActive || isLeaving;
+                        return ExcludeFocus(
+                          excluding: !isActive,
+                          child: Offstage(
+                            offstage: !isVisible,
+                            child: IgnorePointer(
+                              ignoring: !isActive,
+                              child: Transform.translate(
+                                offset: Offset(dx, 0),
+                                child: child,
+                              ),
                             ),
                           ),
                         );
                       },
-                      child: _ensurePage(i),
+                      child: RepaintBoundary(child: _ensurePage(i)),
                     );
                   }),
                   if (!isRecording)
@@ -566,19 +732,27 @@ class _MainScreenState extends ConsumerState<MainScreen>
                           label: textLocalize("recall"),
                         ),
                         NavIslandItem(
+                          icon: Icons.travel_explore_rounded,
+                          label: textLocalize("agent"),
+                        ),
+                        NavIslandItem(
                           icon: Icons.add_rounded,
                           label: textLocalize("create"),
                           isLarge: true,
                         ),
                         NavIslandItem(
-                          icon: Icons.settings_rounded,
-                          label: textLocalize("manage"),
+                          icon: Icons.groups_rounded,
+                          label: textLocalize("community"),
+                        ),
+                        NavIslandItem(
+                          icon: Icons.person_rounded,
+                          label: textLocalize("mine"),
                         ),
                       ],
                     ),
                 ],
               ),
-      ),
+            ),
     );
   }
 }

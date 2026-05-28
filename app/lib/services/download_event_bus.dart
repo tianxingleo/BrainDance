@@ -25,3 +25,8 @@ class ModelDownloadEvent {
 }
 
 final downloadEventBus = StreamController<ModelDownloadEvent>.broadcast();
+
+/// 关闭全局事件总线，释放监听器引用。应在 App 退出时调用。
+void disposeDownloadEventBus() {
+  downloadEventBus.close();
+}

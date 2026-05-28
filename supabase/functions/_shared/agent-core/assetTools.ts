@@ -13,6 +13,7 @@ type ModelAssetRow = {
   scene_id: string;
   description: string | null;
   display_name: string | null;
+  summary_title: string | null;
   objects: string[] | null;
   tags: string[] | null;
   preview_img_path: string | null;
@@ -29,15 +30,19 @@ export type ListedModelAsset = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  summary_title: string | null;
   description: string | null;
   tags: string[];
   created_at: string;
+  preview_img_path: string | null;
+  ply_path: string | null;
 };
 
 export type ModelAssetBundle = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  summary_title: string | null;
   description: string | null;
   objects: string[];
   tags: string[];
@@ -60,6 +65,12 @@ export type CompareModelAssetsResult = {
   };
 };
 
+export type DuplicateModelNameGroup = {
+  display_name: string;
+  count: number;
+  rows: ListedModelAsset[];
+};
+
 export type AssetOperationResult = {
   tool_name: string;
   dry_run: boolean;
@@ -70,6 +81,8 @@ export type AssetOperationResult = {
     scene_id: string;
     old_display_name: string | null;
     new_display_name: string | null;
+    old_summary_title?: string | null;
+    new_summary_title?: string | null;
     old_description: string | null;
     new_description: string | null;
     old_tags: string[];
@@ -82,24 +95,24 @@ export type AssetToolState = {
   list: ListedModelAsset[] | null;
   bundle: ModelAssetBundle[] | null;
   comparison: CompareModelAssetsResult | null;
+  duplicateNames: DuplicateModelNameGroup[] | null;
   operation: AssetOperationResult | null;
   poseSummary: PoseSummary | null;
   relatedModels: RelatedModelSummary[] | null;
   placeVersions: PlaceVersionsResult | null;
   collectionSummary: MemoryCollectionSummary | null;
-  threadGrouping: {
-    model_ids: string[];
-    place_id: string;
-    memory_thread_id: string;
-  } | null;
 };
 
 type AssetToolRuntimeOptions = {
   selectedModelIds?: string[];
   allowWrite?: boolean;
+  embeddings?: {
+    embedQuery(text: string): Promise<number[]>;
+  };
 };
 
-const listModelAssetsSchema = z.object({
+const readModelAssetsSchema = z.object({
+  mode: z.enum(["list", "duplicate_display_name"]).default("list"),
   modelIds: z.array(z.string().uuid()).default([]),
   sceneIds: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
@@ -140,6 +153,25 @@ const batchPatchSchema = z.object({
   dryRun: z.boolean().default(true),
 });
 
+const writeModelAssetsSchema = z.object({
+  updates: z.array(z.object({
+    modelId: z.string().uuid(),
+    displayName: z.string().trim().min(1).max(120).optional(),
+    summaryTitle: z.string().trim().min(1).max(80).optional(),
+    description: z.string().trim().max(2000).optional(),
+    tags: z.array(z.string().trim().min(1)).optional(),
+  }).refine((item) =>
+    Boolean(
+      item.displayName ||
+        item.summaryTitle ||
+        item.description !== undefined ||
+        item.tags,
+    ), {
+    message: "每条更新至少包含一个可写字段",
+  })).min(1).max(20),
+  dryRun: z.boolean().default(true),
+});
+
 const getBundleSchema = z.object({
   modelIds: z.array(z.string().uuid()).min(1).max(20),
 });
@@ -167,15 +199,19 @@ const listedModelAssetSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  summary_title: z.string().nullable(),
   description: z.string().nullable(),
   tags: z.array(z.string()),
   created_at: z.string(),
+  preview_img_path: z.string().nullable(),
+  ply_path: z.string().nullable(),
 });
 
 const modelAssetBundleSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  summary_title: z.string().nullable(),
   description: z.string().nullable(),
   objects: z.array(z.string()),
   tags: z.array(z.string()),
@@ -198,6 +234,12 @@ const compareModelAssetsResultSchema = z.object({
   }),
 });
 
+const duplicateModelNameGroupSchema = z.object({
+  display_name: z.string(),
+  count: z.number().int().min(2),
+  rows: z.array(listedModelAssetSchema),
+});
+
 const assetOperationSchema = z.object({
   tool_name: z.string(),
   dry_run: z.boolean(),
@@ -208,6 +250,8 @@ const assetOperationSchema = z.object({
     scene_id: z.string(),
     old_display_name: z.string().nullable(),
     new_display_name: z.string().nullable(),
+    old_summary_title: z.string().nullable().optional(),
+    new_summary_title: z.string().nullable().optional(),
     old_description: z.string().nullable(),
     new_description: z.string().nullable(),
     old_tags: z.array(z.string()),
@@ -235,13 +279,11 @@ const relatedModelSummarySchema = z.object({
   relation_score: z.number(),
   created_at: z.string(),
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   version_label: z.string().nullable(),
 });
 
 const placeVersionsResultSchema = z.object({
   place_id: z.string().nullable(),
-  memory_thread_id: z.string().nullable(),
   versions: z.array(z.object({
     model_id: z.string(),
     scene_id: z.string(),
@@ -292,6 +334,10 @@ const assetToolResultSchema = z.discriminatedUnion("kind", [
     diff: compareModelAssetsResultSchema.shape.diff,
   }),
   z.object({
+    kind: z.literal("duplicate_model_names"),
+    groups: z.array(duplicateModelNameGroupSchema),
+  }),
+  z.object({
     kind: z.literal("asset_operation"),
     operation: assetOperationSchema,
   }),
@@ -310,14 +356,6 @@ const assetToolResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("memory_collection_summary"),
     summary: memoryCollectionSummarySchema,
-  }),
-  z.object({
-    kind: z.literal("group_models_into_thread"),
-    result: z.object({
-      model_ids: z.array(z.string()),
-      place_id: z.string(),
-      memory_thread_id: z.string(),
-    }),
   }),
   z.object({
     kind: z.literal("memory_collection"),
@@ -397,7 +435,7 @@ async function fetchModelAssets(
   const { data, error } = await supabase
     .from("model_assets")
     .select(
-      "id, scene_id, description, display_name, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+      "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
     )
     .in("id", modelIds)
     .order("created_at", { ascending: true });
@@ -407,6 +445,60 @@ async function fetchModelAssets(
   }
 
   return (data ?? []) as ModelAssetRow[];
+}
+
+async function fetchSemanticMatchedAssets(input: {
+  supabase: SupabaseClient;
+  embeddings: { embedQuery(text: string): Promise<number[]> };
+  query: string;
+  startTime: string | null;
+  endTime: string | null;
+  limit: number;
+  selectedModelIds?: string[];
+}): Promise<ModelAssetRow[]> {
+  const {
+    supabase,
+    embeddings,
+    query,
+    startTime,
+    endTime,
+    limit,
+    selectedModelIds,
+  } = input;
+  const queryEmbedding = await embeddings.embedQuery(query);
+  const { data, error } = await supabase.rpc("match_model_assets", {
+    query_embedding: queryEmbedding,
+    match_threshold: 0.35,
+    match_count: Math.max(limit * 3, 12),
+    filter_start: startTime,
+    filter_end: endTime,
+  } as never) as { data: unknown; error: { message: string } | null };
+
+  if (error) {
+    throw new Error(`read_model_assets 语义召回失败: ${error.message}`);
+  }
+
+  const rows = Array.isArray(data) ? data as Array<{ id: string }> : [];
+  const modelIds = dedupeStrings(rows.map((row) => row.id)).filter(Boolean);
+  const allowedIds = selectedModelIds && selectedModelIds.length > 0
+    ? new Set(selectedModelIds)
+    : null;
+  const filteredIds = allowedIds
+    ? modelIds.filter((id) => allowedIds.has(id))
+    : modelIds;
+
+  if (filteredIds.length === 0) {
+    return [];
+  }
+
+  const assets = await fetchModelAssets(supabase, filteredIds);
+  const order = new Map(filteredIds.map((id, index) => [id, index]));
+  return assets
+    .sort((left, right) =>
+      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+    )
+    .slice(0, limit);
 }
 
 async function fetchPoseCounts(
@@ -448,6 +540,7 @@ async function buildBundle(
       id: row.id,
       scene_id: row.scene_id,
       display_name: row.display_name?.trim() || null,
+      summary_title: row.summary_title?.trim() || null,
       description: row.description,
       objects: safeArray(row.objects),
       tags: safeArray(row.tags),
@@ -537,6 +630,8 @@ function buildPatchedPreview(
       scene_id: row.scene_id,
       old_display_name: row.display_name?.trim() || null,
       new_display_name: nextName,
+      old_summary_title: row.summary_title?.trim() || null,
+      new_summary_title: row.summary_title?.trim() || null,
       old_description: row.description,
       new_description: nextDescription,
       old_tags: oldTags,
@@ -585,13 +680,26 @@ function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
     id: row.id,
     scene_id: row.scene_id,
     display_name: row.display_name?.trim() || null,
+    summary_title: row.summary_title?.trim() || null,
     description: row.description,
     tags: safeArray(row.tags),
     created_at: row.created_at,
+    preview_img_path: row.preview_img_path ?? null,
+    ply_path: row.ply_path ?? null,
   }));
 }
 
-export function buildAssetAnswer(state: AssetToolState): string | null {
+export function buildAssetAnswer(
+  state: AssetToolState,
+  options: { query?: string; displayCount?: number } = {},
+): string | null {
+  const isRecommendation = isRecommendationQuery(options.query);
+  const fallbackCount = 5;
+  const displayCount = Math.max(
+    1,
+    Math.min(20, options.displayCount ?? fallbackCount),
+  );
+
   if (state.operation) {
     const actionText = state.operation.dry_run ? "预览" : "执行";
     return `已${actionText} ${state.operation.affected_count} 个模型资产的元数据修改。${
@@ -608,8 +716,20 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
         : "这些模型没有稳定的共同标签。"
     }`;
   }
+  if (state.duplicateNames) {
+    if (state.duplicateNames.length === 0) {
+      return "当前没有发现重名的模型。";
+    }
+    const details = state.duplicateNames.slice(0, 5).map((group, index) => {
+      const scenes = group.rows.slice(0, 3).map((row) => row.scene_id).join("、");
+      return `${index + 1}. ${group.display_name}：重复 ${group.count} 次${scenes ? `（scene: ${scenes}）` : ""}`;
+    }).join("\n");
+    return `当前发现 ${state.duplicateNames.length} 组重名模型：\n${details}\n如果你需要，我可以继续展开这些重名模型的详细摘要。`;
+  }
   if (state.bundle) {
-    return `已读取 ${state.bundle.length} 个模型资产摘要。`;
+    return isRecommendation
+      ? buildBundleRecommendationAnswer(state.bundle, displayCount)
+      : buildBundleAnswer(state.bundle, displayCount);
   }
   if (state.collectionSummary) {
     return `已整理专题“${state.collectionSummary.collection.title}”，当前包含 ${state.collectionSummary.model_count} 个模型。`;
@@ -623,29 +743,177 @@ export function buildAssetAnswer(state: AssetToolState): string | null {
   if (state.placeVersions) {
     return `已列出 ${state.placeVersions.versions.length} 个地点版本。`;
   }
-  if (state.threadGrouping) {
-    return `已将 ${state.threadGrouping.model_ids.length} 个模型归入同一记忆线程。`;
-  }
   if (state.list) {
-    return `已找到 ${state.list.length} 个候选模型资产。`;
+    return isRecommendation
+      ? buildListRecommendationAnswer(state.list, displayCount)
+      : buildListAnswer(state.list, displayCount);
   }
   return null;
 }
 
-export function buildListModelAssetsTool(
+function isRecommendationQuery(query?: string): boolean {
+  if (!query) {
+    return false;
+  }
+  const normalized = query.replace(/\s+/g, "");
+  return /推荐|建议|值得看|先看哪|哪些模型好|有什么模型/.test(normalized);
+}
+
+export function isModelRecommendationQuery(query?: string): boolean {
+  return isRecommendationQuery(query);
+}
+
+function summarizeRecommendationReason(input: {
+  description?: string | null;
+  tags: string[];
+  poseCount?: number;
+}): string {
+  if (typeof input.poseCount === "number" && input.poseCount >= 12) {
+    return `视角更完整（pose ${input.poseCount} 个）`;
+  }
+  if (input.tags.length >= 2) {
+    return `标签较完整（${input.tags.slice(0, 2).join("、")}）`;
+  }
+  if (input.description?.trim()) {
+    return input.description.trim();
+  }
+  if (typeof input.poseCount === "number" && input.poseCount > 0) {
+    return `已采集 ${input.poseCount} 个 pose`;
+  }
+  return "信息相对完整，适合优先查看";
+}
+
+function rankRecommendationRows<T extends {
+  description?: string | null;
+  tags: string[];
+  created_at: string;
+  pose_count?: number;
+}>(rows: T[]): T[] {
+  return [...rows].sort((left, right) => {
+    const leftScore = (left.pose_count ?? 0) * 10 +
+      left.tags.length * 3 +
+      (left.description?.trim() ? 5 : 0) +
+      Date.parse(left.created_at || "1970-01-01T00:00:00Z") / 1_000_000_000_000;
+    const rightScore = (right.pose_count ?? 0) * 10 +
+      right.tags.length * 3 +
+      (right.description?.trim() ? 5 : 0) +
+      Date.parse(right.created_at || "1970-01-01T00:00:00Z") / 1_000_000_000_000;
+    return rightScore - leftScore;
+  });
+}
+
+function buildBundleRecommendationAnswer(
+  rows: ModelAssetBundle[],
+  displayCount: number = 5,
+): string {
+  if (rows.length === 0) {
+    return "当前没有找到可推荐的模型。";
+  }
+
+  const recommended = rankRecommendationRows(rows).slice(0, displayCount);
+  const details = recommended.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const reason = summarizeRecommendationReason({
+      description: row.description,
+      tags: row.tags,
+      poseCount: row.pose_count,
+    });
+    return `${index + 1}. ${name}：${reason}`;
+  }).join("\n");
+
+  return `我先推荐这 ${recommended.length} 个模型：\n${details}\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你细分。`;
+}
+
+function buildListRecommendationAnswer(
+  rows: ListedModelAsset[],
+  displayCount: number = 5,
+): string {
+  if (rows.length === 0) {
+    return "当前没有找到可推荐的模型。";
+  }
+
+  const recommended = rankRecommendationRows(rows).slice(0, displayCount);
+  const details = recommended.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const reason = summarizeRecommendationReason({
+      description: row.description,
+      tags: row.tags,
+    });
+    return `${index + 1}. ${name}：${reason}`;
+  }).join("\n");
+
+  return `我先从当前候选里推荐这 ${recommended.length} 个模型：\n${details}\n如果你需要更精确的推荐，我可以继续读取其中几个模型的详细摘要再细分。`;
+}
+
+function buildBundleAnswer(
+  rows: ModelAssetBundle[],
+  displayCount: number = 5,
+): string {
+  if (rows.length === 0) {
+    return "当前没有读取到可用的模型资产摘要。";
+  }
+
+  const displayed = rows.slice(0, displayCount);
+  const intro = displayed.length === 1
+    ? "我先整理出 1 个可参考的模型："
+    : `我先整理出 ${displayed.length} 个可参考的模型：`;
+  const details = displayed.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const segments = [
+      row.description?.trim() || null,
+      row.tags.length > 0 ? `标签：${row.tags.slice(0, 3).join("、")}` : null,
+      row.pose_count > 0 ? `pose ${row.pose_count} 个` : null,
+    ].filter((item): item is string => Boolean(item));
+    return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
+  }).join("\n");
+  const suffix = rows.length > displayed.length
+    ? `\n（共 ${rows.length} 个，已展示前 ${displayed.length} 个）\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。`
+    : "\n如果你想继续缩小范围，我可以再按时间、标签或场景帮你筛一轮。";
+
+  return `${intro}\n${details}${suffix}`;
+}
+
+function buildListAnswer(
+  rows: ListedModelAsset[],
+  displayCount: number = 5,
+): string {
+  if (rows.length === 0) {
+    return "当前没有找到匹配的模型资产。";
+  }
+
+  const displayed = rows.slice(0, displayCount);
+  const intro = displayed.length === 1
+    ? "当前找到 1 个候选模型："
+    : `当前找到 ${displayed.length} 个候选模型：`;
+  const details = displayed.map((row, index) => {
+    const name = row.display_name?.trim() || row.scene_id;
+    const segments = [
+      row.description?.trim() || null,
+      row.tags.length > 0 ? `标签：${row.tags.slice(0, 3).join("、")}` : null,
+    ].filter((item): item is string => Boolean(item));
+    return `${index + 1}. ${name}${segments.length > 0 ? `：${segments.join("；")}` : ""}`;
+  }).join("\n");
+  const suffix = rows.length > displayed.length
+    ? `\n（共 ${rows.length} 个，已展示前 ${displayed.length} 个）\n如果你需要，我可以继续读取其中某几个模型的详细摘要。`
+    : "\n如果你需要，我可以继续读取其中某几个模型的详细摘要。";
+
+  return `${intro}\n${details}${suffix}`;
+}
+
+export function buildReadModelAssetsTool(
   supabase: SupabaseClient,
   options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
-    name: "list_model_assets",
+    name: "read_model_assets",
     description:
-      "列出模型资产候选。适合在批量改名、批量打标签、按时间筛选前先确认候选集合。",
-    schema: listModelAssetsSchema,
+      "通用模型资产读库工具。可用于按关键词/时间/标签读取资产列表，也可用于重名模型这类只读分析。",
+    schema: readModelAssetsSchema,
     func: async (input) => {
       let builder = supabase
         .from("model_assets")
         .select(
-          "id, scene_id, description, display_name, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+          "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
         )
         .order("created_at", { ascending: false })
         .limit(Math.max(input.limit * 5, 20));
@@ -679,16 +947,46 @@ export function buildListModelAssetsTool(
         );
       }
       if (input.query.trim()) {
-        const keyword = escapeIlike(input.query).toLowerCase();
-        rows = rows.filter((row) =>
-          [
-            row.scene_id,
-            row.display_name ?? "",
-            row.description ?? "",
-            ...safeArray(row.tags),
-            ...safeArray(row.objects),
-          ].join(" ").toLowerCase().includes(keyword)
-        );
+        if (options.embeddings) {
+          rows = await fetchSemanticMatchedAssets({
+            supabase,
+            embeddings: options.embeddings,
+            query: input.query,
+            startTime: input.startTime,
+            endTime: input.endTime,
+            limit: input.limit,
+            selectedModelIds: options.selectedModelIds,
+          });
+        } else {
+          rows = [];
+        }
+      }
+
+      if (input.mode === "duplicate_display_name") {
+        const grouped = new Map<string, ModelAssetRow[]>();
+        for (const row of rows) {
+          const displayName = row.display_name?.trim();
+          if (!displayName) continue;
+          const bucket = grouped.get(displayName) ?? [];
+          bucket.push(row);
+          grouped.set(displayName, bucket);
+        }
+        return JSON.stringify({
+          kind: "duplicate_model_names",
+          groups: [...grouped.entries()]
+            .map(([displayName, bucket]) => ({
+              display_name: displayName,
+              count: bucket.length,
+              rows: summarizeListRows(
+                bucket.sort((left, right) =>
+                  right.created_at.localeCompare(left.created_at)
+                ),
+              ),
+            }))
+            .filter((group) => group.count >= 2)
+            .sort((left, right) => right.count - left.count)
+            .slice(0, input.limit),
+        });
       }
 
       return JSON.stringify({
@@ -730,6 +1028,8 @@ export function buildRenameModelAssetTool(
           scene_id: row.scene_id,
           old_display_name: row.display_name?.trim() || null,
           new_display_name: input.newName,
+          old_summary_title: row.summary_title?.trim() || null,
+          new_summary_title: row.summary_title?.trim() || null,
           old_description: row.description,
           new_description: row.description,
           old_tags: safeArray(row.tags),
@@ -787,6 +1087,85 @@ export function buildBatchPatchModelMetadataTool(
       return JSON.stringify({
         kind: "asset_operation",
         operation,
+      });
+    },
+  });
+}
+
+export function buildWriteModelAssetsTool(
+  supabase: SupabaseClient,
+  options: AssetToolRuntimeOptions = {},
+): DynamicStructuredTool {
+  return new DynamicStructuredTool({
+    name: "write_model_assets",
+    description:
+      "通用模型资产写库工具。支持一次更新多个模型的 display_name、summary_title、description、tags；summary_title 仅用于 Agent 专题整理/记忆归档的简短回忆标题，不替代用户可编辑名称。",
+    schema: writeModelAssetsSchema,
+    func: async (input) => {
+      const targetIds = restrictModelIds(
+        input.updates.map((item: z.infer<typeof writeModelAssetsSchema>["updates"][number]) => item.modelId),
+        options.selectedModelIds,
+      );
+      const rows = await fetchModelAssets(supabase, targetIds);
+      if (rows.length === 0) {
+        throw new Error("未找到可修改的模型资产");
+      }
+
+      const rowById = new Map(rows.map((row) => [row.id, row]));
+      const dryRun = options.allowWrite === false ? true : input.dryRun;
+      const preview = input.updates.map((
+        update: z.infer<typeof writeModelAssetsSchema>["updates"][number],
+      ) => {
+        const row = rowById.get(update.modelId);
+        if (!row) {
+          throw new Error(`未找到模型资产 ${update.modelId}`);
+        }
+        return {
+          model_id: row.id,
+          scene_id: row.scene_id,
+          old_display_name: row.display_name?.trim() || null,
+          new_display_name: update.displayName ?? row.display_name?.trim() ?? null,
+          old_summary_title: row.summary_title?.trim() || null,
+          new_summary_title: update.summaryTitle ?? row.summary_title?.trim() ?? null,
+          old_description: row.description,
+          new_description: update.description ?? row.description,
+          old_tags: safeArray(row.tags),
+          new_tags: update.tags ? dedupeStrings(update.tags) : safeArray(row.tags),
+        };
+      });
+
+      if (!dryRun) {
+        for (const item of preview) {
+          const requestedUpdate = input.updates.find((update) =>
+            update.modelId === item.model_id
+          );
+          const updatePayload: Record<string, unknown> = {
+            display_name: item.new_display_name,
+            description: item.new_description,
+            tags: item.new_tags,
+          };
+          if (requestedUpdate?.summaryTitle !== undefined) {
+            updatePayload.summary_title = item.new_summary_title ?? null;
+          }
+          const { error } = await supabase
+            .from("model_assets")
+            .update(updatePayload)
+            .eq("id", item.model_id);
+          if (error) {
+            throw new Error(`write_model_assets 执行失败: ${error.message}`);
+          }
+        }
+      }
+
+      return JSON.stringify({
+        kind: "asset_operation",
+        operation: {
+          tool_name: "write_model_assets",
+          dry_run: dryRun,
+          requires_confirmation: dryRun,
+          affected_count: preview.length,
+          preview,
+        },
       });
     },
   });
@@ -862,12 +1241,12 @@ export function createEmptyAssetToolState(): AssetToolState {
     list: null,
     bundle: null,
     comparison: null,
+    duplicateNames: null,
     operation: null,
     poseSummary: null,
     relatedModels: null,
     placeVersions: null,
     collectionSummary: null,
-    threadGrouping: null,
   };
 }
 
@@ -880,7 +1259,13 @@ export function collectAssetToolResult(
   state.lastToolName = toolName;
 
   if (parsed.kind === "list_model_assets") {
-    state.list = parsed.rows;
+    if (!state.list) {
+      state.list = parsed.rows;
+    } else {
+      const seen = new Set(state.list.map((r) => r.id));
+      const newRows = parsed.rows.filter((r) => !seen.has(r.id));
+      state.list = [...state.list, ...newRows];
+    }
     return state.list.length;
   }
   if (parsed.kind === "model_asset_bundle") {
@@ -893,6 +1278,10 @@ export function collectAssetToolResult(
       diff: parsed.diff,
     };
     return state.comparison.rows.length;
+  }
+  if (parsed.kind === "duplicate_model_names") {
+    state.duplicateNames = parsed.groups;
+    return state.duplicateNames.length;
   }
   if (parsed.kind === "asset_operation" && parsed.operation) {
     state.operation = parsed.operation;
@@ -913,10 +1302,6 @@ export function collectAssetToolResult(
   if (parsed.kind === "memory_collection_summary" && parsed.summary) {
     state.collectionSummary = parsed.summary;
     return state.collectionSummary.model_count;
-  }
-  if (parsed.kind === "group_models_into_thread" && parsed.result) {
-    state.threadGrouping = parsed.result;
-    return state.threadGrouping?.model_ids.length ?? 0;
   }
   if (parsed.kind === "memory_collection") {
     return 1;

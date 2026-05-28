@@ -2,7 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import * as THREE from 'three';
 import gsap from 'gsap';
-import { SparkControls, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { BrainDanceCameraRig } from '../lib/interaction/BrainDanceCameraRig';
+import { classifyInteractionProfile } from '../lib/interaction/classifySceneProfile';
+import { PoseGraph } from '../lib/interaction/poseGraph';
+import { GestureHandler } from '../lib/interaction/gestures';
 import TopHud from './TopHud.vue';
 import FocalPanel from './FocalPanel.vue';
 import StatusRibbon from './StatusRibbon.vue';
@@ -50,6 +54,14 @@ const clipOffset = ref(0);
 const currentModelUrl = ref('./models/scene_auto_sync_raw.ply');
 const currentPosesPath = ref('/models/webgl_poses_with_tags.json');
 
+// ==================== Orbit 相机模式 ====================
+// Orbit 模式：相机绕模型中心自动旋转（圆周运动），不改变现有手动控制逻辑
+const orbitEnabled = ref(false);    // 是否开启 orbit 模式
+const orbitPaused = ref(false);     // 是否暂停旋转
+const orbitSpeed = ref(20);         // 旋转速度，单位：度/秒
+const orbitDirection = ref(1);      // 旋转方向：1=逆时针(CCW)，-1=顺时针(CW)
+const orbitRadius = ref(0);         // 旋转半径：0=自动计算（保持当前距离），>0 使用指定值
+
 const filteredPoses = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) {
@@ -78,7 +90,6 @@ let scene = null;
 let camera = null;
 let renderer = null;
 let spark = null;
-let controls = null;
 let splatMesh = null;
 let highlightEffect = null;
 let clipEffect = null;
@@ -91,6 +102,26 @@ let posesFetchSettled = false;
 let hasInitializedFromExternalInput = false;
 let fpsFrames = 0;
 let fpsTimestamp = 0;
+let clock = new THREE.Clock();
+let lastAppliedDpr = 0;
+let lastQualityUpdateAt = 0;
+
+// ── Spark 2.0 interaction state ──
+let cameraRig = null;
+let poseGraph = null;
+let gestureHandler = null;
+const interactionProfile = ref('hybrid');
+const profileConfidence = ref(0);
+const focusPointArr = ref([]);
+const qualityMode = ref('standard');
+const currentPoseIndex = ref(-1);
+
+// ===== Orbit 运行时变量（非响应式，避免不必要的 Vue 重渲染） =====
+let orbitAngle = 0;           // 当前旋转角度（弧度）
+let orbitY = 0;               // 相机 Y 坐标（保持 orbit 高度不变）
+let autoOrbitRadius = 0;      // 自动计算的轨道半径（从当前相机距离获取）
+let orbitLastFrameTime = performance.now();
+let isOrbitDragging = false;  // 用户正在手动拖拽（临时中断 orbit）
 
 const refreshCurrentFocalInfo = () => {
   if (!camera) return;
@@ -125,6 +156,54 @@ const syncClipPlane = () => {
     point,
     normal,
   });
+};
+
+// ==================== Orbit 相机模式：核心函数 ====================
+
+// 从当前相机位置同步 orbit 参数（角度、高度、半径）
+// 用于：(1) 开启 orbit 时初始化 (2) 手动拖拽松开后恢复 (3) 模型加载后重新锚定
+const syncOrbitFromCamera = () => {
+  if (!camera || !sceneCenter) return;
+  const dx = camera.position.x - sceneCenter.x;
+  const dz = camera.position.z - sceneCenter.z;
+  orbitAngle = Math.atan2(dz, dx);
+  orbitY = camera.position.y;
+  autoOrbitRadius = Math.sqrt(dx * dx + dz * dz);
+};
+
+// 开启 orbit 模式：从当前位置初始化轨道参数并开始旋转
+const startOrbit = () => {
+  if (!sceneCenter) return;
+  syncOrbitFromCamera();
+  // 如果自动半径过小（相机太靠近中心），使用默认距离
+  if (autoOrbitRadius < 0.1) {
+    autoOrbitRadius = sceneRadius * 2.4;
+  }
+  orbitPaused.value = false;
+  orbitEnabled.value = true;
+};
+
+// 关闭 orbit 模式：相机停在当前位置，恢复原有手动控制
+const stopOrbit = () => {
+  orbitEnabled.value = false;
+  orbitPaused.value = false;
+};
+
+// 暂停/恢复 orbit 旋转
+const toggleOrbitPause = () => {
+  if (!orbitEnabled.value) return;
+  if (orbitPaused.value) {
+    // 恢复时从当前位置重新同步轨道参数，确保无缝衔接
+    syncOrbitFromCamera();
+    orbitPaused.value = false;
+  } else {
+    orbitPaused.value = true;
+  }
+};
+
+// 切换旋转方向（顺时针/逆时针）
+const toggleOrbitDirection = () => {
+  orbitDirection.value *= -1;
 };
 
 const applyFocalLengthPx = (focalPx, options = {}) => {
@@ -180,8 +259,23 @@ const toggleFocalSettings = () => {
 const frameScene = () => {
   if (!camera) return;
   const distance = Math.max(sceneRadius * 2.4, 2.5);
-  camera.position.copy(sceneCenter).add(new THREE.Vector3(0, sceneRadius * 0.3, distance));
-  camera.lookAt(sceneCenter);
+  const pos = sceneCenter.clone().add(new THREE.Vector3(0, sceneRadius * 0.3, distance));
+
+  if (cameraRig) {
+    cameraRig.targetPosition.copy(pos);
+    cameraRig.targetYaw = 0;
+    cameraRig.targetPitch = -Math.atan2(sceneRadius * 0.3, distance);
+    cameraRig.position.copy(pos);
+    cameraRig.yaw = 0;
+    cameraRig.pitch = cameraRig.targetPitch;
+    cameraRig.pivot.copy(sceneCenter);
+    cameraRig.distance = distance;
+    cameraRig.targetDistance = distance;
+  } else {
+    camera.position.copy(pos);
+    camera.lookAt(sceneCenter);
+  }
+
   camera.updateProjectionMatrix();
   refreshCurrentFocalInfo();
   syncHighlight(sceneCenter, Math.max(sceneRadius * 0.16, 0.08));
@@ -203,27 +297,35 @@ const flyToImage = (poseData) => {
   const targetScale = new THREE.Vector3();
   targetMatrix.decompose(targetPosition, targetQuaternion, targetScale);
 
-  gsap.killTweensOf(camera.position);
-  gsap.killTweensOf(camera.quaternion);
-
-  gsap.to(camera.position, {
-    x: targetPosition.x,
-    y: targetPosition.y,
-    z: targetPosition.z,
-    duration: 0.9,
-    ease: 'power2.inOut',
-    onUpdate: renderOnce,
-  });
-
-  gsap.to(camera.quaternion, {
-    x: targetQuaternion.x,
-    y: targetQuaternion.y,
-    z: targetQuaternion.z,
-    w: targetQuaternion.w,
-    duration: 0.9,
-    ease: 'power2.inOut',
-    onUpdate: renderOnce,
-  });
+  if (cameraRig) {
+    // 底部镜头代表真实采集相机，跳转后必须按第一人称相机继续交互。
+    cameraRig.flyToPose(targetPosition, targetQuaternion);
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark rollfix active: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(cameraRig.targetRoll).toFixed(1)}deg`,
+    });
+  } else {
+    // Fallback: direct GSAP tween
+    gsap.killTweensOf(camera.position);
+    gsap.killTweensOf(camera.quaternion);
+    gsap.to(camera.position, {
+      x: targetPosition.x,
+      y: targetPosition.y,
+      z: targetPosition.z,
+      duration: 0.9,
+      ease: 'power2.inOut',
+      onUpdate: renderOnce,
+    });
+    gsap.to(camera.quaternion, {
+      x: targetQuaternion.x,
+      y: targetQuaternion.y,
+      z: targetQuaternion.z,
+      w: targetQuaternion.w,
+      duration: 0.9,
+      ease: 'power2.inOut',
+      onUpdate: renderOnce,
+    });
+  }
 
   activeImage.value = poseData.image_url || '';
   activeTag.value = poseData.tag || '';
@@ -238,7 +340,32 @@ const flyToImage = (poseData) => {
     deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
     Math.max(sceneRadius * 0.12, 0.08),
   );
+
+  // ── Focus-area LoD boost: temporarily boost quality around search hit ──
+  boostLodAroundPoint(
+    deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
+    Math.max(sceneRadius * 0.3, 0.2),
+  );
+
   highlightStatus.value = activeTag.value ? `高亮镜头: ${activeTag.value}` : '高亮当前视角区域';
+};
+
+/**
+ * Boost LoD quality around a specific point for a short duration.
+ * Uses Spark 2.0 lodSplatScale to increase quality in the focus area.
+ */
+const boostLodAroundPoint = (point, radius) => {
+  if (spark && 'lodSplatScale' in spark) {
+    // Temporarily boost quality
+    spark.lodSplatScale = 1.3;
+
+    // Gradually return to normal after flight settles
+    setTimeout(() => {
+      if (spark && 'lodSplatScale' in spark) {
+        spark.lodSplatScale = 1.0;
+      }
+    }, 2000);
+  }
 };
 
 const searchAndFly = () => {
@@ -313,6 +440,39 @@ const loadPoses = async () => {
       applyFocalLengthPx(DEFAULT_FOCAL_PX);
     }
 
+    // ── Scene topology classification ──
+    if (cameraPoses.value.length >= 4) {
+      const profile = classifyInteractionProfile(cameraPoses.value, sceneRadius);
+      interactionProfile.value = profile.profile;
+      profileConfidence.value = profile.confidence;
+
+      if (profile.focusPoint) {
+        focusPointArr.value = profile.focusPoint;
+        if (cameraRig) {
+          cameraRig.pivot.fromArray(profile.focusPoint);
+          if (profile.defaultRadius) {
+            cameraRig.distance = profile.defaultRadius;
+            cameraRig.targetDistance = profile.defaultRadius;
+          }
+          cameraRig.sceneRadius = sceneRadius;
+          cameraRig.initFromCamera();
+
+          if (profile.profile === 'object_orbit') {
+            cameraRig.mode = 'inspect';
+          }
+        }
+      }
+
+      // Build pose graph for guided navigation
+      poseGraph = new PoseGraph(sceneRadius);
+      poseGraph.buildFromPoses(cameraPoses.value);
+
+      notifyFlutter({
+        status: 'info',
+        msg: `Scene profile: ${profile.profile} (conf: ${(profile.confidence * 100).toFixed(0)}%)`,
+      });
+    }
+
     maybeApplyInitialTarget(true);
   } catch (error) {
     posesFetchSettled = true;
@@ -328,7 +488,18 @@ const disposeViewer = () => {
     renderer.setAnimationLoop(null);
   }
 
-  controls = null;
+  if (gestureHandler) {
+    gestureHandler.dispose();
+    gestureHandler = null;
+  }
+
+  if (cameraRig) {
+    cameraRig.dispose();
+    cameraRig = null;
+  }
+
+  stopMemoryPath();
+  poseGraph = null;
 
   if (splatMesh) {
     splatMesh.removeFromParent();
@@ -374,6 +545,44 @@ const setupResizeHandler = () => {
   window.addEventListener('resize', resizeHandler);
 };
 
+/**
+ * Resolve the best model URL using Spark 2.0 format priority:
+ * .rad (LoD streaming) > .spz (compressed) > .ksplat > .ply (original)
+ */
+const resolveBestModelUrl = async (originalUrl) => {
+  if (/\.(splat|ksplat|spz|rad|sog)$/i.test(originalUrl || '')) {
+    return originalUrl;
+  }
+  const stripExt = (url) => url.replace(/\.(ply|splat|ksplat|spz|rad|sog)$/i, '');
+  const candidates = ['.rad', '.spz', '.ksplat'];
+
+  for (const ext of candidates) {
+    const candidateUrl = stripExt(originalUrl) + ext;
+    try {
+      const resp = await fetch(candidateUrl, { method: 'HEAD' });
+      if (resp.ok) {
+        console.log(`[SparkViewer] Using optimized format: ${ext}`);
+        return candidateUrl;
+      }
+    } catch {
+      // File doesn't exist or not reachable — skip
+    }
+  }
+
+  return originalUrl;
+};
+
+const applyRendererDpr = (targetDpr) => {
+  if (!renderer || !containerRef.value) return;
+  const normalizedDpr = Math.round(targetDpr * 100) / 100;
+  if (Math.abs(normalizedDpr - lastAppliedDpr) < 0.05) return;
+  lastAppliedDpr = normalizedDpr;
+  const width = containerRef.value.clientWidth || window.innerWidth;
+  const height = containerRef.value.clientHeight || window.innerHeight;
+  renderer.setPixelRatio(normalizedDpr);
+  renderer.setSize(width, height, false);
+};
+
 const initViewer = async (plyUrl, posesUrl, initialTarget) => {
   if (isLoading.value) return;
   isLoading.value = true;
@@ -400,11 +609,29 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
       alpha: true,
       powerPreference: 'high-performance',
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(width, height, false);
+    applyRendererDpr(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     containerRef.value.innerHTML = '';
     containerRef.value.appendChild(renderer.domElement);
+
+    // ===== Orbit 指针事件：检测手动拖拽以临时中断/恢复 orbit 旋转 =====
+    renderer.domElement.addEventListener('pointerdown', () => {
+      isOrbitDragging = true;
+    });
+    renderer.domElement.addEventListener('pointerup', () => {
+      isOrbitDragging = false;
+      if (orbitEnabled.value && !orbitPaused.value) {
+        syncOrbitFromCamera();
+      }
+    });
+    renderer.domElement.addEventListener('pointerleave', () => {
+      if (isOrbitDragging) {
+        isOrbitDragging = false;
+        if (orbitEnabled.value && !orbitPaused.value) {
+          syncOrbitFromCamera();
+        }
+      }
+    });
 
     spark = new SparkRenderer({
       renderer,
@@ -416,29 +643,76 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     });
     scene.add(spark);
 
-    controls = new SparkControls({ canvas: renderer.domElement });
-    controls.fpsMovement.enable = false;
-    controls.pointerControls.rotateSpeed = 0.0018;
-    controls.pointerControls.slideSpeed = 0.0045;
-    controls.pointerControls.scrollSpeed = 0.0013;
+    // ── BrainDance camera rig (replaces SparkControls) ──
+    cameraRig = new BrainDanceCameraRig({
+      camera,
+      sceneRadius: DEFAULT_SCENE_RADIUS,
+    });
+
+    gestureHandler = new GestureHandler(renderer.domElement, {
+      onAction: handleGesture,
+    });
 
     splatMesh = new SplatMesh({
-      url: currentModelUrl.value,
+      url: await resolveBestModelUrl(currentModelUrl.value),
       editable: true,
     });
     scene.add(splatMesh);
 
+    clock.start();
+
     renderer.setAnimationLoop(() => {
       if (!renderer || !scene || !camera) return;
-      controls?.update(camera);
-      renderer.render(scene, camera);
-      fpsFrames += 1;
       const now = performance.now();
+
+      const dt = clock.getDelta();
+      if (cameraRig) {
+        cameraRig.update(dt);
+
+        // Adaptive quality: adjust LoD scale and DPR based on FPS
+        if (spark && 'lodSplatScale' in spark) {
+          spark.lodSplatScale = cameraRig.getRecommendedLodScale(currentFps.value);
+        }
+        const baseDpr = window.devicePixelRatio || 1;
+        if (now - lastQualityUpdateAt >= 500) {
+          lastQualityUpdateAt = now;
+          applyRendererDpr(cameraRig.getRecommendedDpr(baseDpr));
+        }
+      }
+
+      const orbitDt = Math.min((now - orbitLastFrameTime) / 1000, 0.1);
+      orbitLastFrameTime = now;
+
+      // FPS 统计
+      fpsFrames += 1;
       if (now - fpsTimestamp >= 1000) {
         currentFps.value = fpsFrames;
         fpsFrames = 0;
         fpsTimestamp = now;
       }
+
+      // ===== Orbit 模式：自动旋转相机（非暂停、非手动拖拽时生效） =====
+      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging && orbitDt > 0) {
+        const speedRad = orbitSpeed.value * (Math.PI / 180);
+        orbitAngle += speedRad * orbitDt * orbitDirection.value;
+        const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
+        const x = sceneCenter.x + r * Math.cos(orbitAngle);
+        const z = sceneCenter.z + r * Math.sin(orbitAngle);
+        camera.position.set(x, orbitY, z);
+        camera.lookAt(sceneCenter);
+        camera.updateProjectionMatrix();
+      }
+
+      // ===== Orbit 模式下重新锁定相机位置，防止 cameraRig 覆盖 orbit 位置 =====
+      if (orbitEnabled.value && !orbitPaused.value && !isOrbitDragging) {
+        const r = orbitRadius.value > 0 ? orbitRadius.value : autoOrbitRadius;
+        const x = sceneCenter.x + r * Math.cos(orbitAngle);
+        const z = sceneCenter.z + r * Math.sin(orbitAngle);
+        camera.position.set(x, orbitY, z);
+        camera.lookAt(sceneCenter);
+      }
+
+      renderer.render(scene, camera);
     });
 
     setupResizeHandler();
@@ -451,6 +725,11 @@ const initViewer = async (plyUrl, posesUrl, initialTarget) => {
     const size = bbox.getSize(new THREE.Vector3());
     sceneCenter = bbox.getCenter(new THREE.Vector3());
     sceneRadius = Math.max(size.length() * 0.32, DEFAULT_SCENE_RADIUS);
+
+    // 如果 orbit 已开启，重新同步轨道参数到新计算的模型中心
+    if (orbitEnabled.value) {
+      syncOrbitFromCamera();
+    }
 
     frameScene();
     highlightEffect = createSphereHighlightEffect(sceneRadius, highlightEnabled.value);
@@ -501,6 +780,194 @@ const onClipOffsetChange = (value) => {
   renderOnce();
 };
 
+// ── Gesture → camera rig bridge ──
+
+let gestureDebugCount = 0;
+
+const handleGesture = (action) => {
+  if (!cameraRig) return;
+
+  if (gestureDebugCount < 3 && (action.type === 'look' || action.type === 'pinch' || action.type === 'pan')) {
+    gestureDebugCount += 1;
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    notifyFlutter({
+      status: 'info',
+      msg: `Spark gesture ${action.type}: mode=${cameraRig.mode}, roll=${THREE.MathUtils.radToDeg(euler.z).toFixed(1)}deg`,
+    });
+  }
+
+  switch (action.type) {
+    case 'look':
+      cameraRig.onLookDrag(action.dx, action.dy);
+      break;
+    case 'pinch':
+      cameraRig.onPinch(action.scaleDelta);
+      break;
+    case 'pan':
+      cameraRig.onPan(action.dx, action.dy);
+      break;
+    case 'doubletap':
+      frameScene();
+      break;
+    case 'longpress':
+      // Could enter inspect mode at long-press point
+      break;
+    case 'swipe_forward':
+      navigatePoseGraph('forward');
+      break;
+    case 'swipe_backward':
+      navigatePoseGraph('backward');
+      break;
+  }
+};
+
+const navigatePoseGraph = (direction) => {
+  if (!poseGraph || poseGraph.size === 0) return;
+
+  const currentIdx = currentPoseIndex.value >= 0
+    ? currentPoseIndex.value
+    : poseGraph.findNearestNode(cameraRig.position);
+
+  const nextIdx = poseGraph.getNextAlongPath(currentIdx, direction);
+  if (nextIdx == null) return;
+
+  const node = poseGraph.getNode(nextIdx);
+  if (!node) return;
+
+  currentPoseIndex.value = nextIdx;
+
+  const matrix = new THREE.Matrix4().fromArray(node.matrix);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  matrix.decompose(pos, quat, scl);
+
+  cameraRig.flyToPose(pos, quat);
+
+  activeImage.value = node.imageUrl;
+  activeTag.value = node.tag;
+
+  syncHighlight(
+    deriveHighlightPointFromPose(node.matrix, sceneRadius),
+    Math.max(sceneRadius * 0.12, 0.08),
+  );
+  highlightStatus.value = node.tag ? `高亮镜头: ${node.tag}` : '高亮当前视角区域';
+};
+
+// ── Quality mode switching ──
+
+const setQualityMode = (mode) => {
+  qualityMode.value = mode;
+  if (!cameraRig) return;
+
+  switch (mode) {
+    case 'smooth':
+      cameraRig.lookDamping = 22;
+      cameraRig.moveDamping = 18;
+      break;
+    case 'standard':
+      cameraRig.lookDamping = 18;
+      cameraRig.moveDamping = 14;
+      break;
+    case 'hd':
+      cameraRig.lookDamping = 14;
+      cameraRig.moveDamping = 10;
+      break;
+  }
+};
+
+// ── Interaction profile switching ──
+
+const setInteractionMode = (mode) => {
+  if (!cameraRig) return;
+  cameraRig.setMode(mode);
+  highlightStatus.value = `交互模式: ${mode === 'recall' ? '回忆' : mode === 'inspect' ? '观察' : '自由'}`;
+};
+
+// ── Memory path auto-camera (recall path cinematography) ──
+
+let memoryPathTimer = null;
+let isPlayingMemoryPath = false;
+const memoryPathSpeed = ref(1.0); // 0.5x – 3x
+let memoryPathPoses = [];
+let memoryPathIndex = 0;
+
+const startMemoryPath = (poses) => {
+  if (!poses || poses.length < 2 || !cameraRig) return;
+
+  stopMemoryPath();
+  memoryPathPoses = poses;
+  memoryPathIndex = 0;
+  isPlayingMemoryPath = true;
+  highlightStatus.value = '回忆路径播放中...';
+
+  flyToNextMemoryPose();
+};
+
+const flyToNextMemoryPose = () => {
+  if (!isPlayingMemoryPath || memoryPathIndex >= memoryPathPoses.length) {
+    stopMemoryPath();
+    return;
+  }
+
+  const poseData = memoryPathPoses[memoryPathIndex];
+  const normalizedMatrix = normalizeMatrixArray(poseData.matrix);
+  if (!normalizedMatrix) {
+    memoryPathIndex += 1;
+    flyToNextMemoryPose();
+    return;
+  }
+
+  const m = new THREE.Matrix4().fromArray(normalizedMatrix);
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  m.decompose(pos, quat, scl);
+
+  cameraRig.flyToPose(pos, quat, () => {
+    activeImage.value = poseData.image_url || '';
+    activeTag.value = poseData.tag || '';
+    syncHighlight(
+      deriveHighlightPointFromPose(normalizedMatrix, sceneRadius),
+      Math.max(sceneRadius * 0.12, 0.08),
+    );
+
+    memoryPathIndex += 1;
+    if (memoryPathIndex < memoryPathPoses.length) {
+      // Delay between poses inversely proportional to speed
+      const delay = Math.max(400, 1800 / memoryPathSpeed.value);
+      memoryPathTimer = setTimeout(flyToNextMemoryPose, delay);
+    } else {
+      stopMemoryPath();
+    }
+  });
+};
+
+const pauseMemoryPath = () => {
+  if (memoryPathTimer !== null) {
+    clearTimeout(memoryPathTimer);
+    memoryPathTimer = null;
+  }
+  isPlayingMemoryPath = false;
+  highlightStatus.value = '回忆路径已暂停';
+};
+
+const resumeMemoryPath = () => {
+  if (memoryPathIndex >= memoryPathPoses.length) return;
+  isPlayingMemoryPath = true;
+  highlightStatus.value = '回忆路径播放中...';
+  flyToNextMemoryPose();
+};
+
+const stopMemoryPath = () => {
+  if (memoryPathTimer !== null) {
+    clearTimeout(memoryPathTimer);
+    memoryPathTimer = null;
+  }
+  isPlayingMemoryPath = false;
+  highlightStatus.value = '回忆路径已停止';
+};
+
 onMounted(() => {
   notifyFlutter({ status: 'ready' });
 
@@ -512,7 +979,7 @@ onMounted(() => {
     }
 
     if (typeof input === 'object' && input !== null) {
-      initViewer(input.ply || null, input.poses || null, {
+      initViewer(input.modelUrl || input.ply || null, input.posesUrl || input.poses || null, {
         matrix: input.matrix || null,
         imageId: input.imageId || null,
       });
@@ -522,6 +989,13 @@ onMounted(() => {
     initViewer(null, null, null);
   };
 
+  // 注册供 Flutter 调用的 TimePeeling 模型列表设置函数
+  window.setModelListForTimePeeling = (list, currentId) => {
+    console.log('[Flutter->SparkViewer] 收到 TimePeeling 模型列表:', list, '当前模型:', currentId);
+    // Spark 2.0 当前版本暂不支持 TimePeeling 切换，但需要提供空实现避免 Flutter 端报错
+    // 后续可扩展为多模型切换逻辑
+  };
+
   const initialInput = parseInitialInputFromUrl();
   if (window.BrainDanceChannel) {
     return;
@@ -529,7 +1003,7 @@ onMounted(() => {
 
   if (initialInput && !hasInitializedFromExternalInput) {
     hasInitializedFromExternalInput = true;
-    initViewer(initialInput.ply, initialInput.poses, {
+    initViewer(initialInput.modelUrl || initialInput.ply, initialInput.posesUrl || initialInput.poses, {
       matrix: initialInput.matrix || null,
       imageId: initialInput.imageId || null,
     });
@@ -547,6 +1021,10 @@ onBeforeUnmount(() => {
 
   if (window.loadModelFromFlutter) {
     delete window.loadModelFromFlutter;
+  }
+
+  if (window.setModelListForTimePeeling) {
+    delete window.setModelListForTimePeeling;
   }
 
   disposeViewer();
@@ -588,42 +1066,158 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <FocalPanel
-      v-if="showFocalSettings"
-      :focal-max="focalMax"
-      :focal-min="focalMin"
-      :manual-focal-px="manualFocalPx"
-      :current-view-fov="currentViewFov"
-      :current-view-focal-px="currentViewFocalPx"
-      @update:manual-focal-px="manualFocalPx = $event"
-      @input-focal="onManualFocalChange"
-      @change-focal="onManualFocalChange"
-      @reset-focal="resetFocalToCapture"
-    />
+    <!-- 右侧面板容器：统一管理堆叠和滚动 -->
+    <div class="right-panels" @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop>
+      <StatusRibbon
+        :clip-enabled="clipEnabled"
+        :clip-offset="clipOffset"
+        :current-model-url="currentModelUrl"
+        :current-poses-path="currentPosesPath"
+        :highlight-status="highlightStatus"
+        @toggle-clip="toggleClip"
+        @update:clip-offset="onClipOffsetChange"
+      />
 
-    <StatusRibbon
-      :clip-enabled="clipEnabled"
-      :clip-offset="clipOffset"
-      :current-model-url="currentModelUrl"
-      :current-poses-path="currentPosesPath"
-      :highlight-status="highlightStatus"
-      @toggle-clip="toggleClip"
-      @update:clip-offset="onClipOffsetChange"
-    />
+      <FocalPanel
+        v-if="showFocalSettings"
+        :focal-max="focalMax"
+        :focal-min="focalMin"
+        :manual-focal-px="manualFocalPx"
+        :current-view-fov="currentViewFov"
+        :current-view-focal-px="currentViewFocalPx"
+        @update:manual-focal-px="manualFocalPx = $event"
+        @input-focal="onManualFocalChange"
+        @change-focal="onManualFocalChange"
+        @reset-focal="resetFocalToCapture"
+      />
 
-    <CameraTrack
-      :active-image="activeImage"
-      :filtered-poses="filteredPoses"
-      :search-query="searchQuery"
-      @select-pose="flyToImage"
-    />
+      <ReferenceCard
+        :active-image="activeImage"
+        :active-tag="activeTag"
+        :scene-metadata="sceneMetadata"
+        @close="activeImage = ''; activeTag = ''"
+      />
 
-    <ReferenceCard
-      :active-image="activeImage"
-      :active-tag="activeTag"
-      :scene-metadata="sceneMetadata"
-      @close="activeImage = ''; activeTag = ''"
-    />
+      <!-- Orbit 控制面板 -->
+      <div
+        v-if="!isLoading && !loadError"
+        class="orbit-panel panel-card"
+        @mousedown.stop
+        @touchstart.stop
+        @touchmove.stop
+        @touchend.stop
+        @touchcancel.stop
+      >
+        <div class="eyebrow">Orbit Control</div>
+        <div class="panel-title">轨道旋转</div>
+        <div class="orbit-btn-row">
+          <button class="panel-btn panel-btn--solid" @click="orbitEnabled ? stopOrbit() : startOrbit()">
+            {{ orbitEnabled ? '关闭轨道' : '开启轨道' }}
+          </button>
+          <button v-if="orbitEnabled" class="panel-btn panel-btn--ghost" @click="toggleOrbitPause()">
+            {{ orbitPaused ? '恢复' : '暂停' }}
+          </button>
+        </div>
+        <template v-if="orbitEnabled">
+          <!-- 旋转速度控制 -->
+          <div class="focal-row" style="margin-top: 10px;">
+            <span>速度</span>
+            <span>{{ orbitSpeed }} 度/秒</span>
+          </div>
+          <input
+            type="range"
+            :min="1"
+            :max="120"
+            :value="orbitSpeed"
+            step="1"
+            @input="orbitSpeed = Number($event.target.value)"
+          />
+          <!-- 旋转半径控制 -->
+          <div class="focal-row" style="margin-top: 6px;">
+            <span>半径</span>
+            <span>{{ orbitRadius > 0 ? orbitRadius.toFixed(2) : '自动' }}</span>
+          </div>
+          <input
+            type="range"
+            :min="0"
+            :max="20"
+            :value="orbitRadius"
+            step="0.1"
+            @input="orbitRadius = Number($event.target.value)"
+          />
+          <!-- 旋转方向切换 -->
+          <div style="margin-top: 8px;">
+            <button class="panel-btn panel-btn--ghost orbit-dir-btn" @click="toggleOrbitDirection()">
+              {{ orbitDirection === 1 ? '逆时针' : '顺时针' }}
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 底部区域容器：QualityHUD 和 CameraTrack -->
+    <div class="bottom-area">
+      <CameraTrack
+        :active-image="activeImage"
+        :filtered-poses="filteredPoses"
+        :search-query="searchQuery"
+        @select-pose="flyToImage"
+      />
+
+      <!-- Quality HUD -->
+      <div class="quality-hud">
+        <div class="quality-row">
+          <button
+            v-for="q in [
+              { key: 'smooth', label: '流畅' },
+              { key: 'standard', label: '标准' },
+              { key: 'hd', label: '高清' },
+            ]"
+            :key="q.key"
+            class="quality-btn"
+            :class="{ 'quality-btn--active': qualityMode === q.key }"
+            @click="setQualityMode(q.key)"
+          >
+            {{ q.label }}
+          </button>
+        </div>
+        <div class="quality-row" style="margin-top: 4px">
+          <button
+            v-for="m in [
+              { key: 'recall', label: '回忆' },
+              { key: 'inspect', label: '观察' },
+              { key: 'freeWalk', label: '自由' },
+            ]"
+            :key="m.key"
+            class="quality-btn quality-btn--mode"
+            :class="{ 'quality-btn--active': cameraRig?.mode === m.key }"
+            @click="setInteractionMode(m.key)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+        <div class="quality-row" style="margin-top: 4px">
+          <button
+            class="quality-btn quality-btn--path"
+            @click="startMemoryPath(filteredPoses)"
+          >
+            ▶ 路径
+          </button>
+          <button
+            class="quality-btn quality-btn--path"
+            @click="isPlayingMemoryPath ? pauseMemoryPath() : resumeMemoryPath()"
+          >
+            {{ isPlayingMemoryPath ? '⏸ 暂停' : '▶ 继续' }}
+          </button>
+          <button
+            class="quality-btn quality-btn--path"
+            @click="stopMemoryPath()"
+          >
+            ⏹ 停止
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -644,6 +1238,16 @@ onBeforeUnmount(() => {
 .viewer-layer {
   position: absolute;
   inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: none;
+}
+
+.viewer-layer canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ambient-mask {
@@ -880,10 +1484,6 @@ onBeforeUnmount(() => {
 }
 
 .camera-track-dock {
-  position: absolute;
-  left: 18px;
-  bottom: 18px;
-  z-index: 55;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -897,13 +1497,9 @@ onBeforeUnmount(() => {
 }
 
 .camera-track {
-  position: absolute;
-  left: 0;
-  bottom: 48px;
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  width: min(540px, calc(100vw - 36px));
   overflow-x: auto;
   padding: 12px 14px;
 }
@@ -1028,6 +1624,170 @@ button {
   }
 }
 
+/* ===== 响应式断点：小屏手机 (≤480px) ===== */
+@media (max-width: 480px) {
+  .hud {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 6px;
+  }
+
+  .toolbar {
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .search-panel {
+    width: 100%;
+    padding: 5px;
+  }
+
+  .search-input {
+    font-size: 11px;
+    padding: 8px 9px;
+  }
+
+  .panel-btn {
+    padding: 8px 9px;
+    font-size: 11px;
+    border-radius: 12px;
+  }
+
+  .right-panels {
+    top: 72px;
+    right: 8px;
+    gap: 12px;
+    max-height: calc(100vh - 140px);
+  }
+
+  .right-panels .status-ribbon {
+    width: min(72vw, 240px);
+    min-width: 180px;
+    padding: 10px 12px;
+  }
+
+  .right-panels .focal-panel {
+    width: min(72vw, 200px);
+    padding: 10px;
+  }
+
+  .right-panels .reference-card {
+    width: 100px;
+    min-width: 100px;
+    padding: 6px;
+  }
+
+  .right-panels .orbit-panel {
+    width: min(72vw, 180px);
+    padding: 10px;
+  }
+
+  .bottom-area {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 8px;
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .bottom-area .quality-hud {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .bottom-area .camera-track {
+    max-width: 100%;
+    padding: 10px;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+  }
+
+  .bottom-area .camera-track-dock {
+    gap: 6px;
+    width: 100%;
+  }
+
+  .camera-item {
+    width: 68px;
+    height: 48px;
+  }
+
+  .track-copy {
+    min-width: 80px;
+  }
+
+  .quality-row {
+    margin-top: 0 !important;
+  }
+
+  .quality-btn {
+    padding: 5px 8px;
+    font-size: 10px;
+    border-radius: 8px;
+  }
+
+  .quality-btn--mode {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .quality-btn--path {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+  }
+
+  .panel-title {
+    font-size: 13px;
+  }
+
+  .status-line {
+    font-size: 12px;
+  }
+
+  .status-subline {
+    font-size: 10px;
+  }
+
+  .focal-row {
+    font-size: 11px;
+  }
+
+  .focal-number {
+    width: 80px;
+    padding: 6px 8px;
+  }
+
+  .meta-chip {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+
+  .reference-hint {
+    font-size: 8px;
+  }
+}
+
+/* ===== 响应式断点：中等屏幕手机 (≤768px) ===== */
 @media (max-width: 768px) {
   .hud {
     top: 12px;
@@ -1056,44 +1816,260 @@ button {
     font-size: 12px;
   }
 
-  .status-ribbon {
-    top: 112px;
+  .right-panels {
+    top: 80px;
     right: 12px;
+    gap: 14px;
+    max-height: calc(100vh - 160px);
+  }
+
+  .right-panels .status-ribbon {
     width: min(68vw, 280px);
+    min-width: 200px;
   }
 
-  .focal-panel {
-    top: 212px;
-    right: 12px;
+  .right-panels .focal-panel {
+    width: min(68vw, 220px);
   }
 
-  .reference-card {
-    top: 412px;
-    right: 12px;
+  .right-panels .reference-card {
     width: 112px;
     min-width: 112px;
   }
 
-  .camera-track-dock {
-    left: 12px;
+  .right-panels .orbit-panel {
+    width: min(68vw, 180px);
+    padding: 10px;
+  }
+
+  .bottom-area {
     bottom: 12px;
+    left: 12px;
+    right: 12px;
+    gap: 10px;
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 
-  .camera-track {
-    width: min(360px, calc(100vw - 24px));
-    bottom: 44px;
+  .bottom-area .quality-hud {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .bottom-area .camera-track {
+    max-width: 100%;
     padding: 12px;
+    background: rgba(249, 249, 248, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 16px;
+    border: 1px solid rgba(107, 122, 143, 0.16);
   }
 
-  .track-copy {
-    min-width: 96px;
+  .bottom-area .camera-track-dock {
+    width: 100%;
   }
 
   .camera-item {
-    width: 78px;
-    height: 56px;
+    width: 74px;
+    height: 52px;
+  }
+
+  .track-copy {
+    min-width: 88px;
   }
 }
-</style>
 
+/* ===== 响应式断点：小平板 (≤1024px) ===== */
+@media (max-width: 1024px) {
+  .right-panels {
+    top: 82px;
+    right: 16px;
+    gap: 15px;
+    max-height: calc(100vh - 170px);
+  }
+
+  .right-panels .status-ribbon {
+    width: min(30vw, 300px);
+    min-width: 210px;
+  }
+
+  .right-panels .focal-panel {
+    width: min(30vw, 230px);
+  }
+
+  .right-panels .reference-card {
+    width: min(25vw, 140px);
+    min-width: 110px;
+  }
+
+  .right-panels .orbit-panel {
+    width: min(30vw, 200px);
+  }
+
+  .bottom-area .camera-track {
+    max-width: min(450px, 50vw);
+  }
+}
+
+/* ===== 右侧面板容器布局 ===== */
+.right-panels {
+  position: absolute;
+  top: 86px;
+  right: 18px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  /* 自定义滚动条 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(97, 109, 118, 0.3) transparent;
+}
+
+.right-panels::-webkit-scrollbar {
+  width: 6px;
+}
+
+.right-panels::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.right-panels::-webkit-scrollbar-thumb {
+  background-color: rgba(97, 109, 118, 0.3);
+  border-radius: 3px;
+}
+
+/* 右侧面板内的面板样式调整 */
+.right-panels .status-ribbon {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: min(26vw, 320px);
+  min-width: 220px;
+}
+
+.right-panels .focal-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 240px;
+}
+
+.right-panels .reference-card {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: min(22vw, 152px);
+  min-width: 118px;
+}
+
+.right-panels .orbit-panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 210px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ===== 底部区域容器 ===== */
+.bottom-area {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  right: 18px;
+  z-index: 55;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.bottom-area .camera-track-dock {
+  position: relative;
+  left: auto;
+  bottom: auto;
+}
+
+.bottom-area .camera-track {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  width: auto;
+  max-width: min(480px, 50vw);
+}
+
+.bottom-area .quality-hud {
+  position: relative;
+  bottom: auto;
+  right: auto;
+}
+
+/* ===== Orbit 控制面板样式 ===== */
+.orbit-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.orbit-dir-btn {
+  width: 100%;
+}
+
+.quality-row {
+  display: flex;
+  gap: 3px;
+}
+
+.quality-btn {
+  appearance: none;
+  border: 1px solid rgba(97, 109, 118, 0.16);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(30, 30, 32, 0.62);
+  transition: background-color 160ms, color 160ms;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.quality-btn:hover {
+  background: rgba(200, 107, 60, 0.08);
+}
+
+.quality-btn--active {
+  background: rgba(200, 107, 60, 0.14);
+  color: #c86b3c;
+  border-color: rgba(200, 107, 60, 0.28);
+}
+
+.quality-btn--mode {
+  font-size: 10px;
+  padding: 5px 8px;
+}
+
+.quality-btn--path {
+  font-size: 10px;
+  padding: 5px 7px;
+}
+</style>
 

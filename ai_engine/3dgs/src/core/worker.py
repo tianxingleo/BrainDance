@@ -446,17 +446,14 @@ class CloudWorker:
                 print("\n🛑 [CloudWorker] 收到远程暂停指令，准备退出。")
                 return
 
-            # --- 1. 轮询数据库 ---
-            # 查询条件：状态(status)必须是 'pending' (待处理)
-            # limit(1)：每次只取 1 个任务，避免贪多嚼不烂
-            response = self.supabase.table(self.TABLE_NAME)\
-                .select("*").eq("status", "pending").limit(1).execute()
-            
+            # --- 1. 原子抢单 ---
+            # 调用 RPC 函数 claim_next_pending_task()，在数据库层原子地选中并锁定任务
+            # 使用 FOR UPDATE SKIP LOCKED 防止多个 Worker 同时领取同一任务
+            response = self.supabase.rpc('claim_next_pending_task', {}).execute()
+
             # --- 2. 判断是否有任务 ---
             if response.data:
-                # 🎯 发现任务！立即处理
-                # response.data 是一个列表，我们取第一个元素
-                self._process_task(response.data[0])
+                self._process_task(response.data)
             else:
                 self._set_worker_state(status="idle")
                 # 💤 没有任务，休眠 3 秒
@@ -774,13 +771,8 @@ class CloudWorker:
             print(f"[{scene_id}] {message}")
 
         try:
-            # =================== 阶段 A: 锁定任务 ===================
-            # 将状态改为 'processing'，告诉其他 Worker 这个任务我接了，别抢
-            # 同时清空 logs 字段，准备开始新纪录
-            self.supabase.table(self.TABLE_NAME).update({
-                "status": "processing",
-                "logs": []
-            }).eq("id", task_id).execute()
+            # =================== 阶段 A: 已由 RPC 完成 ===================
+            # claim_next_pending_task() 已原子性地将 status 设为 processing 并清空 logs
 
             # =================== 阶段 B: 下载资源 ===================
             on_pipeline_log("正在从云端下载资源...")

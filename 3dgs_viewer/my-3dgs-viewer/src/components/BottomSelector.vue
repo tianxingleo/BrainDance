@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount, shallowRef } from 'vue';
 
 const props = defineProps({
   models: { type: Array, default: () => [] },
@@ -16,27 +16,24 @@ const emit = defineEmits(['selectModel', 'selectPose']);
 
 const mode = ref('pose'); // 'pose' | 'model'
 const scrollRef = ref(null);
+const failedThumbs = ref({});
 
-// 拖拽滚动状态
 let isDragging = false;
 let dragStartX = 0;
 let scrollStartLeft = 0;
 let dragMoved = false;
 
-const sortedModels = computed(() => {
-  return [...props.models].sort((a, b) => {
-    const ta = new Date(a.createdAt || 0).getTime();
-    const tb = new Date(b.createdAt || 0).getTime();
-    return tb - ta;
-  });
-});
+const modelItems = shallowRef([]);
 
-const showTabs = computed(() => props.hasModels);
+const showTabs = computed(() => props.models.length > 0);
 
-// 自动切换到可用 tab（仅当模型 tab 不可用时切换，视角为空时保留空状态）
 watch([() => props.hasModels, () => props.hasPoses], () => {
   if (mode.value === 'model' && !props.hasModels) mode.value = 'pose';
 }, { immediate: true });
+
+watch(mode, () => {
+  dragMoved = false;
+});
 
 function formatTime(dateStr) {
   if (!dateStr) return '';
@@ -48,6 +45,36 @@ function formatTime(dateStr) {
   return `${mm}/${dd} ${hh}:${min}`;
 }
 
+watch(
+  () => props.models,
+  (models) => {
+    const items = [...models]
+      .sort((a, b) => {
+        const ta = new Date(a.createdAt || 0).getTime();
+        const tb = new Date(b.createdAt || 0).getTime();
+        return tb - ta;
+      })
+      .map((model) => ({
+        ...model,
+        formattedTime: formatTime(model.createdAt),
+        thumb:
+          model.previewImg ||
+          model.previewImage ||
+          model.preview_url ||
+          model.preview ||
+          model.cover ||
+          model.coverUrl ||
+          model.cover_url ||
+          model.thumbnail ||
+          model.thumbnailUrl ||
+          model.thumbnail_url ||
+          '',
+      }));
+    modelItems.value = items;
+  },
+  { immediate: true },
+);
+
 function onClickModel(model) {
   if (dragMoved) return;
   if (model.id === props.activeModelId) return;
@@ -57,6 +84,14 @@ function onClickModel(model) {
 function onClickPose(pose) {
   if (dragMoved) return;
   emit('selectPose', pose);
+}
+
+function onThumbError(url, ctx) {
+  if (!url) return;
+  if (!failedThumbs.value[url]) {
+    failedThumbs.value = { ...failedThumbs.value, [url]: true };
+    console.warn('[BottomSelector] thumbnail load failed:', url, ctx || '');
+  }
 }
 
 function scrollToActive() {
@@ -71,7 +106,6 @@ watch([() => props.activePoseId, () => props.activeModelId, mode], () => {
   nextTick(scrollToActive);
 });
 
-// 拖拽滚动
 function onPointerDown(e) {
   isDragging = true;
   dragMoved = false;
@@ -89,6 +123,8 @@ function onPointerMove(e) {
 
 function onPointerUp() {
   isDragging = false;
+  // 留半帧给 click 判断 dragMoved，再清掉
+  setTimeout(() => { dragMoved = false; }, 0);
 }
 
 onMounted(() => {
@@ -104,7 +140,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="bs-root"
     @mousedown.stop @touchstart.stop @touchmove.stop @touchend.stop @wheel.stop>
-    <!-- 切换按钮 -->
     <div class="bs-tabs" v-if="showTabs">
       <button
         class="bs-tab" :class="{ 'bs-tab--active': mode === 'pose' }"
@@ -116,7 +151,6 @@ onBeforeUnmount(() => {
       >时间</button>
     </div>
 
-    <!-- 缩略图滚动区 -->
     <div class="bs-track-wrap">
       <div class="bs-track"
         ref="scrollRef"
@@ -125,7 +159,6 @@ onBeforeUnmount(() => {
         @touchstart="onPointerDown"
         @touchmove="onPointerMove"
       >
-        <!-- 视角模式 -->
         <template v-if="mode === 'pose'">
           <div
             v-for="pose in poses"
@@ -134,36 +167,46 @@ onBeforeUnmount(() => {
             :class="{ 'bs-item--active': activePoseId === getPosePresentationId(pose) }"
             @click="onClickPose(pose)"
           >
-            <img v-if="pose.image_url" :src="pose.image_url" class="bs-thumb" draggable="false" />
+            <img
+              v-if="pose.image_url && !failedThumbs[pose.image_url]"
+              :src="pose.image_url"
+              class="bs-thumb"
+              @error="onThumbError(pose.image_url)"
+              draggable="false"
+              loading="eager"
+              decoding="async"
+              fetchpriority="low"
+            />
             <div v-else class="bs-thumb bs-thumb--empty">
               <span>未命名</span>
             </div>
-            <div v-if="pose.tag" class="bs-tag">{{ pose.tag }}</div>
           </div>
         </template>
 
-        <!-- 模型模式 -->
         <template v-if="mode === 'model'">
           <div
-            v-for="model in sortedModels"
+            v-for="model in modelItems"
             :key="model.id"
-            class="bs-item"
-            :class="{ 'bs-item--active': model.id === activeModelId }"
+            class="bs-item bs-item--model"
+            :class="{ 'bs-item--active': activeModelId === model.id }"
             @click="onClickModel(model)"
           >
-            <img v-if="model.previewImg" :src="model.previewImg" class="bs-thumb" draggable="false" />
+            <img
+              v-if="model.thumb && !failedThumbs[model.thumb]"
+              :src="model.thumb"
+              class="bs-thumb"
+              @error="onThumbError(model.thumb, { id: model.id, name: model.name })"
+              draggable="false"
+              loading="eager"
+              decoding="async"
+            />
             <div v-else class="bs-thumb bs-thumb--empty">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-              </svg>
+              <span>未命名</span>
             </div>
-            <div class="bs-time">{{ formatTime(model.createdAt) }}</div>
+            <div class="bs-time">{{ model.formattedTime }}</div>
           </div>
         </template>
       </div>
-      <!-- 左右渐隐 -->
-      <div class="bs-fade bs-fade--left"></div>
-      <div class="bs-fade bs-fade--right"></div>
     </div>
   </div>
 </template>
@@ -171,30 +214,29 @@ onBeforeUnmount(() => {
 <style scoped>
 .bs-root {
   position: absolute;
-  bottom: 32px;
+  bottom: 24px;
   left: 16px;
   right: 16px;
   z-index: 100;
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 12px;
   pointer-events: auto;
-  background: rgba(249, 249, 248, 0.88);
+  background: linear-gradient(180deg, rgba(249, 249, 248, 0.72) 0%, rgba(249, 249, 248, 0.88) 100%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-radius: 20px;
-  border: 1px solid rgba(107, 122, 143, 0.16);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  padding: 10px 0 10px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--card-border, rgba(107, 122, 143, 0.16));
+  box-shadow: 0 8px 22px var(--card-shadow, rgba(0, 0, 0, 0.1));
+  padding: 12px 14px;
 }
 
-/* 切换按钮 */
 .bs-tabs {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
-  padding-right: 10px;
+  align-self: center;
 }
 
 .bs-tab {
@@ -204,25 +246,28 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
-  background: rgba(107, 122, 143, 0.1);
-  color: rgba(30, 30, 32, 0.5);
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  background: var(--chip-hover-bg, rgba(107, 122, 143, 0.1));
+  color: var(--text-muted, rgba(30, 30, 32, 0.55));
   white-space: nowrap;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   outline: none;
 }
+.bs-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
 .bs-tab--active {
-  background: rgba(204, 154, 92, 0.88);
+  background: rgba(204, 154, 92, 0.9);
   color: #fff;
-  box-shadow: 0 2px 10px rgba(204, 154, 92, 0.3);
+  box-shadow: 0 2px 8px rgba(204, 154, 92, 0.3);
 }
 .bs-tab:hover:not(.bs-tab--active) {
-  background: rgba(107, 122, 143, 0.18);
-  color: rgba(30, 30, 32, 0.75);
+  background: var(--chip-hover-bg, rgba(107, 122, 143, 0.18));
+  color: var(--text-secondary, rgba(30, 30, 32, 0.78));
 }
 
-/* 缩略图滚动区 */
 .bs-track-wrap {
   position: relative;
   flex: 1;
@@ -232,15 +277,18 @@ onBeforeUnmount(() => {
 
 .bs-track {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 6px 36px;
+  padding: 6px 28px;
   scrollbar-width: none;
   -ms-overflow-style: none;
   cursor: grab;
   user-select: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent);
+  -webkit-tap-highlight-color: transparent;
 }
 .bs-track::-webkit-scrollbar {
   display: none;
@@ -249,30 +297,51 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
-/* 缩略图项 */
 .bs-item {
   position: relative;
-  width: 80px;
+  width: 84px;
   height: 56px;
   flex-shrink: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  border: 2px solid rgba(107, 122, 143, 0.12);
-  opacity: 0.7;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease,
+    box-shadow 0.25s ease,
+    filter 0.25s ease;
+  opacity: 0.78;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform: scale(0.95);
+  transform-origin: center;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bs-item:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .bs-item--active {
-  width: 96px;
-  height: 68px;
-  border-color: #CC9A5C;
   opacity: 1;
-  box-shadow: 0 4px 16px rgba(204, 154, 92, 0.3);
+  transform: scale(1.05);
+  filter: saturate(1.05);
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.18),
+    0 6px 16px rgba(204, 154, 92, 0.26);
+}
+.bs-item--active:focus-visible {
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.28),
+    0 6px 16px rgba(204, 154, 92, 0.3);
 }
 .bs-item:hover:not(.bs-item--active) {
-  opacity: 0.88;
-  border-color: rgba(107, 122, 143, 0.25);
+  opacity: 0.95;
+  transform: scale(0.98);
 }
 
 .bs-thumb {
@@ -282,68 +351,98 @@ onBeforeUnmount(() => {
   display: block;
   user-select: none;
   -webkit-user-drag: none;
-  background: rgba(30, 30, 32, 0.5);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+  background: linear-gradient(135deg, rgba(60, 60, 66, 0.35) 0%, rgba(40, 40, 46, 0.45) 100%);
 }
 .bs-thumb--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
 }
 
-/* 视角标签 */
-.bs-tag {
+/* 时间 tab：active 卡底部叠时间戳 */
+.bs-item--model .bs-time {
   position: absolute;
-  bottom: 0;
   left: 0;
   right: 0;
+  bottom: 0;
   padding: 2px 6px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(transparent, rgba(0,0,0,0.6));
   text-align: center;
-  line-height: 1.4;
+  line-height: 1.3;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.bs-item--model.bs-item--active .bs-time,
+.bs-item--model:hover .bs-time {
+  opacity: 1;
 }
 
-/* 模型时间标签 */
-.bs-time {
-  position: absolute;
-  bottom: 1px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 8px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
-  pointer-events: none;
-  line-height: 1.2;
+[data-theme="dark"] .bs-root {
+  background: linear-gradient(
+    180deg,
+    rgba(22, 24, 30, 0.78) 0%,
+    rgba(22, 24, 30, 0.92) 100%
+  );
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
 
-/* 左右渐隐 */
-.bs-fade {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 40px;
-  pointer-events: none;
-  z-index: 2;
+[data-theme="dark"] .bs-tab {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 247, 250, 0.6);
 }
-.bs-fade--left {
-  left: 0;
-  background: linear-gradient(to right,
-    rgba(249, 249, 248, 0.95) 0%,
-    rgba(249, 249, 248, 0) 100%);
+[data-theme="dark"] .bs-tab:hover:not(.bs-tab--active) {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(245, 247, 250, 0.92);
 }
-.bs-fade--right {
-  right: 0;
-  background: linear-gradient(to left,
-    rgba(249, 249, 248, 0.95) 0%,
-    rgba(249, 249, 248, 0) 100%);
+[data-theme="dark"] .bs-tab--active {
+  background: rgba(204, 154, 92, 0.92);
+  color: #1a1a1f;
+  box-shadow: 0 2px 8px rgba(204, 154, 92, 0.35);
+}
+[data-theme="dark"] .bs-tab:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .bs-item {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+[data-theme="dark"] .bs-item:focus-visible {
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    0 1px 3px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+}
+[data-theme="dark"] .bs-item:hover:not(.bs-item--active) {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+[data-theme="dark"] .bs-item--active {
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.22),
+    0 6px 18px rgba(204, 154, 92, 0.34);
+}
+[data-theme="dark"] .bs-item--active:focus-visible {
+  box-shadow:
+    0 0 0 1.5px #CC9A5C,
+    0 0 0 4px rgba(204, 154, 92, 0.32),
+    0 6px 18px rgba(204, 154, 92, 0.4);
+}
+[data-theme="dark"] .bs-thumb {
+  background: linear-gradient(
+    135deg,
+    rgba(40, 40, 46, 0.45) 0%,
+    rgba(20, 20, 26, 0.6) 100%
+  );
+}
+[data-theme="dark"] .bs-thumb--empty {
+  color: rgba(245, 247, 250, 0.45);
 }
 </style>

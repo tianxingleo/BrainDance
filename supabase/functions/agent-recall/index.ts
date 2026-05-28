@@ -27,17 +27,27 @@ const encoder = new TextEncoder();
 function isStreamingRequest(req: Request): boolean {
   const accept = req.headers.get("accept") ?? "";
   const streamFlag = new URL(req.url).searchParams.get("stream");
-  return streamFlag === "1" || accept.includes("application/x-ndjson");
+  return streamFlag === "1" ||
+    accept.includes("application/x-ndjson") ||
+    accept.includes("text/event-stream");
 }
 
-function writeNdjsonLine(
+function prefersSse(req: Request): boolean {
+  const accept = req.headers.get("accept") ?? "";
+  return accept.includes("text/event-stream");
+}
+
+function writeStreamEvent(
   controller: ReadableStreamDefaultController<Uint8Array>,
+  format: "ndjson" | "sse",
   event: string,
   data: unknown,
 ): void {
-  controller.enqueue(
-    encoder.encode(`${JSON.stringify({ event, data })}\n`),
-  );
+  const payload = format === "sse"
+    ? `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+    : `${JSON.stringify({ event, data })}\n`;
+  controller.enqueue(encoder.encode(payload));
+  console.log(`[AgentStream] Enqueued event: ${event}`);
 }
 
 function chunkText(text: string, chunkSize = 28): string[] {
@@ -74,32 +84,62 @@ serve(async (req: Request) => {
       currentMode: parsed.data.currentMode,
       candidateSceneIds: parsed.data.candidateSceneIds,
       sessionId: parsed.data.sessionId,
+      userId: parsed.data.userId,
       conversationSummary: parsed.data.conversationSummary,
       sessionState: parsed.data.sessionState,
+      shortTermMemory: parsed.data.shortTermMemory,
     };
 
     if (isStreamingRequest(req)) {
+      const streamFormat = prefersSse(req) ? "sse" : "ndjson";
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
+          // 发送一条占位数据以快速撑破 Nginx 等反向代理的缓冲区 (约2KB)
+          writeStreamEvent(controller, streamFormat, "ping", {
+            message: " ".repeat(2048),
+          });
+          writeStreamEvent(controller, streamFormat, "status", {
+            phase: "request_received",
+            summary: "已收到 Agent 请求，准备进入编排链路",
+          });
+
           void (async () => {
             try {
+              let messageStreamed = false;
               const result = await runSpatialSearchAgent(
                 parsed.data.query,
                 agentOptions,
                 {
                   onEvent: async (event: AgentProgressEvent) => {
-                    writeNdjsonLine(controller, event.event, event.data);
+                    if (event.event === "message") {
+                      const delta = (event.data as { delta?: string })?.delta ?? "";
+                      if (delta.length > 0) messageStreamed = true;
+                    }
+                    writeStreamEvent(
+                      controller,
+                      streamFormat,
+                      event.event,
+                      event.data,
+                    );
                   },
                 },
               );
 
-              for (const chunk of chunkText(result.answer)) {
-                writeNdjsonLine(controller, "message", { delta: chunk });
+              if (!messageStreamed) {
+                writeStreamEvent(controller, streamFormat, "status", {
+                  phase: "final_answer",
+                  summary: "检索与工具调用已完成，正在整理最终回答",
+                });
+                for (const chunk of chunkText(result.answer)) {
+                  writeStreamEvent(controller, streamFormat, "message", {
+                    delta: chunk,
+                  });
+                }
               }
 
-              writeNdjsonLine(controller, "done", result);
+              writeStreamEvent(controller, streamFormat, "done", result);
             } catch (error) {
-              writeNdjsonLine(controller, "error", {
+              writeStreamEvent(controller, streamFormat, "error", {
                 message: error instanceof Error ? error.message : String(error),
               });
             } finally {
@@ -112,8 +152,11 @@ serve(async (req: Request) => {
       return new Response(stream, {
         headers: {
           ...corsHeaders,
-          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Content-Type": streamFormat === "sse"
+            ? "text/event-stream; charset=utf-8"
+            : "application/x-ndjson; charset=utf-8",
           "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
           "X-Accel-Buffering": "no",
         },
       });

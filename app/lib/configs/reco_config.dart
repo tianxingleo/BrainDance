@@ -5,7 +5,7 @@ class RecoConfig {
   //更新
   static VoidCallback? onUpdate;
   //程序
-  static late final bool cameraEnabled;
+  static late bool cameraEnabled;
   static late final List<CameraDescription> cameras;
   static List<CameraDescription> frontCameras = [];
   static List<CameraDescription> backCameras = [];
@@ -14,6 +14,26 @@ class RecoConfig {
   //可变
   static int camNum = 0;
   static const ResolutionPreset resolutionPreset = ResolutionPreset.max;
+
+  static List<int> get backCameraIndices {
+    final indices = <int>[];
+    for (var i = 0; i < cameras.length; i++) {
+      if (cameras[i].lensDirection == CameraLensDirection.back) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }
+
+  static List<int> get frontCameraIndices {
+    final indices = <int>[];
+    for (var i = 0; i < cameras.length; i++) {
+      if (cameras[i].lensDirection == CameraLensDirection.front) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }
   //基础函数
   static Future<bool> cameraInitialize() async {
     cameraController = CameraController(cameras[camNum], resolutionPreset);
@@ -21,6 +41,11 @@ class RecoConfig {
     await cameraController!.initialize().catchError((Object e) {
       suc = false;
     });
+    if (!suc) {
+      cameraEnabled = false;
+    } else {
+      cameraEnabled = true;
+    }
     onUpdate?.call();
     return suc;
   }
@@ -53,6 +78,23 @@ class RecoConfig {
       return;
     }
     cameraInitialize();
+  }
+
+  /// 切换相机分辨率并重新初始化
+  static Future<void> switchResolution(ResolutionPreset preset) async {
+    if (cameraController == null) return;
+    try {
+      await cameraController!.dispose();
+    } catch (_) {}
+    try {
+      cameraController = CameraController(cameras[camNum], preset);
+      await cameraController!.initialize();
+    } catch (_) {
+      // 回退到 max 分辨率
+      cameraController = CameraController(cameras[camNum], ResolutionPreset.max);
+      await cameraController!.initialize();
+    }
+    onUpdate?.call();
   }
 
   static void disposeCamera() {

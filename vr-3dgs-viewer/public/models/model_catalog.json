@@ -1,0 +1,32 @@
+{
+  "sceneId": "BrainDance VR Demo",
+  "activeModelId": "local-splat",
+  "authSession": {
+    "status": "local-preview",
+    "displayName": "VR Local User"
+  },
+  "modelList": [
+    {
+      "id": "local-splat",
+      "name": "Local Splat",
+      "displayName": "Local Splat",
+      "modelUrl": "./models/point_cloud.splat",
+      "ply": "./models/point_cloud.splat",
+      "posesUrl": "./models/webgl_poses.json",
+      "poses": "./models/webgl_poses.json",
+      "description": "本地默认 VR 调试模型，可在 .env 中切换为远程模型目录。",
+      "tags": ["local", "vr", "3dgs"]
+    },
+    {
+      "id": "local-ply",
+      "name": "Local PLY",
+      "displayName": "Local PLY",
+      "modelUrl": "./models/scene_auto_sync_raw.ply",
+      "ply": "./models/scene_auto_sync_raw.ply",
+      "posesUrl": "./models/webgl_poses.json",
+      "poses": "./models/webgl_poses.json",
+      "description": "本地原始 PLY 调试模型，体积较大，建议真实 VR 优先使用 splat/ksplat。",
+      "tags": ["local", "ply", "fallback"]
+    }
+  ]
+}

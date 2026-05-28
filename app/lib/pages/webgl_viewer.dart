@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:braindance/configs/app_config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:braindance/widgets/app_toast.dart';
 import 'package:flutter/services.dart';
+import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:tdesign_flutter/tdesign_flutter.dart';
@@ -24,16 +26,18 @@ class WebGLViewerPage extends StatefulWidget {
   final List<double>? initialPose;
   final String? initialPoseId;
   final bool useSparkViewer;
+  final bool initialMarkerArMode;
   final List<Map<String, dynamic>> timePeelingModels;
 
   const WebGLViewerPage({
     super.key,
-    this.initialModelUrl = './models/scene_auto_sync_raw.ply',
+    this.initialModelUrl = '',
     this.posesUrl,
     this.sceneId = '3DGS Viewer',
     this.initialPose,
     this.initialPoseId,
     this.useSparkViewer = false,
+    this.initialMarkerArMode = false,
     this.timePeelingModels = const [],
   });
 
@@ -42,6 +46,10 @@ class WebGLViewerPage extends StatefulWidget {
 }
 
 class _WebGLViewerPageState extends State<WebGLViewerPage> {
+  static const MethodChannel _cameraPermissionChannel = MethodChannel(
+    'braindance/camera_permission',
+  );
+
   WebViewController? _controller;
   bool _isWebReady = false;
   bool _isUnsupportedPlatform = false;
@@ -58,6 +66,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String? _localModelPath;
   bool _downloadCancelled = false;
   late bool _useSparkViewer;
+  bool _isMarkerArMode = false;
 
   void _attachViewerHeaders(HttpResponse response) {
     response.headers.add('Access-Control-Allow-Origin', '*');
@@ -69,13 +78,13 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   String get _viewerAssetRoot =>
       _useSparkViewer ? 'assets/webgl_spark' : 'assets/webgl';
 
-  String get _viewerLabel =>
-      _useSparkViewer ? 'Spark' : '\u539f\u7248';
+  String get _viewerLabel => _useSparkViewer ? 'Spark' : '\u539f\u7248';
 
   @override
   void initState() {
     super.initState();
-    _useSparkViewer = widget.useSparkViewer;
+    _useSparkViewer = widget.useSparkViewer || widget.initialMarkerArMode;
+    _isMarkerArMode = widget.initialMarkerArMode;
 
     // Flutter Web is not supported here. Desktop uses the external browser mode.
     if (kIsWeb) {
@@ -144,8 +153,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           if (ct != null) request.response.headers.contentType = ct;
           await request.response.addStream(proxyResp);
         } catch (e) {
+          debugPrint('[WebGLViewer] proxy error: $e');
           request.response.statusCode = HttpStatus.badGateway;
-          request.response.write('Proxy error: $e');
+          request.response.write('Proxy error');
         }
         await request.response.close();
         return;
@@ -265,8 +275,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
             debugPrint('Server does not support Range, restarting download');
             if (await tmpFile.exists()) await tmpFile.delete();
             existingBytes = 0;
-          } else if (response.statusCode != 200 &&
-              response.statusCode != 206) {
+          } else if (response.statusCode != 200 && response.statusCode != 206) {
             var errorBody = '';
             try {
               errorBody = await response.transform(utf8.decoder).join();
@@ -360,15 +369,19 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           }
         }
       } catch (e) {
-        debugPrint('Download error: $e');
+        debugPrint('[WebGLViewer] download error: $e');
         if (mounted) {
           setState(() {
             _isDownloading = false;
           });
-          TDToast.showText('\u4e0b\u8f7d\u6a21\u578b\u5931\u8d25: $e', context: context);
+          showAppToast(context, textLocalize('viewer_download_fail'));
           _launchViewer();
         }
       }
+    } else if (originalUrl.isNotEmpty) {
+      // Local file path — serve directly without downloading
+      _localModelPath = originalUrl;
+      if (mounted) _launchViewer();
     } else {
       if (mounted) _launchViewer();
     }
@@ -392,11 +405,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       targetUrl =
           'http://127.0.0.1:$_localPort/proxy/${Uri.encodeComponent(widget.initialModelUrl)}';
     } else {
-      targetUrl = widget.initialModelUrl;
+      // 相对路径或空路径：不传给 JS，让查看器以空状态打开
+      targetUrl = '';
     }
 
     return {
-      'ply': targetUrl,
+      if (targetUrl.isNotEmpty) 'ply': targetUrl,
       if (widget.posesUrl != null && widget.posesUrl!.isNotEmpty)
         'poses': widget.posesUrl,
       if (widget.initialPose != null) 'matrix': widget.initialPose,
@@ -405,11 +419,50 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     };
   }
 
+  bool get _hasPosesResource =>
+      widget.posesUrl != null && widget.posesUrl!.isNotEmpty;
+
+  Map<String, String> _buildViewerQueryParameters({required bool cacheBust}) {
+    final params = <String, String>{
+      'mode': _isMarkerArMode ? 'marker-ar' : 'viewer',
+    };
+
+    if (cacheBust) {
+      params['v'] = DateTime.now().millisecondsSinceEpoch.toString();
+    }
+
+    if (_isMarkerArMode) {
+      final payload = _buildViewerPayload();
+      final modelUrl = payload['ply']?.toString() ?? '';
+      if (modelUrl.isNotEmpty) {
+        params['model'] = modelUrl;
+      }
+      params['target'] = '/targets/braindance-card.mind';
+      params['mode'] = 'marker-ar';
+    } else {
+      params['airGestureAvailable'] = '1';
+      params['gestureCamera'] = 'front';
+      final payload = _buildViewerPayload();
+      if (payload.isNotEmpty) {
+        params['payload'] = jsonEncode(payload);
+      }
+    }
+
+    return params;
+  }
+
+  Uri _buildViewerUri({required bool cacheBust}) {
+    return Uri(
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: _localPort,
+      path: '/index.html',
+      queryParameters: _buildViewerQueryParameters(cacheBust: cacheBust),
+    );
+  }
+
   Future<void> _openInExternalBrowser() async {
-    final payload = _buildViewerPayload();
-    final encodedPayload = Uri.encodeComponent(jsonEncode(payload));
-    final url =
-        'http://127.0.0.1:$_localPort/index.html?payload=$encodedPayload';
+    final url = _buildViewerUri(cacheBust: false).toString();
     _externalViewerUrl = url;
 
     if (_didAttemptExternalOpen) {
@@ -454,7 +507,25 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   }
 
   void _initWebView() {
-    _controller = WebViewController()
+    final controller = WebViewController(
+      onPermissionRequest: (WebViewPermissionRequest request) async {
+        final needsCamera = request.types.contains(
+          WebViewPermissionResourceType.camera,
+        );
+        if (!needsCamera) {
+          await request.deny();
+          return;
+        }
+
+        final granted = await _requestNativeCameraPermission();
+        if (granted) {
+          await request.grant();
+        } else {
+          await request.deny();
+        }
+      },
+    );
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
       ..addJavaScriptChannel(
@@ -464,12 +535,27 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           debugPrint('BrainDanceChannel: ${message.message}');
           if (data['status'] == 'ready') {
             setState(() => _isWebReady = true);
-            _sendModelToVue();
+            if (!_isMarkerArMode) {
+              _sendModelToVue();
+            }
           } else if (data['action'] == 'switchModel') {
             _handleSwitchModel(data);
+          } else if (data['action'] == 'exit') {
+            if (mounted) Navigator.of(context).pop();
+          } else if (data['action'] == 'switchViewer') {
+            final useSpark = data['useSpark'] == true;
+            _switchViewer(useSpark);
+          } else if (data['action'] == 'enterMarkerAr') {
+            if (!_isMarkerArMode) {
+              _switchMarkerArMode();
+            }
           } else if (data['status'] == 'error') {
+            debugPrint('[WebGLViewer] spark error: ${data['msg']}');
             if (mounted) {
-              TDToast.showText('Spark \u9519\u8bef: ${data['msg']}', context: context);
+              if (!_isWebReady) {
+                setState(() => _isWebReady = true);
+              }
+              showAppToast(context, textLocalize('viewer_spark_error'));
             }
           } else if (data['status'] == 'info') {
             debugPrint('Spark info: ${data['msg']}');
@@ -479,6 +565,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageFinished: (String url) {
+            if (_isMarkerArMode) {
+              if (mounted && !_isWebReady) {
+                setState(() => _isWebReady = true);
+              }
+              return;
+            }
             Future.delayed(const Duration(seconds: 2), () {
               if (!_isWebReady && mounted) {
                 debugPrint(
@@ -494,6 +586,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           },
         ),
       );
+    _controller = controller;
 
     if (mounted) setState(() {});
     _loadLocalHtml();
@@ -502,8 +595,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
   Future<void> _loadLocalHtml() async {
     try {
       await _controller?.clearCache();
-      final cacheBust = DateTime.now().millisecondsSinceEpoch;
-      final url = 'http://127.0.0.1:$_localPort/index.html?v=$cacheBust';
+      final url = _buildViewerUri(cacheBust: true).toString();
       await _controller?.loadRequest(Uri.parse(url));
     } catch (e) {
       debugPrint('Error loading HTML via local server: $e');
@@ -512,6 +604,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
   void _sendModelToVue() {
     if (!_isWebReady) return;
+    if (_isMarkerArMode) return;
     final payloadData = _buildViewerPayload();
     final targetUrl = payloadData['ply'];
 
@@ -521,6 +614,21 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
 
     // 发送 TimePeeling 模型列表（无条件发送，空列表时 JS 端显示空态）
     _sendTimePeelingList();
+
+    // 同步当前主题到 WebView
+    _sendThemeToVue();
+
+    // 同步渲染器状态到 WebView
+    _controller?.runJavaScript(
+      "window.setRendererStateFromFlutter($_useSparkViewer)",
+    );
+  }
+
+  void _sendThemeToVue() {
+    final theme = AppConfig.isNightMode ? 'dark' : 'light';
+    _controller?.runJavaScript(
+      "window.setThemeFromFlutter && window.setThemeFromFlutter('$theme')",
+    );
   }
 
   void _sendTimePeelingList() {
@@ -540,7 +648,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
           'id': widget.sceneId,
           'name': widget.sceneId,
           'ply': plyUrl,
-          'poses': widget.posesUrl ?? '',
+          if (_hasPosesResource) 'poses': widget.posesUrl,
           'previewImg': '',
           'createdAt': '',
         },
@@ -548,7 +656,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
       final json = jsonEncode(fallbackList);
       debugPrint('Sending TimePeeling list (1 fallback model) to WebView');
       _controller?.runJavaScript(
-          "window.setModelListForTimePeeling($json, '${widget.sceneId}')");
+        "window.setModelListForTimePeeling($json, '${widget.sceneId}')",
+      );
       return;
     }
 
@@ -601,7 +710,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName = model['display_name']?.toString() ??
+      final displayName =
+          model['display_name']?.toString() ??
           model['scene_id']?.toString() ??
           '';
 
@@ -620,7 +730,8 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     final currentModelId = _findCurrentModelId();
     debugPrint('Sending TimePeeling list (${list.length} models) to WebView');
     _controller?.runJavaScript(
-        "window.setModelListForTimePeeling($json, '$currentModelId')");
+      "window.setModelListForTimePeeling($json, '$currentModelId')",
+    );
   }
 
   String _findCurrentModelId() {
@@ -737,10 +848,68 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     _controller?.runJavaScript("window.loadModelFromFlutter($payload)");
   }
 
+  // ignore: unused_element
   Future<void> _switchViewer(bool useSpark) async {
     if (_useSparkViewer == useSpark) return;
     setState(() {
       _useSparkViewer = useSpark;
+      _isMarkerArMode = false;
+      _isWebReady = false;
+      _didAttemptExternalOpen = false;
+      _externalViewerUrl = null;
+    });
+
+    if (_useExternalBrowserMode) {
+      await _openInExternalBrowser();
+      return;
+    }
+
+    await _loadLocalHtml();
+  }
+
+  Future<bool> _ensureRuntimeCameraPermission() async {
+    final granted = await _requestNativeCameraPermission();
+    if (!granted) {
+      return false;
+    }
+
+    try {
+      final cameras = await availableCameras();
+      return cameras.isNotEmpty;
+    } on CameraException {
+      return false;
+    }
+  }
+
+  Future<bool> _requestNativeCameraPermission() async {
+    try {
+      final granted = await _cameraPermissionChannel.invokeMethod<bool>(
+        'ensureCameraPermission',
+      );
+      return granted ?? false;
+    } catch (e) {
+      debugPrint('[WebGLViewer] camera permission channel failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> _switchMarkerArMode() async {
+    final nextMarkerMode = !_isMarkerArMode;
+    if (nextMarkerMode) {
+      final granted = await _ensureRuntimeCameraPermission();
+      if (!granted) {
+        if (mounted) {
+          TDToast.showText(textLocalize('reco_camun'), context: context);
+        }
+        return;
+      }
+    }
+
+    setState(() {
+      _isMarkerArMode = nextMarkerMode;
+      if (_isMarkerArMode) {
+        _useSparkViewer = true;
+      }
       _isWebReady = false;
       _didAttemptExternalOpen = false;
       _externalViewerUrl = null;
@@ -787,44 +956,45 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
     );
   }
 
-  Widget _buildFloatingViewerToggle(bool isDark) {
-    return Material(
-      color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
-      borderRadius: BorderRadius.circular(18),
-      elevation: 10,
-      shadowColor: Colors.black.withValues(alpha: 0.18),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: ToggleButtons(
-          isSelected: [!_useSparkViewer, _useSparkViewer],
-          onPressed: (index) {
-            _switchViewer(index == 1);
-          },
-          borderRadius: BorderRadius.circular(14),
-          constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
-          fillColor: isDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : AppConfig.primaryColor.withValues(alpha: 0.10),
-          selectedColor: isDark
-              ? const Color(0xFFF7F7FB)
-              : const Color(0xFF202226),
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.74)
-              : const Color(0xFF5B6470),
-          children: const [
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('\u539f\u7248'),
-            ),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10),
-              child: Text('Spark'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // \u6682\u65f6\u6ce8\u91ca\u6389\u539f\u7248/Spark \u6e32\u67d3\u5668\u5207\u6362\u6309\u94ae\uff0c\u9ed8\u8ba4\u4f7f\u7528\u539f\u7248\u6e32\u67d3\u5668
+  // Widget _buildFloatingViewerToggle(bool isDark) {
+  //   return Material(
+  //     color: isDark ? const Color(0xCC1A1D24) : const Color(0xEFFFFFFF),
+  //     borderRadius: BorderRadius.circular(18),
+  //     elevation: 10,
+  //     shadowColor: Colors.black.withValues(alpha: 0.18),
+  //     child: Padding(
+  //       padding: const EdgeInsets.all(4),
+  //       child: ToggleButtons(
+  //         isSelected: [!_useSparkViewer, _useSparkViewer],
+  //         onPressed: (index) {
+  //           _switchViewer(index == 1);
+  //         },
+  //         borderRadius: BorderRadius.circular(14),
+  //         constraints: const BoxConstraints(minHeight: 34, minWidth: 58),
+  //         fillColor: isDark
+  //             ? Colors.white.withValues(alpha: 0.12)
+  //             : AppConfig.primaryColor.withValues(alpha: 0.10),
+  //         selectedColor: isDark
+  //             ? const Color(0xFFF7F7FB)
+  //             : const Color(0xFF202226),
+  //         color: isDark
+  //             ? Colors.white.withValues(alpha: 0.74)
+  //             : const Color(0xFF5B6470),
+  //         children: const [
+  //           Padding(
+  //             padding: EdgeInsets.symmetric(horizontal: 10),
+  //             child: Text('\u539f\u7248'),
+  //           ),
+  //           Padding(
+  //             padding: EdgeInsets.symmetric(horizontal: 10),
+  //             child: Text('Spark'),
+  //           ),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -914,8 +1084,12 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                     ],
                     const SizedBox(height: 18),
                     ElevatedButton(
-                      onPressed: _localPort == 0 ? null : _openInExternalBrowser,
-                      child: const Text('\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00'),
+                      onPressed: _localPort == 0
+                          ? null
+                          : _openInExternalBrowser,
+                      child: const Text(
+                        '\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00',
+                      ),
                     ),
                     if (_externalViewerUrl != null) ...[
                       const SizedBox(height: 12),
@@ -1022,9 +1196,9 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                       ),
                     ),
                   )
-                else if (!_isWebReady && _controller != null)
+                else if (!_isDownloading && !_isWebReady && _controller != null)
                   Center(child: CircularProgressIndicator(color: iconColor)),
-                if (!_isDownloading)
+                if (!_isDownloading && _useSparkViewer)
                   SafeArea(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
@@ -1033,12 +1207,16 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
                         children: [
                           _buildFloatingCircleButton(
                             icon: Icons.arrow_back_rounded,
-                            onPressed: () => Navigator.of(context).pop(),
+                            onPressed: () {
+                              if (_isMarkerArMode || _useSparkViewer) {
+                                _switchViewer(false);
+                              } else {
+                                Navigator.of(context).pop();
+                              }
+                            },
                             isDark: isDark,
                             tooltip: '\u8fd4\u56de',
                           ),
-                          const Spacer(),
-                          _buildFloatingViewerToggle(isDark),
                         ],
                       ),
                     ),

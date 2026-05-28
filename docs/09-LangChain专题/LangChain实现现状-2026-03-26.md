@@ -35,6 +35,8 @@ Core，避免能力散落在独立函数和旧文档描述里。
 - `asset_metadata`
   - 在原有资产工具基础上，新增专题归档、线程归组、pose 摘要、相关模型查找。
   - 已补充“最新模型改名”确定性兜底：这类请求不再只依赖 LLM 自主多轮工具编排，而是会先锁定最新模型，再根据是否给出新名字返回缺参提示或调用 `rename_model_asset`。
+  - 已补充“最新 N 个模型批量改名”确定性兜底：像“把最新三个模型改名为 xxx”会先按 `created_at` 倒序锁定最近 N 个模型，再调用 `batch_patch_model_metadata` 做 dry run / execute。
+  - 已补充预览写操作重放：当上一轮已经生成改名或批量修改预览后，`session_state.lastOperationPreview` 会保存目标模型与工具参数；用户再次说“确认执行”时，共享 Core 会优先重放上一轮参数，而不是让 LLM 重新猜范围。
 - `time_compare`
   - 复用
     [time-compare-agent/agent.ts](/home/ltx/projects/BrainDance/supabase/functions/time-compare-agent/agent.ts)
@@ -77,6 +79,7 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - `lastSelectedModelIds`
   - `lastCandidateRefs`
   - `lastOperationPreview`
+- `lastOperationPreview` 不再只记录工具名和影响数量，还会带上目标模型 IDs 与上一次预览的工具参数，供确认执行时直接重放。
 - `buildAgentContextBlock()`
   现在会把候选引用列表按编号展开，便于模型理解“上一个”“第二个”这类指代。
 - 当前正式响应还新增：
@@ -84,6 +87,7 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - `conversation_summary`
   - `follow_up`
 - `follow_up` 用于把“当前还缺什么输入”“推荐继续说什么”结构化返回给前端，而不是只把追问塞进自然语言答案里。
+- Flutter Recall 页在 follow-up 快捷回复命中“确认执行 / 正式写入”时，会显式把 `executionMode` 切到 `execute` 后再请求 `agent-recall`，不再永远停在 `preview`。
 
 兼容性处理：
 
@@ -332,3 +336,75 @@ Core，避免能力散落在独立函数和旧文档描述里。
   - 入口文件和共享依赖是否存在语法错误。
   - 本地是否能先跑过 `deno check`。
 - 只有在 `deno check` 明确通过后，才继续排查 DashScope、Supabase 权限、数据库查询或外部 5xx。
+
+## 2026-03-26 第四次补充：半截函数定义同样会触发 `worker failed to boot`
+
+### 背景
+
+- 本次 Flutter 侧再次出现 `DioException [bad response]`，HTTP 状态码为 503，服务端表现仍然是 `worker failed to boot`。
+- 但这次共享 Core 里已经看不到显式的 `<<<<<<< / ======= / >>>>>>>` 标记，更像是一次“冲突解决到一半”的残留状态。
+
+### 本次结论
+
+- 根因仍在
+  [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)，但表现形式不是冲突标记，而是多个函数声明被截断。
+- 本轮实际补回的缺口包括：
+  - `extractLatestModelCount(...)`
+  - `extractRenameTargetName(...)`
+  - `parseDeterministicAssetRenameIntent(...)`
+  - `buildDeterministicSpatialSelection(...)`
+  - `executeDeterministicSpatialToolLoop(...)`
+  - `shouldPreferHeuristicSpatialRoute(...)`
+- 同时补回了缺失的类型收敛：
+  - 把 `classifyAgentMode(...)`、`parseSpatialIntent(...)` 的模型参数收敛为当前真实使用的 `ChatOpenAI`
+  - 对 `spatialIntentSchema` 结果执行显式 `parse`
+- 这类问题不会在 Flutter 侧暴露具体堆栈，前端最终只会看到 503，所以必须先在 Edge Function 源码层做静态检查。
+
+### 验证方式
+
+- 已执行 `deno check supabase/functions/_shared/agent-core/spatialAgent.ts`
+- 已执行 `deno check supabase/functions/agent-recall/index.ts`
+- 已执行 `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts`
+- 本轮结果为 17 个测试全部通过，说明共享 Core 与 `agent-recall` 入口当前可正常解析并通过相关单测。
+
+### 排查建议
+
+- 后续如果再碰到 `worker failed to boot`，不要只搜索冲突标记，也要检查是否存在：
+  - 孤立的 `): ReturnType {`
+  - 丢失函数名的半截声明
+  - 导入被删但调用仍保留的情况
+  - 导出函数被误删，导致测试或入口依赖失配
+
+## 2026-03-26 第五次补充：收敛无效续轮，并补齐 Agent 决策可解释性
+
+### 背景
+
+- 当前 Recall 页虽然已经能看到 `status / tool_call / tool_result`，但服务端实际回传的信息仍然偏“流水账”。
+- 用户可以看到“正在初始化”“正在解析空间意图”，却看不到为什么进入某个模式、为什么继续下一轮、为什么突然失败，也很难分辨哪些轮次只是重复劳动。
+- 共享 Core 之前还会把“候选数不足 3 个”作为强续轮信号，即使已经有一个高分且多来源交叉验证的候选，也会继续试探，导致 Agent 看起来像在空转。
+
+### 本次实现
+
+- 在
+  [spatialAgent.ts](/home/ltx/projects/BrainDance/supabase/functions/_shared/agent-core/spatialAgent.ts)
+  的流式事件协议里新增 `plan / thought` 两类事件。
+- 路由完成后会显式输出“为什么选择当前模式”；空间意图解析完成后会显式输出“为什么判断成这个目标类型、是否带时间约束”。
+- 空间工具循环与资产工具循环都新增了重复调用去重：
+  - 如果同一工具以完全相同的参数再次出现，会直接停止本轮续转，而不是重复执行。
+- 空间工具循环的停止条件也做了收敛：
+  - 当已经拿到高分候选，且存在交叉证据或首选工具已经用完时，不再为了凑满 3 个候选而继续机械续轮。
+  - 仅在“没有候选”“最高分明显不足”“还缺关键交叉来源”时才继续下一轮。
+- `classifyAgentMode(...)` 现在会复用已有的简单空间问句规则路由，像“找一下耳机在哪”这类短句不必额外走一次 LLM 模式分类。
+- 另外顺手修复了模式分类异常处理里的不可达回退分支，避免一旦路由模型报错就直接抛出，导致原本设计好的空间检索兜底根本不会生效。
+
+### 影响
+
+- `agent-recall` 和 `spatial-search-agent` 共用同一个共享 Core，因此两条链路都会同步获得更少的无效循环与更完整的中间决策信息。
+- Flutter 端现有 Recall 运行时已经支持消费 `plan / thought`，因此本轮不需要改 Dart 代码，前端就能直接看到更完整的规划与判断过程。
+- 这次改动不会改变最终正式返回结构，但会让流式事件更丰富，便于后续继续做“可解释 Agent 时间线”。
+
+### 验证方式
+
+- 已执行 `deno check supabase/functions/_shared/agent-core/spatialAgent.ts`
+- 已执行 `deno test supabase/functions/agent-recall/test.ts supabase/functions/spatial-search-agent/test.ts`
+- 已新增一条单测覆盖“单个高分交叉证据候选时不再强制续轮”的行为，确保停止条件不会再退回到机械追轮。

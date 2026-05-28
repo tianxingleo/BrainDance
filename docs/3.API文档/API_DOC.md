@@ -61,6 +61,7 @@
 | `video_3dgs` | 视频转3DGS（传统流程） | `video.mp4` |
 | `single_image_sam3d` | 单图转3DGS（SAM3D） | `image.png` |
 | `single_image_sharp` | 单图转3DGS（SHARP） | `image.png` |
+| `sparse2dgs` | 少量图片生成2DGS（Sparse2DGS） | `picture_XXXXX.jpg` 帧序列 / `video.mp4` |
 
 **task_params 字段说明 (single_image_sam3d):**
 
@@ -141,8 +142,9 @@ braindance-assets/ (Bucket)
 └── {user_id}/                   <-- 第一级：用户隔离
     └── {scene_id}/              <-- 第二级：项目/场景隔离
         ├── raw/                 <-- 原始素材
-        │   ├── video.mp4        # 视频任务 (task_type: video_3dgs)
-        │   └── image.png        # 单图任务 (task_type: single_image_sam3d)
+        │   ├── video.mp4           # 视频任务 (task_type: video_3dgs)
+        │   ├── picture_00001.jpg   # 流式帧序列 (task_type: sparse2dgs)
+        │   └── image.png           # 单图任务 (task_type: single_image_sam3d)
         ├── processed/           <-- 抽帧图片
         │   ├── frame_001.jpg
         │   └── frame_002.jpg
@@ -345,3 +347,90 @@ class SearchResult {
     *   当 `status` 变为 `processing` -> 显示进度条。
     *   当 `logs` 数组更新 -> 显示实时日志。
     *   当 `status` 变为 `completed` -> 拼接 URL 下载并展示模型。
+
+### 流程五：流式拍摄 (Streaming Capture)
+
+流式拍摄是"边拍边传"的实时帧上传方案。拍摄期间每秒拍照并即时上传 JPEG 帧至 Storage，停止瞬间所有帧已就绪，全链路无 zip 打包/解压。
+
+**拍摄流程:**
+
+```
+用户开启流式模式 → 点击录制
+  │
+  ├─ 每秒: takePicture() → upload → storage (即时，互不阻塞)
+  │   ...
+  ├─ 用户点击停止
+  │
+  ├─ await Future.wait(所有 pending uploads)
+  ├─ INSERT processing_tasks (task_type: sparse2dgs)
+  └─ Navigator.pop()
+```
+
+**帧文件规范:**
+
+| 项目 | 规范 |
+| :--- | :--- |
+| **拍摄频率** | 1 帧/秒 |
+| **最大时长** | 600 秒 (10 分钟) |
+| **文件格式** | JPEG (.jpg) |
+| **命名规则** | `picture_XXXXX.jpg`，5 位零填充序号 |
+| **存储路径** | `{user_id}/{scene_id}/raw/picture_XXXXX.jpg` |
+
+**Scene ID 格式:** `scene_YYYYMMDD_NNNNNN`（与标准流程一致）
+
+**任务创建时机:**
+
+| 场景 | 行为 |
+| :--- | :--- |
+| 用户手动停止 | ✅ 创建任务 |
+| 10 分钟超时 | ✅ 自动停止并创建任务 |
+| App 切到后台 | ❌ 等待上传完成，不创建任务 |
+
+**后端处理时序:**
+
+```
+Worker:
+  1. 轮询 processing_tasks WHERE status='pending'
+  2. UPDATE status='processing'
+  3. storage.list('{user_id}/{scene_id}/raw') → 筛选 picture_*.jpg
+  4. 逐一下载帧文件到临时目录
+  5. 帧序列 → Sparse2DGSPipeline
+     → COLMAP 稀疏重建 → Sparse2DGS 训练
+  6. 上传结果: {user_id}/{scene_id}/output/point_cloud.ply
+  7. UPSERT model_assets
+  8. UPDATE status='completed'
+```
+
+**Dart 代码示例:**
+
+```dart
+// 每秒拍照 + 即时上传
+Future<void> _captureAndUploadFrame(
+  CameraController controller,
+  String userId,
+) async {
+  final frameLabel = 'picture_${frameIndex.toString().padLeft(5, '0')}';
+  final photo = await controller.takePicture();
+  final file = File(photo.path);
+
+  await supabase.storage
+      .from('braindance-assets')
+      .upload('$userId/$sceneId/raw/$frameLabel.jpg', file);
+
+  file.deleteSync();
+}
+
+// 停止 → 等待上传 → 创建任务
+Future<void> _stopStreaming() async {
+  _streamingTimer?.cancel();
+  await Future.wait(_pendingUploads);
+
+  await supabase.from('processing_tasks').insert({
+    'scene_id': sceneId,
+    'user_id': user.id,
+    'task_type': 'sparse2dgs',
+    'task_params': { 'image_count': successCount },
+    'status': 'pending',
+  });
+}
+```

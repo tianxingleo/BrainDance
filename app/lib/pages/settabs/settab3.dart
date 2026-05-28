@@ -1,6 +1,5 @@
-import 'package:braindance/configs/app_config.dart';
+﻿import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
-import 'package:braindance/extra_func/dir_and_file.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:flutter/material.dart';
 
@@ -11,6 +10,7 @@ Widget setTab3(BuildContext context) {
       mainAxisSize: MainAxisSize.min,
       children: [
         BDPanelCard(
+          glass: true,
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(
             children: [
@@ -22,16 +22,6 @@ Widget setTab3(BuildContext context) {
               _ManageInfoRow(
                 title: textLocalize('set_pub'),
                 value: AppConfig.publishDate,
-              ),
-              const _ManageDivider(),
-              _ManageActionRow(
-                title: textLocalize('set_cache'),
-                onTap: () async {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(textLocalize('tip_cache'))),
-                  );
-                  await DirSystem.deleteDir(await DirFinder.cacheDir());
-                },
               ),
             ],
           ),
@@ -81,50 +71,6 @@ class _ManageInfoRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ManageActionRow extends StatelessWidget {
-  final String title;
-  final Future<void> Function() onTap;
-
-  const _ManageActionRow({required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark
-        ? BDDesign.colorPaperWhite
-        : BDDesign.colorInkBlack;
-    final actionColor = isDark
-        ? BDDesign.colorMutedBlueLight
-        : BDDesign.colorMutedBlue;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: actionColor, size: 20),
-            ],
-          ),
-        ),
       ),
     );
   }
