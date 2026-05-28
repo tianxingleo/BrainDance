@@ -27,6 +27,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ── CI 需要的占位文件，本地由 build_to_flutter.ps1 生成 ──
+      - name: Create placeholder assets for CI
+        run: |
+          touch app/.env
+          mkdir -p app/assets/webgl/assets app/assets/webgl_spark/assets
+          echo "// CI placeholder" > app/assets/webgl/assets/.gitkeep
+          echo "// CI placeholder" > app/assets/webgl_spark/assets/.gitkeep
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
