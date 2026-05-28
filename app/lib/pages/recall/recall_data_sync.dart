@@ -54,6 +54,7 @@ extension _RecallPageDataSync on _RecallPageState {
       // 任务从 processing 变为其他状态，移除
       // 终态前再扫一次最新 logs，避免错过最后一次写入的里程碑
       final rawLogs = newData['logs'];
+      final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
       final finalLogs = _parseAllLogMsgs(logsJson);
       _processDualChainMilestones(taskId, newData, finalLogs);
       if (mounted) {
