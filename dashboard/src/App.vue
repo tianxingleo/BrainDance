@@ -89,11 +89,22 @@ interface WorkerNode {
   } | null
 }
 
+interface UserActivityRpcRow {
+  user_id: string
+  total_tasks: number
+  tasks_24h: number
+  tasks_7d: number
+  total_assets: number
+  assets_7d: number
+  last_active: string | null
+}
+
 const loading = ref(true)
 const refreshing = ref(false)
 const storageLoading = ref(false)
 const errorMessage = ref('')
 const storageError = ref('')
+const dataWarnings = ref<string[]>([])
 const lastUpdated = ref<string | null>(null)
 
 // 认证状态
@@ -103,6 +114,7 @@ const loginEmail = ref('')
 const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
+const dashboardStarted = ref(false)
 
 const taskRows = ref<ProcessingTask[]>([])
 const workerRows = ref<WorkerNode[]>([])
@@ -859,6 +871,87 @@ const formatUserId = (userId: string) => {
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`
 }
 
+const buildUserSummaries = (rows: UserActivityRpcRow[]): UserActivitySummary[] =>
+  rows.map((s) => ({
+    userId: s.user_id,
+    displayName: s.user_id.slice(0, 8) + '...',
+    taskCount: s.total_tasks,
+    assetCount: s.total_assets,
+    task24h: s.tasks_24h,
+    task7d: s.tasks_7d,
+    asset7d: s.assets_7d,
+    lastSeenAt: s.last_active,
+  }))
+
+const fetchFallbackUserActivity = async (since24h: string, since7d: string) => {
+  const [taskUserRes, assetUserRes] = await Promise.all([
+    supabase
+      .from('processing_tasks')
+      .select('user_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('model_assets')
+      .select('user_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000),
+  ])
+
+  if (taskUserRes.error || assetUserRes.error) {
+    dataWarnings.value.push(
+      `用户活跃兜底聚合失败：${taskUserRes.error?.message || assetUserRes.error?.message || '未知错误'}`,
+    )
+    return []
+  }
+
+  const byUser = new Map<string, UserActivityRpcRow>()
+  const ensureUser = (userId: string) => {
+    const existing = byUser.get(userId)
+    if (existing) return existing
+    const created: UserActivityRpcRow = {
+      user_id: userId,
+      total_tasks: 0,
+      tasks_24h: 0,
+      tasks_7d: 0,
+      total_assets: 0,
+      assets_7d: 0,
+      last_active: null,
+    }
+    byUser.set(userId, created)
+    return created
+  }
+
+  const touchLastActive = (row: UserActivityRpcRow, createdAt: string | null) => {
+    if (!createdAt) return
+    if (!row.last_active || dayjs(createdAt).isAfter(dayjs(row.last_active))) {
+      row.last_active = createdAt
+    }
+  }
+
+  ;((taskUserRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>).forEach((item) => {
+    if (!item.user_id) return
+    const row = ensureUser(item.user_id)
+    row.total_tasks += 1
+    if (item.created_at && item.created_at >= since24h) row.tasks_24h += 1
+    if (item.created_at && item.created_at >= since7d) row.tasks_7d += 1
+    touchLastActive(row, item.created_at)
+  })
+
+  ;((assetUserRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>).forEach((item) => {
+    if (!item.user_id) return
+    const row = ensureUser(item.user_id)
+    row.total_assets += 1
+    if (item.created_at && item.created_at >= since7d) row.assets_7d += 1
+    touchLastActive(row, item.created_at)
+  })
+
+  return Array.from(byUser.values()).sort((a, b) => {
+    const left = a.last_active ? dayjs(a.last_active).valueOf() : 0
+    const right = b.last_active ? dayjs(b.last_active).valueOf() : 0
+    return right - left
+  })
+}
+
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
   const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? ''
   const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? ''
@@ -1051,6 +1144,7 @@ const fetchStorageStats = async () => {
 const refreshDashboard = async () => {
   if (!loading.value) refreshing.value = true
   errorMessage.value = ''
+  dataWarnings.value = []
 
   const now = dayjs()
   const since24h = now.subtract(24, 'hour').toISOString()
@@ -1102,42 +1196,36 @@ const refreshDashboard = async () => {
       poseCountRes.error?.message ||
       '数据读取失败'
   } else {
+    if (ragCountRes.error) dataWarnings.value.push(`rag_docs 计数失败：${ragCountRes.error.message}`)
+    if (taskTableCountRes.error) dataWarnings.value.push(`tasks 计数失败：${taskTableCountRes.error.message}`)
+    if (task24hRes.error) dataWarnings.value.push(`24h 任务统计失败：${task24hRes.error.message}`)
+    if (asset7dRes.error) dataWarnings.value.push(`7d 资产统计失败：${asset7dRes.error.message}`)
+
     const tasks = (tasksRes.data ?? []) as ProcessingTask[]
     const workers = (workerRes.data ?? []) as WorkerNode[]
-    // RPC 返回的是聚合后的用户活跃数据
-    const rpcSummaries = (userActivityRes.data ?? []) as Array<{
-      user_id: string
-      total_tasks: number
-      tasks_24h: number
-      tasks_7d: number
-      total_assets: number
-      assets_7d: number
-      last_active: string | null
-    }>
+    let activityRows = (userActivityRes.data ?? []) as UserActivityRpcRow[]
+    if (userActivityRes.error) {
+      dataWarnings.value.push(
+        `用户活跃 RPC 不可用，已使用最多 5000 行前端兜底聚合：${userActivityRes.error.message}`,
+      )
+      activityRows = await fetchFallbackUserActivity(since24h, since7d)
+    }
+
     taskRows.value = tasks
     workerRows.value = workers
-    userSummaries.value = rpcSummaries.map((s) => ({
-      userId: s.user_id,
-      displayName: s.user_id.slice(0, 8) + '...',
-      taskCount: s.total_tasks,
-      assetCount: s.total_assets,
-      task24h: s.tasks_24h,
-      task7d: s.tasks_7d,
-      asset7d: s.assets_7d,
-      lastSeenAt: s.last_active,
-    }))
+    userSummaries.value = buildUserSummaries(activityRows)
     modelAssetCount.value = assetCountRes.count ?? 0
     memoryPoseCount.value = poseCountRes.count ?? 0
 
     const tasks24hRows = (task24hRes.data ?? []) as Array<{ status: string; user_id: string }>
     timeBasedStats.value = {
-      tasks24h: task24hRes.count ?? 0,
+      tasks24h: task24hRes.error ? 0 : (task24hRes.count ?? 0),
       failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
       completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
       totalUsers: userSummaries.value.length,
       activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
       activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
-      assets7d: asset7dRes.count ?? 0,
+      assets7d: asset7dRes.error ? 0 : (asset7dRes.count ?? 0),
     }
 
     dbCounts.value = {
@@ -1160,6 +1248,27 @@ const refreshDashboard = async () => {
 let refreshTimer: number | undefined
 let pollTimer: number | undefined
 const channels: RealtimeChannel[] = []
+
+const clearDashboardRuntime = () => {
+  if (refreshTimer) {
+    window.clearTimeout(refreshTimer)
+    refreshTimer = undefined
+  }
+  if (pollTimer) {
+    window.clearInterval(pollTimer)
+    pollTimer = undefined
+  }
+  channels.splice(0).forEach((channel) => {
+    void supabase.removeChannel(channel)
+  })
+  dashboardStarted.value = false
+  channelState.value = {
+    processing_tasks: 'connecting',
+    model_assets: 'connecting',
+    memory_poses: 'connecting',
+    worker_nodes: 'connecting',
+  }
+}
 
 const scheduleRefresh = () => {
   if (refreshTimer) window.clearTimeout(refreshTimer)
@@ -1192,6 +1301,20 @@ const bindChannel = (tableName: string, channelName: string) => {
   channels.push(channel)
 }
 
+const startDashboardRuntime = async () => {
+  if (dashboardStarted.value) return
+  dashboardStarted.value = true
+  loading.value = true
+  await refreshDashboard()
+
+  bindChannel('processing_tasks', 'dashboard-processing-tasks')
+  bindChannel('model_assets', 'dashboard-model-assets')
+  bindChannel('memory_poses', 'dashboard-memory-poses')
+  bindChannel('worker_nodes', 'dashboard-worker-nodes')
+
+  restartPolling()
+}
+
 watch([autoRefresh, refreshSeconds], () => {
   restartPolling()
 })
@@ -1209,25 +1332,25 @@ onMounted(async () => {
   }
   applyTheme()
 
-  // 认证检查：监听 Supabase Auth 状态
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    isAuthenticated.value = !!session
+  // 必须等待 getSession 完成后再启动数据刷新，否则首次加载会停在空面板。
+  const { data: { session } } = await supabase.auth.getSession()
+  isAuthenticated.value = !!session
+  authLoading.value = false
+
+  supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const authed = !!nextSession
+    isAuthenticated.value = authed
     authLoading.value = false
+
+    if (authed) {
+      void startDashboardRuntime()
+    } else {
+      clearDashboardRuntime()
+      loading.value = true
+    }
   })
-  supabase.auth.onAuthStateChange((_event, session) => {
-    isAuthenticated.value = !!session
-    authLoading.value = false
-  })
 
-  if (!isAuthenticated.value) return
-  await refreshDashboard()
-
-  bindChannel('processing_tasks', 'dashboard-processing-tasks')
-  bindChannel('model_assets', 'dashboard-model-assets')
-  bindChannel('memory_poses', 'dashboard-memory-poses')
-  bindChannel('worker_nodes', 'dashboard-worker-nodes')
-
-  restartPolling()
+  if (session) await startDashboardRuntime()
 })
 
 watch([isDarkTheme, accentColor], () => {
@@ -1237,11 +1360,7 @@ watch([isDarkTheme, accentColor], () => {
 })
 
 onUnmounted(() => {
-  if (refreshTimer) window.clearTimeout(refreshTimer)
-  if (pollTimer) window.clearInterval(pollTimer)
-  channels.forEach((channel) => {
-    void supabase.removeChannel(channel)
-  })
+  clearDashboardRuntime()
 })
 </script>
 
@@ -1453,6 +1572,14 @@ onUnmounted(() => {
         </section>
 
         <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon class="mb-16" />
+        <el-alert
+          v-for="warning in dataWarnings"
+          :key="warning"
+          :title="warning"
+          type="warning"
+          show-icon
+          class="mb-16"
+        />
         <el-alert v-if="storageError" :title="`Storage: ${storageError}`" type="warning" show-icon class="mb-16" />
         <el-skeleton v-if="loading" :rows="7" animated />
 
