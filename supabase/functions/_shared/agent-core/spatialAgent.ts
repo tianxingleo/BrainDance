@@ -1194,85 +1194,6 @@ function summarizeToolResult(toolName: string, count: number): string {
   return `${toolName} 返回 ${count} 条候选`;
 }
 
-function buildStopSearchSummaryPayload(input: {
-  query: string;
-  stopReason: unknown;
-  stopConfidence: unknown;
-  trace: ToolTraceEntry[];
-  candidates: Map<string, SceneCandidate>;
-  assetState: AssetToolState;
-}): Record<string, unknown> {
-  const topCandidates = [...input.candidates.values()].slice(0, 5).map((
-    candidate,
-  ) => ({
-    scene_id: candidate.sceneId,
-    model_id: candidate.modelId,
-    display_name: candidate.displayName ?? null,
-    description: candidate.description,
-    tags: candidate.tags,
-    best_pose: candidate.bestPose
-      ? {
-        image_name: candidate.bestPose.image_name,
-        similarity: candidate.bestPose.similarity,
-        tag: candidate.bestPose.tag,
-      }
-      : null,
-    source_scores: candidate.sourceScores,
-  }));
-
-  return {
-    user_query: input.query,
-    stop_reason: typeof input.stopReason === "string" ? input.stopReason : "",
-    stop_confidence: typeof input.stopConfidence === "number"
-      ? input.stopConfidence
-      : null,
-    tool_trace: input.trace,
-    spatial_candidates: topCandidates,
-    asset_context: serializeAssetContext(input.assetState),
-  };
-}
-
-async function buildStopSearchUserFacingSummary(input: {
-  model: ChatOpenAI;
-  query: string;
-  stopReason: unknown;
-  stopConfidence: unknown;
-  trace: ToolTraceEntry[];
-  candidates: Map<string, SceneCandidate>;
-  assetState: AssetToolState;
-  callbacks?: AgentRuntimeCallbacks;
-}): Promise<string> {
-  await emitProgress(input.callbacks, {
-    event: "status",
-    data: {
-      phase: "stop_search_summary",
-      summary: "Agent 已停止继续调用工具，正在整理当前结果概述",
-    },
-  });
-
-  const payload = buildStopSearchSummaryPayload(input);
-  const result = await input.model.invoke([
-    new SystemMessage(
-      [
-        "你是 BrainDance 的空间记忆 Agent。",
-        "你刚刚主动调用了 stop_search，表示当前工具结果已经足够。",
-        "请基于已有工具结果，生成一段直接反馈给前端用户的中文自然语言回答。",
-        "要求：说明已经查到或整理到了什么；如有候选，点出最相关的候选和依据；如是资产操作预览，说明当前只是预览以及下一步需要确认。",
-        "不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节。",
-        "不要编造工具结果中不存在的场景、数量或字段。",
-        "控制在 2 到 4 句，语气自然、明确。",
-      ].join("\n"),
-    ),
-    new HumanMessage(
-      `用户问题：${input.query}\n\n当前工具结果摘要：\n${
-        JSON.stringify(payload, null, 2)
-      }\n\n请输出给用户看的最终回答。`,
-    ),
-  ]);
-
-  return extractModelTextContent(result.content).trim();
-}
-
 export function pickSpatialSearchAnswerAfterStop(input: {
   trace: Array<{ toolName: string }>;
   stopSummary: string;
@@ -2908,13 +2829,16 @@ function buildStopSearchTool(): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "stop_search",
     description:
-      "当你认为当前已收集到足够的信息来回答用户问题时调用此工具。调用后将立即停止工具循环并进入最终回答整理阶段。你应该在以下情况调用：1) 已有高置信度候选；2) 继续搜索不会带来增量信息；3) 问题已可直接回答。",
+      "当你认为当前已收集到足够的信息来回答用户问题时调用此工具。调用后将立即停止工具循环并把 result_summary 作为最终回答交给前端用户。你应该在以下情况调用：1) 已有高置信度候选；2) 继续搜索不会带来增量信息；3) 问题已可直接回答。",
     schema: z.object({
-      reason: z.string().describe("为什么认为当前信息已足够，简要说明判断依据"),
+      reason: z.string().describe("为什么认为当前信息已足够，简要说明判断依据，仅用于日志，不会展示给用户"),
       confidence: z.number().min(0).max(1).describe("对当前结果的置信度，0-1"),
+      result_summary: z.string().min(1).describe(
+        "面向用户的最终回答（中文，2-4 句）。说明已经查到或整理到了什么；如有候选请点出最相关的候选和依据；如是资产操作预览，需说明当前只是预览以及下一步需要确认。不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节，也不要编造工具结果中不存在的字段。该字段会原样作为前端气泡内容展示。",
+      ),
     }),
-    func: async ({ reason, confidence }) => {
-      return JSON.stringify({ stopped: true, reason, confidence });
+    func: async ({ reason, confidence, result_summary }) => {
+      return JSON.stringify({ stopped: true, reason, confidence, result_summary });
     },
   });
 }
@@ -3042,33 +2966,24 @@ async function executeUnifiedAgentLoop(input: {
       const resultText = typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
 
       if (toolCall.name === "stop_search") {
+        const stopSummary = typeof toolArgs.result_summary === "string"
+          ? toolArgs.result_summary.trim()
+          : "";
         tr.push({ toolName: "stop_search", args: toolArgs, resultSummary: `LLM 主动停止: ${toolArgs.reason ?? ""}` });
         await emitProgress(callbacks, {
           event: "tool_result",
-          data: { name: "stop_search", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, count: 0, round: state.round },
+          data: {
+            name: "stop_search",
+            summary: stopSummary || `Agent 主动终止: ${toolArgs.reason ?? ""}`,
+            count: 0,
+            round: state.round,
+          },
         });
         await emitProgress(callbacks, {
           event: "status",
           data: { phase: "llm_stop_decision", summary: `Agent 主动终止: ${toolArgs.reason ?? ""}`, detail: `置信度: ${toolArgs.confidence ?? "N/A"}` },
         });
         msgs.push(new ToolMessage({ tool_call_id: toolCall.id ?? toolCall.name, content: resultText }));
-        const stopSummary = await buildStopSearchUserFacingSummary({
-          model,
-          query,
-          stopReason: toolArgs.reason,
-          stopConfidence: toolArgs.confidence,
-          trace: tr,
-          candidates: cands,
-          assetState: aState,
-          callbacks,
-        }).catch((error) => {
-          console.warn(
-            `[SpatialAgent] stop_search summary failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return "";
-        });
         if (stopSummary) {
           msgs.push(new AIMessage(stopSummary));
         }

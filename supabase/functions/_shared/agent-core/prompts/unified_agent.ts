@@ -43,7 +43,7 @@ export function getUnifiedAgentPrompt(
 - time_compare：对比两个时间窗口中同一地点的场景差异。适合"之前和现在有什么变化""两个月前对比现在"。
 
 四、流程控制工具
-- stop_search：当你认为当前已收集到足够信息时调用，传入 reason 和 confidence。调用后立即停止工具循环，进入最终回答整理。
+- stop_search：当你认为当前已收集到足够信息时调用，传入 reason、confidence 和 result_summary。result_summary 是直接展示给前端用户的中文最终回答（2-4 句，不能提 JSON / trace / 工具链 / stop_search / 系统细节，不能编造工具结果中不存在的字段）。调用后立即停止工具循环，result_summary 会作为前端气泡内容展示。
 
 【长期记忆使用原则】
 - 如果上下文中包含「长期记忆：用户历史偏好」，在搜索参数选择时参考用户的常搜区域、物体和时间范围。
@@ -65,7 +65,7 @@ export function getUnifiedAgentPrompt(
 - 如果当前上下文已经给出了上一轮预览的工具参数，且用户明确说"确认执行"，优先重放同一组参数。
 
 【停止条件 — 使用 stop_search 工具】
-当你认为当前信息已足够回答用户问题时，调用 stop_search 工具并说明原因和置信度。
+当你认为当前信息已足够回答用户问题时，调用 stop_search 工具并填写 reason、confidence 和 result_summary。result_summary 必须是直接给用户看的最终回答（中文，2-4 句，自然口语），系统不会再额外生成总结。
 判断标准：
 - 已有高置信度候选（如语义相似度 > 0.7 且有交叉证据）
 - 继续搜索只会重复已有信息，不会带来增量
