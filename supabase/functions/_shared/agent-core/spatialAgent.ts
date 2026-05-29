@@ -1275,9 +1275,67 @@ function decorateAssetRowForCard<
   };
 }
 
-function serializeAssetContext(state: AssetToolState) {
-  const list = state.list ? state.list.map(decorateAssetRowForCard) : null;
-  const bundle = state.bundle ? state.bundle.map(decorateAssetRowForCard) : null;
+// 决定 asset_metadata 模式下是否把 list / bundle 隐藏不下发卡片。
+// 三层判定（从强到弱）：
+// 1. 硬规则：最后工具是 find_related_models / 重名分析模式 / 写预览 / 比较 /
+//    收藏整理 / 版本链 / 视角摘要 —— 这些场景的 list 是过程数据或有专属面板，
+//    重复展示会误导用户。
+// 2. LLM 在 stop_search 里输出 card_intent === "none"。
+// 3. 默认（card_intent === "browse"）保留卡片。
+function shouldHideAssetCards(input: {
+  lastToolName: string | null;
+  trace: ToolTraceEntry[];
+  hasOperationPreview: boolean;
+  hasComparison: boolean;
+  hasCollectionSummary: boolean;
+  hasPoseSummary: boolean;
+  hasRelatedModels: boolean;
+  hasPlaceVersions: boolean;
+}): boolean {
+  if (input.hasOperationPreview) return true;
+  if (input.hasComparison) return true;
+  if (input.hasCollectionSummary) return true;
+  if (input.hasPoseSummary) return true;
+  if (input.hasRelatedModels) return true;
+  if (input.hasPlaceVersions) return true;
+  if (input.lastToolName === "find_related_models") return true;
+  if (input.lastToolName === "compare_model_assets") return true;
+  if (input.lastToolName === "list_place_versions") return true;
+  if (input.lastToolName === "get_pose_summary") return true;
+  if (input.lastToolName === "summarize_collection") return true;
+
+  const usedDuplicateMode = input.trace.some((entry) =>
+    entry.toolName === "read_model_assets" &&
+    (entry.args as Record<string, unknown> | undefined)?.mode ===
+      "duplicate_display_name"
+  );
+  if (usedDuplicateMode) return true;
+
+  const stopEntry = [...input.trace].reverse().find((entry) =>
+    entry.toolName === "stop_search"
+  );
+  const cardIntent = stopEntry
+    ? (stopEntry.args as Record<string, unknown> | undefined)?.card_intent
+    : undefined;
+  if (cardIntent === "none") return true;
+
+  return false;
+}
+
+function serializeAssetContext(
+  state: AssetToolState,
+  options: { hideCards?: boolean } = {},
+) {
+  // hideCards = true 时只清空前端卡片渲染源（list / bundle），保留
+  // comparison / pose_summary / related_models / place_versions /
+  // collection_summary / operation 这些独立面板。改名预览、对比、重名分析、
+  // 相关模型查询等场景的 list 是过程数据，不应作为卡片展示。
+  const list = options.hideCards || !state.list
+    ? null
+    : state.list.map(decorateAssetRowForCard);
+  const bundle = options.hideCards || !state.bundle
+    ? null
+    : state.bundle.map(decorateAssetRowForCard);
   const comparison = state.comparison
     ? {
       ...state.comparison,
@@ -2895,9 +2953,12 @@ function buildStopSearchTool(): DynamicStructuredTool {
       result_summary: z.string().min(1).describe(
         "面向用户的最终回答（中文，2-4 句）。说明已经查到或整理到了什么；如有候选请点出最相关的候选和依据；如是资产操作预览，需说明当前只是预览以及下一步需要确认。不要提及 JSON、内部 trace、工具链、stop_search 或系统实现细节，也不要编造工具结果中不存在的字段。该字段会原样作为前端气泡内容展示。",
       ),
+      card_intent: z.enum(["browse", "none"]).default("browse").describe(
+        "本轮回答是否需要把模型卡片下发给前端展示。'browse' = 用户在浏览/发现模型，需要展示卡片（默认）；'none' = 用户的诉求是改名/写入预览/重名分析/对比/相关模型/版本链/收藏整理等，列表只是过程数据，不需要把卡片塞给前端。判断依据：result_summary 是否在'介绍这几个模型'？是 -> browse；否 -> none。",
+      ),
     }),
-    func: async ({ reason, confidence, result_summary }) => {
-      return JSON.stringify({ stopped: true, reason, confidence, result_summary });
+    func: async ({ reason, confidence, result_summary, card_intent }) => {
+      return JSON.stringify({ stopped: true, reason, confidence, result_summary, card_intent });
     },
   });
 }
@@ -4312,6 +4373,17 @@ export async function runSpatialSearchAgent(
       : null;
     const answer = agentAnswer || reason || "当前没有生成有效的模型资产结果。";
 
+    const hideCards = shouldHideAssetCards({
+      lastToolName: assetState.lastToolName,
+      trace,
+      hasOperationPreview: assetState.operation != null,
+      hasComparison: assetState.comparison != null,
+      hasCollectionSummary: assetState.collectionSummary != null,
+      hasPoseSummary: assetState.poseSummary != null,
+      hasRelatedModels: assetState.relatedModels != null,
+      hasPlaceVersions: assetState.placeVersions != null,
+    });
+
     return finalizeResponseWithLongTermMemory(supabase, {
       success: true,
       mode: "asset_metadata",
@@ -4325,7 +4397,7 @@ export async function runSpatialSearchAgent(
       top_candidates: [],
       selected_candidate_reason: reason,
       tool_trace: trace,
-      asset_context: serializeAssetContext(assetState),
+      asset_context: serializeAssetContext(assetState, { hideCards }),
       compare_context: assetState.placeVersions ? { place_versions: assetState.placeVersions } : null,
       collection_context: assetState.collectionSummary ? { collection_summary: assetState.collectionSummary } : null,
       creative_context: null,
