@@ -57,9 +57,10 @@ export const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_DASHSCOPE_BASE_URL =
   "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_CHAT_MODEL = "qwen3.5-plus";
+const DEFAULT_CHAT_MODEL = "deepseek-v4-flash";
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-v2";
 const DEFAULT_BUCKET = "braindance-assets";
 const SPATIAL_INTENT_TIMEOUT_MS = 8000;
@@ -624,9 +625,11 @@ export function getPresentationLimitsForMode(
 }
 
 type RuntimeEnv = {
+  chatApiKey: string;
+  chatBaseUrl: string;
+  chatModel: string;
   dashscopeApiKey: string;
   dashscopeBaseUrl: string;
-  chatModel: string;
   embeddingModel: string;
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
@@ -846,11 +849,15 @@ export type SpatialSearchResponse = z.infer<
 >;
 
 function ensureRuntimeEnv(): RuntimeEnv {
+  const chatApiKey = Deno.env.get("DEEPSEEK_API_KEY") ?? "";
   const dashscopeApiKey = Deno.env.get("DASHSCOPE_API_KEY") ?? "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
     "";
 
+  if (!chatApiKey) {
+    throw new Error("未配置 DEEPSEEK_API_KEY");
+  }
   if (!dashscopeApiKey) {
     throw new Error("未配置 DASHSCOPE_API_KEY");
   }
@@ -862,10 +869,12 @@ function ensureRuntimeEnv(): RuntimeEnv {
   }
 
   return {
+    chatApiKey,
+    chatBaseUrl: Deno.env.get("DEEPSEEK_BASE_URL") ?? DEFAULT_DEEPSEEK_BASE_URL,
+    chatModel: Deno.env.get("DEEPSEEK_CHAT_MODEL") ?? DEFAULT_CHAT_MODEL,
     dashscopeApiKey,
     dashscopeBaseUrl: Deno.env.get("DASHSCOPE_BASE_URL") ??
       DEFAULT_DASHSCOPE_BASE_URL,
-    chatModel: Deno.env.get("DASHSCOPE_CHAT_MODEL") ?? DEFAULT_CHAT_MODEL,
     embeddingModel: Deno.env.get("DASHSCOPE_EMBEDDING_MODEL") ??
       DEFAULT_EMBEDDING_MODEL,
     supabaseUrl,
@@ -880,11 +889,11 @@ function createSupabaseAdminClient(env: RuntimeEnv): SupabaseClient {
 
 function createChatModel(env: RuntimeEnv): ChatOpenAI {
   return new ChatOpenAI({
-    apiKey: env.dashscopeApiKey,
+    apiKey: env.chatApiKey,
     model: env.chatModel,
     temperature: 0,
     configuration: {
-      baseURL: env.dashscopeBaseUrl,
+      baseURL: env.chatBaseUrl,
     },
   });
 }
@@ -1195,15 +1204,11 @@ function summarizeToolResult(toolName: string, count: number): string {
 }
 
 export function pickSpatialSearchAnswerAfterStop(input: {
-  trace: Array<{ toolName: string }>;
   stopSummary: string;
-  deterministicAnswer: string;
 }): string {
-  const hasStopSearch = input.trace.some((entry) =>
-    entry.toolName === "stop_search"
-  );
   const summary = input.stopSummary.trim();
-  return hasStopSearch && summary ? summary : input.deterministicAnswer;
+  if (summary) return summary;
+  return "已为你整理了相关空间候选，请在结果区继续查看。";
 }
 
 function serializeAssetOperation(state: AssetToolState) {
@@ -2638,25 +2643,10 @@ function buildDeterministicSpatialSelection(input: {
       selectedPoseImageId: null,
       selectionReason: "没有检索到可信候选",
       confidence: 0,
-      answer: "当前没有找到可信的空间检索结果。",
+      answer: "",
       actions: [],
     };
   }
-
-  const poseLabel = best.bestPose?.tag ?? best.bestPose?.image_name ??
-    "最佳视角";
-  const objectSummary = best.objects.slice(0, 3).join("、");
-  const description = best.description.trim();
-  const answerSegments = [
-    `我先定位到场景 ${best.sceneId}。`,
-    description.length > 0 ? description : null,
-    objectSummary.length > 0
-      ? `该场景里识别到的相关内容包括 ${objectSummary}。`
-      : null,
-    best.bestPose
-      ? `可以直接飞到 ${poseLabel}。`
-      : "当前先打开场景，再继续手动查看。",
-  ].filter((segment): segment is string => Boolean(segment && segment.trim()));
 
   return {
     selectedSceneId: best.sceneId,
@@ -2665,7 +2655,7 @@ function buildDeterministicSpatialSelection(input: {
     selectionReason:
       "已按确定性检索得分选择当前最可信候选，避免因上游模型抖动阻塞简单空间查询",
     confidence: best.score,
-    answer: answerSegments.join(" "),
+    answer: "",
     actions: [],
   };
 }
@@ -4347,9 +4337,7 @@ export async function runSpatialSearchAgent(
     .map(serializeSceneCandidate);
   const stopSearchSummary = extractLastAgentTextFromMessages(finalMessages);
   const answer = pickSpatialSearchAnswerAfterStop({
-    trace,
     stopSummary: stopSearchSummary,
-    deterministicAnswer: selection.answer,
   });
 
   return finalizeResponseWithLongTermMemory(supabase, {
