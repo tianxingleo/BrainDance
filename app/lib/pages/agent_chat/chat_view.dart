@@ -330,7 +330,7 @@ extension _AgentChatView on _AgentChatPageState {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: AgentAssetCard(
-                displayName: model['display_name']?.toString(),
+                displayName: modelDisplayName(model),
                 description: model['description']?.toString() ?? '',
                 tags:
                     (model['tags'] as List?)
@@ -351,9 +351,11 @@ extension _AgentChatView on _AgentChatPageState {
               child: AgentAssetCard(
                 displayName:
                     topCandidates[i].displayName ??
-                    (topCandidates[i].description.isNotEmpty
-                        ? topCandidates[i].description
-                        : topCandidates[i].sceneId),
+                    (topCandidates[i].tags.isNotEmpty
+                        ? topCandidates[i].tags[0]
+                        : (topCandidates[i].description.isNotEmpty
+                            ? topCandidates[i].description
+                            : topCandidates[i].sceneId)),
                 description: topCandidates[i].description.isNotEmpty
                     ? topCandidates[i].description
                     : '场景 ${topCandidates[i].sceneId}',

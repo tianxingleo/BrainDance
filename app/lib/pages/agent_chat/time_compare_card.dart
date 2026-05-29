@@ -277,7 +277,9 @@ class _TimeCompareSceneCard extends StatelessWidget {
     final desc = evidence.description?.trim() ?? '';
     final title = (evidence.displayName?.trim().isNotEmpty ?? false)
         ? evidence.displayName!.trim()
-        : (desc.isNotEmpty ? desc : evidence.sceneId);
+        : (evidence.tags.isNotEmpty
+            ? evidence.tags[0]
+            : (desc.isNotEmpty ? desc : evidence.sceneId));
     final created = _shortDate(evidence.createdAt);
     final similarityPct =
         '${(evidence.similarity * 100).toStringAsFixed(1)}%';

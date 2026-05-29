@@ -15,6 +15,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/download_event_bus.dart';
 import '../services/dual_chain_phase.dart';
+import 'recall/model_grid_helpers.dart';
 
 // ============================================================
 // Dev/prod mode notes
@@ -789,10 +790,7 @@ class _WebGLViewerPageState extends State<WebGLViewerPage> {
         } catch (_) {}
       }
 
-      final displayName =
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          '';
+      final displayName = modelDisplayName(model, fallback: '');
 
       return {
         'id': model['id']?.toString() ?? model['scene_id']?.toString() ?? '',

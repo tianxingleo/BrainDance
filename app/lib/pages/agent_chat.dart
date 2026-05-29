@@ -17,6 +17,7 @@ import '../services/viewer_navigation.dart';
 import '../widgets/agent_widgets.dart';
 import '../widgets/app_toast.dart';
 import 'recall/agent_asset_card.dart';
+import 'recall/model_grid_helpers.dart';
 
 part 'agent_chat/chat_runtime.dart';
 part 'agent_chat/chat_view.dart';
