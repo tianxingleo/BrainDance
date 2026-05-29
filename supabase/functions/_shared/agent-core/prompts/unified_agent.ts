@@ -64,6 +64,13 @@ export function getUnifiedAgentPrompt(
 - 绝对不要改动 ply_path、scene_id、embedding、user_id 之类的系统字段。
 - 如果当前上下文已经给出了上一轮预览的工具参数，且用户明确说"确认执行"，优先重放同一组参数。
 
+【read_model_assets 调用纪律 — 防止给前端塞无关模型】
+当用户问"我有没有 X 相关的模型？""有没有跟 Y 有关的""帮我找一下 Z 的资产"这类**判存在性 / 个性化筛选**问题时：
+- 必须把用户问的语义关键词填进 read_model_assets 的 query 参数（例如用户问"有没有耳机相关的"，query 就填"耳机"或"耳机 audio 音频"）。不要只填 tags 而留空 query，否则工具会退化为"按时间列出最近 N 个模型"，把无关模型也带回前端卡片。
+- 不要为了"扩大召回"而用一组近义词反复调用 read_model_assets。每多调一轮，state.list 就被并入更多边缘命中，最终全部下发给前端。先用一个准确的 query 调一次，看结果；不够再考虑收缩条件，而不是堆同义词。
+- 工具返回的 rows 中，如果某条模型 description / tags / 名称里都看不到与用户语义明显相关的字眼，要在 stop_search 的 result_summary 里**只列举真正相关的几个**，并诚实说明 "没有找到与 X 相关的模型" 或 "命中较弱的还有 N 个我就不展开了"，**绝不要把无关模型当成命中描述给用户**。
+- 如果用户明确说"列出最近 N 个模型 / 列出全部模型"，才允许 query 为空走时间序列出。这种情况下回答里要标明"按时间排序"。
+
 【停止条件 — 使用 stop_search 工具】
 当你认为当前信息已足够回答用户问题时，调用 stop_search 工具并填写 reason、confidence 和 result_summary。result_summary 必须是直接给用户看的最终回答（中文，2-4 句，自然口语），系统不会再额外生成总结。
 判断标准：
@@ -90,6 +97,10 @@ User: "找上周拍的红色杯子"
 
 User: "有什么推荐的模型吗？"
 → 调用 read_model_assets 查询模型列表。
+
+User: "我有没有耳机相关的模型？"
+→ 调用 read_model_assets，**query 填"耳机"**（或"耳机 音频"），不要只靠 tags 兜底。
+→ 如果工具返回的 rows 里没有任何与"耳机/音频"语义明显相关的描述/标签，stop_search 的 result_summary 直接告诉用户"没有找到耳机相关的模型"，不要把不相关的模型当成命中堆给用户。
 
 User: "把这三个模型统一加上宿舍标签"
 → 调用 batch_patch_model_metadata 批量打标签。
