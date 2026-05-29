@@ -1979,9 +1979,14 @@ async function buildPoseTool(
         ? data as Array<Record<string, unknown>>
         : [];
       // service role 下 RPC 内部 auth.uid() 为 NULL，函数会返回全库结果。
-      // 这里按 userId 在客户端再过滤一次，避免用户级数据互相暴露。
+      // 这里按 userId 在客户端再过滤一次；同时允许 is_official=true 的官方资产
+      // 跨用户暴露给检索结果，写工具仍然按 user_id 隔离。
       const rows = rawRows
-        .filter((row) => typeof row.user_id === "string" && row.user_id === userId)
+        .filter((row) => {
+          const isOfficial = row.is_official === true;
+          const ownsRow = typeof row.user_id === "string" && row.user_id === userId;
+          return isOfficial || ownsRow;
+        })
         .slice(0, limit);
       const enriched: PoseSearchRow[] = [];
       const modelIds = [...new Set(
@@ -2032,9 +2037,9 @@ async function buildPoseTool(
         const { data: assetRows, error: assetError } = await supabase
           .from("model_assets")
           .select(
-            "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, display_name",
+            "id, scene_id, user_id, is_official, description, objects, tags, ply_path, preview_img_path, meta_info, created_at, display_name",
           )
-          .eq("user_id", userId)
+          .or(`user_id.eq.${userId},is_official.eq.true`)
           .in("id", modelIds);
 
         if (assetError) {
@@ -2116,9 +2121,11 @@ async function buildSceneTool(
       let builder = supabase
         .from("model_assets")
         .select(
-          "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
+          "id, scene_id, user_id, is_official, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
         )
-        .eq("user_id", userId)
+        // 检索类工具允许返回当前用户自有的或 is_official=true 的官方资产；
+        // 写工具仍走严格的 user_id 过滤。
+        .or(`user_id.eq.${userId},is_official.eq.true`)
         .order("created_at", { ascending: false })
         // 避免把中文关键词直接下推到 ilike 过滤，减少 PostgREST 在大表上的慢查询风险。
         .limit(Math.max(limit * 20, 120));
@@ -2179,9 +2186,10 @@ async function buildRecentSceneTool(
       let builder = supabase
         .from("model_assets")
         .select(
-          "id, scene_id, user_id, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
+          "id, scene_id, user_id, is_official, description, objects, tags, ply_path, preview_img_path, meta_info, created_at",
         )
-        .eq("user_id", userId)
+        // 检索类工具允许返回当前用户自有的或 is_official=true 的官方资产。
+        .or(`user_id.eq.${userId},is_official.eq.true`)
         .order("created_at", { ascending: false })
         .limit(limit);
 

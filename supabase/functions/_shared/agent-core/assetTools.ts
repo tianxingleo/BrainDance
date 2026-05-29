@@ -450,6 +450,32 @@ async function fetchModelAssets(
   return (data ?? []) as ModelAssetRow[];
 }
 
+// 检索/查询类工具专用：允许命中当前用户自有或 is_official=true 的模型资产，
+// 写工具仍使用 fetchModelAssets 做严格的 user_id 隔离。
+async function fetchReadableModelAssets(
+  supabase: SupabaseClient,
+  modelIds: string[],
+  userId: string,
+): Promise<ModelAssetRow[]> {
+  if (modelIds.length === 0) {
+    return [];
+  }
+  const { data, error } = await supabase
+    .from("model_assets")
+    .select(
+      "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+    )
+    .or(`user_id.eq.${userId},is_official.eq.true`)
+    .in("id", modelIds)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`读取 model_assets 失败: ${error.message}`);
+  }
+
+  return (data ?? []) as ModelAssetRow[];
+}
+
 async function fetchSemanticMatchedAssets(input: {
   supabase: SupabaseClient;
   embeddings: { embedQuery(text: string): Promise<number[]> };
@@ -484,13 +510,16 @@ async function fetchSemanticMatchedAssets(input: {
   }
 
   const rawRows = Array.isArray(data)
-    ? data as Array<{ id?: string; user_id?: string }>
+    ? data as Array<{ id?: string; user_id?: string; is_official?: boolean }>
     : [];
   // service role 下 RPC 内部 auth.uid() 为 NULL，函数会返回全库结果。
-  // 这里按 userId 在客户端再过滤一次，避免用户级数据互相暴露。
-  const userScopedRows = rawRows.filter((row) =>
-    typeof row.user_id === "string" && row.user_id === userId
-  );
+  // 这里按 userId 在客户端再过滤一次；同时允许 is_official=true 的官方资产
+  // 跨用户暴露给检索结果，写工具仍走严格的 user_id 隔离。
+  const userScopedRows = rawRows.filter((row) => {
+    const isOfficial = row.is_official === true;
+    const ownsRow = typeof row.user_id === "string" && row.user_id === userId;
+    return isOfficial || ownsRow;
+  });
   const modelIds = dedupeStrings(userScopedRows.map((row) => row.id ?? "")).filter(Boolean);
   const allowedIds = selectedModelIds && selectedModelIds.length > 0
     ? new Set(selectedModelIds)
@@ -503,7 +532,7 @@ async function fetchSemanticMatchedAssets(input: {
     return [];
   }
 
-  const assets = await fetchModelAssets(supabase, filteredIds, userId);
+  const assets = await fetchReadableModelAssets(supabase, filteredIds, userId);
   const order = new Map(filteredIds.map((id, index) => [id, index]));
   return assets
     .sort((left, right) =>
@@ -543,8 +572,9 @@ async function buildBundle(
   modelIds: string[],
   userId: string,
 ): Promise<ModelAssetBundle[]> {
-  // 先按 userId 过滤出归属当前用户的 modelIds，再用归属合法的 ids 查 pose 数。
-  const assets = await fetchModelAssets(supabase, modelIds, userId);
+  // bundle 是只读视图，允许读取自有或 is_official=true 的官方资产；
+  // 由于 fetchPoseCounts 直接用归属合法的 ids 反查，无需再额外校验。
+  const assets = await fetchReadableModelAssets(supabase, modelIds, userId);
   const allowedIds = assets.map((row) => row.id);
   const poseCounts = await fetchPoseCounts(supabase, allowedIds);
 
@@ -931,7 +961,8 @@ export function buildReadModelAssetsTool(
         .select(
           "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
         )
-        .eq("user_id", options.userId)
+        // read_model_assets 是只读工具，允许命中自有或 is_official=true 的官方资产。
+        .or(`user_id.eq.${options.userId},is_official.eq.true`)
         .order("created_at", { ascending: false })
         .limit(Math.max(input.limit * 5, 20));
 

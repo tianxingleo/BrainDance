@@ -277,6 +277,32 @@ async function fetchModelAssets(
   return (data ?? []).map((row) => normalizeAssetRow(row as ModelAssetRow));
 }
 
+// 检索/查询类工具专用：允许命中当前用户自有或 is_official=true 的模型资产，
+// 写工具仍使用 fetchModelAssets 做严格的 user_id 隔离。
+async function fetchReadableModelAssets(
+  supabase: SupabaseClient,
+  modelIds: string[],
+  userId: string,
+): Promise<ModelAssetRow[]> {
+  if (modelIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("model_assets")
+    .select(
+      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
+    )
+    .or(`user_id.eq.${userId},is_official.eq.true`)
+    .in("id", modelIds);
+
+  if (error) {
+    throw new Error(`读取 model_assets 失败: ${error.message}`);
+  }
+
+  return (data ?? []).map((row) => normalizeAssetRow(row as ModelAssetRow));
+}
+
 async function fetchPoseCountMap(
   supabase: SupabaseClient,
   modelIds: string[],
@@ -316,13 +342,29 @@ async function assertUserOwnsModels(
   }
 }
 
+// 检索/查询类工具专用：允许命中自有或 is_official=true 的官方模型，
+// 与 assertUserOwnsModels 的差别在于"读"而非"写"，写场景仍走严格归属校验。
+async function assertUserCanReadModels(
+  supabase: SupabaseClient,
+  modelIds: string[],
+  userId: string,
+): Promise<void> {
+  if (modelIds.length === 0) return;
+  const rows = await fetchReadableModelAssets(supabase, modelIds, userId);
+  const readable = new Set(rows.map((row) => row.id));
+  const missing = modelIds.filter((id) => !readable.has(id));
+  if (missing.length > 0) {
+    throw new Error(`模型 ${missing.join(", ")} 当前用户不可读取，已拒绝操作`);
+  }
+}
+
 export async function getPoseSummary(
   supabase: SupabaseClient,
   input: z.infer<typeof getPoseSummarySchema>,
   userId: string,
 ): Promise<PoseSummary> {
-  await assertUserOwnsModels(supabase, [input.modelId], userId);
-  // memory_poses 没有 user_id 列，归属已通过 assertUserOwnsModels 校验。
+  await assertUserCanReadModels(supabase, [input.modelId], userId);
+  // memory_poses 没有 user_id 列，归属已通过 assertUserCanReadModels 校验。
   const { data, error } = await supabase
     .from("memory_poses")
     .select("image_name, tag, transform_matrix, created_at")
@@ -365,7 +407,7 @@ export async function findRelatedModels(
   input: z.infer<typeof findRelatedModelsSchema>,
   userId: string,
 ): Promise<RelatedModelSummary[]> {
-  const [base] = await fetchModelAssets(supabase, [input.modelId], userId);
+  const [base] = await fetchReadableModelAssets(supabase, [input.modelId], userId);
   if (!base) {
     throw new Error(`未找到模型 ${input.modelId}`);
   }
@@ -383,7 +425,7 @@ export async function findRelatedModels(
     const targetIds = dedupeStrings(linkRows.map((row) =>
       row.source_model_id === input.modelId ? row.target_model_id : row.source_model_id
     ));
-    const linkedAssets = await fetchModelAssets(supabase, targetIds, userId);
+    const linkedAssets = await fetchReadableModelAssets(supabase, targetIds, userId);
     const assetById = new Map(linkedAssets.map((row) => [row.id, row]));
 
     for (const link of linkRows) {
@@ -412,7 +454,7 @@ export async function findRelatedModels(
     .select(
       "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
-    .eq("user_id", userId)
+    .or(`user_id.eq.${userId},is_official.eq.true`)
     .neq("id", input.modelId)
     .limit(Math.max(input.limit * 5, 20));
 
@@ -469,7 +511,7 @@ export async function listPlaceVersions(
   let placeId = input.placeId ?? null;
 
   if (input.modelId && !placeId) {
-    const [base] = await fetchModelAssets(supabase, [input.modelId], userId);
+    const [base] = await fetchReadableModelAssets(supabase, [input.modelId], userId);
     if (!base) {
       throw new Error(`未找到模型 ${input.modelId}`);
     }
@@ -481,7 +523,7 @@ export async function listPlaceVersions(
     .select(
       "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
-    .eq("user_id", userId)
+    .or(`user_id.eq.${userId},is_official.eq.true`)
     .order("created_at", { ascending: true })
     .limit(input.limit);
 
