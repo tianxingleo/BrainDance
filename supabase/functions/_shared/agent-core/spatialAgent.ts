@@ -97,8 +97,8 @@ const spatialIntentSchema = z.object({
   locationHint: z.string().nullable(),
   sceneHint: z.string().nullable(),
   timeHint: z.string().nullable(),
-  startTime: z.string().datetime({ offset: true }).nullable(),
-  endTime: z.string().datetime({ offset: true }).nullable(),
+  startTime: z.string().datetime({ offset: true, local: true }).nullable(),
+  endTime: z.string().datetime({ offset: true, local: true }).nullable(),
   reasoning: z.string(),
 });
 
@@ -455,6 +455,8 @@ const assetContextSchema = z.object({
     id: z.string(),
     scene_id: z.string(),
     display_name: z.string().nullable(),
+    task_display_name: z.string().nullable().optional(),
+    summary_title: z.string().nullable().optional(),
     description: z.string().nullable(),
     tags: z.array(z.string()),
     created_at: z.string(),
@@ -465,6 +467,8 @@ const assetContextSchema = z.object({
     id: z.string(),
     scene_id: z.string(),
     display_name: z.string().nullable(),
+    task_display_name: z.string().nullable().optional(),
+    summary_title: z.string().nullable().optional(),
     description: z.string().nullable(),
     objects: z.array(z.string()),
     tags: z.array(z.string()),
@@ -479,6 +483,8 @@ const assetContextSchema = z.object({
       id: z.string(),
       scene_id: z.string(),
       display_name: z.string().nullable(),
+      task_display_name: z.string().nullable().optional(),
+      summary_title: z.string().nullable().optional(),
       description: z.string().nullable(),
       objects: z.array(z.string()),
       tags: z.array(z.string()),
@@ -1223,12 +1229,67 @@ function serializeAssetOperation(state: AssetToolState) {
     : null;
 }
 
+function pickAssetCardDisplayName(row: {
+  display_name?: string | null;
+  task_display_name?: string | null;
+  tags?: string[] | null;
+  scene_id?: string | null;
+}): string | null {
+  const candidates = [row.display_name, row.task_display_name];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed) return trimmed;
+  }
+  const firstTag = (row.tags ?? []).map((t) => t?.trim()).find((t) => !!t);
+  if (firstTag) return firstTag;
+  const sceneId = row.scene_id?.trim();
+  return sceneId && sceneId.length > 0 ? sceneId : null;
+}
+
+function pickAssetCardDescription(row: {
+  summary_title?: string | null;
+  description?: string | null;
+}): string | null {
+  const summary = row.summary_title?.trim();
+  if (summary) return summary;
+  return row.description ?? null;
+}
+
+// 输出给前端卡片的 model 行：display_name / description 已经按
+// display_name → task_display_name → tags[0] → scene_id /
+// summary_title → description 的链路覆盖好，前端直读即可。
+function decorateAssetRowForCard<
+  T extends {
+    display_name: string | null;
+    task_display_name?: string | null;
+    summary_title?: string | null;
+    description: string | null;
+    tags: string[];
+    scene_id: string;
+  },
+>(row: T): T {
+  return {
+    ...row,
+    display_name: pickAssetCardDisplayName(row),
+    description: pickAssetCardDescription(row),
+  };
+}
+
 function serializeAssetContext(state: AssetToolState) {
+  const list = state.list ? state.list.map(decorateAssetRowForCard) : null;
+  const bundle = state.bundle ? state.bundle.map(decorateAssetRowForCard) : null;
+  const comparison = state.comparison
+    ? {
+      ...state.comparison,
+      rows: state.comparison.rows.map(decorateAssetRowForCard),
+    }
+    : null;
+
   return {
     last_tool_name: state.lastToolName,
-    list: state.list,
-    bundle: state.bundle,
-    comparison: state.comparison,
+    list,
+    bundle,
+    comparison,
     operation: serializeAssetOperation(state),
     pose_summary: state.poseSummary,
     related_models: state.relatedModels,
@@ -1962,9 +2023,9 @@ async function buildPoseTool(
     schema: z.object({
       query: z.string().min(1),
       threshold: z.number().min(0).max(1).default(0.35),
-      limit: z.number().int().min(1).max(10).default(5),
-      startTime: z.string().datetime({ offset: true }).nullable().default(null),
-      endTime: z.string().datetime({ offset: true }).nullable().default(null),
+      limit: z.coerce.number().int().min(1).max(10).default(5),
+      startTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+      endTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
     }),
     func: async ({ query, threshold, limit, startTime, endTime }) => {
       const queryEmbedding = await embeddings.embedQuery(query);
@@ -2118,9 +2179,9 @@ async function buildSceneTool(
     schema: z.object({
       query: z.string().default(""),
       sceneId: z.string().nullable().default(null),
-      limit: z.number().int().min(1).max(20).default(8),
-      startTime: z.string().datetime({ offset: true }).nullable().default(null),
-      endTime: z.string().datetime({ offset: true }).nullable().default(null),
+      limit: z.coerce.number().int().min(1).max(20).default(8),
+      startTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+      endTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
     }),
     func: async ({ query, sceneId, limit, startTime, endTime }) => {
       let builder = supabase
@@ -2183,9 +2244,9 @@ async function buildRecentSceneTool(
     name: "recent_scene_search",
     description: "当用户主要按时间找最近或某段时间内的内容时使用。",
     schema: z.object({
-      limit: z.number().int().min(1).max(10).default(5),
-      startTime: z.string().datetime({ offset: true }).nullable().default(null),
-      endTime: z.string().datetime({ offset: true }).nullable().default(null),
+      limit: z.coerce.number().int().min(1).max(10).default(5),
+      startTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+      endTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
     }),
     func: async ({ limit, startTime, endTime }) => {
       let builder = supabase

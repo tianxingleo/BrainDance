@@ -30,6 +30,7 @@ export type ListedModelAsset = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  task_display_name: string | null;
   summary_title: string | null;
   description: string | null;
   tags: string[];
@@ -42,6 +43,7 @@ export type ModelAssetBundle = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  task_display_name: string | null;
   summary_title: string | null;
   description: string | null;
   objects: string[];
@@ -118,9 +120,11 @@ const readModelAssetsSchema = z.object({
   sceneIds: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
   query: z.string().default(""),
-  startTime: z.string().datetime({ offset: true }).nullable().default(null),
-  endTime: z.string().datetime({ offset: true }).nullable().default(null),
-  limit: z.number().int().min(1).max(50).default(10),
+  // 允许带 Z/偏移、或不带时区的本地时间（LLM 常生成不带时区的字符串）
+  startTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+  endTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+  // 兼容 LLM 把数字写成字符串的场景，如 "5"
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 const renameModelAssetSchema = z.object({
@@ -200,6 +204,7 @@ const listedModelAssetSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  task_display_name: z.string().nullable().optional(),
   summary_title: z.string().nullable(),
   description: z.string().nullable(),
   tags: z.array(z.string()),
@@ -212,6 +217,7 @@ const modelAssetBundleSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  task_display_name: z.string().nullable().optional(),
   summary_title: z.string().nullable(),
   description: z.string().nullable(),
   objects: z.array(z.string()),
@@ -559,12 +565,49 @@ async function fetchPoseCounts(
   if (error) {
     throw new Error(`读取 memory_poses 失败: ${error.message}`);
   }
-
   const counter = new Map<string, number>();
   for (const row of (data ?? []) as MemoryPoseCountRow[]) {
     counter.set(row.model_id, (counter.get(row.model_id) ?? 0) + 1);
   }
   return counter;
+}
+
+// 反查 processing_tasks.display_name，给 Agent 卡片在 model_assets.display_name
+// 为空时提供回退（video_submit 入口写过用户标题、但 model_assets 那行还没回写）。
+// processing_tasks 的 RLS 仅允许用户自己的行，因此显式带上 user_id。
+async function fetchTaskDisplayNames(
+  supabase: SupabaseClient,
+  sceneIds: string[],
+  userId: string,
+): Promise<Map<string, string>> {
+  const uniqueScenes = [...new Set(sceneIds.filter((s) => s && s.trim()))];
+  if (uniqueScenes.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("processing_tasks")
+    .select("scene_id, display_name, updated_at")
+    .eq("user_id", userId)
+    .in("scene_id", uniqueScenes)
+    .not("display_name", "is", null)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    // 反查失败不应让卡片整体崩，前端还能落回 tag/scene_id。
+    console.warn(`[assetTools] 读取 processing_tasks.display_name 失败: ${error.message}`);
+    return new Map();
+  }
+
+  const map = new Map<string, string>();
+  for (const row of (data ?? []) as { scene_id: string; display_name: string | null }[]) {
+    const name = row.display_name?.trim();
+    if (!name) continue;
+    if (!map.has(row.scene_id)) {
+      map.set(row.scene_id, name);
+    }
+  }
+  return map;
 }
 
 async function buildBundle(
@@ -577,6 +620,11 @@ async function buildBundle(
   const assets = await fetchReadableModelAssets(supabase, modelIds, userId);
   const allowedIds = assets.map((row) => row.id);
   const poseCounts = await fetchPoseCounts(supabase, allowedIds);
+  const taskNames = await fetchTaskDisplayNames(
+    supabase,
+    assets.map((row) => row.scene_id),
+    userId,
+  );
 
   const order = new Map(modelIds.map((id, index) => [id, index]));
   return assets
@@ -584,6 +632,7 @@ async function buildBundle(
       id: row.id,
       scene_id: row.scene_id,
       display_name: row.display_name?.trim() || null,
+      task_display_name: taskNames.get(row.scene_id) ?? null,
       summary_title: row.summary_title?.trim() || null,
       description: row.description,
       objects: safeArray(row.objects),
@@ -721,11 +770,15 @@ async function applyBatchPatch(
   }
 }
 
-function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
+function summarizeListRows(
+  rows: ModelAssetRow[],
+  taskDisplayNames?: Map<string, string>,
+): ListedModelAsset[] {
   return rows.map((row) => ({
     id: row.id,
     scene_id: row.scene_id,
     display_name: row.display_name?.trim() || null,
+    task_display_name: taskDisplayNames?.get(row.scene_id) ?? null,
     summary_title: row.summary_title?.trim() || null,
     description: row.description,
     tags: safeArray(row.tags),
@@ -1038,9 +1091,15 @@ export function buildReadModelAssetsTool(
         });
       }
 
+      const displayed = rows.slice(0, input.limit);
+      const taskDisplayNames = await fetchTaskDisplayNames(
+        supabase,
+        displayed.map((row) => row.scene_id),
+        options.userId,
+      );
       return JSON.stringify({
         kind: "list_model_assets",
-        rows: summarizeListRows(rows.slice(0, input.limit)),
+        rows: summarizeListRows(displayed, taskDisplayNames),
       });
     },
   });
