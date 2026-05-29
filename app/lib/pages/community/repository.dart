@@ -657,10 +657,7 @@ class CommunityRepository {
       authorName: metadata['author_email']?.toString() ??
           map['user_id']?.toString() ??
           textLocalize('community_anonymous'),
-      modelName: map['model_name']?.toString() ??
-          model['display_name']?.toString() ??
-          model['scene_id']?.toString() ??
-          '3D 模型',
+      modelName: map['model_name']?.toString() ?? _modelDisplayName(model),
       modelUrl: derived != null ? derived.modelUrl : modelUrl,
       posesUrl: derived != null ? derived.posesUrl : posesUrl,
       coverUrl: cover.primary,
