@@ -131,6 +131,32 @@ extension _RecallPageSearch on _RecallPageState {
     }
   }
 
+  /// 用本地已加载的 _allModels 补全云端搜索结果缺失的 display_name
+  void _enrichDisplayNames(List<Map<String, dynamic>> results) {
+    if (_allModels.isEmpty || results.isEmpty) return;
+
+    // 构建 id -> display_name 和 scene_id -> display_name 的查找表
+    final displayNameById = <String, String>{};
+    final displayNameBySceneId = <String, String>{};
+    for (final m in _allModels) {
+      final dn = m['display_name']?.toString().trim() ?? '';
+      if (dn.isEmpty) continue;
+      final id = m['id']?.toString() ?? '';
+      if (id.isNotEmpty) displayNameById[id] = dn;
+      final sid = m['scene_id']?.toString() ?? '';
+      if (sid.isNotEmpty) displayNameBySceneId[sid] = dn;
+    }
+
+    for (final row in results) {
+      final existing = row['display_name']?.toString().trim() ?? '';
+      if (existing.isNotEmpty) continue;
+      final id = row['id']?.toString() ?? '';
+      final sid = row['scene_id']?.toString() ?? '';
+      final dn = displayNameById[id] ?? displayNameBySceneId[sid];
+      if (dn != null) row['display_name'] = dn;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _searchModelsFromCloud(
     String query,
   ) async {
@@ -141,7 +167,9 @@ extension _RecallPageSearch on _RecallPageState {
 
     final data = response.data;
     if (data is Map && data['success'] == true) {
-      return List<Map<String, dynamic>>.from(data['results'] ?? []);
+      final results = List<Map<String, dynamic>>.from(data['results'] ?? []);
+      _enrichDisplayNames(results);
+      return results;
     }
 
     final errMsg = (data is Map)
