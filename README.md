@@ -1,15 +1,28 @@
-<div align="center">
+<div align=”center”>
 
-<img src="./app/assets/icon_square_transparent.png" alt="BrainDance Logo" width="120" />
-
+<img src=”./app/assets/icon_square_transparent.png” alt=”BrainDance Logo” width=”120” />
 
 # BrainDance | 流光 · 记
 
-**“物理世界注定走向无序，而我们在比特世界重建永恒。”**
+**”物理世界注定走向无序，而我们在比特世界重建永恒。”**
 
 面向空间记忆的三维语义引擎与检索系统。
 
 [English](./README.en.md) | [简体中文](README.md)
+
+*更新于 2026-06-02*
+
+### 🏆 第十九届全国大学生软件创新大赛 · 国家级一等奖
+
+> **全国大学生软件创新大赛**由示范性软件学院联盟主办，是国家级 A 类竞赛。第十九届大赛以”**AI 无界 · 创见未来**”为主题，全国 400 所高校、2392 支团队、共 7082 名学生报名参赛，历经校赛选拔、区域赛角逐、全国复赛，最终 45 支团队晋级全国总决赛。**本项目在 2026 年 5 月 29—31 日广东东莞举行的总决赛中荣获国家级一等奖。**
+>
+> 队长：[李天行](https://github.com/tianxingleo)（大连理工大学国际信息与软件学院 2025 级本科生）｜队员：[林钧俊](https://github.com/RainE)、[王业桓](https://github.com/RatherHard)｜指导教师：范永刚、[胡江北](https://github.com/jbHu67)
+>
+> 📰 院系报道：[两金一银！历史性突破，我院学子再创巅峰！](https://mp.weixin.qq.com/s/NwKWzgCOyXZPkEEKSGL3OA)
+
+![路演现场](https://pub-f8d3afa0c3274f1e943ee2f8c45dff96.r2.dev/26_06_0ab36fd88ccf4efb061014c9080ab184.webp)
+
+![项目海报](https://pub-f8d3afa0c3274f1e943ee2f8c45dff96.r2.dev/26_06_e38f74435b371b87f2aad8d736b358a0.webp)
 
 ### 从采集到检索的三维记忆链路
 
@@ -453,3 +466,9 @@ BrainDance 的三维重建与语义理解能力建立在多个优秀开源项目
 
 > **第三方依赖特别声明**
 > 本项目 AI 引擎部分集成了多个上游研究项目与子模块，使用时需同时遵守其各自许可证与非商业研究协议。
+
+<div align="center">
+
+![](https://pub-f8d3afa0c3274f1e943ee2f8c45dff96.r2.dev/26_06_e7f2e3821b8de94ee85e2bed3918642d.webp)
+
+</div>
