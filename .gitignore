@@ -305,6 +305,9 @@ bfg-report/
 # =========================
 # 9. Sensitive / Temporary Files (临时文件)
 # =========================
+# repomix 自动导出文件（整个项目代码的 XML 导出，不应提交至版本库）
+repomix-output.xml
+repomix-output.txt
 PR_BODY.md
 create_pr.sh
 CLAUDE.md
