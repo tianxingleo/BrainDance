@@ -1,3 +1,4 @@
+// ignore_for_file: invalid_use_of_protected_member
 part of '../recall.dart';
 
 extension _RecallPageView on _RecallPageState {
@@ -167,6 +168,21 @@ extension _RecallPageView on _RecallPageState {
                                   textColor,
                                 ),
                               ),
+                            if (_slowReadyNotices.isNotEmpty)
+                              RepaintBoundary(
+                                child: DualChainNoticeStrip(
+                                  notices: List.unmodifiable(
+                                    _slowReadyNotices,
+                                  ),
+                                  isDark: isDark,
+                                  onRefresh: (notice) {
+                                    unawaited(
+                                      _refreshFromSlowReadyNotice(notice),
+                                    );
+                                  },
+                                  onDismiss: _dismissSlowReadyNotice,
+                                ),
+                              ),
                             if (_processingTasks.isNotEmpty)
                               RepaintBoundary(
                                 child: RecallProcessingSection(
@@ -240,6 +256,7 @@ extension _RecallPageView on _RecallPageState {
                           isSameModel: _isSameModel,
                           onNavigateToViewer: _navigateToViewer,
                           toPublicUrl: _toPublicUrl,
+                          previewSceneIds: _previewSceneIds,
                           onShowModelActions:
                               (model, {bool imageOnly = false}) {
                                 _showModelActions(model, imageOnly: imageOnly);
@@ -294,6 +311,7 @@ extension _RecallPageView on _RecallPageState {
                                     name;
                                 ref.read(pageIndexProvider.notifier).state = 2;
                               },
+                              previewSceneIds: _previewSceneIds,
                             ),
                         ],
                         if (_officialModels.isNotEmpty) ...[
@@ -344,6 +362,7 @@ extension _RecallPageView on _RecallPageState {
                                     name;
                                 ref.read(pageIndexProvider.notifier).state = 2;
                               },
+                              previewSceneIds: _previewSceneIds,
                             ),
                         ],
                         if (_localModels.isNotEmpty) ...[
@@ -394,6 +413,7 @@ extension _RecallPageView on _RecallPageState {
                                     name;
                                 ref.read(pageIndexProvider.notifier).state = 2;
                               },
+                              previewSceneIds: _previewSceneIds,
                             ),
                         ],
                       ],

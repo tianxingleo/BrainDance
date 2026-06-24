@@ -27,7 +27,7 @@ class CommunityPage extends ConsumerStatefulWidget {
   ConsumerState<CommunityPage> createState() => _CommunityPageState();
 }
 
-enum _CommunitySubPage { recommend, search, submit }
+enum _CommunitySubPage { search, submit }
 
 class _CommunityPageState extends ConsumerState<CommunityPage> {
   final CommunityRepository _repository = CommunityRepository();
@@ -432,8 +432,8 @@ class _CommunityPageState extends ConsumerState<CommunityPage> {
     final effectivePlace =
         place.isEmpty ? textLocalize('community_no_location') : place;
     final hasBoth = lat != null && lng != null;
-    final effectiveLat = hasBoth ? lat! : 0.0;
-    final effectiveLng = hasBoth ? lng! : 0.0;
+    final effectiveLat = hasBoth ? lat : 0.0;
+    final effectiveLng = hasBoth ? lng : 0.0;
 
     final result = CommunityComposerResult(
       title: title,

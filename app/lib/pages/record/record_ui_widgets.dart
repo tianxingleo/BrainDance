@@ -248,7 +248,6 @@ class _TipBubble extends ConsumerStatefulWidget {
   final IconData Function() iconBuilder;
   final Color Function() iconColorBuilder;
   final Color? Function()? bgColorBuilder;
-  final bool withSlide;
 
   const _TipBubble({
     required this.provider,
@@ -256,7 +255,6 @@ class _TipBubble extends ConsumerStatefulWidget {
     required this.iconBuilder,
     required this.iconColorBuilder,
     this.bgColorBuilder,
-    this.withSlide = true,
   });
 
   @override
@@ -358,9 +356,7 @@ class _TipBubbleState extends ConsumerState<_TipBubble>
             alignment: widget.alignment,
             child: FadeTransition(
               opacity: _fade,
-              child: widget.withSlide
-                  ? SlideTransition(position: _slide, child: bubble)
-                  : bubble,
+              child: SlideTransition(position: _slide, child: bubble),
             ),
           );
         },
@@ -382,6 +378,7 @@ class _CenterBubble extends ConsumerStatefulWidget {
     required this.message,
     required this.icon,
     required this.iconColor,
+    // ignore: unused_element_parameter
     this.durationSeconds = 3,
   });
 
