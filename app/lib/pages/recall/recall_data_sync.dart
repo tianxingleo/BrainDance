@@ -27,15 +27,15 @@ extension _RecallPageDataSync on _RecallPageState {
 
     final newData = payload.newRecord;
     final oldData = payload.oldRecord;
-    final taskId = (newData['id'] ?? oldData['id'])?.toString();
+    final taskId = (newData?['id'] ?? oldData?['id'])?.toString();
     final String? status =
-        newData['status']?.toString() ?? oldData['status']?.toString();
+        newData?['status']?.toString() ?? oldData?['status']?.toString();
 
     if (taskId == null) return;
 
     if (status == 'processing') {
       // 更新或添加 processing 任务
-      final rawLogs = newData['logs'];
+      final rawLogs = newData?['logs'];
       final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
       final allLogs = _parseAllLogMsgs(logsJson);
       if (mounted) {
@@ -53,7 +53,7 @@ extension _RecallPageDataSync on _RecallPageState {
     } else if (status != 'processing' && oldData['status'] == 'processing') {
       // 任务从 processing 变为其他状态，移除
       // 终态前再扫一次最新 logs，避免错过最后一次写入的里程碑
-      final rawLogs = newData['logs'];
+      final rawLogs = newData?['logs'];
       final logsJson = rawLogs is List<dynamic> ? rawLogs : null;
       final finalLogs = _parseAllLogMsgs(logsJson);
       _processDualChainMilestones(taskId, newData, finalLogs);
@@ -62,13 +62,6 @@ extension _RecallPageDataSync on _RecallPageState {
           _processingTasks.removeWhere((t) => t['id'].toString() == taskId);
           _taskAllLogs.remove(taskId);
           _expandedTaskLogs.remove(taskId);
-          // 任务进入终态后，预览版徽章不再适用（成功完成意味着完整模型已就位；
-          // 失败意味着没有完整模型可看，但快链产物仍在卡片上，去掉徽章避免误导）。
-          final sceneId = newData?['scene_id']?.toString() ??
-              oldData['scene_id']?.toString();
-          if (sceneId != null && sceneId.isNotEmpty) {
-            _previewSceneIds.remove(sceneId);
-          }
         });
       }
       _taskMilestones.remove(taskId);
@@ -95,33 +88,12 @@ extension _RecallPageDataSync on _RecallPageState {
     known.addAll(fresh);
 
     final sceneId = task['scene_id']?.toString();
-    final displayName = task['display_name']?.toString().trim();
 
     if (fresh.contains(DualChainMilestone.fastReady)) {
       // 快链产物已 upsert 进 model_assets，刷新一次即可看到卡片。
-      if (sceneId != null && sceneId.isNotEmpty) {
-        if (mounted) {
-          _refreshState(() {
-            _previewSceneIds.add(sceneId);
-          });
-        }
-        emitDualChainEvent(DualChainEvent(
-          sceneId: sceneId,
-          milestone: DualChainMilestone.fastReady,
-          displayName: displayName,
-        ));
-      }
       unawaited(_fetchModels(
         preserveExistingDataOnError: true,
         showErrorToast: false,
-      ));
-    }
-
-    if (fresh.contains(DualChainMilestone.fastFailed) && sceneId != null) {
-      emitDualChainEvent(DualChainEvent(
-        sceneId: sceneId,
-        milestone: DualChainMilestone.fastFailed,
-        displayName: displayName,
       ));
     }
 
@@ -135,58 +107,7 @@ extension _RecallPageDataSync on _RecallPageState {
           showErrorToast: false,
         );
       }));
-      // 维护通知行：移出预览集合，追加慢链完成通知。
-      if (mounted) {
-        final name = (displayName != null && displayName.isNotEmpty)
-            ? displayName
-            : sceneId;
-        _refreshState(() {
-          _previewSceneIds.remove(sceneId);
-          // 同 sceneId 已在通知列表中则不重复插入。
-          if (!_slowReadyNotices.any((n) => n.sceneId == sceneId)) {
-            _slowReadyNotices.add(DualChainNotice(
-              sceneId: sceneId,
-              displayName: name,
-              arrivedAt: DateTime.now(),
-            ));
-          }
-        });
-      }
-      emitDualChainEvent(DualChainEvent(
-        sceneId: sceneId,
-        milestone: DualChainMilestone.slowReady,
-        displayName: displayName,
-      ));
     }
-
-    if (fresh.contains(DualChainMilestone.slowFailed) && sceneId != null) {
-      // 慢链失败：移除预览徽章（卡片回归普通展示），不弹通知。
-      if (mounted) {
-        _refreshState(() {
-          _previewSceneIds.remove(sceneId);
-        });
-      }
-      emitDualChainEvent(DualChainEvent(
-        sceneId: sceneId,
-        milestone: DualChainMilestone.slowFailed,
-        displayName: displayName,
-      ));
-    }
-  }
-
-  void _dismissSlowReadyNotice(DualChainNotice notice) {
-    if (!mounted) return;
-    _refreshState(() {
-      _slowReadyNotices.removeWhere((n) => n.sceneId == notice.sceneId);
-    });
-  }
-
-  Future<void> _refreshFromSlowReadyNotice(DualChainNotice notice) async {
-    _dismissSlowReadyNotice(notice);
-    await _fetchModels(
-      preserveExistingDataOnError: true,
-      showErrorToast: false,
-    );
   }
 
   /// 根据 scene_id 反查 model_assets.ply_path，清掉 webgl_viewer 的本地缓存。
@@ -248,16 +169,6 @@ extension _RecallPageDataSync on _RecallPageState {
           _processingTasks = List<Map<String, dynamic>>.from(response);
           _taskAllLogs = logMap;
         });
-        // 冷启动时为每个进行中的双链任务跑一次里程碑检测，
-        // 让预览版徽章 / 通知行在切回 App 时能立即恢复正确状态。
-        for (final task in response) {
-          final taskId = task['id'].toString();
-          _processDualChainMilestones(
-            taskId,
-            Map<String, dynamic>.from(task),
-            logMap[taskId] ?? const <String>[],
-          );
-        }
         _updateOverviewProvider();
       }
     } catch (e) {

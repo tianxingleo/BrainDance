@@ -7,7 +7,6 @@ import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/animated_network_image.dart';
 import '../../services/viewer_navigation.dart';
-import 'model_grid_helpers.dart';
 
 /// 搜索结果卡片组件（带匹配帧列表）
 class SearchResultCard extends StatelessWidget {
@@ -36,7 +35,10 @@ class SearchResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = modelDisplayName(model, fallback: 'Unknown Scene');
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
     final desc = model['description'] ?? textLocalize('recall_no_desc');
     final similarity = model['similarity'] as double?;
     final userId = model['user_id'] ?? '';
@@ -217,7 +219,10 @@ class SearchResultCard extends StatelessWidget {
         ? toPublicUrl(plyPath)
         : '';
     final posesUrlResolved = plyPath.isNotEmpty ? toPosesUrl(plyPath) : null;
-    final sceneId = modelDisplayName(model, fallback: 'Unknown Scene');
+    final sceneId =
+        model['display_name']?.toString() ??
+        model['scene_id'] ??
+        'Unknown Scene';
     String? initialPoseId;
 
     if (transformMatrix is Map) {

@@ -53,7 +53,6 @@ import 'recall/model_grid.dart';
 import 'recall/model_detail_sheet.dart';
 import 'recall/time_peeling.dart';
 import 'recall/processing_section.dart';
-import 'recall/dual_chain_notice_strip.dart';
 import 'recall/rename_model_dialog.dart';
 import 'recall/model_section_header.dart';
 import 'recall/search_header_section.dart';
@@ -103,8 +102,6 @@ class _RecallPageState extends ConsumerState<RecallPage> {
   List<LocalModelCatalogItem> _localModelCatalog = const [];
   Map<String, List<String>> _taskAllLogs = {};
   final Map<String, Set<DualChainMilestone>> _taskMilestones = {};
-  final Set<String> _previewSceneIds = {};
-  final List<DualChainNotice> _slowReadyNotices = [];
   Map<String, dynamic>? _activeModelAction;
   Rect? _activeModelActionRect;
   LocalRagIndexStats? _indexStats;

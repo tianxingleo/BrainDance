@@ -347,7 +347,8 @@ extension _RecallPageModelActions on _RecallPageState {
           .eq('scene_id', sceneId)
           .select('id');
 
-      if (updateResult.isEmpty) {
+      if (updateResult == null ||
+          (updateResult is List && updateResult.isEmpty)) {
         if (mounted) {
           debugPrint(
             '[RecallModelActions] rename update returned empty for scene_id=$sceneId',
@@ -693,7 +694,8 @@ extension _RecallPageModelActions on _RecallPageState {
           .eq('user_id', currentUserId)
           .select('id');
 
-      if (deleteResult.isEmpty) {
+      if (deleteResult == null ||
+          (deleteResult is List && deleteResult.isEmpty)) {
         if (mounted) {
           showAppToast(context, textLocalize('cloud_model_delete_fail'));
         }

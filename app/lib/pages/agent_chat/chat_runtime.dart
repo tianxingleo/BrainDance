@@ -1,4 +1,3 @@
-// ignore_for_file: invalid_use_of_protected_member
 part of '../agent_chat.dart';
 
 extension _AgentChatRuntime on _AgentChatPageState {

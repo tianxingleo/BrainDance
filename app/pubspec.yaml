@@ -171,8 +171,3 @@ ffmpeg_kit_extended_config:
   type: "video_hw"
   gpl: false
   small: false
-  # ffmpeg_kit_extended_flutter 0.5.0 的官方 Windows/Linux checksum 文件
-  # 与实际发布包不一致，会导致 Flutter native assets 在 test 阶段失败。
-  # 这里显式使用同一批官方构建产物作为平台 override，避开该版本中过时的远端 sha 文件。
-  windows: "https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-windows/bundle-video_hw-windows-x86_64-shared-lgpl.zip"
-  linux: "https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip"

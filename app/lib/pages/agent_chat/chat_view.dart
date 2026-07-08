@@ -304,7 +304,7 @@ extension _AgentChatView on _AgentChatPageState {
                   )
                 : MarkdownBody(
                     data: answer,
-                    builders: {'code': CodeElementBuilder(isDark)},
+                    builders: {'code': CodeElementBuilder(isDark, context)},
                     styleSheet: MarkdownStyleSheet(
                       p: TextStyle(color: textColor, fontSize: 14, height: 1.6),
                       code: TextStyle(
@@ -330,7 +330,7 @@ extension _AgentChatView on _AgentChatPageState {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: AgentAssetCard(
-                displayName: modelDisplayName(model),
+                displayName: model['display_name']?.toString(),
                 description: model['description']?.toString() ?? '',
                 tags:
                     (model['tags'] as List?)
@@ -351,11 +351,9 @@ extension _AgentChatView on _AgentChatPageState {
               child: AgentAssetCard(
                 displayName:
                     topCandidates[i].displayName ??
-                    (topCandidates[i].tags.isNotEmpty
-                        ? topCandidates[i].tags[0]
-                        : (topCandidates[i].description.isNotEmpty
-                            ? topCandidates[i].description
-                            : topCandidates[i].sceneId)),
+                    (topCandidates[i].description.isNotEmpty
+                        ? topCandidates[i].description
+                        : topCandidates[i].sceneId),
                 description: topCandidates[i].description.isNotEmpty
                     ? topCandidates[i].description
                     : '场景 ${topCandidates[i].sceneId}',
@@ -374,7 +372,7 @@ extension _AgentChatView on _AgentChatPageState {
             !isTimeCompareMode &&
             topCandidates.isEmpty) ...[
           const SizedBox(height: 12),
-          _buildOpenSceneButton(result, isDark),
+          _buildOpenSceneButton(result!, isDark),
         ],
         if (result?.mode != null &&
             !(isAssetMode && assetModels.isNotEmpty)) ...[

@@ -53,7 +53,6 @@ type CollectionItemJoinRow = {
 };
 
 type AssetToolRuntimeOptions = {
-  userId: string;
   selectedModelIds?: string[];
   allowWrite?: boolean;
 };
@@ -256,7 +255,6 @@ function restrictModelIds(
 async function fetchModelAssets(
   supabase: SupabaseClient,
   modelIds: string[],
-  userId: string,
 ): Promise<ModelAssetRow[]> {
   if (modelIds.length === 0) {
     return [];
@@ -267,33 +265,6 @@ async function fetchModelAssets(
     .select(
       "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
-    .eq("user_id", userId)
-    .in("id", modelIds);
-
-  if (error) {
-    throw new Error(`读取 model_assets 失败: ${error.message}`);
-  }
-
-  return (data ?? []).map((row) => normalizeAssetRow(row as ModelAssetRow));
-}
-
-// 检索/查询类工具专用：允许命中当前用户自有或 is_official=true 的模型资产，
-// 写工具仍使用 fetchModelAssets 做严格的 user_id 隔离。
-async function fetchReadableModelAssets(
-  supabase: SupabaseClient,
-  modelIds: string[],
-  userId: string,
-): Promise<ModelAssetRow[]> {
-  if (modelIds.length === 0) {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from("model_assets")
-    .select(
-      "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
-    )
-    .or(`user_id.eq.${userId},is_official.eq.true`)
     .in("id", modelIds);
 
   if (error) {
@@ -309,7 +280,6 @@ async function fetchPoseCountMap(
 ): Promise<Map<string, number>> {
   if (modelIds.length === 0) return new Map();
 
-  // memory_poses 没有 user_id 列，调用方必须确保 modelIds 已经按当前用户过滤过。
   const { data, error } = await supabase
     .from("memory_poses")
     .select("model_id")
@@ -328,43 +298,27 @@ async function fetchPoseCountMap(
   return map;
 }
 
-async function assertUserOwnsModels(
+async function inferUserIdFromModels(
   supabase: SupabaseClient,
   modelIds: string[],
-  userId: string,
-): Promise<void> {
-  if (modelIds.length === 0) return;
-  const rows = await fetchModelAssets(supabase, modelIds, userId);
-  const owned = new Set(rows.map((row) => row.id));
-  const missing = modelIds.filter((id) => !owned.has(id));
-  if (missing.length > 0) {
-    throw new Error(`模型 ${missing.join(", ")} 不属于当前用户，已拒绝操作`);
+  fallbackModelId?: string | null,
+): Promise<string> {
+  const targetIds = dedupeStrings([
+    ...modelIds,
+    fallbackModelId ?? "",
+  ]).filter(Boolean);
+  const rows = await fetchModelAssets(supabase, targetIds.slice(0, 10));
+  const userId = rows.find((row) => row.user_id)?.user_id;
+  if (!userId) {
+    throw new Error("无法从当前模型上下文推断 user_id，请至少提供一个属于当前用户的模型");
   }
-}
-
-// 检索/查询类工具专用：允许命中自有或 is_official=true 的官方模型，
-// 与 assertUserOwnsModels 的差别在于"读"而非"写"，写场景仍走严格归属校验。
-async function assertUserCanReadModels(
-  supabase: SupabaseClient,
-  modelIds: string[],
-  userId: string,
-): Promise<void> {
-  if (modelIds.length === 0) return;
-  const rows = await fetchReadableModelAssets(supabase, modelIds, userId);
-  const readable = new Set(rows.map((row) => row.id));
-  const missing = modelIds.filter((id) => !readable.has(id));
-  if (missing.length > 0) {
-    throw new Error(`模型 ${missing.join(", ")} 当前用户不可读取，已拒绝操作`);
-  }
+  return userId;
 }
 
 export async function getPoseSummary(
   supabase: SupabaseClient,
   input: z.infer<typeof getPoseSummarySchema>,
-  userId: string,
 ): Promise<PoseSummary> {
-  await assertUserCanReadModels(supabase, [input.modelId], userId);
-  // memory_poses 没有 user_id 列，归属已通过 assertUserCanReadModels 校验。
   const { data, error } = await supabase
     .from("memory_poses")
     .select("image_name, tag, transform_matrix, created_at")
@@ -405,9 +359,8 @@ export async function getPoseSummary(
 export async function findRelatedModels(
   supabase: SupabaseClient,
   input: z.infer<typeof findRelatedModelsSchema>,
-  userId: string,
 ): Promise<RelatedModelSummary[]> {
-  const [base] = await fetchReadableModelAssets(supabase, [input.modelId], userId);
+  const [base] = await fetchModelAssets(supabase, [input.modelId]);
   if (!base) {
     throw new Error(`未找到模型 ${input.modelId}`);
   }
@@ -425,7 +378,7 @@ export async function findRelatedModels(
     const targetIds = dedupeStrings(linkRows.map((row) =>
       row.source_model_id === input.modelId ? row.target_model_id : row.source_model_id
     ));
-    const linkedAssets = await fetchReadableModelAssets(supabase, targetIds, userId);
+    const linkedAssets = await fetchModelAssets(supabase, targetIds);
     const assetById = new Map(linkedAssets.map((row) => [row.id, row]));
 
     for (const link of linkRows) {
@@ -454,10 +407,12 @@ export async function findRelatedModels(
     .select(
       "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
-    .or(`user_id.eq.${userId},is_official.eq.true`)
     .neq("id", input.modelId)
     .limit(Math.max(input.limit * 5, 20));
 
+  if (base.user_id) {
+    builder = builder.eq("user_id", base.user_id);
+  }
   if (base.place_id) {
     builder = builder.eq("place_id", base.place_id);
   }
@@ -506,12 +461,11 @@ export async function findRelatedModels(
 export async function listPlaceVersions(
   supabase: SupabaseClient,
   input: z.infer<typeof listPlaceVersionsSchema>,
-  userId: string,
 ): Promise<PlaceVersionsResult> {
   let placeId = input.placeId ?? null;
 
   if (input.modelId && !placeId) {
-    const [base] = await fetchReadableModelAssets(supabase, [input.modelId], userId);
+    const [base] = await fetchModelAssets(supabase, [input.modelId]);
     if (!base) {
       throw new Error(`未找到模型 ${input.modelId}`);
     }
@@ -523,7 +477,6 @@ export async function listPlaceVersions(
     .select(
       "id, scene_id, user_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, agent_meta, place_id, version_label, created_at",
     )
-    .or(`user_id.eq.${userId},is_official.eq.true`)
     .order("created_at", { ascending: true })
     .limit(input.limit);
 
@@ -553,7 +506,7 @@ export async function listPlaceVersions(
 export async function createMemoryCollection(
   supabase: SupabaseClient,
   input: z.infer<typeof createMemoryCollectionSchema>,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): Promise<MemoryCollectionRow> {
   const targetIds = restrictModelIds(
     dedupeStrings([
@@ -562,12 +515,12 @@ export async function createMemoryCollection(
     ]).filter(Boolean),
     options.selectedModelIds,
   );
-  await assertUserOwnsModels(supabase, targetIds, options.userId);
+  const userId = await inferUserIdFromModels(supabase, targetIds, input.coverModelId ?? null);
 
   const { data, error } = await supabase
     .from("memory_collections")
     .insert({
-      user_id: options.userId,
+      user_id: userId,
       title: input.title,
       description: input.description ?? null,
       cover_model_id: input.coverModelId ?? targetIds[0] ?? null,
@@ -593,12 +546,9 @@ export async function createMemoryCollection(
 export async function addModelsToCollection(
   supabase: SupabaseClient,
   input: z.infer<typeof addModelsToCollectionSchema>,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): Promise<{ collection_id: string; added_count: number }> {
   const modelIds = restrictModelIds(input.modelIds, options.selectedModelIds);
-  await assertUserOwnsModels(supabase, modelIds, options.userId);
-  await assertUserOwnsCollection(supabase, input.collectionId, options.userId);
-
   const rows = modelIds.map((modelId, index) => ({
     collection_id: input.collectionId,
     model_id: modelId,
@@ -619,28 +569,9 @@ export async function addModelsToCollection(
   };
 }
 
-async function assertUserOwnsCollection(
-  supabase: SupabaseClient,
-  collectionId: string,
-  userId: string,
-): Promise<void> {
-  const { data, error } = await supabase
-    .from("memory_collections")
-    .select("id, user_id")
-    .eq("id", collectionId)
-    .maybeSingle();
-  if (error) {
-    throw new Error(`读取专题失败: ${error.message}`);
-  }
-  if (!data || data.user_id !== userId) {
-    throw new Error(`专题 ${collectionId} 不属于当前用户，已拒绝操作`);
-  }
-}
-
 export async function summarizeCollection(
   supabase: SupabaseClient,
   input: z.infer<typeof summarizeCollectionSchema>,
-  userId: string,
 ): Promise<MemoryCollectionSummary> {
   const { data: collection, error: collectionError } = await supabase
     .from("memory_collections")
@@ -649,9 +580,6 @@ export async function summarizeCollection(
     .single();
   if (collectionError || !collection) {
     throw new Error(`读取专题失败: ${collectionError?.message ?? input.collectionId}`);
-  }
-  if (collection.user_id !== userId) {
-    throw new Error(`专题 ${input.collectionId} 不属于当前用户，已拒绝操作`);
   }
 
   const { data: items, error: itemError } = await supabase
@@ -670,8 +598,6 @@ export async function summarizeCollection(
       const asset = Array.isArray(row.model_assets) ? row.model_assets[0] : row.model_assets;
       if (!asset) return null;
       const model = normalizeAssetRow(asset);
-      // 防御：如果 join 出来的 model 不属于当前用户，丢弃。
-      if (model.user_id && model.user_id !== userId) return null;
       return {
         model_id: model.id,
         scene_id: model.scene_id,
@@ -715,22 +641,18 @@ export async function summarizeCollection(
 export async function prepareStoryContext(
   supabase: SupabaseClient,
   input: { modelIds?: string[]; collectionId?: string | null },
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): Promise<StoryContext> {
   let modelIds = restrictModelIds(input.modelIds ?? [], options.selectedModelIds);
   let title = "空间记忆导览";
 
   if (input.collectionId) {
-    const summary = await summarizeCollection(
-      supabase,
-      { collectionId: input.collectionId },
-      options.userId,
-    );
+    const summary = await summarizeCollection(supabase, { collectionId: input.collectionId });
     modelIds = summary.items.map((item) => item.model_id);
     title = summary.collection.title;
   }
 
-  const rows = (await fetchModelAssets(supabase, modelIds, options.userId))
+  const rows = (await fetchModelAssets(supabase, modelIds))
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
   const tagCounter = new Map<string, number>();
   for (const row of rows) {
@@ -792,18 +714,18 @@ export async function enqueueCreativeTask(
     modelIds: string[];
     outline: StoryOutline;
     currentSceneId?: string | null;
-    userId: string;
   },
 ): Promise<{ task_id: string; task_type: string; status: string }> {
-  const assets = await fetchModelAssets(supabase, input.modelIds.slice(0, 10), input.userId);
-  if (assets.length === 0) {
-    throw new Error("当前用户下没有可用于 creative task 的模型");
+  const assets = await fetchModelAssets(supabase, input.modelIds.slice(0, 10));
+  const userId = assets.find((row) => row.user_id)?.user_id;
+  if (!userId) {
+    throw new Error("无法根据选中模型推断 creative task 的 user_id");
   }
   const sceneId = input.currentSceneId ?? assets[0]?.scene_id ?? `creative-${Date.now()}`;
   const { data, error } = await supabase
     .from("processing_tasks")
     .insert({
-      user_id: input.userId,
+      user_id: userId,
       scene_id: sceneId,
       status: "pending",
       task_type: "creative_story",
@@ -838,15 +760,14 @@ function trendLabel(values: number[]): string {
 
 export async function getRecentPlaceTrend(
   supabase: SupabaseClient,
-  input: { modelId: string; lookback?: number; userId: string },
+  input: { modelId: string; lookback?: number },
 ): Promise<RecentPlaceTrend> {
   const versions = await listPlaceVersions(supabase, {
     modelId: input.modelId,
     limit: input.lookback ?? 5,
-  }, input.userId);
-  const assets = await fetchModelAssets(supabase, versions.versions.map((item) => item.model_id), input.userId);
-  const allowedIds = assets.map((row) => row.id);
-  const poseCountMap = await fetchPoseCountMap(supabase, allowedIds);
+  });
+  const assets = await fetchModelAssets(supabase, versions.versions.map((item) => item.model_id));
+  const poseCountMap = await fetchPoseCountMap(supabase, versions.versions.map((item) => item.model_id));
   const objectCounts = assets.map((row) => row.objects?.length ?? 0);
   const poseCounts = assets.map((row) => poseCountMap.get(row.id) ?? 0);
   const trend = trendLabel(objectCounts);
@@ -862,13 +783,13 @@ export async function getRecentPlaceTrend(
 
 export async function findMissingObjectPattern(
   supabase: SupabaseClient,
-  input: { modelId: string; objectName: string; lookback?: number; userId: string },
+  input: { modelId: string; objectName: string; lookback?: number },
 ): Promise<MissingObjectPattern> {
   const versions = await listPlaceVersions(supabase, {
     modelId: input.modelId,
     limit: input.lookback ?? 5,
-  }, input.userId);
-  const assets = await fetchModelAssets(supabase, versions.versions.map((item) => item.model_id), input.userId);
+  });
+  const assets = await fetchModelAssets(supabase, versions.versions.map((item) => item.model_id));
   const target = assets[assets.length - 1] ?? null;
   const baseline = assets.slice(0, -1).filter((row) => (row.objects ?? []).includes(input.objectName));
   const missing = baseline.length > 0 && Boolean(target) &&
@@ -886,12 +807,12 @@ export async function findMissingObjectPattern(
 
 export async function summarizePlaceChangeTimeline(
   supabase: SupabaseClient,
-  input: { modelId: string; limit?: number; userId: string },
+  input: { modelId: string; limit?: number },
 ): Promise<PlaceTimelineSummary> {
   const versions = await listPlaceVersions(supabase, {
     modelId: input.modelId,
     limit: input.limit ?? 10,
-  }, input.userId);
+  });
   return {
     place_id: versions.place_id,
     timeline: versions.versions,
@@ -903,16 +824,16 @@ export async function summarizePlaceChangeTimeline(
 
 export async function buildPersonalMemoryGraphSummary(
   supabase: SupabaseClient,
-  input: { modelId: string; userId: string },
+  input: { modelId: string },
 ): Promise<MemoryGraphSummary> {
-  const [base] = await fetchModelAssets(supabase, [input.modelId], input.userId);
+  const [base] = await fetchModelAssets(supabase, [input.modelId]);
   if (!base) {
     throw new Error(`未找到模型 ${input.modelId}`);
   }
   const related = await findRelatedModels(supabase, {
     modelId: input.modelId,
     limit: 6,
-  }, input.userId);
+  });
   const keyRelationships = dedupeStrings([
     base.place_id ? "同一地点版本链" : "",
     ...related.map((item) => item.relation_type),
@@ -929,7 +850,7 @@ export async function buildPersonalMemoryGraphSummary(
 
 export function buildGetPoseSummaryTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "get_pose_summary",
@@ -937,7 +858,7 @@ export function buildGetPoseSummaryTool(
     schema: getPoseSummarySchema,
     func: async (input) => {
       const [modelId] = restrictModelIds([input.modelId], options.selectedModelIds);
-      const result = await getPoseSummary(supabase, { ...input, modelId }, options.userId);
+      const result = await getPoseSummary(supabase, { ...input, modelId });
       return JSON.stringify({
         kind: "pose_summary",
         summary: result,
@@ -948,7 +869,7 @@ export function buildGetPoseSummaryTool(
 
 export function buildFindRelatedModelsTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "find_related_models",
@@ -956,7 +877,7 @@ export function buildFindRelatedModelsTool(
     schema: findRelatedModelsSchema,
     func: async (input) => {
       const [modelId] = restrictModelIds([input.modelId], options.selectedModelIds);
-      const rows = await findRelatedModels(supabase, { ...input, modelId }, options.userId);
+      const rows = await findRelatedModels(supabase, { ...input, modelId });
       return JSON.stringify({
         kind: "related_models",
         rows,
@@ -967,14 +888,13 @@ export function buildFindRelatedModelsTool(
 
 export function buildListPlaceVersionsTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "list_place_versions",
     description: "列出同一地点下的时间顺序版本。",
     schema: listPlaceVersionsSchema,
     func: async (input) => {
-      const result = await listPlaceVersions(supabase, input, options.userId);
+      const result = await listPlaceVersions(supabase, input);
       return JSON.stringify({
         kind: "place_versions",
         result,
@@ -985,7 +905,7 @@ export function buildListPlaceVersionsTool(
 
 export function buildCreateMemoryCollectionTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "create_memory_collection",
@@ -1004,7 +924,7 @@ export function buildCreateMemoryCollectionTool(
 
 export function buildAddModelsToCollectionTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
+  options: AssetToolRuntimeOptions = {},
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "add_models_to_collection",
@@ -1023,14 +943,13 @@ export function buildAddModelsToCollectionTool(
 
 export function buildSummarizeCollectionTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "summarize_collection",
     description: "读取专题并给出标题建议、摘要和标签建议。",
     schema: summarizeCollectionSchema,
     func: async (input) => {
-      const summary = await summarizeCollection(supabase, input, options.userId);
+      const summary = await summarizeCollection(supabase, input);
       return JSON.stringify({
         kind: "memory_collection_summary",
         summary,

@@ -89,22 +89,11 @@ interface WorkerNode {
   } | null
 }
 
-interface UserActivityAggregateRow {
-  user_id: string
-  total_tasks: number
-  tasks_24h: number
-  tasks_7d: number
-  total_assets: number
-  assets_7d: number
-  last_active: string | null
-}
-
 const loading = ref(true)
 const refreshing = ref(false)
 const storageLoading = ref(false)
 const errorMessage = ref('')
 const storageError = ref('')
-const dataWarnings = ref<string[]>([])
 const lastUpdated = ref<string | null>(null)
 
 // 认证状态
@@ -114,7 +103,6 @@ const loginEmail = ref('')
 const loginPassword = ref('')
 const loginError = ref('')
 const loginSubmitting = ref(false)
-const dashboardStarted = ref(false)
 
 const taskRows = ref<ProcessingTask[]>([])
 const workerRows = ref<WorkerNode[]>([])
@@ -327,11 +315,10 @@ const queueCount = computed(() => pendingCount.value + processingCount.value)
 
 const refreshModeText = computed(() => (autoRefresh.value ? `${refreshSeconds.value}s 自动刷新` : '手动刷新'))
 const totalUserCount = computed(() => userSummaries.value.length)
-const resourceRecordCount = computed(() => modelAssetCount.value + memoryPoseCount.value)
 
 const storageModeText = computed(() => {
-  if (storageProbeMode.value === 'bucket_list') return '正常读取'
-  if (storageProbeMode.value === 'known_buckets') return '部分可用'
+  if (storageProbeMode.value === 'bucket_list') return '列桶模式'
+  if (storageProbeMode.value === 'known_buckets') return '已知桶探测'
   return '不可用'
 })
 
@@ -697,21 +684,21 @@ const requestWorkerPause = async (worker: WorkerNode) =>
   updateWorkerDesiredState(
     worker,
     'pause',
-    `已暂停 ${formatWorkerLabel(worker)}，将停止接新任务。`,
+    `已请求优雅暂停 ${formatWorkerLabel(worker)}，它会停止接新任务并在安全点退出。`,
   )
 
 const requestWorkerInterrupt = async (worker: WorkerNode) =>
   updateWorkerDesiredState(
     worker,
     'interrupt',
-    `已中断 ${formatWorkerLabel(worker)}，当前任务将被终止。`,
+    `已请求中断 ${formatWorkerLabel(worker)}，Supervisor 会尝试立即打断当前任务。`,
   )
 
 const requestWorkerResume = async (worker: WorkerNode) =>
   updateWorkerDesiredState(
     worker,
     'run',
-    `已恢复 ${formatWorkerLabel(worker)}，将重新开始接任务。`,
+    `已请求恢复 ${formatWorkerLabel(worker)}，Supervisor 会在轮询周期内拉起实例。`,
   )
 
 const edgeFunctionNames = computed(() => {
@@ -796,9 +783,9 @@ const overviewCards = computed(() => [
   },
   {
     key: 'assets',
-    label: '资源数据',
-    value: `${resourceRecordCount.value}`,
-    note: `模型 ${modelAssetCount.value} / 姿态 ${memoryPoseCount.value}`,
+    label: '模型资产',
+    value: `${modelAssetCount.value}`,
+    note: `姿态 ${memoryPoseCount.value}`,
     icon: 'lucide:boxes',
     tone: 'neutral' as const,
   },
@@ -870,87 +857,6 @@ const activeAlertCount = computed(() =>
 const formatUserId = (userId: string) => {
   if (userId.length <= 14) return userId
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`
-}
-
-const buildUserSummaries = (rows: UserActivityAggregateRow[]): UserActivitySummary[] =>
-  rows.map((s) => ({
-    userId: s.user_id,
-    displayName: s.user_id.slice(0, 8) + '...',
-    taskCount: s.total_tasks,
-    assetCount: s.total_assets,
-    task24h: s.tasks_24h,
-    task7d: s.tasks_7d,
-    asset7d: s.assets_7d,
-    lastSeenAt: s.last_active,
-  }))
-
-const fetchUserActivitySummary = async (since24h: string, since7d: string) => {
-  const [taskUserRes, assetUserRes] = await Promise.all([
-    supabase
-      .from('processing_tasks')
-      .select('user_id, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5000),
-    supabase
-      .from('model_assets')
-      .select('user_id, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5000),
-  ])
-
-  if (taskUserRes.error || assetUserRes.error) {
-    dataWarnings.value.push(
-      `用户活跃聚合失败：${taskUserRes.error?.message || assetUserRes.error?.message || '未知错误'}`,
-    )
-    return []
-  }
-
-  const byUser = new Map<string, UserActivityAggregateRow>()
-  const ensureUser = (userId: string) => {
-    const existing = byUser.get(userId)
-    if (existing) return existing
-    const created: UserActivityAggregateRow = {
-      user_id: userId,
-      total_tasks: 0,
-      tasks_24h: 0,
-      tasks_7d: 0,
-      total_assets: 0,
-      assets_7d: 0,
-      last_active: null,
-    }
-    byUser.set(userId, created)
-    return created
-  }
-
-  const touchLastActive = (row: UserActivityAggregateRow, createdAt: string | null) => {
-    if (!createdAt) return
-    if (!row.last_active || dayjs(createdAt).isAfter(dayjs(row.last_active))) {
-      row.last_active = createdAt
-    }
-  }
-
-  ;((taskUserRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>).forEach((item) => {
-    if (!item.user_id) return
-    const row = ensureUser(item.user_id)
-    row.total_tasks += 1
-    if (item.created_at && item.created_at >= since24h) row.tasks_24h += 1
-    if (item.created_at && item.created_at >= since7d) row.tasks_7d += 1
-    touchLastActive(row, item.created_at)
-  })
-
-  ;((assetUserRes.data ?? []) as Array<{ user_id: string | null; created_at: string | null }>).forEach((item) => {
-    if (!item.user_id) return
-    const row = ensureUser(item.user_id)
-    row.total_assets += 1
-    if (item.created_at && item.created_at >= since7d) row.assets_7d += 1
-    touchLastActive(row, item.created_at)
-  })
-
-  return Array.from(byUser.values()).sort((a, b) => {
-    const left = a.last_active ? dayjs(a.last_active).valueOf() : 0
-    const right = b.last_active ? dayjs(b.last_active).valueOf() : 0
-    return right - left
-  })
 }
 
 const checkEdgeFunction = async (name: string): Promise<EdgeFunctionCheck> => {
@@ -1145,7 +1051,6 @@ const fetchStorageStats = async () => {
 const refreshDashboard = async () => {
   if (!loading.value) refreshing.value = true
   errorMessage.value = ''
-  dataWarnings.value = []
 
   const now = dayjs()
   const since24h = now.subtract(24, 'hour').toISOString()
@@ -1161,6 +1066,7 @@ const refreshDashboard = async () => {
     taskTableCountRes,
     task24hRes,
     asset7dRes,
+    userActivityRes,
   ] = await Promise.all([
     supabase
       .from('processing_tasks')
@@ -1183,60 +1089,67 @@ const refreshDashboard = async () => {
       .gte('created_at', since24h)
       .limit(1000),
     supabase.from('model_assets').select('created_at', { count: 'exact', head: true }).gte('created_at', since7d),
+    // 使用 RPC 替代 3 次 fetchAllRows 全表扫描
+    supabase.rpc('get_user_activity_summary', {}),
   ])
 
-  const readErrors = [
-    tasksRes.error ? `processing_tasks 列表读取失败：${tasksRes.error.message}` : '',
-    workerRes.error ? `worker_nodes 读取失败：${workerRes.error.message}` : '',
-    processingTaskCountRes.error ? `processing_tasks 计数失败：${processingTaskCountRes.error.message}` : '',
-    assetCountRes.error ? `model_assets 计数失败：${assetCountRes.error.message}` : '',
-    poseCountRes.error ? `memory_poses 计数失败：${poseCountRes.error.message}` : '',
-  ].filter(Boolean)
+  if (tasksRes.error || workerRes.error || processingTaskCountRes.error || assetCountRes.error || poseCountRes.error) {
+    errorMessage.value =
+      tasksRes.error?.message ||
+      workerRes.error?.message ||
+      processingTaskCountRes.error?.message ||
+      assetCountRes.error?.message ||
+      poseCountRes.error?.message ||
+      '数据读取失败'
+  } else {
+    const tasks = (tasksRes.data ?? []) as ProcessingTask[]
+    const workers = (workerRes.data ?? []) as WorkerNode[]
+    // RPC 返回的是聚合后的用户活跃数据
+    const rpcSummaries = (userActivityRes.data ?? []) as Array<{
+      user_id: string
+      total_tasks: number
+      tasks_24h: number
+      tasks_7d: number
+      total_assets: number
+      assets_7d: number
+      last_active: string | null
+    }>
+    taskRows.value = tasks
+    workerRows.value = workers
+    userSummaries.value = rpcSummaries.map((s) => ({
+      userId: s.user_id,
+      displayName: s.user_id.slice(0, 8) + '...',
+      taskCount: s.total_tasks,
+      assetCount: s.total_assets,
+      task24h: s.tasks_24h,
+      task7d: s.tasks_7d,
+      asset7d: s.assets_7d,
+      lastSeenAt: s.last_active,
+    }))
+    modelAssetCount.value = assetCountRes.count ?? 0
+    memoryPoseCount.value = poseCountRes.count ?? 0
 
-  dataWarnings.value.push(
-    ...readErrors,
-    ...(ragCountRes.error ? [`rag_docs 计数失败：${ragCountRes.error.message}`] : []),
-    ...(taskTableCountRes.error ? [`tasks 计数失败：${taskTableCountRes.error.message}`] : []),
-    ...(task24hRes.error ? [`24h 任务统计失败：${task24hRes.error.message}`] : []),
-    ...(asset7dRes.error ? [`7d 资产统计失败：${asset7dRes.error.message}`] : []),
-  )
+    const tasks24hRows = (task24hRes.data ?? []) as Array<{ status: string; user_id: string }>
+    timeBasedStats.value = {
+      tasks24h: task24hRes.count ?? 0,
+      failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
+      completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
+      totalUsers: userSummaries.value.length,
+      activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
+      activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
+      assets7d: asset7dRes.count ?? 0,
+    }
 
-  if (readErrors.length) {
-    errorMessage.value = '部分数据读取失败，已保留可读取的数据。'
+    dbCounts.value = {
+      processing_tasks: processingTaskCountRes.count ?? 0,
+      model_assets: assetCountRes.count ?? 0,
+      memory_poses: poseCountRes.count ?? 0,
+      rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
+      tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
+    }
+
+    lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
   }
-
-  const tasks = tasksRes.error ? [] : ((tasksRes.data ?? []) as ProcessingTask[])
-  const workers = workerRes.error ? [] : ((workerRes.data ?? []) as WorkerNode[])
-  const activityRows = await fetchUserActivitySummary(since24h, since7d)
-
-  taskRows.value = tasks
-  workerRows.value = workers
-  userSummaries.value = buildUserSummaries(activityRows)
-  modelAssetCount.value = assetCountRes.error ? 0 : (assetCountRes.count ?? 0)
-  memoryPoseCount.value = poseCountRes.error ? 0 : (poseCountRes.count ?? 0)
-
-  const tasks24hRows = task24hRes.error
-    ? []
-    : ((task24hRes.data ?? []) as Array<{ status: string; user_id: string }>)
-  timeBasedStats.value = {
-    tasks24h: task24hRes.error ? 0 : (task24hRes.count ?? 0),
-    failed24h: tasks24hRows.filter((item) => item.status === 'failed').length,
-    completed24h: tasks24hRows.filter((item) => item.status === 'completed').length,
-    totalUsers: userSummaries.value.length,
-    activeUsers24h: new Set(tasks24hRows.map((item) => item.user_id)).size,
-    activeUsers7d: userSummaries.value.filter((item) => item.task7d > 0 || item.asset7d > 0).length,
-    assets7d: asset7dRes.error ? 0 : (asset7dRes.count ?? 0),
-  }
-
-  dbCounts.value = {
-    processing_tasks: processingTaskCountRes.error ? 0 : (processingTaskCountRes.count ?? 0),
-    model_assets: assetCountRes.error ? 0 : (assetCountRes.count ?? 0),
-    memory_poses: poseCountRes.error ? 0 : (poseCountRes.count ?? 0),
-    rag_docs: ragCountRes.error ? 0 : (ragCountRes.count ?? 0),
-    tasks: taskTableCountRes.error ? 0 : (taskTableCountRes.count ?? 0),
-  }
-
-  lastUpdated.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
 
   await Promise.all([fetchStorageStats(), refreshEdgeChecks()])
 
@@ -1247,27 +1160,6 @@ const refreshDashboard = async () => {
 let refreshTimer: number | undefined
 let pollTimer: number | undefined
 const channels: RealtimeChannel[] = []
-
-const clearDashboardRuntime = () => {
-  if (refreshTimer) {
-    window.clearTimeout(refreshTimer)
-    refreshTimer = undefined
-  }
-  if (pollTimer) {
-    window.clearInterval(pollTimer)
-    pollTimer = undefined
-  }
-  channels.splice(0).forEach((channel) => {
-    void supabase.removeChannel(channel)
-  })
-  dashboardStarted.value = false
-  channelState.value = {
-    processing_tasks: 'connecting',
-    model_assets: 'connecting',
-    memory_poses: 'connecting',
-    worker_nodes: 'connecting',
-  }
-}
 
 const scheduleRefresh = () => {
   if (refreshTimer) window.clearTimeout(refreshTimer)
@@ -1300,20 +1192,6 @@ const bindChannel = (tableName: string, channelName: string) => {
   channels.push(channel)
 }
 
-const startDashboardRuntime = async () => {
-  if (dashboardStarted.value) return
-  dashboardStarted.value = true
-  loading.value = true
-  await refreshDashboard()
-
-  bindChannel('processing_tasks', 'dashboard-processing-tasks')
-  bindChannel('model_assets', 'dashboard-model-assets')
-  bindChannel('memory_poses', 'dashboard-memory-poses')
-  bindChannel('worker_nodes', 'dashboard-worker-nodes')
-
-  restartPolling()
-}
-
 watch([autoRefresh, refreshSeconds], () => {
   restartPolling()
 })
@@ -1331,25 +1209,25 @@ onMounted(async () => {
   }
   applyTheme()
 
-  // 必须等待 getSession 完成后再启动数据刷新，否则首次加载会停在空面板。
-  const { data: { session } } = await supabase.auth.getSession()
-  isAuthenticated.value = !!session
-  authLoading.value = false
-
-  supabase.auth.onAuthStateChange((_event, nextSession) => {
-    const authed = !!nextSession
-    isAuthenticated.value = authed
+  // 认证检查：监听 Supabase Auth 状态
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    isAuthenticated.value = !!session
     authLoading.value = false
-
-    if (authed) {
-      void startDashboardRuntime()
-    } else {
-      clearDashboardRuntime()
-      loading.value = true
-    }
+  })
+  supabase.auth.onAuthStateChange((_event, session) => {
+    isAuthenticated.value = !!session
+    authLoading.value = false
   })
 
-  if (session) await startDashboardRuntime()
+  if (!isAuthenticated.value) return
+  await refreshDashboard()
+
+  bindChannel('processing_tasks', 'dashboard-processing-tasks')
+  bindChannel('model_assets', 'dashboard-model-assets')
+  bindChannel('memory_poses', 'dashboard-memory-poses')
+  bindChannel('worker_nodes', 'dashboard-worker-nodes')
+
+  restartPolling()
 })
 
 watch([isDarkTheme, accentColor], () => {
@@ -1359,7 +1237,11 @@ watch([isDarkTheme, accentColor], () => {
 })
 
 onUnmounted(() => {
-  clearDashboardRuntime()
+  if (refreshTimer) window.clearTimeout(refreshTimer)
+  if (pollTimer) window.clearInterval(pollTimer)
+  channels.forEach((channel) => {
+    void supabase.removeChannel(channel)
+  })
 })
 </script>
 
@@ -1371,7 +1253,7 @@ onUnmounted(() => {
 
   <!-- 登录表单 -->
   <div v-else-if="!isAuthenticated" class="login-page">
-    <div class="login-card">
+    <div class="login-card glass-card">
       <h2>BrainDance Dashboard</h2>
       <p class="login-subtitle">请登录以访问管理面板</p>
       <form @submit.prevent="handleLogin">
@@ -1406,85 +1288,149 @@ onUnmounted(() => {
   <!-- 已认证：主 Dashboard -->
   <div v-else class="dashboard-page">
     <section class="shell-grid">
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <p class="sidebar-brand__label">BrainDance</p>
-          <h1 class="sidebar-brand__title">Dashboard</h1>
-        </div>
+      <aside class="phone-shell">
+        <div class="phone-shell__glow"></div>
+        <div class="phone-shell__frame">
+          <div class="phone-shell__head">
+            <div>
+              <p class="eyebrow">BrainDance</p>
+              <h1>Dashboard</h1>
+            </div>
+            <div class="status-dot" :class="`tone-${realtimeSeverity}`">
+              <Icon icon="lucide:radio-tower" />
+              <span>{{ realtimeStatusText }}</span>
+            </div>
+          </div>
 
-        <div class="sidebar-stat">
-          <span>成功率</span>
-          <strong :class="`tone-${successSeverity}`">{{ successRate }}%</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>排队</span>
-          <strong>{{ pendingCount }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>处理中</span>
-          <strong>{{ processingCount }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>失败</span>
-          <strong :class="`tone-${failureSeverity}`">{{ failedCount }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>资源</span>
-          <strong>{{ resourceRecordCount }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>用户</span>
-          <strong>{{ totalUserCount }}</strong>
-        </div>
+          <div class="phone-hero">
+            <div class="phone-hero__badge">实时总览</div>
+            <strong>{{ successRate }}%</strong>
+            <span>任务成功率</span>
+            <p>{{ successHint }}，最近 24 小时完成 {{ timeBasedStats.completed24h }} 条。</p>
+          </div>
 
-        <div class="sidebar-divider"></div>
+          <div class="phone-stats">
+            <article class="phone-stat-card">
+              <span>排队</span>
+              <strong>{{ pendingCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>处理中</span>
+              <strong>{{ processingCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>失败</span>
+              <strong>{{ failedCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>资产</span>
+              <strong>{{ modelAssetCount }}</strong>
+            </article>
+            <article class="phone-stat-card">
+              <span>用户</span>
+              <strong>{{ totalUserCount }}</strong>
+            </article>
+          </div>
 
-        <div class="sidebar-section-label">系统</div>
-        <div class="sidebar-stat">
-          <span>实时连接</span>
-          <strong :class="`tone-${realtimeSeverity}`">{{ realtimeStatusText }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>数据更新</span>
-          <strong>{{ taskFreshnessText }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>刷新</span>
-          <strong>{{ refreshModeText }}</strong>
-        </div>
-        <div class="sidebar-stat">
-          <span>Storage</span>
-          <strong>{{ storageApiReachable ? '可读' : '受限' }}</strong>
+          <div class="phone-panel">
+            <div class="phone-panel__title">
+              <span>Live status</span>
+              <strong>{{ taskFreshnessText }}</strong>
+            </div>
+            <div class="phone-list">
+              <div class="phone-list__item">
+                <Icon icon="lucide:clock-3" />
+                <div>
+                  <span>最后采样</span>
+                  <strong>{{ lastUpdated ?? '还没采样' }}</strong>
+                </div>
+              </div>
+              <div class="phone-list__item">
+                <Icon icon="lucide:refresh-cw" />
+                <div>
+                  <span>刷新节奏</span>
+                  <strong>{{ refreshModeText }}</strong>
+                </div>
+              </div>
+              <div class="phone-list__item">
+                <Icon icon="lucide:database" />
+                <div>
+                  <span>Storage</span>
+                  <strong>{{ storageApiReachable ? '可读' : '受限' }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottom-dock">
+            <div class="bottom-dock__item bottom-dock__item--active">
+              <Icon icon="lucide:layout-dashboard" />
+              <span>概览</span>
+            </div>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:activity" />
+              <span>趋势</span>
+            </div>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:database-zap" />
+              <span>资源</span>
+            </div>
+            <div class="bottom-dock__item">
+              <Icon icon="lucide:settings-2" />
+              <span>设置</span>
+            </div>
+          </div>
         </div>
       </aside>
 
       <main class="content-stage">
-        <section class="hero">
-          <div>
-            <h2 class="hero__title">任务与资源</h2>
-            <p class="hero__sub">查看当前任务进度、资源状态和系统运行情况。</p>
+        <section class="hero-card glass-card">
+          <div class="hero-card__copy">
+            <p class="eyebrow">BrainDance Operations</p>
+            <h2>统一查看任务、资源与服务状态</h2>
+            <p class="hero-card__text">
+              面向运营与排障场景，集中展示任务成功率、队列压力、存储可用性和实时连接状态。
+            </p>
+
+            <div class="hero-card__actions">
+              <el-button :loading="refreshing" type="primary" @click="refreshDashboard">
+                <Icon icon="lucide:refresh-cw" />
+                <span>立即刷新</span>
+              </el-button>
+
+              <div class="theme-pill">
+                <Icon :icon="isDarkTheme ? 'lucide:moon-star' : 'lucide:sun-medium'" />
+                <el-switch v-model="isDarkTheme" inline-prompt active-text="夜间" inactive-text="日间" />
+              </div>
+
+              <div class="theme-pill">
+                <Icon icon="lucide:paintbrush-2" />
+                <el-color-picker
+                  v-model="accentColor"
+                  :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
+                />
+              </div>
+
+              <el-button size="small" @click="handleLogout">
+                <Icon icon="lucide:log-out" />
+                <span>登出</span>
+              </el-button>
+            </div>
           </div>
-          <div class="hero__actions">
-            <el-button :loading="refreshing" type="primary" size="small" @click="refreshDashboard">
-              <Icon icon="lucide:refresh-cw" />
-              <span>刷新</span>
-            </el-button>
-            <div class="theme-pill">
-              <Icon :icon="isDarkTheme ? 'lucide:moon' : 'lucide:sun'" style="font-size: 14px;" />
-              <el-switch v-model="isDarkTheme" size="small" inline-prompt active-text="" inactive-text="" />
-            </div>
-            <div class="theme-pill">
-              <Icon icon="lucide:palette" style="font-size: 14px;" />
-              <el-color-picker
-                v-model="accentColor"
-                size="small"
-                :predefine="['#6b7a8f', '#71839a', '#6d8260', '#8b4747', '#a0aab5']"
-              />
-            </div>
-            <el-button size="small" @click="handleLogout">
-              <Icon icon="lucide:log-out" />
-              <span>登出</span>
-            </el-button>
+
+          <div class="hero-card__summary">
+            <article class="summary-pill" :class="`tone-${successSeverity}`">
+              <span>成功率</span>
+              <strong>{{ successRate }}%</strong>
+            </article>
+            <article class="summary-pill" :class="`tone-${queueSeverity}`">
+              <span>队列</span>
+              <strong>{{ queueCount }}</strong>
+            </article>
+            <article class="summary-pill" :class="`tone-${workerSeverity}`">
+              <span>Workers</span>
+              <strong>{{ workerSummaryText }}</strong>
+            </article>
           </div>
         </section>
 
@@ -1492,549 +1438,564 @@ onUnmounted(() => {
           <article
             v-for="item in overviewCards"
             :key="item.key"
-            class="overview-cell"
+            class="overview-card glass-card"
             :class="`tone-${item.tone}`"
           >
-            <div class="overview-cell__top">
-              <div class="overview-cell__icon">
+            <div class="overview-card-top">
+              <div class="icon-chip">
                 <Icon :icon="item.icon" />
               </div>
-              <span class="overview-cell__label">{{ item.label }}</span>
+              <span class="overview-label">{{ item.label }}</span>
             </div>
-            <div class="overview-cell__value">{{ item.value }}</div>
-            <p class="overview-cell__note">{{ item.note }}</p>
+            <div class="overview-value">{{ item.value }}</div>
+            <p class="overview-note">{{ item.note }}</p>
           </article>
         </section>
 
         <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon class="mb-16" />
-        <el-alert
-          v-for="warning in dataWarnings"
-          :key="warning"
-          :title="warning"
-          type="warning"
-          show-icon
-          class="mb-16"
-        />
         <el-alert v-if="storageError" :title="`Storage: ${storageError}`" type="warning" show-icon class="mb-16" />
         <el-skeleton v-if="loading" :rows="7" animated />
 
         <template v-else>
-          <section class="filters-bar">
-            <el-select v-model="selectedStatus" class="ctrl" placeholder="状态" size="small">
-              <el-option label="全部状态" value="all" />
-              <el-option label="排队中" value="pending" />
-              <el-option label="处理中" value="processing" />
-              <el-option label="已完成" value="completed" />
-              <el-option label="失败" value="failed" />
-            </el-select>
+          <section class="filters-row glass-card">
+            <div class="section-heading-main">
+              <div class="section-icon-shell">
+                <Icon icon="lucide:sliders-horizontal" />
+              </div>
+              <div>
+                <span class="section-kicker">Filters</span>
+                <h3 class="filters-title">筛选与刷新</h3>
+              </div>
+            </div>
 
-            <el-select v-model="selectedTaskType" class="ctrl" placeholder="类型" size="small">
-              <el-option label="全部类型" value="all" />
-              <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
-            </el-select>
-
-            <el-input v-model="searchKeyword" class="ctrl search" size="small" clearable placeholder="搜索任务 / 场景 / 用户" />
-
-            <div class="inline-ops">
-              <el-switch v-model="autoRefresh" size="small" inline-prompt active-text="" inactive-text="" />
-              <el-select v-model="refreshSeconds" class="interval" size="small" :disabled="!autoRefresh">
-                <el-option :value="15" label="15s" />
-                <el-option :value="30" label="30s" />
-                <el-option :value="60" label="60s" />
-                <el-option :value="120" label="120s" />
+            <div class="filters-controls">
+              <el-select v-model="selectedStatus" class="ctrl" placeholder="状态过滤">
+                <el-option label="全部状态" value="all" />
+                <el-option label="排队中" value="pending" />
+                <el-option label="处理中" value="processing" />
+                <el-option label="已完成" value="completed" />
+                <el-option label="失败" value="failed" />
               </el-select>
-            </div>
 
-            <span class="filters-count">{{ filteredTasks.length }} 条结果</span>
-          </section>
+              <el-select v-model="selectedTaskType" class="ctrl" placeholder="任务类型过滤">
+                <el-option label="全部类型" value="all" />
+                <el-option v-for="item in taskTypeOptions" :key="item" :label="item" :value="item" />
+              </el-select>
 
-          <section class="panel-row panel-row--2col">
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>任务趋势</h3>
-                  <p>各时间段的任务量变化。</p>
-                </div>
-                <el-radio-group v-model="taskTrendRange" size="small">
-                  <el-radio-button label="24h" value="24h">24h</el-radio-button>
-                  <el-radio-button label="7d" value="7d">7d</el-radio-button>
-                  <el-radio-button label="30d" value="30d">30d</el-radio-button>
-                  <el-radio-button label="all" value="all">全部</el-radio-button>
-                </el-radio-group>
-              </div>
-              <div class="card__body">
-                <v-chart class="chart" :option="taskTrendOption" autoresize />
-              </div>
-            </div>
+              <el-input v-model="searchKeyword" class="ctrl search" clearable placeholder="搜索任务 / 场景 / 用户" />
 
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>状态占比</h3>
-                  <p>各状态任务的数量占比。</p>
-                </div>
+              <div class="inline-ops">
+                <el-switch v-model="autoRefresh" inline-prompt active-text="自动" inactive-text="手动" />
+                <el-select v-model="refreshSeconds" class="interval" :disabled="!autoRefresh">
+                  <el-option :value="15" label="15s" />
+                  <el-option :value="30" label="30s" />
+                  <el-option :value="60" label="60s" />
+                  <el-option :value="120" label="120s" />
+                </el-select>
               </div>
-              <div class="card__body">
-                <v-chart class="chart pie" :option="statusPieOption" autoresize />
-              </div>
+
+              <div class="filter-count">{{ filteredTasks.length }} 条结果</div>
             </div>
           </section>
 
-          <section class="panel-row panel-row--2col">
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>处理中模型</h3>
-                  <p>当前正在处理的任务。</p>
+          <section class="panel-grid panel-grid--charts">
+            <el-card shadow="never" class="chart-card glass-card chart-card--wide">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">任务趋势</div>
+                    <div class="header-meta">对齐 app 的柔和蓝灰节奏感。</div>
+                  </div>
+                  <el-radio-group v-model="taskTrendRange" size="small">
+                    <el-radio-button label="24h" value="24h">24h</el-radio-button>
+                    <el-radio-button label="7d" value="7d">7d</el-radio-button>
+                    <el-radio-button label="30d" value="30d">30d</el-radio-button>
+                    <el-radio-button label="all" value="all">全部</el-radio-button>
+                  </el-radio-group>
                 </div>
-                <span class="filters-count">{{ processingSpotlights.length }} 条</span>
-              </div>
-              <div class="card__body">
-                <el-empty
-                  v-if="!processingSpotlights.length"
-                  description="当前没有正在处理的任务"
-                />
+              </template>
+              <v-chart class="chart" :option="taskTrendOption" autoresize />
+            </el-card>
 
-                <div v-else class="processing-grid">
-                  <article
-                    v-for="item in processingSpotlights"
-                    :key="item.task.id"
-                    class="processing-item"
-                  >
-                    <div class="processing-item__top">
+            <el-card shadow="never" class="chart-card glass-card chart-card--compact">
+              <template #header>
+                <div>
+                  <div class="card-header">状态占比</div>
+                  <div class="header-meta">快速读出失败与完成比例。</div>
+                </div>
+              </template>
+              <v-chart class="chart pie" :option="statusPieOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--processing">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">处理中模型</div>
+                    <div class="header-meta">按日志阶段估算进度，优先展示正在跑的任务。</div>
+                  </div>
+                  <div class="filter-count">{{ processingSpotlights.length }} 条</div>
+                </div>
+              </template>
+
+              <el-empty
+                v-if="!processingSpotlights.length"
+                description="当前没有 processing 状态的模型任务"
+              />
+
+              <div v-else class="processing-grid">
+                <article
+                  v-for="item in processingSpotlights"
+                  :key="item.task.id"
+                  class="processing-card"
+                >
+                  <div class="processing-card__top">
+                    <div>
+                      <div class="task-name">{{ formatDisplayName(item.task) }}</div>
+                      <div class="task-sub">
+                        {{ item.task.task_type || 'video_3dgs' }} / {{ item.task.scene_id }}
+                      </div>
+                    </div>
+                    <el-tag type="warning">{{ item.insight.stageLabel }}</el-tag>
+                  </div>
+
+                  <div class="processing-card__metrics">
+                    <div class="processing-chip">
+                      <span>当前 Worker</span>
+                      <strong>{{ item.worker ? formatWorkerLabel(item.worker) : '待分配' }}</strong>
+                    </div>
+                    <div class="processing-chip">
+                      <span>最新心跳</span>
+                      <strong>{{ item.worker ? formatHeartbeatAge(item.worker.last_heartbeat) : '暂无' }}</strong>
+                    </div>
+                  </div>
+
+                  <el-progress :percentage="item.insight.percent" :stroke-width="10" />
+
+                  <div class="processing-card__log">
+                    <span>最新动态</span>
+                    <strong>{{ item.insight.latestMessage }}</strong>
+                  </div>
+
+                  <div class="processing-card__footer">
+                    <span>更新时间 {{ formatDateTime(item.task.updated_at) }}</span>
+                    <el-button size="small" plain @click="openTaskLogDrawer(item.task)">查看日志</el-button>
+                  </div>
+                </article>
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">处理观察点</div>
+                  <div class="header-meta">聚焦处理阶段、排障入口和 Worker 绑定情况。</div>
+                </div>
+              </template>
+
+              <div class="alerts-list alerts-list--soft">
+                <article
+                  v-for="item in processingSpotlights.slice(0, 4)"
+                  :key="item.task.id"
+                  class="alert-item"
+                >
+                  <div class="alert-item-top">
+                    <div>
+                      <span class="alert-label">{{ item.insight.stageLabel }}</span>
+                      <strong class="alert-value">{{ item.insight.percent }}%</strong>
+                    </div>
+                    <el-tag type="info">
+                      {{ item.worker ? getWorkerStatusLabel(item.worker) : '等待接单' }}
+                    </el-tag>
+                  </div>
+                  <p class="alert-note">{{ item.insight.summary }}</p>
+                  <div class="fail-sub">
+                    {{ item.worker ? formatWorkerLabel(item.worker) : '尚未绑定 Worker' }}
+                  </div>
+                </article>
+              </div>
+
+              <el-divider />
+
+              <div class="db-metrics db-metrics--users">
+                <div class="metric-item">
+                  <div class="metric-title">处理中</div>
+                  <div class="metric-value">{{ processingCount }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">排队中</div>
+                  <div class="metric-value">{{ pendingCount }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">在线 Worker</div>
+                  <div class="metric-value ok">{{ onlineWorkerCount }}</div>
+                </div>
+              </div>
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--operations">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">任务队列</div>
+                  <div class="header-meta">显示筛选后的前 20 条任务。</div>
+                </div>
+              </template>
+              <el-table :data="taskQueue" stripe height="460" empty-text="没找到任务">
+                <el-table-column label="任务名" min-width="220">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatDisplayName(scope.row) }}</div>
+                    <div class="task-sub">{{ scope.row.task_type || 'video_3dgs' }} / {{ scope.row.scene_id }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="110" align="center">
+                  <template #default="scope">
+                    <el-tag :type="statusMap[scope.row.status]?.type || 'info'">
+                      {{ statusMap[scope.row.status]?.label || scope.row.status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="进度" min-width="140">
+                  <template #default="scope">
+                    <div class="task-progress-cell">
+                      <el-progress
+                        :percentage="getTaskProgress(scope.row)"
+                        :status="scope.row.status === 'failed' ? 'exception' : scope.row.status === 'completed' ? 'success' : undefined"
+                      />
+                      <span class="task-progress-note">{{ getTaskInsight(scope.row).stageLabel }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="日志摘要" min-width="240">
+                  <template #default="scope">
+                    <div class="task-log-snippet">{{ getTaskInsight(scope.row).latestMessage }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="质量" width="85" align="center">
+                  <template #default="scope">
+                    {{ typeof scope.row.quality_score === 'number' ? scope.row.quality_score : '-' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="更新时间" min-width="165">
+                  <template #default="scope">
+                    {{ formatDateTime(scope.row.updated_at) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="日志" width="110" align="center">
+                  <template #default="scope">
+                    <el-button size="small" plain @click="openTaskLogDrawer(scope.row)">查看</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">异常摘要</div>
+                  <div class="header-meta">{{ activeAlertCount }} 项需要关注。</div>
+                </div>
+              </template>
+
+              <div class="alerts-list alerts-list--soft">
+                <article
+                  v-for="item in alertRows"
+                  :key="item.key"
+                  class="alert-item"
+                  :class="`tone-${item.tone}`"
+                >
+                  <div class="alert-item-top">
+                    <div class="icon-chip icon-chip--small">
+                      <Icon :icon="item.icon" />
+                    </div>
+                    <div>
+                      <span class="alert-label">{{ item.label }}</span>
+                      <strong class="alert-value">{{ item.value }}</strong>
+                    </div>
+                  </div>
+                  <p class="alert-note">{{ item.note }}</p>
+                </article>
+              </div>
+
+              <el-divider />
+
+              <el-empty v-if="!failedTasks.length" description="暂无失败任务" />
+              <el-timeline v-else>
+                <el-timeline-item
+                  v-for="item in failedTasks"
+                  :key="item.id"
+                  type="danger"
+                  :timestamp="formatDateTime(item.updated_at)"
+                >
+                  <div class="fail-title">{{ formatDisplayName(item) }}</div>
+                  <div class="fail-sub">{{ item.scene_id }} / {{ item.user_id }}</div>
+                  <div class="fail-log">{{ getLatestLogMessage(item.logs) }}</div>
+                  <div style="margin-top: 10px;">
+                    <el-button size="small" plain @click="openTaskLogDrawer(item)">查看完整日志</el-button>
+                  </div>
+                </el-timeline-item>
+              </el-timeline>
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--resources">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">Worker 集群</div>
+                    <div class="header-meta">在线 {{ onlineWorkerCount }} / 总数 {{ workerRows.length }}，支持对单个实例发起优雅暂停。</div>
+                  </div>
+                </div>
+              </template>
+              <el-table :data="workerRows" stripe height="300" empty-text="还没有 worker 注册心跳">
+                <el-table-column label="Worker" min-width="240">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatWorkerLabel(scope.row) }}</div>
+                    <div class="task-sub">{{ scope.row.worker_id }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="120" align="center">
+                  <template #default="scope">
+                    <el-tag :type="getWorkerStatusTag(scope.row.status)">
+                      {{ getWorkerStatusLabel(scope.row) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="当前任务" min-width="180">
+                  <template #default="scope">
+                    {{ scope.row.current_scene_id || scope.row.current_task_id || '-' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="心跳" min-width="170">
+                  <template #default="scope">
+                    {{ formatDateTime(scope.row.last_heartbeat) }} / {{ formatHeartbeatAge(scope.row.last_heartbeat) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="控制" min-width="260" align="center">
+                  <template #default="scope">
+                    <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerPause(scope.row)"
+                      >
+                        优雅暂停
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="danger"
+                        plain
+                        :disabled="scope.row.desired_state === 'interrupt' || !isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerInterrupt(scope.row)"
+                      >
+                        中断任务
+                      </el-button>
+                      <el-button
+                        size="small"
+                        type="success"
+                        plain
+                        :disabled="scope.row.desired_state === 'run' && isWorkerRowOnline(scope.row)"
+                        @click="requestWorkerResume(scope.row)"
+                      >
+                        恢复实例
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="header-meta" style="margin-top: 12px;">
+                “优雅暂停” 会把 `desired_state` 设为 `pause`，实例不会再接新任务；“中断任务” 会把 `desired_state` 设为 `interrupt`，Supervisor 会尝试向子 Worker 转发中断信号，尽量打断当前任务；“恢复实例” 会把 `desired_state` 改回 `run` 并重新拉起实例。
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="storage-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">Storage 状态</div>
+                  <div class="header-meta">前端扫描的桶与体积估算。</div>
+                </div>
+              </template>
+              <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="桶还读不到">
+                <el-table-column label="Bucket" min-width="180" prop="id" />
+                <el-table-column label="可见性" width="90" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.public ? 'success' : 'info'">{{ scope.row.public ? 'Public' : 'Private' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="对象数" width="95" align="right" prop="objectCount" />
+                <el-table-column label="估算体积" min-width="120" align="right">
+                  <template #default="scope">{{ formatBytes(scope.row.totalBytes) }}</template>
+                </el-table-column>
+                <el-table-column label="最近更新" min-width="170">
+                  <template #default="scope">{{ scope.row.latestUpdatedAt ? formatDateTime(scope.row.latestUpdatedAt) : '-' }}</template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="db-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">数据库概览</div>
+                  <div class="header-meta">短周期活跃度与总量。</div>
+                </div>
+              </template>
+              <div class="db-metrics">
+                <div class="metric-item">
+                  <div class="metric-title">24h 任务</div>
+                  <div class="metric-value">{{ timeBasedStats.tasks24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 失败</div>
+                  <div class="metric-value bad">{{ timeBasedStats.failed24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 完成</div>
+                  <div class="metric-value ok">{{ timeBasedStats.completed24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">用户总数</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃用户</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 活跃</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers7d }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 资产</div>
+                  <div class="metric-value">{{ timeBasedStats.assets7d }}</div>
+                </div>
+              </div>
+              <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
+            </el-card>
+          </section>
+
+          <section class="panel-grid panel-grid--users">
+            <el-card shadow="never" class="table-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户列表</div>
+                  <div class="header-meta">基于 `processing_tasks`、`model_assets`、`tasks` 的 user_id 聚合。</div>
+                </div>
+              </template>
+              <el-table :data="userSummaries" stripe height="360" empty-text="暂无用户数据">
+                <el-table-column label="用户" min-width="180">
+                  <template #default="scope">
+                    <div class="task-name">{{ formatUserId(scope.row.userId) }}</div>
+                    <div class="task-sub">{{ scope.row.userId }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="任务数" width="90" align="right" prop="taskCount" />
+                <el-table-column label="资产数" width="90" align="right" prop="assetCount" />
+                <el-table-column label="24h 任务" width="100" align="right" prop="task24h" />
+                <el-table-column label="7d 活跃" width="100" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.task7d > 0 || scope.row.asset7d > 0 ? 'success' : 'info'">
+                      {{ scope.row.task7d > 0 || scope.row.asset7d > 0 ? '活跃' : '沉默' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="最近活动" min-width="170">
+                  <template #default="scope">
+                    {{ scope.row.lastSeenAt ? formatDateTime(scope.row.lastSeenAt) : '-' }}
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <el-card shadow="never" class="fail-card glass-card">
+              <template #header>
+                <div>
+                  <div class="card-header">用户活跃摘要</div>
+                  <div class="header-meta">最近活跃与高频使用者。</div>
+                </div>
+              </template>
+
+              <div class="db-metrics db-metrics--users">
+                <div class="metric-item">
+                  <div class="metric-title">总用户</div>
+                  <div class="metric-value">{{ timeBasedStats.totalUsers }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">24h 活跃</div>
+                  <div class="metric-value">{{ timeBasedStats.activeUsers24h }}</div>
+                </div>
+                <div class="metric-item">
+                  <div class="metric-title">7d 活跃</div>
+                  <div class="metric-value ok">{{ timeBasedStats.activeUsers7d }}</div>
+                </div>
+              </div>
+
+              <div class="user-summary-block">
+                <div class="card-header-row user-summary-block__head">
+                  <div>
+                    <div class="card-header">Top 用户</div>
+                    <div class="header-meta">按业务动作总数排序。</div>
+                  </div>
+                </div>
+                <div class="alerts-list alerts-list--soft">
+                  <article v-for="item in topUsers" :key="item.userId" class="alert-item">
+                    <div class="alert-item-top">
                       <div>
-                        <div class="processing-item__name">{{ formatDisplayName(item.task) }}</div>
-                        <div class="processing-item__sub">
-                          {{ item.task.task_type || 'video_3dgs' }} / {{ item.task.scene_id }}
-                        </div>
+                        <span class="alert-label">{{ formatUserId(item.userId) }}</span>
+                        <strong class="alert-value">{{ item.taskCount + item.assetCount }}</strong>
                       </div>
-                      <el-tag type="warning" size="small">{{ item.insight.stageLabel }}</el-tag>
+                      <el-tag type="info">任务 {{ item.taskCount }}</el-tag>
                     </div>
-
-                    <div class="processing-item__chips">
-                      <div class="processing-chip">
-                        <div class="processing-chip__label">Worker</div>
-                        <div class="processing-chip__value">{{ item.worker ? formatWorkerLabel(item.worker) : '待分配' }}</div>
-                      </div>
-                      <div class="processing-chip">
-                        <div class="processing-chip__label">心跳</div>
-                        <div class="processing-chip__value">{{ item.worker ? formatHeartbeatAge(item.worker.last_heartbeat) : '暂无' }}</div>
-                      </div>
-                    </div>
-
-                    <el-progress :percentage="item.insight.percent" :stroke-width="6" />
-
-                    <div class="processing-log">
-                      <div class="processing-log__label">最新动态</div>
-                      <div class="processing-log__text">{{ item.insight.latestMessage }}</div>
-                    </div>
-
-                    <div class="processing-item__footer">
-                      <span>{{ formatDateTime(item.task.updated_at) }}</span>
-                      <el-button size="small" plain @click="openTaskLogDrawer(item.task)">日志</el-button>
-                    </div>
+                    <p class="alert-note">资产 {{ item.assetCount }}，最近活动 {{ item.lastSeenAt ? formatDateTime(item.lastSeenAt) : '-' }}</p>
                   </article>
                 </div>
               </div>
-            </div>
 
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>处理概况</h3>
-                  <p>正在处理的任务与 Worker 状态。</p>
+              <el-divider />
+
+              <div class="user-chip-list">
+                <div v-for="item in newlyActiveUsers" :key="item.userId" class="user-chip">
+                  <span>{{ formatUserId(item.userId) }}</span>
+                  <strong>{{ item.task7d + item.asset7d }}</strong>
                 </div>
               </div>
-              <div class="card__body">
-                <div class="alert-list">
-                  <div
-                    v-for="item in processingSpotlights.slice(0, 4)"
-                    :key="item.task.id"
-                    class="alert-row"
-                  >
-                    <div class="alert-row__icon">
-                      <Icon icon="lucide:loader" />
-                    </div>
-                    <div class="alert-row__body">
-                      <div class="alert-row__label">{{ item.insight.stageLabel }}</div>
-                      <div class="alert-row__value">{{ item.insight.percent }}%</div>
-                      <div class="alert-row__note">{{ item.insight.summary }}</div>
-                    </div>
-                    <el-tag type="info" size="small">
-                      {{ item.worker ? getWorkerStatusLabel(item.worker) : '等待' }}
-                    </el-tag>
-                  </div>
-                </div>
-
-                <div class="metric-grid metric-grid--3col" style="margin-top: 16px;">
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">处理中</div>
-                    <div class="metric-cell__value">{{ processingCount }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">排队中</div>
-                    <div class="metric-cell__value">{{ pendingCount }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">在线 Worker</div>
-                    <div class="metric-cell__value ok">{{ onlineWorkerCount }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            </el-card>
           </section>
 
-          <section class="panel-row panel-row--2col">
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>任务队列</h3>
-                  <p>筛选后的前 20 条任务。</p>
-                </div>
-              </div>
-              <div class="card__body" style="padding: 0;">
-                <el-table :data="taskQueue" stripe height="460" empty-text="没找到任务">
-                  <el-table-column label="任务名" min-width="220">
-                    <template #default="scope">
-                      <div class="task-name">{{ formatDisplayName(scope.row) }}</div>
-                      <div class="task-sub">{{ scope.row.task_type || 'video_3dgs' }} / {{ scope.row.scene_id }}</div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="状态" width="100" align="center">
-                    <template #default="scope">
-                      <el-tag :type="statusMap[scope.row.status]?.type || 'info'" size="small">
-                        {{ statusMap[scope.row.status]?.label || scope.row.status }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="进度" min-width="130">
-                    <template #default="scope">
-                      <div class="task-progress-cell">
-                        <el-progress
-                          :percentage="getTaskProgress(scope.row)"
-                          :stroke-width="4"
-                          :show-text="false"
-                          :status="scope.row.status === 'failed' ? 'exception' : scope.row.status === 'completed' ? 'success' : undefined"
-                        />
-                        <span class="task-progress-note">{{ getTaskInsight(scope.row).stageLabel }}</span>
-                      </div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="日志摘要" min-width="220">
-                    <template #default="scope">
-                      <div class="task-log-snippet">{{ getTaskInsight(scope.row).latestMessage }}</div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="质量" width="70" align="center">
-                    <template #default="scope">
-                      {{ typeof scope.row.quality_score === 'number' ? scope.row.quality_score : '-' }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="更新时间" width="150">
-                    <template #default="scope">
-                      {{ formatDateTime(scope.row.updated_at) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="" width="70" align="center">
-                    <template #default="scope">
-                      <el-button size="small" plain @click="openTaskLogDrawer(scope.row)">日志</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>异常摘要</h3>
-                  <p>{{ activeAlertCount }} 项需要关注。</p>
-                </div>
-              </div>
-              <div class="card__body">
-                <div class="alert-list">
-                  <div
-                    v-for="item in alertRows"
-                    :key="item.key"
-                    class="alert-row"
-                    :class="`tone-${item.tone}`"
-                  >
-                    <div class="alert-row__icon">
-                      <Icon :icon="item.icon" />
-                    </div>
-                    <div class="alert-row__body">
-                      <div class="alert-row__label">{{ item.label }}</div>
-                      <div class="alert-row__value">{{ item.value }}</div>
-                      <div class="alert-row__note">{{ item.note }}</div>
-                    </div>
+          <section class="panel-grid panel-grid--edge">
+            <el-card shadow="never" class="edge-card glass-card">
+              <template #header>
+                <div class="card-header-row">
+                  <div>
+                    <div class="card-header">Edge Functions</div>
+                    <div class="header-meta">只测网关可达和延迟。</div>
                   </div>
+                  <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">重新探测</el-button>
                 </div>
-
-                <div style="margin-top: 16px;">
-                  <el-empty v-if="!failedTasks.length" description="暂无失败任务" :image-size="60" />
-                  <template v-else>
-                    <div
-                      v-for="item in failedTasks"
-                      :key="item.id"
-                      class="fail-item"
-                    >
-                      <div class="fail-item__title">{{ formatDisplayName(item) }}</div>
-                      <div class="fail-item__sub">{{ item.scene_id }} / {{ item.user_id }}</div>
-                      <div class="fail-item__log">{{ getLatestLogMessage(item.logs) }}</div>
-                      <div style="margin-top: 8px;">
-                        <el-button size="small" plain @click="openTaskLogDrawer(item)">完整日志</el-button>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel-row panel-row--3col">
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>Worker 集群</h3>
-                  <p>在线 {{ onlineWorkerCount }} / 总数 {{ workerRows.length }}</p>
-                </div>
-              </div>
-              <div class="card__body" style="padding: 0;">
-                <el-table :data="workerRows" stripe height="300" empty-text="还没有 worker 注册心跳">
-                  <el-table-column label="Worker" min-width="200">
-                    <template #default="scope">
-                      <div class="task-name">{{ formatWorkerLabel(scope.row) }}</div>
-                      <div class="task-sub">{{ scope.row.worker_id }}</div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="状态" width="100" align="center">
-                    <template #default="scope">
-                      <el-tag :type="getWorkerStatusTag(scope.row.status)" size="small">
-                        {{ getWorkerStatusLabel(scope.row) }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="当前任务" min-width="150">
-                    <template #default="scope">
-                      {{ scope.row.current_scene_id || scope.row.current_task_id || '-' }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="心跳" width="140">
-                    <template #default="scope">
-                      {{ formatHeartbeatAge(scope.row.last_heartbeat) }}
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="" width="200" align="center">
-                    <template #default="scope">
-                      <div style="display: flex; gap: 4px; justify-content: center;">
-                        <el-button
-                          size="small"
-                          plain
-                          :disabled="scope.row.desired_state === 'pause' || !isWorkerRowOnline(scope.row)"
-                          @click="requestWorkerPause(scope.row)"
-                        >暂停</el-button>
-                        <el-button
-                          size="small"
-                          type="danger"
-                          plain
-                          :disabled="scope.row.desired_state === 'interrupt' || !isWorkerRowOnline(scope.row)"
-                          @click="requestWorkerInterrupt(scope.row)"
-                        >中断</el-button>
-                        <el-button
-                          size="small"
-                          type="success"
-                          plain
-                          :disabled="scope.row.desired_state === 'run' && isWorkerRowOnline(scope.row)"
-                          @click="requestWorkerResume(scope.row)"
-                        >恢复</el-button>
-                      </div>
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>Storage</h3>
-                  <p>各存储桶的文件数量和占用空间。</p>
-                </div>
-              </div>
-              <div class="card__body" style="padding: 0;">
-                <el-table :data="storageStats" stripe :loading="storageLoading" height="300" empty-text="暂无数据">
-                  <el-table-column label="Bucket" min-width="150" prop="id" />
-                  <el-table-column label="可见性" width="80" align="center">
-                    <template #default="scope">
-                      <el-tag :type="scope.row.public ? 'success' : 'info'" size="small">{{ scope.row.public ? 'Public' : 'Private' }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="对象数" width="80" align="right" prop="objectCount" />
-                  <el-table-column label="体积" width="100" align="right">
-                    <template #default="scope">{{ formatBytes(scope.row.totalBytes) }}</template>
-                  </el-table-column>
-                  <el-table-column label="最近更新" width="140">
-                    <template #default="scope">{{ scope.row.latestUpdatedAt ? formatDateTime(scope.row.latestUpdatedAt) : '-' }}</template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>数据库</h3>
-                  <p>各表记录数与近期活跃量。</p>
-                </div>
-              </div>
-              <div class="card__body">
-                <div class="metric-grid metric-grid--7col">
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">24h 任务</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.tasks24h }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">24h 失败</div>
-                    <div class="metric-cell__value bad">{{ timeBasedStats.failed24h }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">24h 完成</div>
-                    <div class="metric-cell__value ok">{{ timeBasedStats.completed24h }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">用户总数</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.totalUsers }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">24h 活跃</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.activeUsers24h }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">7d 活跃</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.activeUsers7d }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">7d 资产</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.assets7d }}</div>
-                  </div>
-                </div>
-                <v-chart class="db-chart" :option="dbRowsChartOption" autoresize />
-              </div>
-            </div>
-          </section>
-
-          <section class="panel-row panel-row--2col">
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>用户列表</h3>
-                  <p>按用户汇总任务与资产数据。</p>
-                </div>
-              </div>
-              <div class="card__body" style="padding: 0;">
-                <el-table :data="userSummaries" stripe height="360" empty-text="暂无用户数据">
-                  <el-table-column label="用户" min-width="180">
-                    <template #default="scope">
-                      <div class="task-name">{{ formatUserId(scope.row.userId) }}</div>
-                      <div class="task-sub">{{ scope.row.userId }}</div>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="任务数" width="80" align="right" prop="taskCount" />
-                  <el-table-column label="资产数" width="80" align="right" prop="assetCount" />
-                  <el-table-column label="24h" width="80" align="right" prop="task24h" />
-                  <el-table-column label="7d 活跃" width="90" align="center">
-                    <template #default="scope">
-                      <el-tag :type="scope.row.task7d > 0 || scope.row.asset7d > 0 ? 'success' : 'info'" size="small">
-                        {{ scope.row.task7d > 0 || scope.row.asset7d > 0 ? '活跃' : '沉默' }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="最近活动" width="150">
-                    <template #default="scope">
-                      {{ scope.row.lastSeenAt ? formatDateTime(scope.row.lastSeenAt) : '-' }}
-                    </template>
-                  </el-table-column>
-                </el-table>
-              </div>
-            </div>
-
-            <div class="card">
-              <div class="card__header">
-                <div class="card__header-text">
-                  <h3>用户活跃</h3>
-                  <p>近期活跃用户统计。</p>
-                </div>
-              </div>
-              <div class="card__body">
-                <div class="metric-grid metric-grid--3col">
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">总用户</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.totalUsers }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">24h 活跃</div>
-                    <div class="metric-cell__value">{{ timeBasedStats.activeUsers24h }}</div>
-                  </div>
-                  <div class="metric-cell">
-                    <div class="metric-cell__label">7d 活跃</div>
-                    <div class="metric-cell__value ok">{{ timeBasedStats.activeUsers7d }}</div>
-                  </div>
-                </div>
-
-                <div style="margin-top: 16px;">
-                  <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 600;">Top 用户</h4>
-                  <div class="alert-list">
-                    <div v-for="item in topUsers" :key="item.userId" class="alert-row">
-                      <div class="alert-row__body">
-                        <div class="alert-row__label">{{ formatUserId(item.userId) }}</div>
-                        <div class="alert-row__value">{{ item.taskCount + item.assetCount }}</div>
-                        <div class="alert-row__note">任务 {{ item.taskCount }} / 资产 {{ item.assetCount }}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div style="margin-top: 16px;">
-                  <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 600;">近期活跃</h4>
-                  <div class="user-chip-list">
-                    <div v-for="item in newlyActiveUsers" :key="item.userId" class="user-chip">
-                      <span>{{ formatUserId(item.userId) }}</span>
-                      <strong>{{ item.task7d + item.asset7d }}</strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="card">
-            <div class="card__header">
-              <div class="card__header-text">
-                <h3>Edge Functions</h3>
-                <p>各函数的在线状态和响应时间。</p>
-              </div>
-              <el-button size="small" :loading="edgeLoading" @click="refreshEdgeChecks">重新探测</el-button>
-            </div>
-            <div class="card__body" style="padding: 0;">
-              <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="250" empty-text="还没配函数名">
+              </template>
+              <el-table :data="edgeChecks" stripe :loading="edgeLoading" height="290" empty-text="还没配函数名">
                 <el-table-column label="函数名" min-width="150" prop="name" />
-                <el-table-column label="状态" width="100" align="center">
+                <el-table-column label="状态" width="120" align="center">
                   <template #default="scope">
-                    <el-tag :type="scope.row.status === 'ok' ? 'success' : scope.row.status === 'missing' ? 'warning' : 'danger'" size="small">
+                    <el-tag :type="scope.row.status === 'ok' ? 'success' : scope.row.status === 'missing' ? 'warning' : 'danger'">
                       {{ scope.row.status === 'ok' ? '可达' : scope.row.status === 'missing' ? '未部署' : '异常' }}
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column label="HTTP" width="80" align="center">
+                <el-table-column label="HTTP" width="90" align="center">
                   <template #default="scope">{{ scope.row.httpStatus ?? '-' }}</template>
                 </el-table-column>
-                <el-table-column label="延迟" width="80" align="right">
-                  <template #default="scope">{{ scope.row.latencyMs != null ? `${scope.row.latencyMs}ms` : '-' }}</template>
+                <el-table-column label="延迟(ms)" width="100" align="right">
+                  <template #default="scope">{{ scope.row.latencyMs ?? '-' }}</template>
                 </el-table-column>
-                <el-table-column label="最近检查" width="150" prop="lastCheckedAt" />
-                <el-table-column label="说明" min-width="200" prop="message" />
+                <el-table-column label="最近检查" min-width="160" prop="lastCheckedAt" />
+                <el-table-column label="说明" min-width="220" prop="message" />
               </el-table>
-            </div>
+            </el-card>
           </section>
         </template>
       </main>
