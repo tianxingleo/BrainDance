@@ -69,7 +69,6 @@ class RecallModelGrid extends StatelessWidget {
   final void Function(Map<String, dynamic> model, {bool imageOnly})
   onShowModelActions;
   final String Function(String) toPublicUrl;
-  final Set<String> previewSceneIds;
 
   const RecallModelGrid({
     super.key,
@@ -84,7 +83,6 @@ class RecallModelGrid extends StatelessWidget {
     required this.onNavigateToViewer,
     required this.onShowModelActions,
     required this.toPublicUrl,
-    this.previewSceneIds = const <String>{},
   });
 
   @override
@@ -285,9 +283,6 @@ class RecallModelGrid extends StatelessWidget {
                         textColor: textColor,
                         hintTextColor: hintTextColor,
                         toPublicUrl: toPublicUrl,
-                        isPreviewVersion: previewSceneIds.contains(
-                          model['scene_id']?.toString() ?? '',
-                        ),
                       ),
                     ),
                   ),
@@ -656,7 +651,6 @@ class RecallModelTile extends StatelessWidget {
   final double? elevationProgress;
   final String Function(String)? toPublicUrl;
   final bool imageOnly;
-  final bool isPreviewVersion;
 
   const RecallModelTile({
     super.key,
@@ -671,7 +665,6 @@ class RecallModelTile extends StatelessWidget {
     this.elevationProgress,
     this.toPublicUrl,
     this.imageOnly = false,
-    this.isPreviewVersion = false,
   });
 
   @override
@@ -775,12 +768,6 @@ class RecallModelTile extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (isPreviewVersion)
-                  Positioned(
-                    top: 8,
-                    left: 8,
-                    child: _PreviewVersionBadge(isDark: isDark, theme: theme),
-                  ),
               ],
             ),
           ),
@@ -861,45 +848,6 @@ class RecallModelMockCover extends StatelessWidget {
             color: accent.withAlpha(210),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _PreviewVersionBadge extends StatelessWidget {
-  final bool isDark;
-  final TDThemeData theme;
-
-  const _PreviewVersionBadge({required this.isDark, required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = const Color(0xFFFFA726);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: accent.withAlpha(isDark ? 230 : 235),
-        borderRadius: BorderRadius.circular(4),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 70 : 30),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.auto_awesome_rounded, size: 10, color: Colors.white),
-          const SizedBox(width: 3),
-          TDText(
-            textLocalize('recall_model_preview_version'),
-            font: theme.fontBodyExtraSmall,
-            fontWeight: FontWeight.w600,
-            textColor: Colors.white,
-          ),
-        ],
       ),
     );
   }

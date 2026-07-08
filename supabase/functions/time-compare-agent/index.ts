@@ -36,7 +36,6 @@ serve(async (req: Request) => {
 
     const result = await runTimeCompareAgent(
       parsed.data.query,
-      parsed.data.userId,
       parsed.data.threshold,
     );
     return new Response(JSON.stringify(result), {

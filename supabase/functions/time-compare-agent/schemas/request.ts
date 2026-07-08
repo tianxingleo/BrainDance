@@ -5,7 +5,6 @@ export const timeCompareRequestSchema = z.object({
     500,
     "搜索语句过长（最大 500 字符）",
   ),
-  userId: z.string().trim().min(1, "userId 不能为空"),
   threshold: z.number().min(0).max(1).optional(),
 });
 

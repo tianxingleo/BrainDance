@@ -7,6 +7,7 @@ import '../main.dart' show pendingSubmitTitleProvider;
 import '../widgets/bd_surfaces.dart';
 import 'record.dart';
 import 'generate.dart';
+import 'community.dart';
 
 PageRoute<T> _verticalSlideRoute<T>({
   required WidgetBuilder builder,

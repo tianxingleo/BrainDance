@@ -12,8 +12,6 @@ export const getAssetToolLoopPrompt = (today: string, contextBlock: string) => `
 - 绝对不要改动 ply_path、scene_id、embedding、user_id 之类的系统字段。
 - 如果需要批量改名，优先使用 batch_patch_model_metadata，并通过 displayNameTemplate / Prefix / Suffix 生成新名称。
 - 如果用户在问“有没有重名/重复命名的模型”“某类主题相关的模型有哪些”，优先使用通用读库工具完成查询或聚合，再基于结果回答，不要先假设答案。
-- "我有没有 X""家里有没有 Y""我拍过 Z 吗"这类判存在性问题，本质是空间检索（找物体/找场景），**不属于资产元数据管理**——应当不调任何资产工具直接停止子循环，把请求交给上层路由由 pose_semantic_search / scene_metadata_search 处理。绝不要用 read_model_assets 兜底，否则会把无关模型作为命中下发到前端。
-- 不要为了扩大召回反复用近义词重复调 read_model_assets——每多调一轮，state.list 就会并入更多边缘命中，最终都会下发到前端卡片。一次准确的 query 优于三次同义词扫荡。
 - 如果用户说“把最新两个模型分别改名为 test1 和 test2”，应先读取最近两个模型，再调用 write_model_assets，为每个 modelId 提供对应的新名字。
 - 如果当前上下文已经给出了上一轮预览的工具参数，且用户明确说“确认执行”，优先重放同一组参数，不要重新猜测范围。
 - 如果用户要做专题归档，优先使用 create_memory_collection / add_models_to_collection / summarize_collection。

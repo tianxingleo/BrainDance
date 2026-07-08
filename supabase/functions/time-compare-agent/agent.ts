@@ -351,7 +351,6 @@ async function parseCompareIntent(
 async function fetchDisplayNameMap(
   supabase: SupabaseClient,
   sceneIds: string[],
-  userId: string,
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (sceneIds.length === 0) return map;
@@ -359,7 +358,6 @@ async function fetchDisplayNameMap(
   const { data } = await supabase
     .from("processing_tasks")
     .select("scene_id, display_name")
-    .eq("user_id", userId)
     .in("scene_id", sceneIds);
 
   for (const row of data ?? []) {
@@ -383,7 +381,6 @@ async function fetchFrameTagMap(
   const map = new Map<string, string | null>();
   if (!modelId || imageNames.length === 0) return map;
 
-  // memory_poses 没有 user_id 列，调用方必须确保 modelId 已经按当前用户过滤过。
   const { data } = await supabase
     .from("memory_poses")
     .select("image_name, tag")
@@ -401,13 +398,12 @@ async function fetchFrameTagMap(
 async function enrichSnapshots(
   supabase: SupabaseClient,
   rows: SearchRow[],
-  userId: string,
 ): Promise<CompareSceneSnapshot[]> {
   if (rows.length === 0) return [];
 
   const modelIds = rows.map((row) => row.id);
   const sceneIds = rows.map((row) => row.scene_id);
-  const displayNameMap = await fetchDisplayNameMap(supabase, sceneIds, userId);
+  const displayNameMap = await fetchDisplayNameMap(supabase, sceneIds);
   const metadataMap = new Map<string, Record<string, unknown>>();
 
   const { data: metadataRows } = await supabase
@@ -415,7 +411,6 @@ async function enrichSnapshots(
     .select(
       "id, scene_id, user_id, description, objects, tags, ply_path, created_at",
     )
-    .eq("user_id", userId)
     .in("id", modelIds);
 
   for (const row of metadataRows ?? []) {
@@ -482,7 +477,6 @@ async function searchBestSceneInWindow(input: {
   queryEmbedding: number[];
   threshold: number;
   window: CompareWindow;
-  userId: string;
 }): Promise<CompareSceneSnapshot | null> {
   const rows = await searchModels(
     input.supabase,
@@ -491,10 +485,9 @@ async function searchBestSceneInWindow(input: {
     5,
     input.window.startTime,
     input.window.endTime,
-    input.userId,
   );
   const normalizedRows = Array.isArray(rows) ? rows as SearchRow[] : [];
-  const enriched = await enrichSnapshots(input.supabase, normalizedRows, input.userId);
+  const enriched = await enrichSnapshots(input.supabase, normalizedRows);
   return enriched[0] ?? null;
 }
 
@@ -542,12 +535,8 @@ export function buildCompareActions(input: {
 
 export async function runTimeCompareAgent(
   query: string,
-  userId: string,
   threshold = DEFAULT_THRESHOLD,
 ): Promise<TimeCompareResponse> {
-  if (!userId) {
-    throw new Error("time-compare-agent 调用缺少 userId，无法进行用户级数据隔离");
-  }
   const apiKey = Deno.env.get("DASHSCOPE_API_KEY");
   if (!apiKey) {
     throw new Error("未配置 DASHSCOPE_API_KEY");
@@ -568,14 +557,12 @@ export async function runTimeCompareAgent(
     queryEmbedding,
     threshold: normalizedThreshold,
     window: windows.baseline,
-    userId,
   });
   const target = await searchBestSceneInWindow({
     supabase,
     queryEmbedding,
     threshold: normalizedThreshold,
     window: windows.target,
-    userId,
   });
   const diff = buildCompareDiff(baseline, target);
   const actions = buildCompareActions({

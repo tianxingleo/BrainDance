@@ -274,18 +274,15 @@ export async function searchModels(
   matchCount: number,
   filterStart: string | null,
   filterEnd: string | null,
-  userId?: string,
 ): Promise<SearchResultRow[]> {
   console.log(
     `[Search] 执行向量搜索: 阈值=${matchThreshold}, 数量=${matchCount}`,
   );
 
-  // service role 下 RPC 内部 auth.uid() 为 NULL，需要拉更多结果再客户端按 userId 过滤
-  const effectiveCount = userId ? Math.max(matchCount * 5, 20) : matchCount;
   const { data, error } = await supabase.rpc("match_memory_poses", {
     query_embedding: queryEmbedding,
     match_threshold: matchThreshold,
-    match_count: effectiveCount,
+    match_count: matchCount,
     filter_start: filterStart,
     filter_end: filterEnd,
   } as never) as { data: unknown; error: { message: string } | null };
@@ -295,13 +292,7 @@ export async function searchModels(
     throw new Error(`数据库查询失败: ${error.message}`);
   }
 
-  let rows = Array.isArray(data) ? data as SearchResultRow[] : [];
-  if (userId) {
-    rows = rows.filter((row) =>
-      typeof (row as { user_id?: unknown }).user_id === "string" &&
-      (row as { user_id?: string }).user_id === userId
-    ).slice(0, matchCount);
-  }
+  const rows = Array.isArray(data) ? data as SearchResultRow[] : [];
   console.log(`[Search] 找到 ${rows.length} 条结果`);
   return rows;
 }

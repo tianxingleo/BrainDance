@@ -582,18 +582,27 @@ Deno.test("shouldForceAnotherToolRound 在证据充分时返回 false", () => {
 
 Deno.test("pickSpatialSearchAnswerAfterStop 优先使用 stop_search 后的用户可读总结", () => {
   const answer = pickSpatialSearchAnswerAfterStop({
+    trace: [
+      { toolName: "pose_semantic_search" },
+      { toolName: "stop_search" },
+    ],
     stopSummary: "我已经找到最相关的桌面模型，可以直接打开查看。",
+    deterministicAnswer: "已找到匹配的空间候选。",
   });
 
   assertEquals(answer, "我已经找到最相关的桌面模型，可以直接打开查看。");
 });
 
-Deno.test("pickSpatialSearchAnswerAfterStop 在没有 stop_search 总结时给出中性兜底", () => {
+Deno.test("pickSpatialSearchAnswerAfterStop 在没有 stop_search 总结时保留确定性回答", () => {
   const answer = pickSpatialSearchAnswerAfterStop({
-    stopSummary: "",
+    trace: [
+      { toolName: "pose_semantic_search" },
+    ],
+    stopSummary: "我已经找到最相关的桌面模型。",
+    deterministicAnswer: "已找到匹配的空间候选。",
   });
 
-  assertEquals(answer, "已为你整理了相关空间候选，请在结果区继续查看。");
+  assertEquals(answer, "已找到匹配的空间候选。");
 });
 
 Deno.test("shouldForceAnotherToolRound 在单个高分交叉证据候选时不再强制续轮", () => {

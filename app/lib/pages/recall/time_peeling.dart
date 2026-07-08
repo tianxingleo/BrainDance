@@ -42,7 +42,6 @@ class TimePeelingList extends StatelessWidget {
   final void Function(Map<String, dynamic> model, {bool imageOnly})
   onShowModelActions;
   final void Function(String name) onAddNewTask;
-  final Set<String> previewSceneIds;
 
   const TimePeelingList({
     super.key,
@@ -57,7 +56,6 @@ class TimePeelingList extends StatelessWidget {
     required this.onNavigateToViewer,
     required this.onShowModelActions,
     required this.onAddNewTask,
-    this.previewSceneIds = const <String>{},
   });
 
   @override
@@ -97,7 +95,6 @@ class TimePeelingList extends StatelessWidget {
             onNavigateToViewer: onNavigateToViewer,
             onShowModelActions: onShowModelActions,
             onAddNewTask: onAddNewTask,
-            previewSceneIds: previewSceneIds,
           );
         }, childCount: sortedKeys.length),
       ),
@@ -135,7 +132,6 @@ class TimePeelingSlot extends StatefulWidget {
   final void Function(Map<String, dynamic> model, {bool imageOnly})
   onShowModelActions;
   final void Function(String name) onAddNewTask;
-  final Set<String> previewSceneIds;
 
   const TimePeelingSlot({
     super.key,
@@ -154,7 +150,6 @@ class TimePeelingSlot extends StatefulWidget {
     required this.onNavigateToViewer,
     required this.onShowModelActions,
     required this.onAddNewTask,
-    this.previewSceneIds = const <String>{},
   });
 
   @override
@@ -351,10 +346,6 @@ class TimePeelingSlotState extends State<TimePeelingSlot> {
                                       textColor: widget.textColor,
                                       hintTextColor: widget.hintTextColor,
                                       imageOnly: true,
-                                      isPreviewVersion: widget.previewSceneIds
-                                          .contains(
-                                            model['scene_id']?.toString() ?? '',
-                                          ),
                                     ),
                                   ),
                                 ),

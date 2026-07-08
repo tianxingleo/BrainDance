@@ -4,7 +4,7 @@ import 'dart:async';
 
 import 'package:braindance/configs/app_config.dart';
 import 'package:braindance/main.dart'
-    show pendingSubmitTitleProvider;
+    show pageIndexProvider, pendingSubmitTitleProvider;
 import 'package:braindance/configs/motion_tokens.dart';
 import 'package:braindance/widgets/bd_surfaces.dart';
 import 'package:dio/dio.dart';

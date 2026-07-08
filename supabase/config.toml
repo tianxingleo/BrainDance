@@ -363,7 +363,6 @@ deno_version = 2
 [edge_runtime.secrets]
 # 本地自部署通过宿主机环境注入，避免把密钥写入版本库或镜像。
 DASHSCOPE_API_KEY = "env(DASHSCOPE_API_KEY)"
-DEEPSEEK_API_KEY = "env(DEEPSEEK_API_KEY)"
 
 [analytics]
 enabled = true

@@ -25,9 +25,6 @@ $RECYCLE.BIN/
 .cache/
 tmp_papers/
 
-# 评委答辩准备文档（仅本地使用，不提交）
-评委答辩准备.md
-
 # PyCharm / IntelliJ
 .idea/
 *.iml
@@ -321,46 +318,6 @@ temp_docx_output/
 temp_doc_*.md
 temp_verify*.md
 modify_doc.py
-
-# 根目录一次性脚本和临时文件
-apply_orbit.py
-cleanup.mjs
-create_task.py
-fetch_db.py
-fix_and_create_task.py
-fix_encoding.py
-fix_garbled.py
-list_s3.py
-save.sh
-spark_flutter_base.vue
-gen.md
-dummy.jpg
-BrainDance_Design_Rules.md
-patch_*.sh
-patch_*.mjs
-patch_*.ts
-
-# 3dgs viewer 一次性修复脚本
-3dgs_viewer/my-3dgs-viewer/fix*.cjs
-3dgs_viewer/my-3dgs-viewer/do_replace.js
-
-# 备份/复制文件
-*copy*.vue
-*Copy*.vue
-
-# Supabase 备份和临时文件
-supabase/backups/
-supabase/.temp/
-
-# SQLite 运行时文件
-*.db-shm
-*.db-wal
-
-# TensorBoard 日志
-events.out.tfevents.*
-
-# mind 文件 (AR marker 数据，应由构建流程生成)
-*.mind
 
 # =========================
 # 10. Document Files (文档文件)

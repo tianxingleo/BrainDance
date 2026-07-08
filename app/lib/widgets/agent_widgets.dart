@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
 import 'package:flutter_highlight/themes/atom-one-dark.dart';
 import 'package:flutter_highlight/themes/atom-one-light.dart';
@@ -776,8 +777,9 @@ class _AgentToolStepTileState extends State<AgentToolStepTile>
 
 class CodeElementBuilder extends MarkdownElementBuilder {
   final bool isDark;
+  final BuildContext context;
 
-  CodeElementBuilder(this.isDark);
+  CodeElementBuilder(this.isDark, this.context);
 
   @override
   Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
@@ -812,13 +814,47 @@ class CodeElementBuilder extends MarkdownElementBuilder {
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(8)),
             ),
-            child: Text(
-              language,
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white70 : Colors.black54,
-                fontWeight: FontWeight.bold,
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  language,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: textContent));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content:
+                            Text(textLocalize('agent_action_code_copied')),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.copy,
+                        size: 14,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        textLocalize('agent_action_copy'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           Padding(
@@ -907,7 +943,7 @@ class _AnimatedMarkdownAnswerState extends State<AnimatedMarkdownAnswer> {
     final visibleText = _animatedText.substring(0, _visibleLength);
     return MarkdownBody(
       data: visibleText,
-      builders: {'code': CodeElementBuilder(widget.isDark)},
+      builders: {'code': CodeElementBuilder(widget.isDark, context)},
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(color: widget.textColor, fontSize: 14, height: 1.6),
         h1: TextStyle(
