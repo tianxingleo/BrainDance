@@ -1,5 +1,0 @@
-supabase/backups/20260120-191507/config/file_list.txt
-supabase/backups/20260120-191507/config/FILE_LIST.md
-supabase/backups/20260120-191507/config/config.toml
-supabase/backups/20260120-191507/config/seed.sql
-supabase/backups/20260120-191507/config/migrations/20260118144558_init_schema.sql
