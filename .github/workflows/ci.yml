@@ -54,14 +54,14 @@ jobs:
           mkdir -p .dart_tool/ffmpeg_kit_bundles
           curl -L --fail --retry 5 --retry-delay 5 --retry-all-errors \
             -o .dart_tool/ffmpeg_kit_bundles/bundle-video_hw-linux-x86_64-shared-lgpl.zip \
-            https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip
+            https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.5-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip
           python - <<'PY'
           from pathlib import Path
 
           pubspec = Path("pubspec.yaml")
           text = pubspec.read_text(encoding="utf-8")
           text = text.replace(
-              'linux: "https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip"',
+              'linux: "https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.5-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip"',
               'linux: ".dart_tool/ffmpeg_kit_bundles/bundle-video_hw-linux-x86_64-shared-lgpl.zip"',
           )
           pubspec.write_text(text, encoding="utf-8")
