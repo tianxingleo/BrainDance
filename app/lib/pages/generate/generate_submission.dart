@@ -9,13 +9,13 @@ extension _GenerateSubmissionX on _GeneratePageState {
     switch (taskType) {
       case 'video_dual_chain':
         return {
-          'slow_pipeline': 'video_3dgs',
+          "mapper_type": "da3",
+          "slow_pipeline": "video_3dgs",
+          "best_frame_sample_count": 8,
+          "sam3d_vram_threshold_gb": 25,
         };
       case 'da3_feed_forward_3dgs':
-        return {
-          'frame_interval': 5,
-          'conf_threshold': 0.5,
-        };
+        return {'frame_interval': 5, 'conf_threshold': 0.5};
       case 'da3_sugar':
         return {
           'regularization': 'dn_consistency',
@@ -23,11 +23,7 @@ extension _GenerateSubmissionX on _GeneratePageState {
           'fast_mode': true,
         };
       case 'da3_2dgs':
-        return {
-          'iterations': 30000,
-          'extract_fps': 2.0,
-          'min_images': 24,
-        };
+        return {'iterations': 30000, 'extract_fps': 2.0, 'min_images': 24};
       case 'sparse2dgs':
         return {
           'video_sample_count': 12,
@@ -211,12 +207,20 @@ extension _GenerateSubmissionX on _GeneratePageState {
                                               data['image_url'] as String;
                                         });
                                       } else if (mounted) {
-                                        showAppToast(context, textLocalize('gen_regenerate_fail'));
+                                        showAppToast(
+                                          context,
+                                          textLocalize('gen_regenerate_fail'),
+                                        );
                                       }
                                     } catch (e) {
                                       if (mounted) {
-                                        debugPrint('[GenerateSubmission] regenerate error: $e');
-                                        showAppToast(context, textLocalize('gen_regenerate_fail'));
+                                        debugPrint(
+                                          '[GenerateSubmission] regenerate error: $e',
+                                        );
+                                        showAppToast(
+                                          context,
+                                          textLocalize('gen_regenerate_fail'),
+                                        );
                                       }
                                     } finally {
                                       _refresh(() {
@@ -326,12 +330,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           _openTaskListAfterSubmit();
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_submit_fail')) : textLocalize('gen_server_error');
+        final errMsg = (data is Map)
+            ? (data['error'] ?? textLocalize('gen_submit_fail'))
+            : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        debugPrint('[GenerateSubmission] submit FunctionException: ${e.details}');
+        debugPrint(
+          '[GenerateSubmission] submit FunctionException: ${e.details}',
+        );
         showAppToast(context, textLocalize('gen_submit_fail'));
       }
     } catch (e) {
@@ -479,12 +487,16 @@ extension _GenerateSubmissionX on _GeneratePageState {
           _showTextImagePreview(prompt);
         }
       } else {
-        final errMsg = (data is Map) ? (data['error'] ?? textLocalize('gen_generate_fail')) : textLocalize('gen_server_error');
+        final errMsg = (data is Map)
+            ? (data['error'] ?? textLocalize('gen_generate_fail'))
+            : textLocalize('gen_server_error');
         throw Exception(errMsg);
       }
     } on FunctionException catch (e) {
       if (mounted) {
-        debugPrint('[GenerateSubmission] generate FunctionException: ${e.details}');
+        debugPrint(
+          '[GenerateSubmission] generate FunctionException: ${e.details}',
+        );
         showAppToast(context, textLocalize('gen_generate_fail'));
       }
     } catch (e) {

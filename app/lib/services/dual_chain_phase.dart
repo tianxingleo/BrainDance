@@ -16,6 +16,31 @@ class DualChainLogKeywords {
 /// 双链里程碑：用于驱动前端模型下载与缓存替换。
 enum DualChainMilestone { fastReady, fastFailed, slowReady, slowFailed }
 
+/// 跨页面广播的双链事件。Recall 页负责发，Viewer 页负责听。
+class DualChainEvent {
+  final String sceneId;
+  final DualChainMilestone milestone;
+  final String? displayName;
+
+  const DualChainEvent({
+    required this.sceneId,
+    required this.milestone,
+    this.displayName,
+  });
+}
+
+/// 全局广播流。当 Recall 检测到新的双链里程碑时往这里 add，
+/// WebGL Viewer 等独立页面订阅以做相应提示或重载。
+final StreamController<DualChainEvent> _dualChainEventController =
+    StreamController<DualChainEvent>.broadcast();
+Stream<DualChainEvent> get dualChainEventStream =>
+    _dualChainEventController.stream;
+void emitDualChainEvent(DualChainEvent event) {
+  if (!_dualChainEventController.isClosed) {
+    _dualChainEventController.add(event);
+  }
+}
+
 /// 检查任务最新一次 logs 列表，返回新出现的里程碑。
 /// [knownMilestones] 是该 taskId 已经处理过的里程碑集合，调用方负责持久化。
 Set<DualChainMilestone> detectNewMilestones({

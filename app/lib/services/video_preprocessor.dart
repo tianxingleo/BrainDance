@@ -332,7 +332,7 @@ class VideoPreprocessor {
       'format': info.format,
       'bitrate': info.bitrate,
       'streams': info.streams
-          ?.map(
+          .map(
             (s) => {
               'type': s.type,
               'codec': s.codec,

@@ -73,7 +73,7 @@ CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "public";
 
 
 
-CREATE OR REPLACE FUNCTION "public"."match_memory_poses"("query_embedding" "public"."vector", "match_threshold" double precision, "match_count" integer, "filter_start" timestamp with time zone DEFAULT NULL::timestamp with time zone, "filter_end" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS TABLE("id" "uuid", "scene_id" "text", "description" "text", "ply_path" "text", "created_at" timestamp with time zone, "user_id" "text", "similarity" double precision, "matched_frames" "jsonb")
+CREATE OR REPLACE FUNCTION "public"."match_memory_poses"("query_embedding" "public"."vector", "match_threshold" double precision, "match_count" integer, "filter_start" timestamp with time zone DEFAULT NULL::timestamp with time zone, "filter_end" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS TABLE("id" "uuid", "scene_id" "text", "description" "text", "ply_path" "text", "created_at" timestamp with time zone, "user_id" "text", "is_official" boolean, "similarity" double precision, "matched_frames" "jsonb")
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $_$
 DECLARE
@@ -115,12 +115,17 @@ BEGIN
         a.description,
         a.ply_path,
         a.created_at,
-        a.user_id
+        a.user_id,
+        COALESCE(a.is_official, false) AS is_official
       FROM filtered f
       JOIN public.model_assets a ON f.model_id = a.id
       WHERE ($4::timestamptz IS NULL OR a.created_at >= $4)
         AND ($5::timestamptz IS NULL OR a.created_at <= $5)
-        AND (auth.uid() IS NULL OR a.user_id = auth.uid()::text)
+        AND (
+          auth.uid() IS NULL
+          OR a.user_id = auth.uid()::text
+          OR COALESCE(a.is_official, false) = true
+        )
     )
     SELECT
       joined.model_id AS id,
@@ -129,6 +134,7 @@ BEGIN
       joined.ply_path,
       joined.created_at,
       joined.user_id,
+      joined.is_official,
       MAX(joined.similarity) AS similarity,
       jsonb_agg(
         jsonb_build_object(
@@ -138,7 +144,7 @@ BEGIN
         ) ORDER BY joined.similarity DESC
       ) AS matched_frames
     FROM joined
-    GROUP BY joined.model_id, joined.scene_id, joined.description, joined.ply_path, joined.created_at, joined.user_id
+    GROUP BY joined.model_id, joined.scene_id, joined.description, joined.ply_path, joined.created_at, joined.user_id, joined.is_official
     ORDER BY similarity DESC
     LIMIT $3
   ' USING query_embedding, match_threshold, match_count, filter_start, filter_end, _limit;
@@ -149,7 +155,7 @@ $_$;
 ALTER FUNCTION "public"."match_memory_poses"("query_embedding" "public"."vector", "match_threshold" double precision, "match_count" integer, "filter_start" timestamp with time zone, "filter_end" timestamp with time zone) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."match_model_assets"("query_embedding" "public"."vector", "match_threshold" double precision, "match_count" integer, "filter_start" timestamp with time zone DEFAULT NULL::timestamp with time zone, "filter_end" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS TABLE("id" "uuid", "scene_id" "text", "description" "text", "ply_path" "text", "created_at" timestamp with time zone, "similarity" double precision)
+CREATE OR REPLACE FUNCTION "public"."match_model_assets"("query_embedding" "public"."vector", "match_threshold" double precision, "match_count" integer, "filter_start" timestamp with time zone DEFAULT NULL::timestamp with time zone, "filter_end" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS TABLE("id" "uuid", "scene_id" "text", "description" "text", "ply_path" "text", "created_at" timestamp with time zone, "user_id" "text", "is_official" boolean, "similarity" double precision)
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 begin
@@ -160,6 +166,8 @@ begin
     model_assets.description,
     model_assets.ply_path,
     model_assets.created_at,
+    model_assets.user_id,
+    COALESCE(model_assets.is_official, false) as is_official,
     1 - (model_assets.embedding <=> query_embedding) as similarity
   from model_assets
   where 1 - (model_assets.embedding <=> query_embedding) > match_threshold
@@ -237,7 +245,8 @@ CREATE TABLE IF NOT EXISTS "public"."model_assets" (
     "preview_img_path" "text",
     "meta_info" "jsonb" DEFAULT '{}'::"jsonb",
     "created_at" timestamp with time zone DEFAULT "timezone"('utc'::"text", "now"()) NOT NULL,
-    "display_name" "text"
+    "display_name" "text",
+    "is_official" boolean DEFAULT false NOT NULL
 );
 
 

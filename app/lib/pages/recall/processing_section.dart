@@ -4,6 +4,7 @@ import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../../configs/app_config.dart';
 import '../../configs/motion_tokens.dart';
 import '../../widgets/bd_surfaces.dart';
+import 'model_grid_helpers.dart';
 
 class RecallProcessingSection extends StatelessWidget {
   final TDThemeData theme;
@@ -181,8 +182,7 @@ class _RecallProcessingTaskItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sceneId = task['scene_id']?.toString() ?? 'Unknown';
-    final displayName = task['display_name']?.toString();
+    final displayName = modelDisplayName(task, fallback: 'Unknown');
     final latestLog = allLogs.isNotEmpty ? allLogs.last : null;
 
     return Container(
@@ -230,7 +230,7 @@ class _RecallProcessingTaskItem extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      displayName ?? sceneId,
+                      displayName,
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,

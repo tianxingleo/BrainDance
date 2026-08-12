@@ -30,6 +30,7 @@ export type ListedModelAsset = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  task_display_name: string | null;
   summary_title: string | null;
   description: string | null;
   tags: string[];
@@ -42,6 +43,7 @@ export type ModelAssetBundle = {
   id: string;
   scene_id: string;
   display_name: string | null;
+  task_display_name: string | null;
   summary_title: string | null;
   description: string | null;
   objects: string[];
@@ -104,6 +106,7 @@ export type AssetToolState = {
 };
 
 type AssetToolRuntimeOptions = {
+  userId: string;
   selectedModelIds?: string[];
   allowWrite?: boolean;
   embeddings?: {
@@ -117,9 +120,11 @@ const readModelAssetsSchema = z.object({
   sceneIds: z.array(z.string().min(1)).default([]),
   tags: z.array(z.string().min(1)).default([]),
   query: z.string().default(""),
-  startTime: z.string().datetime({ offset: true }).nullable().default(null),
-  endTime: z.string().datetime({ offset: true }).nullable().default(null),
-  limit: z.number().int().min(1).max(50).default(10),
+  // 允许带 Z/偏移、或不带时区的本地时间（LLM 常生成不带时区的字符串）
+  startTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+  endTime: z.string().datetime({ offset: true, local: true }).nullable().default(null),
+  // 兼容 LLM 把数字写成字符串的场景，如 "5"
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 const renameModelAssetSchema = z.object({
@@ -199,6 +204,7 @@ const listedModelAssetSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  task_display_name: z.string().nullable().optional(),
   summary_title: z.string().nullable(),
   description: z.string().nullable(),
   tags: z.array(z.string()),
@@ -211,6 +217,7 @@ const modelAssetBundleSchema = z.object({
   id: z.string(),
   scene_id: z.string(),
   display_name: z.string().nullable(),
+  task_display_name: z.string().nullable().optional(),
   summary_title: z.string().nullable(),
   description: z.string().nullable(),
   objects: z.array(z.string()),
@@ -431,12 +438,40 @@ export function renderDisplayNameTemplate(
 async function fetchModelAssets(
   supabase: SupabaseClient,
   modelIds: string[],
+  userId: string,
 ): Promise<ModelAssetRow[]> {
   const { data, error } = await supabase
     .from("model_assets")
     .select(
       "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
     )
+    .eq("user_id", userId)
+    .in("id", modelIds)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`读取 model_assets 失败: ${error.message}`);
+  }
+
+  return (data ?? []) as ModelAssetRow[];
+}
+
+// 检索/查询类工具专用：允许命中当前用户自有或 is_official=true 的模型资产，
+// 写工具仍使用 fetchModelAssets 做严格的 user_id 隔离。
+async function fetchReadableModelAssets(
+  supabase: SupabaseClient,
+  modelIds: string[],
+  userId: string,
+): Promise<ModelAssetRow[]> {
+  if (modelIds.length === 0) {
+    return [];
+  }
+  const { data, error } = await supabase
+    .from("model_assets")
+    .select(
+      "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
+    )
+    .or(`user_id.eq.${userId},is_official.eq.true`)
     .in("id", modelIds)
     .order("created_at", { ascending: true });
 
@@ -454,6 +489,7 @@ async function fetchSemanticMatchedAssets(input: {
   startTime: string | null;
   endTime: string | null;
   limit: number;
+  userId: string;
   selectedModelIds?: string[];
 }): Promise<ModelAssetRow[]> {
   const {
@@ -463,13 +499,14 @@ async function fetchSemanticMatchedAssets(input: {
     startTime,
     endTime,
     limit,
+    userId,
     selectedModelIds,
   } = input;
   const queryEmbedding = await embeddings.embedQuery(query);
   const { data, error } = await supabase.rpc("match_model_assets", {
     query_embedding: queryEmbedding,
     match_threshold: 0.35,
-    match_count: Math.max(limit * 3, 12),
+    match_count: Math.max(limit * 5, 24),
     filter_start: startTime,
     filter_end: endTime,
   } as never) as { data: unknown; error: { message: string } | null };
@@ -478,8 +515,18 @@ async function fetchSemanticMatchedAssets(input: {
     throw new Error(`read_model_assets 语义召回失败: ${error.message}`);
   }
 
-  const rows = Array.isArray(data) ? data as Array<{ id: string }> : [];
-  const modelIds = dedupeStrings(rows.map((row) => row.id)).filter(Boolean);
+  const rawRows = Array.isArray(data)
+    ? data as Array<{ id?: string; user_id?: string; is_official?: boolean }>
+    : [];
+  // service role 下 RPC 内部 auth.uid() 为 NULL，函数会返回全库结果。
+  // 这里按 userId 在客户端再过滤一次；同时允许 is_official=true 的官方资产
+  // 跨用户暴露给检索结果，写工具仍走严格的 user_id 隔离。
+  const userScopedRows = rawRows.filter((row) => {
+    const isOfficial = row.is_official === true;
+    const ownsRow = typeof row.user_id === "string" && row.user_id === userId;
+    return isOfficial || ownsRow;
+  });
+  const modelIds = dedupeStrings(userScopedRows.map((row) => row.id ?? "")).filter(Boolean);
   const allowedIds = selectedModelIds && selectedModelIds.length > 0
     ? new Set(selectedModelIds)
     : null;
@@ -491,7 +538,7 @@ async function fetchSemanticMatchedAssets(input: {
     return [];
   }
 
-  const assets = await fetchModelAssets(supabase, filteredIds);
+  const assets = await fetchReadableModelAssets(supabase, filteredIds, userId);
   const order = new Map(filteredIds.map((id, index) => [id, index]));
   return assets
     .sort((left, right) =>
@@ -509,6 +556,7 @@ async function fetchPoseCounts(
     return new Map();
   }
 
+  // memory_poses 没有 user_id 列，调用方必须确保 modelIds 已经按当前用户过滤过。
   const { data, error } = await supabase
     .from("memory_poses")
     .select("model_id")
@@ -517,7 +565,6 @@ async function fetchPoseCounts(
   if (error) {
     throw new Error(`读取 memory_poses 失败: ${error.message}`);
   }
-
   const counter = new Map<string, number>();
   for (const row of (data ?? []) as MemoryPoseCountRow[]) {
     counter.set(row.model_id, (counter.get(row.model_id) ?? 0) + 1);
@@ -525,14 +572,59 @@ async function fetchPoseCounts(
   return counter;
 }
 
+// 反查 processing_tasks.display_name，给 Agent 卡片在 model_assets.display_name
+// 为空时提供回退（video_submit 入口写过用户标题、但 model_assets 那行还没回写）。
+// processing_tasks 的 RLS 仅允许用户自己的行，因此显式带上 user_id。
+async function fetchTaskDisplayNames(
+  supabase: SupabaseClient,
+  sceneIds: string[],
+  userId: string,
+): Promise<Map<string, string>> {
+  const uniqueScenes = [...new Set(sceneIds.filter((s) => s && s.trim()))];
+  if (uniqueScenes.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("processing_tasks")
+    .select("scene_id, display_name, updated_at")
+    .eq("user_id", userId)
+    .in("scene_id", uniqueScenes)
+    .not("display_name", "is", null)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    // 反查失败不应让卡片整体崩，前端还能落回 tag/scene_id。
+    console.warn(`[assetTools] 读取 processing_tasks.display_name 失败: ${error.message}`);
+    return new Map();
+  }
+
+  const map = new Map<string, string>();
+  for (const row of (data ?? []) as { scene_id: string; display_name: string | null }[]) {
+    const name = row.display_name?.trim();
+    if (!name) continue;
+    if (!map.has(row.scene_id)) {
+      map.set(row.scene_id, name);
+    }
+  }
+  return map;
+}
+
 async function buildBundle(
   supabase: SupabaseClient,
   modelIds: string[],
+  userId: string,
 ): Promise<ModelAssetBundle[]> {
-  const [assets, poseCounts] = await Promise.all([
-    fetchModelAssets(supabase, modelIds),
-    fetchPoseCounts(supabase, modelIds),
-  ]);
+  // bundle 是只读视图，允许读取自有或 is_official=true 的官方资产；
+  // 由于 fetchPoseCounts 直接用归属合法的 ids 反查，无需再额外校验。
+  const assets = await fetchReadableModelAssets(supabase, modelIds, userId);
+  const allowedIds = assets.map((row) => row.id);
+  const poseCounts = await fetchPoseCounts(supabase, allowedIds);
+  const taskNames = await fetchTaskDisplayNames(
+    supabase,
+    assets.map((row) => row.scene_id),
+    userId,
+  );
 
   const order = new Map(modelIds.map((id, index) => [id, index]));
   return assets
@@ -540,6 +632,7 @@ async function buildBundle(
       id: row.id,
       scene_id: row.scene_id,
       display_name: row.display_name?.trim() || null,
+      task_display_name: taskNames.get(row.scene_id) ?? null,
       summary_title: row.summary_title?.trim() || null,
       description: row.description,
       objects: safeArray(row.objects),
@@ -652,6 +745,7 @@ async function applyBatchPatch(
   supabase: SupabaseClient,
   rows: ModelAssetRow[],
   operation: AssetOperationResult,
+  userId: string,
 ): Promise<void> {
   const nextById = new Map(
     operation.preview.map((item) => [item.model_id, item]),
@@ -667,6 +761,7 @@ async function applyBatchPatch(
         description: next.new_description,
         tags: next.new_tags,
       })
+      .eq("user_id", userId)
       .eq("id", row.id);
 
     if (error) {
@@ -675,11 +770,15 @@ async function applyBatchPatch(
   }
 }
 
-function summarizeListRows(rows: ModelAssetRow[]): ListedModelAsset[] {
+function summarizeListRows(
+  rows: ModelAssetRow[],
+  taskDisplayNames?: Map<string, string>,
+): ListedModelAsset[] {
   return rows.map((row) => ({
     id: row.id,
     scene_id: row.scene_id,
     display_name: row.display_name?.trim() || null,
+    task_display_name: taskDisplayNames?.get(row.scene_id) ?? null,
     summary_title: row.summary_title?.trim() || null,
     description: row.description,
     tags: safeArray(row.tags),
@@ -902,7 +1001,7 @@ function buildListAnswer(
 
 export function buildReadModelAssetsTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "read_model_assets",
@@ -915,6 +1014,8 @@ export function buildReadModelAssetsTool(
         .select(
           "id, scene_id, description, display_name, summary_title, objects, tags, preview_img_path, ply_path, meta_info, created_at",
         )
+        // read_model_assets 是只读工具，允许命中自有或 is_official=true 的官方资产。
+        .or(`user_id.eq.${options.userId},is_official.eq.true`)
         .order("created_at", { ascending: false })
         .limit(Math.max(input.limit * 5, 20));
 
@@ -955,6 +1056,7 @@ export function buildReadModelAssetsTool(
             startTime: input.startTime,
             endTime: input.endTime,
             limit: input.limit,
+            userId: options.userId,
             selectedModelIds: options.selectedModelIds,
           });
         } else {
@@ -989,9 +1091,15 @@ export function buildReadModelAssetsTool(
         });
       }
 
+      const displayed = rows.slice(0, input.limit);
+      const taskDisplayNames = await fetchTaskDisplayNames(
+        supabase,
+        displayed.map((row) => row.scene_id),
+        options.userId,
+      );
       return JSON.stringify({
         kind: "list_model_assets",
-        rows: summarizeListRows(rows.slice(0, input.limit)),
+        rows: summarizeListRows(displayed, taskDisplayNames),
       });
     },
   });
@@ -999,7 +1107,7 @@ export function buildReadModelAssetsTool(
 
 export function buildRenameModelAssetTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "rename_model_asset",
@@ -1011,7 +1119,7 @@ export function buildRenameModelAssetTool(
         [input.modelId],
         options.selectedModelIds,
       );
-      const rows = await fetchModelAssets(supabase, targetIds);
+      const rows = await fetchModelAssets(supabase, targetIds, options.userId);
       const row = rows[0];
       if (!row) {
         throw new Error(`未找到模型资产 ${input.modelId}`);
@@ -1041,6 +1149,7 @@ export function buildRenameModelAssetTool(
         const { error } = await supabase
           .from("model_assets")
           .update({ display_name: input.newName })
+          .eq("user_id", options.userId)
           .eq("id", input.modelId);
 
         if (error) {
@@ -1058,7 +1167,7 @@ export function buildRenameModelAssetTool(
 
 export function buildBatchPatchModelMetadataTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "batch_patch_model_metadata",
@@ -1070,7 +1179,7 @@ export function buildBatchPatchModelMetadataTool(
         input.modelIds,
         options.selectedModelIds,
       );
-      const rows = await fetchModelAssets(supabase, targetIds);
+      const rows = await fetchModelAssets(supabase, targetIds, options.userId);
       if (rows.length === 0) {
         throw new Error("未找到可修改的模型资产");
       }
@@ -1081,7 +1190,7 @@ export function buildBatchPatchModelMetadataTool(
       };
       const operation = buildPatchedPreview(rows, effectiveInput);
       if (!effectiveInput.dryRun) {
-        await applyBatchPatch(supabase, rows, operation);
+        await applyBatchPatch(supabase, rows, operation, options.userId);
       }
 
       return JSON.stringify({
@@ -1094,7 +1203,7 @@ export function buildBatchPatchModelMetadataTool(
 
 export function buildWriteModelAssetsTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "write_model_assets",
@@ -1106,7 +1215,7 @@ export function buildWriteModelAssetsTool(
         input.updates.map((item: z.infer<typeof writeModelAssetsSchema>["updates"][number]) => item.modelId),
         options.selectedModelIds,
       );
-      const rows = await fetchModelAssets(supabase, targetIds);
+      const rows = await fetchModelAssets(supabase, targetIds, options.userId);
       if (rows.length === 0) {
         throw new Error("未找到可修改的模型资产");
       }
@@ -1150,6 +1259,7 @@ export function buildWriteModelAssetsTool(
           const { error } = await supabase
             .from("model_assets")
             .update(updatePayload)
+            .eq("user_id", options.userId)
             .eq("id", item.model_id);
           if (error) {
             throw new Error(`write_model_assets 执行失败: ${error.message}`);
@@ -1173,7 +1283,7 @@ export function buildWriteModelAssetsTool(
 
 export function buildGetModelAssetBundleTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "get_model_asset_bundle",
@@ -1184,6 +1294,7 @@ export function buildGetModelAssetBundleTool(
       const bundle = await buildBundle(
         supabase,
         restrictModelIds(modelIds, options.selectedModelIds),
+        options.userId,
       );
       return JSON.stringify({
         kind: "model_asset_bundle",
@@ -1195,7 +1306,7 @@ export function buildGetModelAssetBundleTool(
 
 export function buildCompareModelAssetsTool(
   supabase: SupabaseClient,
-  options: AssetToolRuntimeOptions = {},
+  options: AssetToolRuntimeOptions,
 ): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: "compare_model_assets",
@@ -1206,6 +1317,7 @@ export function buildCompareModelAssetsTool(
       const bundle = await buildBundle(
         supabase,
         restrictModelIds(modelIds, options.selectedModelIds),
+        options.userId,
       );
       const comparison = buildComparisonResult(bundle);
       const requestedFields = new Set(fields);

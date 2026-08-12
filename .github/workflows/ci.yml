@@ -5,7 +5,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, tianxingleo-flutter]
   pull_request:
     branches: [main, dev]
 
@@ -38,12 +38,34 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          # 锁定版本避免 latest stable 引入 breaking change
-          flutter-version: '3.41.2'
+          flutter-version: "3.41.2"
+          channel: stable
+          # 固定到当前本地验证版本，避免 stable 滚动后 Dart SDK / native assets 行为漂移。
           cache: true
 
       - name: Install dependencies
         run: flutter pub get
+
+      # ffmpeg_kit_extended_flutter 0.5.0 的 native asset hook 会在 flutter test
+      # 前下载 FFmpeg 原生包；这里先用 curl 的重试能力落到本地，再让 hook
+      # 读取本地文件，避免 GitHub release 单次下载抖动或 checksum 文件漂移导致 CI 假红。
+      - name: Prepare FFmpeg native asset bundle
+        run: |
+          mkdir -p .dart_tool/ffmpeg_kit_bundles
+          curl -L --fail --retry 5 --retry-delay 5 --retry-all-errors \
+            -o .dart_tool/ffmpeg_kit_bundles/bundle-video_hw-linux-x86_64-shared-lgpl.zip \
+            https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip
+          python - <<'PY'
+          from pathlib import Path
+
+          pubspec = Path("pubspec.yaml")
+          text = pubspec.read_text(encoding="utf-8")
+          text = text.replace(
+              'linux: "https://github.com/akashskypatel/ffmpeg-kit-builders/releases/download/v0.10.2-linux/bundle-video_hw-linux-x86_64-shared-lgpl.zip"',
+              'linux: ".dart_tool/ffmpeg_kit_bundles/bundle-video_hw-linux-x86_64-shared-lgpl.zip"',
+          )
+          pubspec.write_text(text, encoding="utf-8")
+          PY
 
       # ── smoke-level: 静态分析，不做 build ──
       - name: Analyze (smoke)
